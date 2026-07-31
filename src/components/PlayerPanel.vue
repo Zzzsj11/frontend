@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatTime, useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
 
@@ -8,7 +8,6 @@ const store = useProjectStore()
 const previewRef = ref<HTMLDivElement>()
 const audioRef = ref<HTMLAudioElement>()
 const videoRef = ref<HTMLVideoElement>()
-const progressRef = ref<HTMLDivElement>()
 
 const progressPercent = computed(() =>
   store.totalDuration > 0 ? (store.currentTime / store.totalDuration) * 100 : 0,
@@ -93,17 +92,17 @@ watch(
   },
 )
 
-// 进度条 seek（点击 + 拖动）
-const seekByEvent = (e: MouseEvent) => {
-  const el = progressRef.value
-  if (!el || store.totalDuration <= 0) return
+// 进度条 seek（点击 + 拖动，普通 / 全屏两条进度条共用，按触发元素自身定位）
+const seekByEvent = (e: MouseEvent, el: HTMLElement) => {
+  if (store.totalDuration <= 0) return
   const rect = el.getBoundingClientRect()
   const ratio = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1)
   store.seek(ratio * store.totalDuration)
 }
 const onProgressDown = (e: MouseEvent) => {
-  seekByEvent(e)
-  const onMove = (ev: MouseEvent) => seekByEvent(ev)
+  const el = e.currentTarget as HTMLElement
+  seekByEvent(e, el)
+  const onMove = (ev: MouseEvent) => seekByEvent(ev, el)
   const onUp = () => {
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', onUp)
@@ -111,6 +110,14 @@ const onProgressDown = (e: MouseEvent) => {
   window.addEventListener('mousemove', onMove)
   window.addEventListener('mouseup', onUp)
 }
+
+// 全屏状态：全屏元素是 .preview，外部控制条不可见，需在画面内叠加悬浮控制条
+const isFullscreen = ref(false)
+const onFsChange = () => {
+  isFullscreen.value = !!document.fullscreenElement
+}
+onMounted(() => document.addEventListener('fullscreenchange', onFsChange))
+onBeforeUnmount(() => document.removeEventListener('fullscreenchange', onFsChange))
 
 const toggleFullscreen = () => {
   if (document.fullscreenElement) {
@@ -142,11 +149,30 @@ const toggleFullscreen = () => {
       <img v-else-if="currentImage" :src="currentImage" alt="分镜预览" class="preview-img" />
       <p v-else class="preview-placeholder">生成分镜后在此查看预览</p>
       <!-- MV 歌词字幕（非中文歌词附中文翻译） -->
-      <div v-if="store.currentLine?.lyrics" class="preview-lyrics">
+      <div v-if="store.currentLine?.lyrics" class="preview-lyrics" :class="{ 'fs-lift': isFullscreen }">
         <p class="lyric-line">{{ store.currentLine.lyrics }}</p>
         <p v-if="store.translationOf(store.currentLine)" class="lyric-zh">
           {{ store.translationOf(store.currentLine) }}
         </p>
+      </div>
+      <!-- 全屏时的悬浮控制条 -->
+      <div v-if="isFullscreen" class="fs-controls">
+        <button class="fs-btn" :title="store.isPlaying ? '暂停' : '播放'" @click="store.togglePlay()">
+          <AppIcon :name="store.isPlaying ? 'pause' : 'play'" :size="20" />
+        </button>
+        <span class="fs-time">
+          {{ formatTime(store.currentTime) }} / {{ formatTime(store.totalDuration) }}
+        </span>
+        <div class="progress-bar fs-progress" @mousedown="onProgressDown">
+          <div class="progress-fill" :style="{ width: progressPercent + '%' }" />
+          <div class="progress-thumb" :style="{ left: progressPercent + '%' }" />
+        </div>
+        <button class="fs-btn" :title="store.muted ? '取消静音' : '静音'" @click="store.muted = !store.muted">
+          <AppIcon :name="store.muted ? 'volume-off' : 'volume-on'" :size="17" />
+        </button>
+        <button class="fs-btn" title="退出全屏" @click="toggleFullscreen">
+          <AppIcon name="fullscreen" :size="17" />
+        </button>
       </div>
       <audio ref="audioRef" />
     </div>
@@ -158,7 +184,7 @@ const toggleFullscreen = () => {
       <span class="time-label">
         {{ formatTime(store.currentTime) }} / {{ formatTime(store.totalDuration) }}
       </span>
-      <div ref="progressRef" class="progress-bar" @mousedown="onProgressDown">
+      <div class="progress-bar" @mousedown="onProgressDown">
         <div class="progress-fill" :style="{ width: progressPercent + '%' }" />
         <div class="progress-thumb" :style="{ left: progressPercent + '%' }" />
       </div>
@@ -270,6 +296,45 @@ const toggleFullscreen = () => {
   margin: 4px 0 0;
   font-size: 13px;
   opacity: 0.85;
+}
+/* 全屏时字幕上移，避免被底部悬浮控制条遮挡 */
+.preview-lyrics.fs-lift {
+  bottom: 76px;
+}
+/* 全屏悬浮控制条 */
+.fs-controls {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 24px 20px 16px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+  z-index: 2;
+}
+.fs-btn {
+  border: none;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #fff;
+  padding: 4px;
+}
+.fs-btn:hover {
+  color: var(--primary);
+}
+.fs-time {
+  font-size: 13px;
+  color: #fff;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.fs-progress {
+  background: rgba(255, 255, 255, 0.3);
 }
 .controls {
   display: flex;

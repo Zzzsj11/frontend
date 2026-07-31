@@ -82,9 +82,10 @@ const saveEdit = () => {
   editId.value = null
 }
 
-/** 用当前提示词重新生成形象，成功后图片本地化存储并替换头像 */
+/** 用当前提示词重新生成形象，成功后图片本地化存储并替换头像（会覆盖当前形象，需二次确认） */
 const regenAvatar = async () => {
   if (!editing.value || regenBusy.value || !editPrompt.value.trim()) return
+  if (!window.confirm(`确定重新生成「${editing.value.name}」的形象？当前形象将被覆盖`)) return
   editError.value = ''
   applyEdit()
   try {

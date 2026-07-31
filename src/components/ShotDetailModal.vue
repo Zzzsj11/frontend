@@ -10,9 +10,13 @@ const store = useProjectStore()
 const lyricsDraft = ref('')
 const scenePromptDraft = ref('')
 const shotPromptDraft = ref('')
-// 提示词默认只展示折叠预览，点击后展开为可编辑状态
-const sceneEditing = ref(false)
-const shotEditing = ref(false)
+
+// 当前展开的调整面板：默认全部折叠，只展示人物 / 分镜 / 场景三个预览
+type TabKey = 'cast' | 'shot' | 'scene'
+const activeTab = ref<TabKey | null>(null)
+const toggleTab = (tab: TabKey) => {
+  activeTab.value = activeTab.value === tab ? null : tab
+}
 
 // 分镜视频生成参数草稿（清晰度 / 时长 / 画幅），重新生成分镜时生效
 const optionsDraft = ref<ShotGenOptions>({ ...DEFAULT_SHOT_OPTIONS })
@@ -25,6 +29,22 @@ const lyricsTranslation = computed(() => {
   const zh = store.editingLine?.lyricsZh?.trim()
   if (!zh || !lyricsDraft.value || /[\u4e00-\u9fff]/.test(lyricsDraft.value)) return undefined
   return zh
+})
+
+// 人物预览：当前分镜出演角色（空 = 空镜头）
+const castOfLine = computed(() => {
+  const line = store.editingLine
+  return line ? store.lineHumans(line) : []
+})
+
+// 分镜预览：当前选用片段的视频 / 封面
+const shotVideo = computed(() => {
+  const line = store.editingLine
+  return line ? store.videoOf(line) : undefined
+})
+const shotCover = computed(() => {
+  const line = store.editingLine
+  return line ? store.coverOf(line) : undefined
 })
 
 /** 弹出预览中的视频片段（点击缩略图时选用并预览） */
@@ -43,6 +63,21 @@ const closePreview = () => {
   previewAsset.value = null
 }
 
+// 点击分镜预览：有片段则弹出播放当前片段，否则展开分镜调整面板
+const onShotPreviewClick = () => {
+  const line = store.editingLine
+  if (!line) return
+  const assets = line.shot.assets
+  if (!assets.length) {
+    toggleTab('shot')
+    return
+  }
+  let idx = assets.findIndex((a) => a.id === line.shot.currentAssetId)
+  if (idx < 0) idx = assets.length - 1
+  previewAsset.value = assets[idx]
+  previewIndex.value = idx
+}
+
 /** 预览片段的真实可播放视频地址（mock:// 假地址除外，退化为展示封面） */
 const previewVideo = computed(() =>
   previewAsset.value && /^(\/|https?:)/.test(previewAsset.value.videoUrl)
@@ -58,25 +93,26 @@ watch(
     scenePromptDraft.value = line?.scenePrompt ?? ''
     shotPromptDraft.value = line?.shotPrompt ?? ''
     optionsDraft.value = { ...(line?.shotOptions ?? DEFAULT_SHOT_OPTIONS) }
-    sceneEditing.value = false
-    shotEditing.value = false
+    activeTab.value = null
     previewAsset.value = null
   },
   { immediate: true },
 )
 
-/** 重新生成场景（仅场景提示词） */
+/** 生成 / 重新生成场景（仅场景提示词）；已有场景图时二次确认（会被覆盖） */
 const regenScene = () => {
   const line = store.editingLine
   if (!line) return
+  if (line.scene.imageUrl && !window.confirm('确定重新生成场景？当前场景图将被覆盖')) return
   store.generateSceneFor(line.id, scenePromptDraft.value)
 }
 
-/** 重新生成分镜视频片段（场景 × 分镜提示词 × 出演角色 × 生成参数） */
+/** 生成 / 重新生成分镜视频片段（场景 × 分镜提示词 × 出演角色 × 生成参数）；已有片段时二次确认 */
 const regenShot = () => {
   const line = store.editingLine
   if (!line) return
-  // 重新生成前先持久化当前编辑中的两个提示词
+  if (line.shot.assets.length && !window.confirm('确定重新生成分镜视频片段？将新增一个视频版本')) return
+  // 重新生成前先持久化当前编辑中的场景提示词
   store.updateScenePrompt(line.id, scenePromptDraft.value)
   store.generateShotFor(line.id, shotPromptDraft.value, { ...optionsDraft.value })
 }
@@ -105,150 +141,184 @@ const cancel = () => store.closeEditor()
         </header>
 
         <div class="modal-body">
-          <!-- 上方：已生成的分镜视频片段（点击缩略图选用并弹出预览） -->
-          <p class="field-label">分镜片段 <span class="field-tip">点击缩略图选用并弹出预览视频</span></p>
-          <div v-if="store.editingLine.shot.assets.length" class="asset-list">
-            <div
-              v-for="(asset, i) in store.editingLine.shot.assets"
-              :key="asset.id"
-              class="asset-thumb"
-              :class="{ active: asset.id === store.editingLine.shot.currentAssetId }"
-              :title="`片段 v${i + 1} · ${asset.duration}s，点击选用并预览`"
-              @click="pickAsset(asset, i)"
-            >
-              <video v-if="!asset.coverUrl" :src="asset.videoUrl" preload="metadata" muted />
-              <img v-else :src="asset.coverUrl" alt="" />
-              <span class="asset-play"><AppIcon name="play" :size="12" /></span>
-              <span class="asset-duration">{{ asset.duration }}s</span>
+          <p class="body-tip">点击任一预览下方的标签，展开调整对应的参数与提示词</p>
+
+          <!-- 三个预览：人物 / 分镜 / 场景 -->
+          <div class="preview-cards">
+            <!-- 人物 -->
+            <div class="pcard" :class="{ open: activeTab === 'cast' }">
+              <div class="pcard-media" title="点击展开人物调整" @click="toggleTab('cast')">
+                <div v-if="castOfLine.length" class="pcard-avatars">
+                  <img
+                    v-for="dh in castOfLine"
+                    :key="dh.id"
+                    :src="dh.avatar"
+                    :alt="dh.name"
+                    :title="dh.name"
+                  />
+                </div>
+                <span v-else class="pcard-empty"><AppIcon name="user" :size="24" />空镜头</span>
+              </div>
+              <button class="pcard-tab" :class="{ active: activeTab === 'cast' }" @click="toggleTab('cast')">
+                <AppIcon name="users" :size="13" />
+                人物
+                <span class="pcard-count">{{ castOfLine.length }}</span>
+              </button>
+            </div>
+
+            <!-- 分镜预览 -->
+            <div class="pcard" :class="{ open: activeTab === 'shot' }">
+              <div class="pcard-media" title="点击播放当前片段" @click="onShotPreviewClick">
+                <video v-if="shotVideo" :src="shotVideo" preload="metadata" muted />
+                <img v-else-if="shotCover" :src="shotCover" alt="分镜预览" />
+                <span v-else class="pcard-empty"><AppIcon name="movie" :size="24" />暂无分镜</span>
+                <span v-if="shotVideo || shotCover" class="pcard-play"><AppIcon name="play" :size="16" /></span>
+                <span v-if="store.editingLine.shot.assets.length > 1" class="pcard-badge">
+                  {{ store.editingLine.shot.assets.length }} 版
+                </span>
+                <div v-if="store.editingLine.shot.status === 'generating'" class="pcard-loading">
+                  <span class="spinner light" />
+                </div>
+              </div>
+              <button class="pcard-tab" :class="{ active: activeTab === 'shot' }" @click="toggleTab('shot')">
+                <AppIcon name="movie" :size="13" />
+                分镜
+              </button>
+            </div>
+
+            <!-- 场景预览 -->
+            <div class="pcard" :class="{ open: activeTab === 'scene' }">
+              <div class="pcard-media" title="点击展开场景调整" @click="toggleTab('scene')">
+                <img
+                  v-if="store.editingLine.scene.imageUrl"
+                  :src="store.editingLine.scene.imageUrl"
+                  alt="场景预览"
+                />
+                <span v-else class="pcard-empty"><AppIcon name="scene" :size="24" />暂无场景</span>
+                <div v-if="store.editingLine.scene.status === 'generating'" class="pcard-loading">
+                  <span class="spinner light" />
+                </div>
+              </div>
+              <button class="pcard-tab" :class="{ active: activeTab === 'scene' }" @click="toggleTab('scene')">
+                <AppIcon name="scene" :size="13" />
+                场景
+              </button>
             </div>
           </div>
-          <p v-else-if="store.editingLine.shot.status !== 'generating'" class="asset-empty">
-            尚未生成内容：可先由场景提示词生成场景，再结合分镜提示词与出演角色生成视频片段
-          </p>
-          <div v-if="store.editingLine.shot.status === 'generating'" class="asset-generating">
-            <span class="spinner" />
-            <span>视频片段生成中（场景 × 分镜 × 角色）…</span>
-          </div>
 
-          <!-- 出演角色（从全局阵容中多选，可为空 = 空镜头） -->
-          <div class="prompt-head">
-            <p class="field-label">出演角色 <span class="field-tip">从全局阵容中勾选，不选 = 空镜头</span></p>
-            <button class="btn-outline regen-btn" @click="store.openLibrary()">
-              <AppIcon name="users" :size="14" />
-              管理阵容
-            </button>
-          </div>
-          <div class="cast-row">
-            <template v-if="store.castHumans.length">
-              <button
-                v-for="dh in store.castHumans"
-                :key="dh.id"
-                class="cast-pick"
-                :class="{ active: store.editingLine.digitalHumanIds.includes(dh.id) }"
-                @click="store.toggleLineHuman(store.editingLine.id, dh.id)"
-              >
-                <img :src="dh.avatar" :alt="dh.name" />
-                <span>{{ dh.name }}</span>
-                <span v-if="store.editingLine.digitalHumanIds.includes(dh.id)" class="pick-mark"><AppIcon name="check" :size="12" /></span>
+          <!-- 人物调整面板 -->
+          <div v-if="activeTab === 'cast'" class="tab-panel">
+            <div class="panel-head">
+              <span class="panel-title">出演角色 <span class="field-tip">从全局阵容勾选，不选 = 空镜头</span></span>
+              <button class="btn-outline regen-btn" @click="store.openLibrary()">
+                <AppIcon name="users" :size="14" />
+                管理阵容
               </button>
-            </template>
-            <span v-else class="cast-none">角色阵容为空，请先到资产库挑选本 MV 的统一角色</span>
+            </div>
+            <div class="cast-row">
+              <template v-if="store.castHumans.length">
+                <button
+                  v-for="dh in store.castHumans"
+                  :key="dh.id"
+                  class="cast-pick"
+                  :class="{ active: store.editingLine.digitalHumanIds.includes(dh.id) }"
+                  @click="store.toggleLineHuman(store.editingLine.id, dh.id)"
+                >
+                  <img :src="dh.avatar" :alt="dh.name" />
+                  <span>{{ dh.name }}</span>
+                  <span v-if="store.editingLine.digitalHumanIds.includes(dh.id)" class="pick-mark"><AppIcon name="check" :size="12" /></span>
+                </button>
+              </template>
+              <span v-else class="cast-none">角色阵容为空，请先到资产库挑选本 MV 的统一角色</span>
+            </div>
           </div>
 
-          <!-- 歌词编辑 -->
-          <p class="field-label">歌词（当前分镜）</p>
-          <input v-model="lyricsDraft" class="lyrics-input" placeholder="输入这句分镜对应的歌词…" />
-          <p v-if="lyricsTranslation" class="lyrics-zh-hint">中文翻译：{{ lyricsTranslation }}</p>
+          <!-- 分镜调整面板 -->
+          <div v-if="activeTab === 'shot'" class="tab-panel">
+            <p class="panel-title">歌词（当前分镜）</p>
+            <input v-model="lyricsDraft" class="lyrics-input" placeholder="输入这句分镜对应的歌词…" />
+            <p v-if="lyricsTranslation" class="lyrics-zh-hint">中文翻译：{{ lyricsTranslation }}</p>
 
-          <!-- 场景提示词：默认折叠预览，点击展开编辑后可重新生成场景 -->
-          <div class="prompt-head">
-            <p class="field-label">场景提示词</p>
-            <button class="btn-outline regen-btn" @click="sceneEditing = !sceneEditing">
-              <AppIcon v-if="!sceneEditing" name="edit" :size="13" />
-              {{ sceneEditing ? '收起' : '编辑' }}
-            </button>
-            <button
-              class="btn-outline regen-btn"
-              :disabled="store.editingLine.scene.status === 'generating' || !scenePromptDraft.trim()"
-              @click="regenScene"
-            >
-              <span v-if="store.editingLine.scene.status === 'generating'" class="spinner" />
-              <AppIcon v-else name="scene" :size="14" />
-              {{ store.editingLine.scene.imageUrl ? '重新生成场景' : '生成场景' }}
-            </button>
-          </div>
-          <div class="scene-row">
-            <!-- 场景预览：独立于分镜预览，随时可查看场景底图 -->
-            <div class="scene-preview">
-              <img
-                v-if="store.editingLine.scene.imageUrl"
-                :src="store.editingLine.scene.imageUrl"
-                alt="场景预览"
-              />
-              <span v-else class="scene-empty">暂无场景</span>
-              <div v-if="store.editingLine.scene.status === 'generating'" class="scene-loading">
-                <span class="spinner light" />
+            <template v-if="store.editingLine.shot.assets.length">
+              <p class="panel-title mt">已生成片段 <span class="field-tip">点击选用并预览</span></p>
+              <div class="asset-list">
+                <div
+                  v-for="(asset, i) in store.editingLine.shot.assets"
+                  :key="asset.id"
+                  class="asset-thumb"
+                  :class="{ active: asset.id === store.editingLine.shot.currentAssetId }"
+                  :title="`片段 v${i + 1} · ${asset.duration}s，点击选用并预览`"
+                  @click="pickAsset(asset, i)"
+                >
+                  <video v-if="!asset.coverUrl" :src="asset.videoUrl" preload="metadata" muted />
+                  <img v-else :src="asset.coverUrl" alt="" />
+                  <span class="asset-play"><AppIcon name="play" :size="12" /></span>
+                  <span class="asset-duration">{{ asset.duration }}s</span>
+                </div>
               </div>
+            </template>
+
+            <div class="panel-head mt">
+              <span class="panel-title">分镜提示词</span>
+              <button
+                class="btn-outline regen-btn"
+                :disabled="store.editingLine.shot.status === 'generating' || !shotPromptDraft.trim()"
+                @click="regenShot"
+              >
+                <span v-if="store.editingLine.shot.status === 'generating'" class="spinner" />
+                <AppIcon v-else name="movie" :size="14" />
+                {{ store.editingLine.shot.assets.length ? '重新生成分镜' : '生成分镜' }}
+              </button>
             </div>
             <textarea
-              v-if="sceneEditing"
+              v-model="shotPromptDraft"
+              class="prompt-input"
+              rows="3"
+              placeholder="描述镜头运动与角色表演，将与场景、出演角色一起生成视频片段…"
+            />
+            <!-- 生成参数：清晰度 / 时长 / 画幅，重新生成分镜时生效 -->
+            <div class="gen-options">
+              <label class="opt-item">
+                <span class="opt-label">清晰度</span>
+                <select v-model="optionsDraft.resolution" class="opt-select">
+                  <option v-for="r in resolutionChoices" :key="r" :value="r">{{ r }}</option>
+                </select>
+              </label>
+              <label class="opt-item">
+                <span class="opt-label">时长</span>
+                <select v-model.number="optionsDraft.duration" class="opt-select">
+                  <option v-for="d in durationChoices" :key="d" :value="d">{{ d }}s</option>
+                </select>
+              </label>
+              <label class="opt-item">
+                <span class="opt-label">画幅</span>
+                <select v-model="optionsDraft.ratio" class="opt-select">
+                  <option v-for="r in ratioChoices" :key="r" :value="r">{{ r }}</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <!-- 场景调整面板 -->
+          <div v-if="activeTab === 'scene'" class="tab-panel">
+            <div class="panel-head">
+              <span class="panel-title">场景提示词</span>
+              <button
+                class="btn-outline regen-btn"
+                :disabled="store.editingLine.scene.status === 'generating' || !scenePromptDraft.trim()"
+                @click="regenScene"
+              >
+                <span v-if="store.editingLine.scene.status === 'generating'" class="spinner" />
+                <AppIcon v-else name="scene" :size="14" />
+                {{ store.editingLine.scene.imageUrl ? '重新生成场景' : '生成场景' }}
+              </button>
+            </div>
+            <textarea
               v-model="scenePromptDraft"
-              class="prompt-input scene-input"
+              class="prompt-input"
               rows="3"
               placeholder="描述这个分镜的背景场景：环境、光线、色调、氛围…"
             />
-            <div v-else class="prompt-preview scene-input" title="点击展开编辑" @click="sceneEditing = true">
-              {{ scenePromptDraft || '暂无场景提示词，点击编写…' }}
-            </div>
-          </div>
-
-          <!-- 分镜提示词：默认折叠预览，点击展开编辑后可重新生成分镜视频片段 -->
-          <div class="prompt-head">
-            <p class="field-label">分镜提示词</p>
-            <button class="btn-outline regen-btn" @click="shotEditing = !shotEditing">
-              <AppIcon v-if="!shotEditing" name="edit" :size="13" />
-              {{ shotEditing ? '收起' : '编辑' }}
-            </button>
-            <button
-              class="btn-outline regen-btn"
-              :disabled="store.editingLine.shot.status === 'generating' || !shotPromptDraft.trim()"
-              @click="regenShot"
-            >
-              <span v-if="store.editingLine.shot.status === 'generating'" class="spinner" />
-              <AppIcon v-else name="movie" :size="14" />
-              {{ store.editingLine.shot.assets.length ? '重新生成分镜' : '生成分镜' }}
-            </button>
-          </div>
-          <!-- 生成参数：清晰度 / 时长 / 画幅，重新生成分镜时生效 -->
-          <div class="gen-options">
-            <label class="opt-item">
-              <span class="opt-label">清晰度</span>
-              <select v-model="optionsDraft.resolution" class="opt-select">
-                <option v-for="r in resolutionChoices" :key="r" :value="r">{{ r }}</option>
-              </select>
-            </label>
-            <label class="opt-item">
-              <span class="opt-label">时长</span>
-              <select v-model.number="optionsDraft.duration" class="opt-select">
-                <option v-for="d in durationChoices" :key="d" :value="d">{{ d }}s</option>
-              </select>
-            </label>
-            <label class="opt-item">
-              <span class="opt-label">画幅</span>
-              <select v-model="optionsDraft.ratio" class="opt-select">
-                <option v-for="r in ratioChoices" :key="r" :value="r">{{ r }}</option>
-              </select>
-            </label>
-          </div>
-          <textarea
-            v-if="shotEditing"
-            v-model="shotPromptDraft"
-            class="prompt-input"
-            rows="3"
-            placeholder="描述镜头运动与角色表演，将与场景、出演角色一起生成视频片段…"
-          />
-          <div v-else class="prompt-preview" title="点击展开编辑" @click="shotEditing = true">
-            {{ shotPromptDraft || '暂无分镜提示词，点击编写…' }}
           </div>
         </div>
 
@@ -331,17 +401,380 @@ const cancel = () => store.closeEditor()
   color: var(--text);
 }
 .modal-body {
-  padding: 16px 22px;
+  padding: 16px 22px 20px;
   overflow-y: auto;
 }
-.field-label {
-  margin: 14px 0 8px;
+.body-tip {
+  margin: 0 0 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* 三个预览卡片：人物 / 分镜 / 场景 */
+.preview-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.pcard {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.pcard.open {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+.pcard-media {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  background: #111;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  overflow: hidden;
+}
+.pcard-media > img,
+.pcard-media > video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.pcard-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: #888;
+  font-size: 12px;
+}
+/* 人物预览：出演角色头像并排（多个时轻微重叠） */
+.pcard-avatars {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  gap: 0;
+}
+.pcard-avatars img {
+  width: 54px;
+  height: 72px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 2px solid #fff;
+  margin-left: -12px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+.pcard-avatars img:first-child {
+  margin-left: 0;
+}
+/* 分镜预览的播放角标 */
+.pcard-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.pcard-media:hover .pcard-play {
+  opacity: 1;
+}
+.pcard-badge {
+  position: absolute;
+  right: 5px;
+  top: 5px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+.pcard-loading {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* 每张卡片下方的 tab 标签，点击展开对应参数 */
+.pcard-tab {
+  width: 100%;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.pcard-tab:hover {
+  color: var(--primary);
+}
+.pcard-tab.active {
+  background: var(--primary);
+  color: #fff;
+}
+.pcard-count {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pcard-tab.active .pcard-count {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+/* 展开的调整面板 */
+.tab-panel {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: #fcfcfc;
+  animation: panelIn 0.18s ease;
+}
+@keyframes panelIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.panel-title {
+  margin: 0 0 8px;
   font-size: 13px;
   font-weight: 700;
   color: var(--text);
 }
-.field-label:first-child {
-  margin-top: 0;
+.panel-title.mt {
+  margin-top: 14px;
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.panel-head .panel-title {
+  margin: 0 auto 0 0;
+}
+.panel-head.mt {
+  margin-top: 14px;
+}
+.regen-btn {
+  padding: 5px 12px;
+}
+.field-tip {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-left: 6px;
+}
+
+/* 出演角色行 */
+.cast-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cast-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-dark);
+  border-radius: 18px;
+  background: #fff;
+  color: var(--text);
+  font-size: 13px;
+  padding: 3px 10px 3px 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.cast-pick img {
+  width: 24px;
+  height: 32px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+.cast-pick:hover {
+  border-color: var(--primary);
+}
+.cast-pick.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+}
+.pick-mark {
+  display: inline-flex;
+  align-items: center;
+  color: var(--primary);
+}
+.cast-none {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* 已生成片段缩略图列表 */
+.asset-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.asset-thumb {
+  position: relative;
+  width: 96px;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.asset-thumb img,
+.asset-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.asset-duration {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 6px;
+}
+.asset-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.asset-thumb:hover .asset-play {
+  opacity: 1;
+}
+.asset-thumb:hover {
+  border-color: rgba(255, 90, 44, 0.4);
+}
+.asset-thumb.active {
+  border-color: var(--primary);
+}
+
+/* 输入框 */
+.lyrics-input,
+.prompt-input {
+  width: 100%;
+  border: 1px solid var(--border-dark);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.lyrics-input:focus,
+.prompt-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(255, 90, 44, 0.12);
+}
+.lyrics-zh-hint {
+  margin: 6px 2px 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.prompt-input {
+  resize: vertical;
+  min-height: 72px;
+}
+
+/* 生成参数选择（清晰度 / 时长 / 画幅） */
+.gen-options {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.opt-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.opt-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.opt-select {
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  padding: 5px 8px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.opt-select:hover,
+.opt-select:focus {
+  border-color: var(--primary);
+}
+
+/* 底部 */
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--border);
+}
+.btn-cancel {
+  border: 1px solid var(--border-dark);
+  border-radius: 20px;
+  background: #fff;
+  color: var(--text);
+  font-size: 14px;
+  padding: 9px 24px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.btn-cancel:hover {
+  border-color: var(--text-secondary);
 }
 
 /* 分镜片段预览弹层 */
@@ -418,293 +851,9 @@ img.preview-media {
 .lyric-caption .cap-line {
   margin: 0;
 }
-/* 非中文歌词的中文翻译 */
 .lyric-caption .cap-zh {
   margin: 4px 0 0;
   font-size: 13px;
   opacity: 0.85;
-}
-
-/* 出演角色行 */
-.cast-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 8px 12px;
-}
-.cast-pick {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--border-dark);
-  border-radius: 18px;
-  background: #fff;
-  color: var(--text);
-  font-size: 13px;
-  padding: 3px 10px 3px 4px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.cast-pick img {
-  width: 24px;
-  height: 32px;
-  border-radius: 6px;
-  object-fit: cover;
-}
-.cast-pick:hover {
-  border-color: var(--primary);
-}
-.cast-pick.active {
-  border-color: var(--primary);
-  background: var(--primary-light);
-  color: var(--primary);
-}
-.pick-mark {
-  display: inline-flex;
-  align-items: center;
-  color: var(--primary);
-}
-.cast-none {
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-.field-tip {
-  font-weight: 400;
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-left: 6px;
-}
-
-/* 资产列表 */
-.asset-list {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.asset-empty {
-  margin: 0;
-  border: 1px dashed var(--border-dark);
-  border-radius: 10px;
-  padding: 14px 16px;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-.asset-generating {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-.asset-thumb {
-  position: relative;
-  width: 96px;
-  aspect-ratio: 16 / 9;
-  border-radius: 8px;
-  border: 2px solid transparent;
-  overflow: hidden;
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-.asset-thumb img,
-.asset-thumb video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.asset-duration {
-  position: absolute;
-  right: 3px;
-  bottom: 3px;
-  background: rgba(0, 0, 0, 0.65);
-  color: #fff;
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 6px;
-}
-/* 悬停缩略图时的播放角标，提示可弹出预览 */
-.asset-play {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  background: rgba(0, 0, 0, 0.35);
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.asset-thumb:hover .asset-play {
-  opacity: 1;
-}
-.asset-thumb:hover {
-  border-color: rgba(255, 90, 44, 0.4);
-}
-.asset-thumb.active {
-  border-color: var(--primary);
-}
-
-/* 场景预览 */
-.scene-row {
-  display: flex;
-  gap: 10px;
-  align-items: stretch;
-}
-.scene-preview {
-  position: relative;
-  width: 150px;
-  flex-shrink: 0;
-  aspect-ratio: 16 / 9;
-  align-self: flex-start;
-  background: #111;
-  border-radius: 10px;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.scene-preview img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.scene-empty {
-  color: #666;
-  font-size: 12px;
-}
-.scene-loading {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.scene-input {
-  flex: 1;
-}
-
-/* 输入框 */
-.lyrics-input,
-.prompt-input {
-  width: 100%;
-  border: 1px solid var(--border-dark);
-  border-radius: 10px;
-  padding: 10px 12px;
-  font-size: 14px;
-  font-family: inherit;
-  color: var(--text);
-  outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-.lyrics-input:focus,
-.prompt-input:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(255, 90, 44, 0.12);
-}
-/* 非中文歌词的中文翻译提示 */
-.lyrics-zh-hint {
-  margin: 6px 2px 0;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-.prompt-input {
-  resize: vertical;
-  min-height: 72px;
-}
-.prompt-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  justify-content: flex-end;
-}
-.prompt-head .field-label {
-  margin-right: auto;
-}
-.regen-btn {
-  padding: 5px 12px;
-}
-
-/* 生成参数选择（清晰度 / 时长 / 画幅） */
-.gen-options {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin: 2px 0 10px;
-}
-.opt-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.opt-label {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-.opt-select {
-  border: 1px solid var(--border-dark);
-  border-radius: 8px;
-  background: #fff;
-  color: var(--text);
-  font-size: 13px;
-  font-family: inherit;
-  padding: 5px 8px;
-  cursor: pointer;
-  outline: none;
-  transition: border-color 0.15s;
-}
-.opt-select:hover,
-.opt-select:focus {
-  border-color: var(--primary);
-}
-
-/* 提示词折叠预览（默认只展示 3 行，点击展开编辑） */
-.prompt-preview {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #fafafa;
-  padding: 10px 12px;
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--text-secondary);
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  overflow-wrap: break-word;
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-.prompt-preview:hover {
-  border-color: var(--primary);
-}
-
-/* 底部 */
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  padding: 14px 22px;
-  border-top: 1px solid var(--border);
-}
-.btn-cancel {
-  border: 1px solid var(--border-dark);
-  border-radius: 20px;
-  background: #fff;
-  color: var(--text);
-  font-size: 14px;
-  padding: 9px 24px;
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-.btn-cancel:hover {
-  border-color: var(--text-secondary);
 }
 </style>

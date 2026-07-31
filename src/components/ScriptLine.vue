@@ -21,6 +21,12 @@ const translation = computed(() => store.translationOf(props.line))
 
 // 点开分镜行 → 选中并打开编辑弹窗
 const openDetail = () => store.openEditor(props.line.id)
+
+// 生成 / 重新生成分镜视频片段：已有片段时二次确认，避免误触
+const onGenerateShot = () => {
+  if (props.line.shot.status === 'done' && !window.confirm('确定重新生成该分镜视频片段？将新增一个视频版本')) return
+  store.generateShotFor(props.line.id)
+}
 </script>
 
 <template>
@@ -57,7 +63,7 @@ const openDetail = () => store.openEditor(props.line.id)
         :class="{ active: line.shot.status === 'done' }"
         :disabled="line.shot.status === 'generating'"
         :title="line.shot.status === 'done' ? '重新生成视频片段' : '生成视频片段（场景 × 分镜 × 角色）'"
-        @click="store.generateShotFor(line.id)"
+        @click="onGenerateShot"
       >
         <span v-if="line.shot.status === 'generating'" class="spinner" />
         <AppIcon v-else name="movie" :size="15" />
