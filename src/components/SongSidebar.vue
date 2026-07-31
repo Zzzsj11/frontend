@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useProjectStore } from '../stores/project'
+import type { SongProject, SongTask } from '../types'
 import AppIcon from './AppIcon.vue'
 
 const store = useProjectStore()
@@ -33,6 +34,51 @@ const submitCreate = async () => {
 const pickTask = (songId: string, taskId: string) => {
   if (store.songSwitching) return
   store.selectSongTask(songId, taskId)
+}
+
+// 重命名输入框挂载时自动聚焦选中
+const autoFocus = (el: unknown) => {
+  if (el instanceof HTMLInputElement) {
+    el.focus()
+    el.select()
+  }
+}
+
+// ---------- 歌曲项目(目录)：重命名 / 删除 ----------
+const editingSongId = ref<string | null>(null)
+const editingSongName = ref('')
+const startRenameSong = (song: SongProject) => {
+  editingSongId.value = song.id
+  editingSongName.value = song.name
+}
+const commitRenameSong = () => {
+  if (editingSongId.value) store.renameSongProject(editingSongId.value, editingSongName.value)
+  editingSongId.value = null
+}
+const cancelRenameSong = () => {
+  editingSongId.value = null
+}
+const removeSong = (song: SongProject) => {
+  if (window.confirm(`确定删除歌曲项目「${song.name}」？其下所有子项目将一并删除`))
+    store.deleteSongProject(song.id)
+}
+
+// ---------- 子项目(任务)：重命名 / 删除 ----------
+const editingTaskId = ref<string | null>(null)
+const editingTaskName = ref('')
+const startRenameTask = (task: SongTask) => {
+  editingTaskId.value = task.id
+  editingTaskName.value = task.title
+}
+const commitRenameTask = (songId: string) => {
+  if (editingTaskId.value) store.renameSongTask(songId, editingTaskId.value, editingTaskName.value)
+  editingTaskId.value = null
+}
+const cancelRenameTask = () => {
+  editingTaskId.value = null
+}
+const removeTask = (songId: string, task: SongTask) => {
+  if (window.confirm(`确定删除子项目「${task.title}」？`)) store.deleteSongTask(songId, task.id)
 }
 
 onMounted(() => {
@@ -68,25 +114,71 @@ onMounted(() => {
 
     <div class="song-list">
       <div v-for="song in store.songProjects" :key="song.id" class="song-group">
-        <button class="song-folder" :class="{ current: song.id === store.activeSongId }" @click="toggleCollapse(song.id)">
-          <AppIcon name="folder" :size="14" />
-          <span class="song-name">{{ song.name }}</span>
-          <span v-if="song.artist" class="song-artist">{{ song.artist }}</span>
-        </button>
+        <div class="song-folder" :class="{ current: song.id === store.activeSongId }">
+          <input
+            v-if="editingSongId === song.id"
+            :ref="autoFocus"
+            v-model="editingSongName"
+            class="rename-input"
+            @keyup.enter="commitRenameSong"
+            @keyup.esc="cancelRenameSong"
+            @blur="commitRenameSong"
+            @click.stop
+          />
+          <template v-else>
+            <button class="folder-main" @click="toggleCollapse(song.id)">
+              <AppIcon name="folder" :size="14" />
+              <span class="song-name">{{ song.name }}</span>
+              <span v-if="song.artist" class="song-artist">{{ song.artist }}</span>
+            </button>
+            <span class="row-actions">
+              <button class="row-act" title="重命名" @click.stop="startRenameSong(song)">
+                <AppIcon name="edit" :size="12" />
+              </button>
+              <button class="row-act danger" title="删除" @click.stop="removeSong(song)">
+                <AppIcon name="trash" :size="12" />
+              </button>
+            </span>
+          </template>
+        </div>
 
         <template v-if="!collapsed.has(song.id)">
-          <button
+          <div
             v-for="task in song.tasks"
             :key="task.id"
             class="task-item"
             :class="{ active: song.id === store.activeSongId && task.id === store.activeTaskId }"
-            :disabled="store.songSwitching"
-            @click="pickTask(song.id, task.id)"
           >
-            <span class="task-dot" />
-            <span class="task-title">{{ task.title }}</span>
-            <span class="task-time">{{ task.updatedAt }}</span>
-          </button>
+            <input
+              v-if="editingTaskId === task.id"
+              :ref="autoFocus"
+              v-model="editingTaskName"
+              class="rename-input task-rename"
+              @keyup.enter="commitRenameTask(song.id)"
+              @keyup.esc="cancelRenameTask"
+              @blur="commitRenameTask(song.id)"
+              @click.stop
+            />
+            <template v-else>
+              <button
+                class="task-main"
+                :disabled="store.songSwitching"
+                @click="pickTask(song.id, task.id)"
+              >
+                <span class="task-dot" />
+                <span class="task-title">{{ task.title }}</span>
+                <span class="task-time">{{ task.updatedAt }}</span>
+              </button>
+              <span class="row-actions">
+                <button class="row-act" title="重命名" @click.stop="startRenameTask(task)">
+                  <AppIcon name="edit" :size="12" />
+                </button>
+                <button class="row-act danger" title="删除" @click.stop="removeTask(song.id, task)">
+                  <AppIcon name="trash" :size="12" />
+                </button>
+              </span>
+            </template>
+          </div>
           <p v-if="!song.tasks.length" class="task-empty">暂无任务</p>
         </template>
       </div>
@@ -180,18 +272,26 @@ onMounted(() => {
 .song-folder {
   display: flex;
   align-items: center;
+  color: var(--text-secondary);
+  border-radius: 8px;
+  transition: background 0.12s;
+}
+.folder-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
   gap: 7px;
-  width: 100%;
   border: none;
   background: transparent;
-  color: var(--text-secondary);
+  color: inherit;
   border-radius: 8px;
   padding: 7px 8px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   text-align: left;
-  transition: background 0.12s;
+  font-family: inherit;
 }
 .song-folder:hover {
   background: rgba(0, 0, 0, 0.045);
@@ -215,17 +315,26 @@ onMounted(() => {
 .task-item {
   display: flex;
   align-items: center;
+  color: var(--text);
+  border-radius: 8px;
+  transition: background 0.12s;
+}
+.task-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
   gap: 8px;
-  width: 100%;
   border: none;
   background: transparent;
-  color: var(--text);
+  color: inherit;
   border-radius: 8px;
   padding: 7px 8px 7px 14px;
   font-size: 13px;
+  font-weight: inherit;
   cursor: pointer;
   text-align: left;
-  transition: background 0.12s;
+  font-family: inherit;
 }
 .task-item:hover {
   background: rgba(0, 0, 0, 0.045);
@@ -235,7 +344,7 @@ onMounted(() => {
   color: var(--primary);
   font-weight: 600;
 }
-.task-item:disabled {
+.task-main:disabled {
   cursor: wait;
   opacity: 0.7;
 }
@@ -269,5 +378,54 @@ onMounted(() => {
   padding-left: 14px;
   font-size: 12px;
   color: var(--text-secondary);
+}
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 6px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.song-folder:hover .row-actions,
+.task-item:hover .row-actions {
+  opacity: 1;
+}
+.row-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.row-act:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--text);
+}
+.row-act.danger:hover {
+  background: rgba(229, 57, 53, 0.12);
+  color: #e53935;
+}
+.rename-input {
+  flex: 1;
+  min-width: 0;
+  margin: 3px 6px;
+  border: 1px solid var(--primary);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  background: #fff;
+  outline: none;
+}
+.rename-input.task-rename {
+  margin-left: 14px;
 }
 </style>

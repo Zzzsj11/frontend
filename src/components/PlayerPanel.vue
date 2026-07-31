@@ -111,13 +111,61 @@ const onProgressDown = (e: MouseEvent) => {
   window.addEventListener('mouseup', onUp)
 }
 
+// 全屏时进度条只对应“当前选中分镜”的局部时间（相对片段 0..duration），且只播放该分镜
+const fsClip = computed(() => store.currentClip)
+const fsElapsed = computed(() => {
+  const clip = fsClip.value
+  if (!clip) return 0
+  return Math.min(Math.max(store.currentTime - clip.start, 0), clip.duration)
+})
+const fsProgressPercent = computed(() => {
+  const clip = fsClip.value
+  return clip && clip.duration > 0 ? (fsElapsed.value / clip.duration) * 100 : 0
+})
+// 全屏进度条 seek：映射到选中片段内的局部时间
+const seekFsByEvent = (e: MouseEvent, el: HTMLElement) => {
+  const clip = fsClip.value
+  if (!clip) return
+  const rect = el.getBoundingClientRect()
+  const ratio = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1)
+  store.seek(clip.start + ratio * clip.duration)
+}
+const onFsProgressDown = (e: MouseEvent) => {
+  const el = e.currentTarget as HTMLElement
+  seekFsByEvent(e, el)
+  const onMove = (ev: MouseEvent) => seekFsByEvent(ev, el)
+  const onUp = () => {
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
+
 // 全屏状态：全屏元素是 .preview，外部控制条不可见，需在画面内叠加悬浮控制条
 const isFullscreen = ref(false)
+// 记录进入全屏前的“单个分镜”模式，退出时还原
+let prevSingle = store.playMode.single
 const onFsChange = () => {
-  isFullscreen.value = !!document.fullscreenElement
+  const nowFs = !!document.fullscreenElement
+  if (nowFs && !isFullscreen.value) {
+    // 进入全屏：强制只播当前选中分镜，并把指针对齐到该片段起点
+    prevSingle = store.playMode.single
+    if (!store.playMode.single) store.setPlayMode('single', true)
+    const clip = store.selectedClip
+    if (clip) store.seek(clip.start)
+  } else if (!nowFs && isFullscreen.value) {
+    // 退出全屏：还原原播放模式
+    store.setPlayMode('single', prevSingle)
+  }
+  isFullscreen.value = nowFs
 }
 onMounted(() => document.addEventListener('fullscreenchange', onFsChange))
-onBeforeUnmount(() => document.removeEventListener('fullscreenchange', onFsChange))
+onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', onFsChange)
+  // 若卸载时仍在全屏，恢复播放模式，避免残留强制单分镜
+  if (isFullscreen.value) store.setPlayMode('single', prevSingle)
+})
 
 const toggleFullscreen = () => {
   if (document.fullscreenElement) {
@@ -161,11 +209,11 @@ const toggleFullscreen = () => {
           <AppIcon :name="store.isPlaying ? 'pause' : 'play'" :size="20" />
         </button>
         <span class="fs-time">
-          {{ formatTime(store.currentTime) }} / {{ formatTime(store.totalDuration) }}
+          {{ formatTime(fsElapsed) }} / {{ formatTime(fsClip?.duration ?? 0) }}
         </span>
-        <div class="progress-bar fs-progress" @mousedown="onProgressDown">
-          <div class="progress-fill" :style="{ width: progressPercent + '%' }" />
-          <div class="progress-thumb" :style="{ left: progressPercent + '%' }" />
+        <div class="progress-bar fs-progress" @mousedown="onFsProgressDown">
+          <div class="progress-fill" :style="{ width: fsProgressPercent + '%' }" />
+          <div class="progress-thumb" :style="{ left: fsProgressPercent + '%' }" />
         </div>
         <button class="fs-btn" :title="store.muted ? '取消静音' : '静音'" @click="store.muted = !store.muted">
           <AppIcon :name="store.muted ? 'volume-off' : 'volume-on'" :size="17" />

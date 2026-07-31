@@ -258,25 +258,8 @@ const cancel = () => store.closeEditor()
               </div>
             </template>
 
-            <div class="panel-head mt">
-              <span class="panel-title">分镜提示词</span>
-              <button
-                class="btn-outline regen-btn"
-                :disabled="store.editingLine.shot.status === 'generating' || !shotPromptDraft.trim()"
-                @click="regenShot"
-              >
-                <span v-if="store.editingLine.shot.status === 'generating'" class="spinner" />
-                <AppIcon v-else name="movie" :size="14" />
-                {{ store.editingLine.shot.assets.length ? '重新生成分镜' : '生成分镜' }}
-              </button>
-            </div>
-            <textarea
-              v-model="shotPromptDraft"
-              class="prompt-input"
-              rows="3"
-              placeholder="描述镜头运动与角色表演，将与场景、出演角色一起生成视频片段…"
-            />
             <!-- 生成参数：清晰度 / 时长 / 画幅，重新生成分镜时生效 -->
+            <p class="panel-title mt">生成参数</p>
             <div class="gen-options">
               <label class="opt-item">
                 <span class="opt-label">清晰度</span>
@@ -297,6 +280,25 @@ const cancel = () => store.closeEditor()
                 </select>
               </label>
             </div>
+
+            <div class="panel-head mt">
+              <span class="panel-title">分镜提示词</span>
+              <button
+                class="btn-outline regen-btn"
+                :disabled="store.editingLine.shot.status === 'generating' || !shotPromptDraft.trim()"
+                @click="regenShot"
+              >
+                <span v-if="store.editingLine.shot.status === 'generating'" class="spinner" />
+                <AppIcon v-else name="movie" :size="14" />
+                {{ store.editingLine.shot.assets.length ? '重新生成分镜' : '生成分镜' }}
+              </button>
+            </div>
+            <textarea
+              v-model="shotPromptDraft"
+              class="prompt-input prompt-shot"
+              rows="6"
+              placeholder="描述镜头运动与角色表演，将与场景、出演角色一起生成视频片段…"
+            />
           </div>
 
           <!-- 场景调整面板 -->
@@ -719,6 +721,10 @@ const cancel = () => store.closeEditor()
 .prompt-input {
   resize: vertical;
   min-height: 72px;
+}
+/* 分镜提示词框加大，方便编写较长的镜头描述 */
+.prompt-input.prompt-shot {
+  min-height: 132px;
 }
 
 /* 生成参数选择（清晰度 / 时长 / 画幅） */

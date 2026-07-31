@@ -18,6 +18,28 @@ const sceneVariants: Record<string, number> = {}
 /** 数字人资产库本地持久化 key */
 const DH_STORAGE_KEY = 'mv-digital-humans'
 
+/** 风格分类列表本地持久化 key */
+const DH_STYLE_STORAGE_KEY = 'mv-dh-styles'
+
+/** 删除分类后，该分类下数字人的归属分类 */
+const FALLBACK_STYLE = '未分类'
+
+/** 从 localStorage 恢复风格分类列表，无存档时从初始数字人推导 */
+function loadDhStyles(): string[] {
+  try {
+    const raw = localStorage.getItem(DH_STYLE_STORAGE_KEY)
+    if (raw) {
+      const list = JSON.parse(raw) as string[]
+      if (Array.isArray(list) && list.length) {
+        return [...new Set(list.filter((s) => typeof s === 'string' && s.trim()))]
+      }
+    }
+  } catch {
+    /* 存档损坏时回退推导数据 */
+  }
+  return [...new Set(mockDigitalHumans.map((d) => d.style))]
+}
+
 /** 从 localStorage 恢复数字人资产库（新增/编辑/删除刷新后不丢），无存档时用初始数据 */
 function loadDigitalHumans(): DigitalHuman[] {
   try {
@@ -41,6 +63,8 @@ export const useProjectStore = defineStore('project', {
   state: () => ({
     lines: initialLines as ScriptLine[],
     digitalHumans: loadDigitalHumans(),
+    /** 风格分类列表（支持增删改查，空分类也会保留） */
+    dhStyles: loadDhStyles(),
     /** 歌曲项目列表（左侧任务栏：一个目录处理一首歌曲） */
     songProjects: [] as SongProject[],
     /** 当前打开的歌曲项目 id */
@@ -49,11 +73,11 @@ export const useProjectStore = defineStore('project', {
     activeTaskId: 'task-nunan-1' as string | null,
     /** 正在切换歌曲（载入脚本中） */
     songSwitching: false,
-    /** 已打开过的歌曲编辑现场缓存，切回时不丢编辑状态 */
-    songCache: {} as Record<string, { cast: string[]; lines: ScriptLine[] }>,
+    /** 各子项目(任务)的脚本编辑现场缓存(按 taskId)，切回时不丢编辑状态 */
+    taskScripts: {} as Record<string, { cast: string[]; lines: ScriptLine[] }>,
     /** 全局角色阵容：本 MV 选定的数字人（全片统一），分镜只能从阵容中挑选出演角色 */
     castIds: [...initialCastIds] as string[],
-    selectedLineId: initialLines[0]?.id ?? null as string | null,
+    selectedLineId: (initialLines[0]?.id ?? null) as string | null,
     /** 当前在弹窗中编辑的分镜行 */
     editingLineId: null as string | null,
     /** 资产库（角色阵容管理）弹窗开关 */
@@ -127,6 +151,11 @@ export const useProjectStore = defineStore('project', {
     digitalHumanOf: (state) => (id?: string) =>
       state.digitalHumans.find((d) => d.id === id),
 
+    /** 全部风格分类：显式管理的分类 + 数字人实际在用的分类（兜底合并，防止遗漏） */
+    allDhStyles(state): string[] {
+      return [...new Set([...state.dhStyles, ...state.digitalHumans.map((d) => d.style)])]
+    },
+
     /** 全局角色阵容对应的数字人列表 */
     castHumans(state): DigitalHuman[] {
       return state.castIds
@@ -184,26 +213,109 @@ export const useProjectStore = defineStore('project', {
       return song
     },
 
-    /** 切换到某歌曲的处理任务：载入对应分镜脚本与阵容，当前编辑现场写入缓存 */
+    /** 把当前子项目(任务)的编辑现场写入缓存 */
+    _cacheCurrentTask() {
+      if (this.activeTaskId) {
+        this.taskScripts[this.activeTaskId] = { cast: this.castIds, lines: this.lines }
+      }
+    },
+
+    /** 载入指定子项目(任务)的脚本到编辑区（不负责缓存当前，调用方自行处理） */
+    async _loadTask(songId: string, taskId: string | null) {
+      const script = (taskId && this.taskScripts[taskId]) || (await api.fetchSongScript(songId))
+      if (taskId) this.taskScripts[taskId] = script
+      this.stop()
+      this.editingLineId = null
+      this.castIds = [...script.cast]
+      this.lines = script.lines
+      this.activeSongId = songId
+      this.activeTaskId = taskId
+      this.selectedLineId = this.lines[0]?.id ?? null
+      this.currentTime = 0
+    },
+
+    /** 切换到某歌曲的处理任务(子项目)：每个任务是独立脚本，当前编辑现场先写入缓存 */
     async selectSongTask(songId: string, taskId: string | null = null) {
       if (this.songSwitching) return
-      if (songId === this.activeSongId) {
-        if (taskId) this.activeTaskId = taskId
-        return
-      }
+      // 已在该任务上无需切换（无 taskId 时仅按歌曲判断）
+      if (taskId ? taskId === this.activeTaskId : songId === this.activeSongId) return
       this.songSwitching = true
       try {
-        this.songCache[this.activeSongId] = { cast: this.castIds, lines: this.lines }
-        const script = this.songCache[songId] ?? (await api.fetchSongScript(songId))
-        this.stop()
-        this.editingLineId = null
-        this.castIds = [...script.cast]
-        this.lines = script.lines
-        this.songCache[songId] = script
-        this.activeSongId = songId
-        this.activeTaskId = taskId
-        this.selectedLineId = this.lines[0]?.id ?? null
-        this.currentTime = 0
+        this._cacheCurrentTask()
+        await this._loadTask(songId, taskId)
+      } finally {
+        this.songSwitching = false
+      }
+    },
+
+    /** 重命名歌曲项目(目录) */
+    renameSongProject(songId: string, name: string) {
+      const song = this.songProjects.find((s) => s.id === songId)
+      const trimmed = name.trim()
+      if (!song || !trimmed) return
+      song.name = trimmed
+    },
+
+    /** 删除歌曲项目(目录)：连同其下所有子项目与脚本缓存；删除激活项时切到其余首个任务 */
+    async deleteSongProject(songId: string) {
+      const idx = this.songProjects.findIndex((s) => s.id === songId)
+      if (idx < 0) return
+      const [removed] = this.songProjects.splice(idx, 1)
+      removed.tasks.forEach((t) => delete this.taskScripts[t.id])
+      if (songId !== this.activeSongId) return
+      // 删除的是当前激活歌曲：切到剩余首个歌曲的首个任务，否则清空编辑区
+      const fallback = this.songProjects[0]
+      this.songSwitching = true
+      try {
+        if (fallback) {
+          await this._loadTask(fallback.id, fallback.tasks[0]?.id ?? null)
+        } else {
+          this.stop()
+          this.editingLineId = null
+          this.lines = []
+          this.castIds = []
+          this.activeSongId = ''
+          this.activeTaskId = null
+          this.selectedLineId = null
+          this.currentTime = 0
+        }
+      } finally {
+        this.songSwitching = false
+      }
+    },
+
+    /** 重命名子项目(任务) */
+    renameSongTask(songId: string, taskId: string, title: string) {
+      const song = this.songProjects.find((s) => s.id === songId)
+      const task = song?.tasks.find((t) => t.id === taskId)
+      const trimmed = title.trim()
+      if (!task || !trimmed) return
+      task.title = trimmed
+    },
+
+    /** 删除子项目(任务)：删除激活任务时切到同歌曲相邻任务，否则清空编辑区 */
+    async deleteSongTask(songId: string, taskId: string) {
+      const song = this.songProjects.find((s) => s.id === songId)
+      if (!song) return
+      const idx = song.tasks.findIndex((t) => t.id === taskId)
+      if (idx < 0) return
+      song.tasks.splice(idx, 1)
+      delete this.taskScripts[taskId]
+      if (taskId !== this.activeTaskId) return
+      const next = song.tasks[idx] ?? song.tasks[idx - 1]
+      this.songSwitching = true
+      try {
+        if (next) {
+          await this._loadTask(song.id, next.id)
+        } else {
+          this.stop()
+          this.editingLineId = null
+          this.lines = []
+          this.castIds = []
+          this.activeTaskId = null
+          this.selectedLineId = null
+          this.currentTime = 0
+        }
       } finally {
         this.songSwitching = false
       }
@@ -330,10 +442,99 @@ export const useProjectStore = defineStore('project', {
         }
         this.digitalHumans.push(dh)
         this.persistDigitalHumans()
+        this.ensureDhStyle(dh.style)
         return dh
       } finally {
         this.dhGenerating = false
       }
+    },
+
+    /** 上传自定义数字人：用户自备头像与信息直接加入资产库（名称、风格必填，不调用生图接口） */
+    addCustomDigitalHuman(input: {
+      name: string
+      style: string
+      description?: string
+      avatar: string
+    }): DigitalHuman {
+      const dh: DigitalHuman = {
+        id: nextId('dh'),
+        name: input.name,
+        style: input.style,
+        avatar: input.avatar,
+        description: input.description ?? '',
+        avatarPrompt: '',
+      }
+      this.digitalHumans.push(dh)
+      this.persistDigitalHumans()
+      this.ensureDhStyle(dh.style)
+      return dh
+    },
+
+    // ---------- 风格分类增删改查 ----------
+    /** 风格分类列表写入 localStorage */
+    persistDhStyles() {
+      try {
+        localStorage.setItem(DH_STYLE_STORAGE_KEY, JSON.stringify(this.dhStyles))
+      } catch {
+        /* 存储超限时忽略，不影响当前会话使用 */
+      }
+    },
+
+    /** 登记某风格到分类列表（生成/上传/编辑数字人使用新风格时自动登记） */
+    ensureDhStyle(style: string) {
+      const s = style.trim()
+      if (!s || this.dhStyles.includes(s)) return
+      this.dhStyles.push(s)
+      this.persistDhStyles()
+    },
+
+    /** 新增风格分类；名称为空或已存在时返回 false */
+    addDhStyle(name: string): boolean {
+      const s = name.trim()
+      if (!s || s === '全部' || this.allDhStyles.includes(s)) return false
+      this.dhStyles.push(s)
+      this.persistDhStyles()
+      return true
+    },
+
+    /** 重命名风格分类：同步更新该分类下所有数字人；目标名已存在时合并到该分类 */
+    renameDhStyle(oldName: string, newName: string): boolean {
+      const s = newName.trim()
+      if (!s || s === '全部' || s === oldName) return false
+      const idx = this.dhStyles.indexOf(oldName)
+      // 分类可能仅来自兜底合并（在用但未登记），此时也允许重命名
+      if (idx < 0 && !this.digitalHumans.some((d) => d.style === oldName)) return false
+      if (idx >= 0) {
+        this.dhStyles.includes(s) ? this.dhStyles.splice(idx, 1) : (this.dhStyles[idx] = s)
+      } else if (!this.dhStyles.includes(s)) {
+        this.dhStyles.push(s)
+      }
+      let touched = false
+      this.digitalHumans.forEach((d) => {
+        if (d.style === oldName) {
+          d.style = s
+          touched = true
+        }
+      })
+      this.persistDhStyles()
+      if (touched) this.persistDigitalHumans()
+      return true
+    },
+
+    /** 删除风格分类：该分类下的数字人归入「未分类」 */
+    deleteDhStyle(name: string) {
+      const idx = this.dhStyles.indexOf(name)
+      if (idx >= 0) this.dhStyles.splice(idx, 1)
+      let moved = false
+      this.digitalHumans.forEach((d) => {
+        if (d.style === name) {
+          d.style = FALLBACK_STYLE
+          moved = true
+        }
+      })
+      if (moved && !this.dhStyles.includes(FALLBACK_STYLE)) this.dhStyles.push(FALLBACK_STYLE)
+      this.persistDhStyles()
+      if (moved) this.persistDigitalHumans()
     },
 
     /** 数字人资产库写入 localStorage（头像已是本地路径，体积很小） */
@@ -354,6 +555,7 @@ export const useProjectStore = defineStore('project', {
       if (!dh) return
       Object.assign(dh, patch)
       this.persistDigitalHumans()
+      if (patch.style) this.ensureDhStyle(patch.style)
     },
 
     /** 删除数字人：同步从全局阵容与所有分镜出演角色中移除 */
@@ -394,16 +596,14 @@ export const useProjectStore = defineStore('project', {
       this.magicOpen = false
     },
 
-    /** 提交魔法脚本表单，生成成功后替换当前脚本与角色阵容 */
+    /** 提交魔法脚本表单：生成成功后在当前歌曲目录下新建一个子项目(任务)并载入生成的脚本 */
     async runMagicScript(req?: api.MagicScriptRequest) {
       if (this.magicLoading) return
       this.magicLoading = true
       try {
         const script = await api.generateMagicScript(req)
-        this.stop()
-        // 脚本自带统一的角色阵容，整体替换当前阵容
-        this.castIds = [...script.cast]
-        this.lines = script.lines.map((item) => ({
+        // 脚本自带统一的角色阵容
+        const lines: ScriptLine[] = script.lines.map((item) => ({
           id: nextId(),
           lyrics: item.lyrics,
           scenePrompt: item.scenePrompt,
@@ -413,6 +613,24 @@ export const useProjectStore = defineStore('project', {
           scene: { status: 'none' },
           shot: { status: 'none', assets: [] },
         }))
+        // 先缓存当前子项目编辑现场，避免被新脚本覆盖丢失
+        this._cacheCurrentTask()
+        // 在当前歌曲目录下创建一个新的子项目(任务)
+        let song = this.songProjects.find((s) => s.id === this.activeSongId)
+        if (!song) {
+          song = { id: nextId('song'), name: '未命名歌曲', tasks: [] }
+          this.songProjects.push(song)
+          this.activeSongId = song.id
+        }
+        const task = { id: nextId('task'), title: 'MV 分镜制作', updatedAt: '刚刚' }
+        song.tasks.push(task)
+        // 载入生成结果到新子项目
+        this.stop()
+        this.editingLineId = null
+        this.castIds = [...script.cast]
+        this.lines = lines
+        this.taskScripts[task.id] = { cast: this.castIds, lines: this.lines }
+        this.activeTaskId = task.id
         this.selectedLineId = this.lines[0]?.id ?? null
         this.currentTime = 0
         this.magicOpen = false

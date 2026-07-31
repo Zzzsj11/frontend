@@ -6,12 +6,74 @@ import AppIcon from './AppIcon.vue'
 const store = useProjectStore()
 
 const activeStyle = ref('全部')
-const styles = computed(() => ['全部', ...new Set(store.digitalHumans.map((d) => d.style))])
+const styles = computed(() => ['全部', ...store.allDhStyles])
 const filtered = computed(() =>
   activeStyle.value === '全部'
     ? store.digitalHumans
     : store.digitalHumans.filter((d) => d.style === activeStyle.value),
 )
+
+// 风格分类管理：增删改查（分类独立于数字人存在，重命名/删除会同步更新所属数字人）
+const styleManaging = ref(false)
+const styleAdding = ref(false)
+const styleNewName = ref('')
+const styleEditingName = ref<string | null>(null)
+const styleEditValue = ref('')
+
+// 行内输入框挂载时自动聚焦选中
+const autoFocus = (el: unknown) => {
+  if (el instanceof HTMLInputElement) {
+    el.focus()
+    el.select()
+  }
+}
+
+const toggleStyleManaging = () => {
+  styleManaging.value = !styleManaging.value
+  styleEditingName.value = null
+  styleAdding.value = false
+}
+
+const confirmAddStyle = () => {
+  const name = styleNewName.value.trim()
+  if (name) store.addDhStyle(name)
+  styleAdding.value = false
+  styleNewName.value = ''
+}
+
+const cancelAddStyle = () => {
+  styleNewName.value = ''
+  styleAdding.value = false
+}
+
+const startRenameStyle = (s: string) => {
+  styleEditingName.value = s
+  styleEditValue.value = s
+}
+
+const confirmRenameStyle = () => {
+  const oldName = styleEditingName.value
+  if (!oldName) return
+  styleEditingName.value = null
+  const newName = styleEditValue.value.trim()
+  if (newName && newName !== oldName && store.renameDhStyle(oldName, newName)) {
+    if (activeStyle.value === oldName) activeStyle.value = newName
+  }
+}
+
+const cancelRenameStyle = () => {
+  styleEditingName.value = null
+}
+
+const removeStyle = (s: string) => {
+  const count = store.digitalHumans.filter((d) => d.style === s).length
+  const msg = count
+    ? `确定删除分类「${s}」？该分类下的 ${count} 个数字人将归入「未分类」`
+    : `确定删除分类「${s}」？`
+  if (!window.confirm(msg)) return
+  store.deleteDhStyle(s)
+  if (activeStyle.value === s) activeStyle.value = '全部'
+}
 
 // 生成数字人：调用真实异步生图接口，成功后新卡片加入资产库
 const genOpen = ref(false)
@@ -38,6 +100,78 @@ const submitGen = async () => {
   } catch (e) {
     genError.value = e instanceof Error ? e.message : '生成失败，请稍后重试'
   }
+}
+
+// 上传自定义数字人：自备头像 + 名称/风格（名称、风格为必填，头像/描述可选）
+const uploadOpen = ref(false)
+const upName = ref('')
+const upStyle = ref('')
+const upDesc = ref('')
+const upAvatar = ref('')
+const upFileRef = ref<HTMLInputElement>()
+const canUpload = computed(() => !!upName.value.trim() && !!upStyle.value.trim())
+
+// 生成 / 上传 两个面板互斥展开
+const openGen = () => {
+  genOpen.value = !genOpen.value
+  if (genOpen.value) uploadOpen.value = false
+}
+const openUpload = () => {
+  uploadOpen.value = !uploadOpen.value
+  if (uploadOpen.value) genOpen.value = false
+}
+
+// 选择头像：等比缩放到 3:4 竖版范围内并转 data URL，避免 localStorage 膨胀
+const onUpAvatarChange = (e: Event) => {
+  const target = e.target as HTMLInputElement
+  const file = target.files?.[0]
+  target.value = ''
+  if (!file || !file.type.startsWith('image/')) return
+  const url = URL.createObjectURL(file)
+  const img = new Image()
+  img.onload = () => {
+    const ratio = Math.min(600 / img.width, 800 / img.height, 1)
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(img.width * ratio)
+    canvas.height = Math.round(img.height * ratio)
+    canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height)
+    upAvatar.value = canvas.toDataURL('image/jpeg', 0.85)
+    URL.revokeObjectURL(url)
+  }
+  img.src = url
+}
+
+// 未上传头像时，用「名称首字 + 风格配色」生成 3:4 竖版占位头像
+const initialsAvatar = (name: string, style: string): string => {
+  const ch = name.trim().charAt(0) || '?'
+  const palette = ['#ff5a2c', '#3b82f6', '#10b981', '#8b5cf6', '#ef4444', '#f59e0b']
+  let hash = 0
+  for (const c of name + style) hash = (hash * 31 + c.charCodeAt(0)) >>> 0
+  const bg = palette[hash % palette.length]
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400">` +
+    `<rect width="300" height="400" fill="${bg}"/>` +
+    `<text x="150" y="205" font-size="150" fill="#fff" text-anchor="middle" ` +
+    `dominant-baseline="central" font-family="sans-serif" font-weight="600">${ch}</text></svg>`
+  return 'data:image/svg+xml,' + encodeURIComponent(svg)
+}
+
+const submitUpload = () => {
+  if (!canUpload.value) return
+  const name = upName.value.trim()
+  const style = upStyle.value.trim()
+  store.addCustomDigitalHuman({
+    name,
+    style,
+    description: upDesc.value.trim(),
+    avatar: upAvatar.value || initialsAvatar(name, style),
+  })
+  uploadOpen.value = false
+  upName.value = ''
+  upStyle.value = ''
+  upDesc.value = ''
+  upAvatar.value = ''
+  activeStyle.value = '全部'
 }
 
 // 编辑数字人：点击头像打开，可查看/修改提示词、重新生成形象、删除数字人
@@ -113,21 +247,26 @@ const removeDh = () => {
             <p class="lib-hint">点击卡片加入/移出本 MV 的角色阵容，全片统一使用同一批角色；每个分镜再从阵容中挑选出演角色（可空镜头 / 可多人）</p>
           </div>
           <div class="header-actions">
-            <button class="btn-gen-dh" :disabled="store.dhGenerating" @click="genOpen = !genOpen">
+            <button class="btn-upload-dh" @click="openUpload">
+              <AppIcon name="image" :size="14" /> 上传数字人
+            </button>
+            <button class="btn-gen-dh" :disabled="store.dhGenerating" @click="openGen">
               <AppIcon name="sparkles" :size="14" /> 生成数字人
             </button>
             <button class="close-btn" title="关闭" @click="store.closeLibrary()"><AppIcon name="close" :size="15" /></button>
           </div>
         </header>
 
+        <!-- 风格分类候选项（生成 / 上传 / 编辑 三处共用） -->
+        <datalist id="dh-style-options">
+          <option v-for="s in styles.slice(1)" :key="s" :value="s" />
+        </datalist>
+
         <!-- 生成数字人表单（真实生图接口） -->
         <div v-if="genOpen" class="gen-panel">
           <div class="gen-row">
             <input v-model="genName" class="gen-input gen-name" placeholder="角色名称（必填）" />
             <input v-model="genStyle" class="gen-input gen-style" list="dh-style-options" placeholder="风格，如：韩系青春" />
-            <datalist id="dh-style-options">
-              <option v-for="s in styles.slice(1)" :key="s" :value="s" />
-            </datalist>
           </div>
           <textarea
             v-model="genDesc"
@@ -145,6 +284,43 @@ const removeDh = () => {
           </div>
         </div>
 
+        <!-- 上传自定义数字人（自备头像，名称、风格必填） -->
+        <div v-if="uploadOpen" class="gen-panel upload-panel">
+          <div class="upload-body">
+            <div
+              class="upload-avatar"
+              :class="{ filled: upAvatar }"
+              title="点击上传头像（可选）"
+              @click="upFileRef?.click()"
+            >
+              <img v-if="upAvatar" :src="upAvatar" alt="头像预览" />
+              <template v-else>
+                <AppIcon name="image" :size="24" />
+                <span>上传头像<br />（可选）</span>
+              </template>
+            </div>
+            <input ref="upFileRef" type="file" accept="image/*" hidden @change="onUpAvatarChange" />
+            <div class="upload-fields">
+              <div class="gen-row">
+                <input v-model="upName" class="gen-input gen-name" placeholder="人物名称（必填）" />
+                <input
+                  v-model="upStyle"
+                  class="gen-input gen-style"
+                  list="dh-style-options"
+                  placeholder="风格分类（必填）"
+                />
+              </div>
+              <textarea v-model="upDesc" class="gen-desc" rows="2" placeholder="形象描述（可选）" />
+            </div>
+          </div>
+          <div class="gen-actions">
+            <span class="upload-tip">自备头像的自定义角色，无需 AI 生成，可直接加入阵容</span>
+            <button class="gen-submit" :disabled="!canUpload" @click="submitUpload">
+              <AppIcon name="check" :size="14" /> 添加到资产库
+            </button>
+          </div>
+        </div>
+
         <!-- 当前阵容 -->
         <div class="cast-bar">
           <span class="cast-label">当前阵容（{{ store.castHumans.length }}）：</span>
@@ -158,16 +334,57 @@ const removeDh = () => {
           <span v-else class="cast-empty">暂无角色，所有分镜将以空镜头生成</span>
         </div>
 
-        <!-- 风格筛选 -->
+        <!-- 风格筛选 + 分类管理（增删改查） -->
         <div class="style-tabs">
+          <template v-for="s in styles" :key="s">
+            <span v-if="styleEditingName === s" class="style-tab style-edit">
+              <input
+                :ref="autoFocus"
+                v-model="styleEditValue"
+                class="style-edit-input"
+                @keyup.enter="confirmRenameStyle"
+                @keyup.esc="cancelRenameStyle"
+                @blur="confirmRenameStyle"
+              />
+            </span>
+            <button
+              v-else
+              class="style-tab"
+              :class="{ active: activeStyle === s, managing: styleManaging && s !== '全部' }"
+              @click="activeStyle = s"
+            >
+              {{ s }}
+              <template v-if="styleManaging && s !== '全部'">
+                <span class="style-op" title="重命名分类" @click.stop="startRenameStyle(s)">
+                  <AppIcon name="edit" :size="11" />
+                </span>
+                <span class="style-op danger" title="删除分类" @click.stop="removeStyle(s)">
+                  <AppIcon name="trash" :size="11" />
+                </span>
+              </template>
+            </button>
+          </template>
+          <span v-if="styleAdding" class="style-tab style-edit">
+            <input
+              :ref="autoFocus"
+              v-model="styleNewName"
+              class="style-edit-input"
+              placeholder="新分类名称，回车确认"
+              @keyup.enter="confirmAddStyle"
+              @keyup.esc="cancelAddStyle"
+              @blur="confirmAddStyle"
+            />
+          </span>
+          <button v-else class="style-tab style-add" title="新增分类" @click="styleAdding = true">
+            <AppIcon name="plus" :size="12" /> 分类
+          </button>
           <button
-            v-for="s in styles"
-            :key="s"
-            class="style-tab"
-            :class="{ active: activeStyle === s }"
-            @click="activeStyle = s"
+            class="style-tab style-manage"
+            :class="{ on: styleManaging }"
+            @click="toggleStyleManaging"
           >
-            {{ s }}
+            <AppIcon :name="styleManaging ? 'check' : 'edit'" :size="12" />
+            {{ styleManaging ? '完成' : '管理分类' }}
           </button>
         </div>
 
@@ -329,6 +546,25 @@ const removeDh = () => {
   opacity: 0.6;
   cursor: not-allowed;
 }
+.btn-upload-dh {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-dark);
+  background: #fff;
+  color: var(--text);
+  border-radius: 16px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn-upload-dh:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
 
 /* 生成数字人表单 */
 .gen-panel {
@@ -413,6 +649,63 @@ const removeDh = () => {
   cursor: not-allowed;
 }
 
+/* 上传自定义数字人 */
+.upload-panel {
+  gap: 10px;
+}
+.upload-body {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+.upload-avatar {
+  flex: 0 0 90px;
+  aspect-ratio: 3 / 4;
+  border: 1.5px dashed var(--primary);
+  border-radius: 10px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  text-align: center;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+.upload-avatar:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.upload-avatar.filled {
+  border-style: solid;
+}
+.upload-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.upload-fields {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.upload-fields .gen-desc {
+  flex: 1;
+}
+.upload-tip {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-right: auto;
+}
+
 /* 当前阵容 */
 .cast-bar {
   display: flex;
@@ -482,6 +775,57 @@ const removeDh = () => {
   border-color: var(--primary);
   background: var(--primary);
   color: #fff;
+}
+.style-tab.managing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.style-op {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.7;
+  transition: opacity 0.15s, color 0.15s;
+}
+.style-op:hover {
+  opacity: 1;
+  color: var(--primary);
+}
+.style-op.danger:hover {
+  color: #d43a1a;
+}
+.style-tab.active .style-op:hover {
+  color: #fff;
+}
+.style-add,
+.style-manage {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-style: dashed;
+  color: var(--text-secondary);
+}
+.style-manage.on {
+  border-style: solid;
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+}
+.style-edit {
+  display: inline-flex;
+  padding: 0;
+  border-color: var(--primary);
+  background: #fff;
+}
+.style-edit-input {
+  width: 130px;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  padding: 5px 12px;
 }
 
 /* 数字人卡片 */
