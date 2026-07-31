@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import type { DigitalHuman, ScriptLine, ShotAsset, SynthesisState, TimelineClip } from '../types'
 import * as api from '../mock/api'
-import { initialLines, mockDigitalHumans, nextId } from '../mock/data'
+import { initialCastIds, initialLines, mockDigitalHumans, nextId } from '../mock/data'
 
 /** 无配音时的占位时长（秒） */
 export const DEFAULT_CLIP_DURATION = 5
@@ -16,7 +16,7 @@ export const useProjectStore = defineStore('project', {
     lines: initialLines as ScriptLine[],
     digitalHumans: mockDigitalHumans,
     /** 全局角色阵容：本 MV 选定的数字人（全片统一），分镜只能从阵容中挑选出演角色 */
-    castIds: ['dh-xiner'] as string[],
+    castIds: [...initialCastIds] as string[],
     selectedLineId: initialLines[0]?.id ?? null as string | null,
     /** 当前在弹窗中编辑的分镜行 */
     editingLineId: null as string | null,
@@ -101,6 +101,12 @@ export const useProjectStore = defineStore('project', {
     /** 分镜展示图：优先视频片段封面，其次场景底图 */
     coverOf: () => (line: ScriptLine): string | undefined =>
       line.shot.imageUrl ?? line.scene.imageUrl,
+
+    /** 当前选用资产的真实可播放视频地址（mock:// 假地址除外） */
+    videoOf: () => (line: ScriptLine): string | undefined => {
+      const asset = line.shot.assets.find((a) => a.id === line.shot.currentAssetId)
+      return asset && /^(\/|https?:)/.test(asset.videoUrl) ? asset.videoUrl : undefined
+    },
 
     /** 是否有任何配音或分镜素材（决定合成按钮可用性） */
     hasAssets(state): boolean {

@@ -37,11 +37,6 @@ const onDrop = (index: number) => {
           👥 角色阵容
           <span v-if="store.castHumans.length" class="cast-count">{{ store.castHumans.length }}</span>
         </button>
-        <button class="btn-outline" :disabled="store.batchVoicing" @click="store.generateAllVoices()">
-          <span v-if="store.batchVoicing" class="spinner" />
-          <span v-else>🎙️</span>
-          全部配音
-        </button>
         <button class="btn-outline" :disabled="store.batchShooting" @click="store.generateAllShots()">
           <span v-if="store.batchShooting" class="spinner" />
           <span v-else>🎬</span>

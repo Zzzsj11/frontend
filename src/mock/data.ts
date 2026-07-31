@@ -19,21 +19,92 @@ export const mockDigitalHumans: DigitalHuman[] = [
   { id: 'dh-ahao', name: '阿豪', style: '街头潮流', avatar: makePortrait('#f39c12', '#7d4e00', '阿豪', '街头潮流'), description: '嘻哈潮男，适合街舞、涂鸦街区场景' },
   { id: 'dh-manlu', name: '曼露', style: '复古港风', avatar: makePortrait('#c0687a', '#4e2430', '曼露', '复古港风'), description: '90年代港风女郎，适合怀旧、霓虹夜色场景' },
   { id: 'dh-linxiao', name: '林霄', style: '商务', avatar: makePortrait('#5c7a99', '#26384c', '林霄', '商务'), description: '干练商务精英，适合都市职场、纪实场景' },
+  { id: 'dh-noona', name: '누나', style: '韩系青春', avatar: makePortrait('#c98d8d', '#5e3a3a', '누나', '韩系青春'), description: '24岁温柔文艺年上女性，黑长直中分披肩，米白针织开衫浅色长裙' },
+  { id: 'dh-sonyeon', name: '少年', style: '韩系青春', avatar: makePortrait('#7d8ba1', '#2f3a4c', '少年', '韩系青春'), description: '18岁清瘦敏感少年，深棕短发微乱，白衬衫深色外套' },
 ]
 
-/** 初始脚本（一条 = 一个分镜） */
-export const initialLines: ScriptLine[] = [
+/** 审核 MV「누난 너무 예뻐」前 5 个分镜（真实视频位于 public/review-mv/） */
+interface ReviewShot {
+  lyrics: string
+  scenePrompt: string
+  shotPrompt: string
+  digitalHumanIds: string[]
+  video: string
+  duration: number
+}
+
+const reviewShots: ReviewShot[] = [
   {
-    id: nextId(),
-    lyrics: '夜色滑过城市的天际线',
-    scenePrompt: '航拍城市夜景，霓虹灯光划过天际线，赛博朋克色调',
-    shotPrompt: '电影感镜头缓慢推进，角色站在天台边缘眺望城市，发丝随风飘动',
-    digitalHumanIds: ['dh-xiner'],
-    voice: { status: 'none' },
-    scene: { status: 'none' },
-    shot: { status: 'none', assets: [] },
+    lyrics: '(前奏)',
+    scenePrompt: '清晨空无一人的房间，白色窗帘在微风中轻轻飘动，阳光透过窗帘洒在木质地板上形成温暖的光斑。桌上放着一杯凉了的咖啡，旁边是一本翻开的笔记本。空气中浮动着细小的尘埃，在阳光下闪烁。',
+    shotPrompt: '韩式青春电影风格，静谧抒情氛围。清晨空房间，白色亚麻窗帘在微风中轻摆，阳光从窗户洒入在木地板上形成温暖光斑。桌上放着一杯凉咖啡和一本翻开的手写笔记本，纸上隐约可见韩文字迹。大远景，平视角度，缓慢横摇运镜，从左至右缓缓扫过房间，带出空间感与故事感。暖金色调，柔和晨光，空气中微尘在光柱中浮动，静谧而温柔。高清电影质感，画面稳定无变形，保持无字幕，不要生成水印，不要生成Logo。',
+    digitalHumanIds: [],
+    video: '/review-mv/shot_01.mp4',
+    duration: 7,
+  },
+  {
+    lyrics: '(前奏)',
+    scenePrompt: '少年独自坐在窗边木椅上，晨光在他身上勾勒出柔和的轮廓。他侧脸对着镜头，目光凝视远方，嘴角带着一丝苦涩的微笑。窗外是城市清晨的轮廓。',
+    shotPrompt: '韩式青春电影风格，静谧抒情氛围。一位18岁韩系少年坐在窗边木椅上，深棕色短发微乱，穿白色宽松衬衫，清瘦身形，晨光勾勒出他的侧脸轮廓，微微侧头望向窗外远方，嘴角带着苦涩微笑。近景，平视角度，缓慢推进运镜，镜头缓缓靠近捕捉面部微表情。金色暖色调，逆光勾勒发丝轮廓，柔和晨光从窗户洒入。高清电影质感，人物面部稳定不变形、五官清晰、动作连贯自然，保持无字幕，不要生成水印，不要生成Logo。',
+    digitalHumanIds: ['dh-sonyeon'],
+    video: '/review-mv/shot_02.mp4',
+    duration: 7,
+  },
+  {
+    lyrics: '누난 너무 예뻐서 남자들이 가만 안 둬',
+    scenePrompt: '秋日校园林荫道，金色落叶铺满小路，阳光透过树叶缝隙洒下斑驳光影。一位长发女子走在路上，裙摆随风轻扬，所有路过的男生都忍不住回头看她。少年站在人群后远远望着她。',
+    shotPrompt: '韩式青春MV风格，温暖回忆氛围。秋日校园林荫道，满地金黄落叶，阳光透过树叶缝隙洒下斑驳光影。一位24岁韩系长发女子，黑色长发中分披肩，穿米白色长款针织开衫和浅色长裙，在金色阳光下缓步行走，裙摆随风轻轻摆动。周圍男生纷纷回头注目。少年站在远处树下默默注视。全景，平视角度，慢动作跟拍运镜。暖金色秋日色调，逆光勾勒人物轮廓，斑驳树影洒落一地。高清电影质感，人物面部稳定不变形、五官清晰、动作连贯自然，保持无字幕，不要生成水印，不要生成Logo，视频全程禁止出现外形、着装、配饰完全一致的人物，禁止生成同款分身、双胞胎效果。',
+    digitalHumanIds: ['dh-noona', 'dh-sonyeon'],
+    video: '/review-mv/shot_03.mp4',
+    duration: 9,
+  },
+  {
+    lyrics: '흔들리는 그녀의 맘 사실 알고 있어',
+    scenePrompt: '学校天台，傍晚时分天空泛着蓝紫色。少年独自靠在围栏边，低头轻声自语。城市天际线在远方展开。风吹动他的头发和衣角。',
+    shotPrompt: '韩式青春电影风格，忧伤氛围。学校天台傍晚，蓝紫色天空泛着暮色余晖，城市天际线在远方展开。18岁少年靠在铁网围栏边，双手撑在栏杆上微微低头，风吹动他的深棕色碎发和白色衬衫衣角，他抬眼望向远方，轻轻叹了口气。中景，微微仰视角度，固定镜头，沉稳构图。蓝紫暮色调，天空自然光，微风吹拂的静谧感。高清电影质感，人物面部稳定不变形、五官清晰、动作连贯自然，保持无字幕，不要生成水印，不要生成Logo。',
+    digitalHumanIds: ['dh-sonyeon'],
+    video: '/review-mv/shot_04.mp4',
+    duration: 9,
+  },
+  {
+    lyrics: '아마 그녀는 어린 내가 부담스러운가봐 날 바라보는 눈빛이 말해주잖아',
+    scenePrompt: '温馨的小咖啡馆，阳光透过玻璃窗，窗外街景模糊。两人面对面坐着，女子低头搅动咖啡杯，眼神闪烁躲闪，笑得勉强。少年直视着她，眼中有不安和心酸。',
+    shotPrompt: '韩式青春电影风格，微妙的紧张氛围。温馨小咖啡馆，午后阳光透过玻璃窗洒在木桌面上，空气中飘浮着细微的咖啡香气。24岁长发女子和18岁少年面对面坐着，女子低头搅动咖啡，目光闪躲不愿直视，嘴角挂着勉强的礼貌微笑。少年直直望着她，眼神中有不安和心酸，放在桌上的手指微微攥紧。近景，平视角度，缓慢推近运镜，镜头缓缓靠近捕捉两人微妙的表情互动。暖黄色室内调，窗外自然侧光，咖啡蒸汽在光线下袅袅升腾。高清电影质感，人物面部稳定不变形、五官清晰、动作连贯自然，保持无字幕，不要生成水印，不要生成Logo，视频全程禁止出现外形、着装、配饰完全一致的人物，禁止生成同款分身、双胞胎效果。',
+    digitalHumanIds: ['dh-noona', 'dh-sonyeon'],
+    video: '/review-mv/shot_05.mp4',
+    duration: 12,
   },
 ]
+
+/** 初始脚本（一条 = 一个分镜）：直接载入审核 MV 的前 5 个真实分镜 */
+export const initialLines: ScriptLine[] = reviewShots.map((s): ScriptLine => {
+  const assetId = nextId('asset')
+  return {
+    id: nextId(),
+    lyrics: s.lyrics,
+    scenePrompt: s.scenePrompt,
+    shotPrompt: s.shotPrompt,
+    digitalHumanIds: [...s.digitalHumanIds],
+    voice: { status: 'none' },
+    scene: { status: 'none' },
+    shot: {
+      status: 'done',
+      currentAssetId: assetId,
+      assets: [
+        {
+          id: assetId,
+          coverUrl: '',
+          videoUrl: s.video,
+          duration: s.duration,
+          digitalHumanIds: [...s.digitalHumanIds],
+        },
+      ],
+    },
+  }
+})
+
+/** 审核 MV 的全局角色阵容（女主 누나 + 男主 少年） */
+export const initialCastIds = ['dh-noona', 'dh-sonyeon']
 
 /** AI 魔法脚本预置假数据：每套脚本带一个统一的角色阵容（cast），
  *  每个分镜只从阵容中挑选出演角色（可为空 = 空镜头，也可多人同框） */

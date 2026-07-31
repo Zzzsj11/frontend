@@ -1,25 +1,44 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { formatTime, useProjectStore } from '../stores/project'
 
 const store = useProjectStore()
 
-/** 像素/秒 缩放比例 */
-const PX_PER_SEC = 60
+/** 最大 像素/秒 缩放比例；实际比例自适应容器宽度，保证全部片段无需横向滚动 */
+const PX_MAX = 60
 const trackAreaRef = ref<HTMLDivElement>()
+const areaWidth = ref(0)
 
-const playheadX = computed(() => store.currentTime * PX_PER_SEC)
-const totalWidth = computed(() => Math.max(store.totalDuration * PX_PER_SEC, 200))
+let resizeObserver: ResizeObserver | undefined
+onMounted(() => {
+  const el = trackAreaRef.value
+  if (!el) return
+  areaWidth.value = el.clientWidth
+  resizeObserver = new ResizeObserver(() => {
+    areaWidth.value = el.clientWidth
+  })
+  resizeObserver.observe(el)
+})
+onBeforeUnmount(() => resizeObserver?.disconnect())
+
+/** 自适应 像素/秒：总时长超出可视宽度时整体缩小铺满 */
+const pxPerSec = computed(() => {
+  if (store.totalDuration <= 0 || areaWidth.value <= 0) return PX_MAX
+  return Math.min(PX_MAX, (areaWidth.value - 2) / store.totalDuration)
+})
+
+const playheadX = computed(() => store.currentTime * pxPerSec.value)
+const totalWidth = computed(() => Math.max(store.totalDuration * pxPerSec.value, 200))
 
 /** 时间刻度（每 5 秒一格） */
 const ticks = computed(() => {
   const list: Array<{ time: number; x: number }> = []
   for (let t = 5; t <= store.totalDuration + 0.001; t += 5) {
-    list.push({ time: t, x: t * PX_PER_SEC })
+    list.push({ time: t, x: t * pxPerSec.value })
   }
   // 总时长刻度（非 5 的倍数时）
   if (store.totalDuration > 0 && store.totalDuration % 5 !== 0) {
-    list.push({ time: store.totalDuration, x: store.totalDuration * PX_PER_SEC })
+    list.push({ time: store.totalDuration, x: store.totalDuration * pxPerSec.value })
   }
   return list
 })
@@ -29,7 +48,7 @@ const seekByEvent = (e: MouseEvent) => {
   if (!el) return
   const rect = el.getBoundingClientRect()
   const x = e.clientX - rect.left + el.scrollLeft
-  store.seek(x / PX_PER_SEC)
+  store.seek(x / pxPerSec.value)
 }
 
 const onAreaDown = (e: MouseEvent) => {
@@ -68,10 +87,6 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
           <span class="track-icon">🖼️</span>
           <span>分镜轨道</span>
         </div>
-        <div class="track-label">
-          <span class="track-icon">🎵</span>
-          <span>配音轨道</span>
-        </div>
       </div>
 
       <!-- 右侧轨道区域 -->
@@ -91,36 +106,24 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
               :key="'shot-' + clip.lineId"
               class="clip shot-clip"
               :class="{ selected: clip.lineId === store.selectedLineId }"
-              :style="{ left: clip.start * PX_PER_SEC + 'px', width: clip.duration * PX_PER_SEC - 4 + 'px' }"
+              :style="{ left: clip.start * pxPerSec + 'px', width: clip.duration * pxPerSec - 4 + 'px' }"
               @mousedown.stop
               @click="onClipClick(clip.lineId, $event)"
             >
+              <video
+                v-if="lineOf(clip.lineId) && store.videoOf(lineOf(clip.lineId)!)"
+                :src="store.videoOf(lineOf(clip.lineId)!)"
+                class="clip-thumb"
+                preload="metadata"
+                muted
+              />
               <img
-                v-if="lineOf(clip.lineId) && store.coverOf(lineOf(clip.lineId)!)"
+                v-else-if="lineOf(clip.lineId) && store.coverOf(lineOf(clip.lineId)!)"
                 :src="store.coverOf(lineOf(clip.lineId)!)"
                 class="clip-thumb"
                 alt=""
               />
               <span v-else class="clip-icon">🖼️</span>
-              <span class="clip-index">{{ String(clip.index + 1).padStart(2, '0') }}</span>
-            </div>
-          </div>
-
-          <!-- 配音轨道 -->
-          <div class="track">
-            <div
-              v-for="clip in store.timelineClips"
-              :key="'voice-' + clip.lineId"
-              class="clip voice-clip"
-              :class="{
-                selected: clip.lineId === store.selectedLineId,
-                done: lineOf(clip.lineId)?.voice.status === 'done',
-              }"
-              :style="{ left: clip.start * PX_PER_SEC + 'px', width: clip.duration * PX_PER_SEC - 4 + 'px' }"
-              @mousedown.stop
-              @click="onClipClick(clip.lineId, $event)"
-            >
-              <span class="clip-icon">🎵</span>
               <span class="clip-index">{{ String(clip.index + 1).padStart(2, '0') }}</span>
             </div>
           </div>
@@ -246,9 +249,6 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
 .shot-clip .clip-thumb ~ .clip-index {
   color: #fff;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
-}
-.voice-clip.done {
-  background: rgba(255, 90, 44, 0.06);
 }
 .playhead {
   position: absolute;

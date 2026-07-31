@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import type { ScriptLine } from '../types'
 import { useProjectStore } from '../stores/project'
 
@@ -12,15 +12,9 @@ const store = useProjectStore()
 const selected = computed(() => store.selectedLineId === props.line.id)
 /** 出演角色（可空/可多个） */
 const humans = computed(() => store.lineHumans(props.line))
-/** 缩略图：视频封面 > 场景底图 */
+/** 缩略图：真实视频 > 视频封面 > 场景底图 */
+const video = computed(() => store.videoOf(props.line))
 const cover = computed(() => store.coverOf(props.line))
-
-const audioRef = ref<HTMLAudioElement>()
-
-const playVoice = () => {
-  if (!props.line.voice.url) return
-  audioRef.value?.play()
-}
 
 // 点开分镜行 → 选中并打开编辑弹窗
 const openDetail = () => store.openEditor(props.line.id)
@@ -33,7 +27,8 @@ const openDetail = () => store.openEditor(props.line.id)
 
     <!-- 分镜缩略图 -->
     <div class="shot-thumb">
-      <img v-if="cover" :src="cover" alt="分镜缩略图" />
+      <video v-if="video" :src="video" preload="metadata" muted />
+      <img v-else-if="cover" :src="cover" alt="分镜缩略图" />
       <span v-else class="thumb-placeholder">🖼️</span>
       <div v-if="line.shot.status === 'generating' || line.scene.status === 'generating'" class="thumb-loading">
         <span class="spinner light" />
@@ -52,17 +47,6 @@ const openDetail = () => store.openEditor(props.line.id)
     </div>
 
     <div class="line-actions" @click.stop>
-      <!-- 生成配音 -->
-      <button
-        class="icon-btn"
-        :class="{ active: line.voice.status === 'done' }"
-        :disabled="line.voice.status === 'generating'"
-        :title="line.voice.status === 'done' ? '重新生成配音' : '生成配音'"
-        @click="store.generateVoiceFor(line.id)"
-      >
-        <span v-if="line.voice.status === 'generating'" class="spinner" />
-        <span v-else>🎙️</span>
-      </button>
       <!-- 生成分镜视频片段 -->
       <button
         class="icon-btn"
@@ -74,15 +58,9 @@ const openDetail = () => store.openEditor(props.line.id)
         <span v-if="line.shot.status === 'generating'" class="spinner" />
         <span v-else>🎬</span>
       </button>
-      <!-- 试听配音 -->
-      <button class="icon-btn" :disabled="line.voice.status !== 'done'" title="试听配音" @click="playVoice">
-        🔊
-      </button>
       <!-- 删除 -->
       <button class="icon-btn danger" title="删除" @click="store.removeLine(line.id)">🗑️</button>
     </div>
-
-    <audio v-if="line.voice.url" ref="audioRef" :src="line.voice.url" preload="none" />
   </div>
 </template>
 
@@ -126,7 +104,8 @@ const openDetail = () => store.openEditor(props.line.id)
   justify-content: center;
   flex-shrink: 0;
 }
-.shot-thumb img {
+.shot-thumb img,
+.shot-thumb video {
   width: 100%;
   height: 100%;
   object-fit: cover;

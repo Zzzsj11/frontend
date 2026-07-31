@@ -8,11 +8,20 @@ const store = useProjectStore()
 const lyricsDraft = ref('')
 const scenePromptDraft = ref('')
 const shotPromptDraft = ref('')
+// 提示词默认只展示折叠预览，点击后展开为可编辑状态
+const sceneEditing = ref(false)
+const shotEditing = ref(false)
 
 /** 当前选用的视频片段资产 */
 const currentAsset = computed(() => {
   const line = store.editingLine
   return line?.shot.assets.find((a) => a.id === line.shot.currentAssetId)
+})
+
+/** 当前资产的真实可播放视频（有则在预览框内直接播放） */
+const currentVideo = computed(() => {
+  const line = store.editingLine
+  return line ? store.videoOf(line) : undefined
 })
 
 /** 预览图：优先视频片段封面，其次场景底图 */
@@ -28,6 +37,8 @@ watch(
     lyricsDraft.value = line?.lyrics ?? ''
     scenePromptDraft.value = line?.scenePrompt ?? ''
     shotPromptDraft.value = line?.shotPrompt ?? ''
+    sceneEditing.value = false
+    shotEditing.value = false
   },
   { immediate: true },
 )
@@ -74,16 +85,17 @@ const cancel = () => store.closeEditor()
           <!-- 上方：生成的分镜内容与资产 -->
           <p class="field-label">分镜预览</p>
           <div class="shot-frame">
-            <img v-if="previewImage" :src="previewImage" alt="分镜预览" class="shot-img" />
+            <video v-if="currentVideo" :src="currentVideo" class="shot-img" controls playsinline />
+            <img v-else-if="previewImage" :src="previewImage" alt="分镜预览" class="shot-img" />
             <p v-else class="shot-placeholder">尚未生成内容：可先由场景提示词生成场景，再结合分镜提示词与出演角色生成视频片段</p>
-            <span v-if="!store.editingLine.shot.imageUrl && store.editingLine.scene.imageUrl" class="scene-badge">场景底图</span>
-            <span v-if="currentAsset && store.editingLine.shot.imageUrl" class="duration-badge">▶ {{ formatTime(currentAsset.duration) }} · {{ currentAsset.duration }}s</span>
+            <span v-if="!currentVideo && !store.editingLine.shot.imageUrl && store.editingLine.scene.imageUrl" class="scene-badge">场景底图</span>
+            <span v-if="currentAsset && !currentVideo && store.editingLine.shot.imageUrl" class="duration-badge">▶ {{ formatTime(currentAsset.duration) }} · {{ currentAsset.duration }}s</span>
             <div v-if="store.editingLine.scene.status === 'generating' || store.editingLine.shot.status === 'generating'" class="shot-loading">
               <span class="spinner light" />
               <span>{{ store.editingLine.shot.status === 'generating' ? '视频片段生成中（场景 × 分镜 × 角色）…' : '场景生成中…' }}</span>
             </div>
-            <!-- 图片框最下面：当前分镜歌词 -->
-            <p v-if="lyricsDraft" class="lyric-caption">{{ lyricsDraft }}</p>
+            <!-- 图片框最下面：当前分镜歌词（真实视频播放时不遮挡控制条） -->
+            <p v-if="lyricsDraft && !currentVideo" class="lyric-caption">{{ lyricsDraft }}</p>
           </div>
 
           <div v-if="store.editingLine.shot.assets.length" class="asset-list">
@@ -95,7 +107,8 @@ const cancel = () => store.closeEditor()
               :title="`片段 v${i + 1} · ${asset.duration}s`"
               @click="store.selectShotAsset(store.editingLine.id, asset.id)"
             >
-              <img :src="asset.coverUrl" alt="" />
+              <video v-if="!asset.coverUrl" :src="asset.videoUrl" preload="metadata" muted />
+              <img v-else :src="asset.coverUrl" alt="" />
               <span class="asset-duration">{{ asset.duration }}s</span>
             </div>
           </div>
@@ -126,9 +139,12 @@ const cancel = () => store.closeEditor()
           <p class="field-label">歌词（当前分镜）</p>
           <input v-model="lyricsDraft" class="lyrics-input" placeholder="输入这句分镜对应的歌词…" />
 
-          <!-- 场景提示词：可编辑重新生成场景 -->
+          <!-- 场景提示词：默认折叠预览，点击展开编辑后可重新生成场景 -->
           <div class="prompt-head">
             <p class="field-label">场景提示词</p>
+            <button class="btn-outline regen-btn" @click="sceneEditing = !sceneEditing">
+              {{ sceneEditing ? '收起' : '✏️ 编辑' }}
+            </button>
             <button
               class="btn-outline regen-btn"
               :disabled="store.editingLine.scene.status === 'generating' || !scenePromptDraft.trim()"
@@ -153,16 +169,23 @@ const cancel = () => store.closeEditor()
               </div>
             </div>
             <textarea
+              v-if="sceneEditing"
               v-model="scenePromptDraft"
               class="prompt-input scene-input"
               rows="3"
               placeholder="描述这个分镜的背景场景：环境、光线、色调、氛围…"
             />
+            <div v-else class="prompt-preview scene-input" title="点击展开编辑" @click="sceneEditing = true">
+              {{ scenePromptDraft || '暂无场景提示词，点击编写…' }}
+            </div>
           </div>
 
-          <!-- 分镜提示词：可编辑重新生成分镜视频片段 -->
+          <!-- 分镜提示词：默认折叠预览，点击展开编辑后可重新生成分镜视频片段 -->
           <div class="prompt-head">
             <p class="field-label">分镜提示词</p>
+            <button class="btn-outline regen-btn" @click="shotEditing = !shotEditing">
+              {{ shotEditing ? '收起' : '✏️ 编辑' }}
+            </button>
             <button
               class="btn-outline regen-btn"
               :disabled="store.editingLine.shot.status === 'generating' || !shotPromptDraft.trim()"
@@ -174,11 +197,15 @@ const cancel = () => store.closeEditor()
             </button>
           </div>
           <textarea
+            v-if="shotEditing"
             v-model="shotPromptDraft"
             class="prompt-input"
             rows="3"
             placeholder="描述镜头运动与角色表演，将与场景、出演角色一起生成视频片段…"
           />
+          <div v-else class="prompt-preview" title="点击展开编辑" @click="shotEditing = true">
+            {{ shotPromptDraft || '暂无分镜提示词，点击编写…' }}
+          </div>
         </div>
 
         <footer class="modal-footer">
@@ -382,7 +409,8 @@ const cancel = () => store.closeEditor()
   cursor: pointer;
   transition: border-color 0.15s;
 }
-.asset-thumb img {
+.asset-thumb img,
+.asset-thumb video {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -471,13 +499,35 @@ const cancel = () => store.closeEditor()
 .prompt-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
+  justify-content: flex-end;
 }
 .prompt-head .field-label {
   margin-right: auto;
 }
 .regen-btn {
   padding: 5px 12px;
+}
+
+/* 提示词折叠预览（默认只展示 3 行，点击展开编辑） */
+.prompt-preview {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fafafa;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.prompt-preview:hover {
+  border-color: var(--primary);
 }
 
 /* 底部 */

@@ -6,17 +6,56 @@ const store = useProjectStore()
 
 const previewRef = ref<HTMLDivElement>()
 const audioRef = ref<HTMLAudioElement>()
+const videoRef = ref<HTMLVideoElement>()
 const progressRef = ref<HTMLDivElement>()
 
 const progressPercent = computed(() =>
   store.totalDuration > 0 ? (store.currentTime / store.totalDuration) * 100 : 0,
 )
 
+/** 当前分镜的真实视频（有则直接播视频） */
+const currentVideoUrl = computed(() => {
+  const line = store.currentLine
+  return line ? store.videoOf(line) : undefined
+})
+
 /** 当前应展示的分镜图（视频封面 > 场景底图） */
 const currentImage = computed(() => {
   const line = store.currentLine
   return line ? store.coverOf(line) : undefined
 })
+
+/** 同步视频元素：播放状态/切片时对齐片段内偏移并播放或暂停 */
+const syncVideo = () => {
+  const video = videoRef.value
+  if (!video) return
+  const clip = store.currentClip
+  if (clip) {
+    const offset = Math.max(0, store.currentTime - clip.start)
+    if (Math.abs(video.currentTime - offset) > 0.5) video.currentTime = offset
+  }
+  video.muted = store.muted
+  video.volume = store.volume
+  if (store.isPlaying) {
+    video.play().catch(() => {})
+  } else {
+    video.pause()
+  }
+}
+
+watch(
+  () => [store.isPlaying, currentVideoUrl.value] as const,
+  () => syncVideo(),
+  { flush: 'post' },
+)
+
+// 暂停状态下拖动进度/时间轴时，同步视频画面帧
+watch(
+  () => store.currentTime,
+  () => {
+    if (!store.isPlaying) syncVideo()
+  },
+)
 
 /** 当前应播放的配音 —— 行切换/播放状态变化时同步 audio 元素 */
 const currentVoiceUrl = computed(() => {
@@ -46,6 +85,10 @@ watch(
   () => [store.volume, store.muted] as const,
   ([v, m]) => {
     if (audioRef.value) audioRef.value.volume = m ? 0 : v
+    if (videoRef.value) {
+      videoRef.value.muted = m
+      videoRef.value.volume = v
+    }
   },
 )
 
@@ -87,8 +130,16 @@ const toggleFullscreen = () => {
     </header>
 
     <div ref="previewRef" class="preview">
-      <img v-if="currentImage" :src="currentImage" alt="分镜预览" class="preview-img" />
-      <p v-else class="preview-placeholder">生成配音和图片后在此查看预览</p>
+      <video
+        v-if="currentVideoUrl"
+        ref="videoRef"
+        :src="currentVideoUrl"
+        class="preview-img"
+        playsinline
+        @loadeddata="syncVideo"
+      />
+      <img v-else-if="currentImage" :src="currentImage" alt="分镜预览" class="preview-img" />
+      <p v-else class="preview-placeholder">生成分镜后在此查看预览</p>
       <!-- MV 歌词字幕 -->
       <p v-if="store.currentLine?.lyrics" class="preview-lyrics">{{ store.currentLine.lyrics }}</p>
       <audio ref="audioRef" />
