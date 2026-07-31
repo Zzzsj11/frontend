@@ -95,6 +95,8 @@ export interface ScriptLine {
   shot: ShotInfo
   /** 分镜视频生成参数（未设置时使用默认值） */
   shotOptions?: ShotGenOptions
+  /** 是否手动添加的分镜（仅手动添加的分镜允许删除，脚本生成的分镜不可删） */
+  manual?: boolean
 }
 
 /** 时间轴片段 */

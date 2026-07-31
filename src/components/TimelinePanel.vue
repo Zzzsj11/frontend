@@ -31,6 +31,16 @@ const pxPerSec = computed(() => {
 const playheadX = computed(() => store.currentTime * pxPerSec.value)
 const totalWidth = computed(() => Math.max(store.totalDuration * pxPerSec.value, 200))
 
+/** 播放头时间标签半宽（px），贴边时夹取位置，避免被轨道区域左右边缘裁切遮挡 */
+const LABEL_HALF = 26
+const playheadLabelStyle = computed(() => {
+  const x = playheadX.value
+  if (x < LABEL_HALF) return { left: `${-x}px`, transform: 'none' }
+  if (x > totalWidth.value - LABEL_HALF)
+    return { left: `${totalWidth.value - x}px`, transform: 'translateX(-100%)' }
+  return {}
+})
+
 /** 时间刻度（每 5 秒一格） */
 const ticks = computed(() => {
   const list: Array<{ time: number; x: number }> = []
@@ -137,7 +147,7 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
 
           <!-- 播放指针 -->
           <div class="playhead" :style="{ left: playheadX + 'px' }">
-            <span class="playhead-label">{{ formatTime(store.currentTime) }}</span>
+            <span class="playhead-label" :style="playheadLabelStyle">{{ formatTime(store.currentTime) }}</span>
             <div class="playhead-line" />
           </div>
         </div>
@@ -267,14 +277,14 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
   position: absolute;
   top: 0;
   bottom: 0;
+  width: 0;
   z-index: 5;
   pointer-events: none;
-  transform: translateX(-50%);
 }
 .playhead-label {
   position: absolute;
   top: 0;
-  left: 50%;
+  left: 0;
   transform: translateX(-50%);
   background: var(--primary);
   color: #fff;
@@ -288,9 +298,8 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
   position: absolute;
   top: 22px;
   bottom: 0;
-  left: 50%;
+  left: -1px;
   width: 2px;
-  transform: translateX(-50%);
   background: var(--primary);
 }
 </style>

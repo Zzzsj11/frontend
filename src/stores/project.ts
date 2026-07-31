@@ -220,6 +220,7 @@ export const useProjectStore = defineStore('project', {
         voice: { status: 'none' },
         scene: { status: 'none' },
         shot: { status: 'none', assets: [] },
+        manual: true,
       }
       this.lines.push(line)
       this.selectedLineId = line.id
@@ -228,6 +229,8 @@ export const useProjectStore = defineStore('project', {
     removeLine(lineId: string) {
       const idx = this.lines.findIndex((l) => l.id === lineId)
       if (idx < 0) return
+      // 脚本生成的分镜不允许删除，仅手动添加的分镜可删
+      if (!this.lines[idx].manual) return
       this.lines.splice(idx, 1)
       if (this.selectedLineId === lineId) {
         this.selectedLineId = this.lines[Math.min(idx, this.lines.length - 1)]?.id ?? null

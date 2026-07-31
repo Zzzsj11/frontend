@@ -62,8 +62,8 @@ const openDetail = () => store.openEditor(props.line.id)
         <span v-if="line.shot.status === 'generating'" class="spinner" />
         <AppIcon v-else name="movie" :size="15" />
       </button>
-      <!-- 删除 -->
-      <button class="icon-btn danger" title="删除" @click="store.removeLine(line.id)">
+      <!-- 删除（仅手动添加的分镜可删，脚本生成的分镜不显示） -->
+      <button v-if="line.manual" class="icon-btn danger" title="删除" @click="store.removeLine(line.id)">
         <AppIcon name="trash" :size="15" />
       </button>
     </div>
