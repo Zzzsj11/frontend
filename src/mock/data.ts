@@ -1,31 +1,35 @@
-import type { DigitalHuman, ScriptLine } from '../types'
+import type { DigitalHuman, ScriptLine, SongProject } from '../types'
+import { buildPortraitPrompt } from '../api/imageGen'
 
 let idSeed = 0
 export const nextId = (prefix = 'line') => `${prefix}-${Date.now()}-${idSeed++}`
 
-/** 数字人头像占位（3:4 竖版 SVG，按风格配色） */
-const makePortrait = (color: string, accent: string, label: string, style: string) => {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="320"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}"/><stop offset="1" stop-color="${accent}"/></linearGradient></defs><rect width="240" height="320" fill="url(#g)"/><circle cx="120" cy="118" r="52" fill="rgba(255,255,255,0.85)"/><circle cx="120" cy="102" r="22" fill="${color}"/><path d="M78 168 a42 42 0 0 1 84 0 v6 h-84 z" fill="${color}"/><text x="120" y="248" font-size="30" text-anchor="middle" fill="#fff" font-family="sans-serif" font-weight="bold">${label}</text><text x="120" y="286" font-size="16" text-anchor="middle" fill="rgba(255,255,255,0.85)" font-family="sans-serif">${style}</text></svg>`
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
-}
+/** 数字人基础信息（头像由英和生图 API 预生成，本地化存储在 public/digital-humans/） */
+const dhSeeds: Array<Omit<DigitalHuman, 'avatar' | 'avatarPrompt'>> = [
+  { id: 'dh-luoli', name: '洛璃', style: '国风', description: '汉服古典美人，适合国风、古典意境场景' },
+  { id: 'dh-xiner', name: '芯儿', style: '赛博朋克', description: '未来感机能少女，适合夜景霓虹、科幻场景' },
+  { id: 'dh-hoshino', name: '星野', style: '二次元', description: '动漫风元气少年，适合校园、热血场景' },
+  { id: 'dh-suwan', name: '苏晚', style: '写实', description: '真实系文艺女生，适合都市生活、情感叙事场景' },
+  { id: 'dh-mia', name: '米娅', style: '虚拟偶像', description: '舞台系虚拟偶像，适合演出、打歌舞台场景' },
+  { id: 'dh-ahao', name: '阿豪', style: '街头潮流', description: '嘻哈潮男，适合街舞、涂鸦街区场景' },
+  { id: 'dh-manlu', name: '曼露', style: '复古港风', description: '90年代港风女郎，适合怀旧、霓虹夜色场景' },
+  { id: 'dh-linxiao', name: '林霄', style: '商务', description: '干练商务精英，适合都市职场、纪实场景' },
+  { id: 'dh-noona', name: '누나', style: '韩系青春', description: '24岁温柔文艺年上女性，黑长直中分披肩，米白针织开衫浅色长裙' },
+  { id: 'dh-sonyeon', name: '少年', style: '韩系青春', description: '18岁清瘦敏感少年，深棕短发微乱，白衬衫深色外套' },
+]
 
 /** 数字人资产库 */
-export const mockDigitalHumans: DigitalHuman[] = [
-  { id: 'dh-luoli', name: '洛璃', style: '国风', avatar: makePortrait('#b03a48', '#5c1f2e', '洛璃', '国风'), description: '汉服古典美人，适合国风、古典意境场景' },
-  { id: 'dh-xiner', name: '芯儿', style: '赛博朋克', avatar: makePortrait('#7b2ff7', '#1a1040', '芯儿', '赛博朋克'), description: '未来感机能少女，适合夜景霓虹、科幻场景' },
-  { id: 'dh-hoshino', name: '星野', style: '二次元', avatar: makePortrait('#4aa3f0', '#1e3a6e', '星野', '二次元'), description: '动漫风元气少年，适合校园、热血场景' },
-  { id: 'dh-suwan', name: '苏晚', style: '写实', avatar: makePortrait('#8a9a80', '#3d4a38', '苏晚', '写实'), description: '真实系文艺女生，适合都市生活、情感叙事场景' },
-  { id: 'dh-mia', name: '米娅', style: '虚拟偶像', avatar: makePortrait('#f06292', '#8e2456', '米娅', '虚拟偶像'), description: '舞台系虚拟偶像，适合演出、打歌舞台场景' },
-  { id: 'dh-ahao', name: '阿豪', style: '街头潮流', avatar: makePortrait('#f39c12', '#7d4e00', '阿豪', '街头潮流'), description: '嘻哈潮男，适合街舞、涂鸦街区场景' },
-  { id: 'dh-manlu', name: '曼露', style: '复古港风', avatar: makePortrait('#c0687a', '#4e2430', '曼露', '复古港风'), description: '90年代港风女郎，适合怀旧、霓虹夜色场景' },
-  { id: 'dh-linxiao', name: '林霄', style: '商务', avatar: makePortrait('#5c7a99', '#26384c', '林霄', '商务'), description: '干练商务精英，适合都市职场、纪实场景' },
-  { id: 'dh-noona', name: '누나', style: '韩系青春', avatar: makePortrait('#c98d8d', '#5e3a3a', '누나', '韩系青春'), description: '24岁温柔文艺年上女性，黑长直中分披肩，米白针织开衫浅色长裙' },
-  { id: 'dh-sonyeon', name: '少年', style: '韩系青春', avatar: makePortrait('#7d8ba1', '#2f3a4c', '少年', '韩系青春'), description: '18岁清瘦敏感少年，深棕短发微乱，白衬衫深色外套' },
-]
+export const mockDigitalHumans: DigitalHuman[] = dhSeeds.map((s) => ({
+  ...s,
+  avatar: `/digital-humans/${s.id}.png`,
+  avatarPrompt: buildPortraitPrompt(s.description, s.style),
+}))
 
 /** 审核 MV「누난 너무 예뻐」前 5 个分镜（真实视频位于 public/review-mv/） */
 interface ReviewShot {
   lyrics: string
+  /** 歌词中文翻译（歌词非中文时展示） */
+  lyricsZh?: string
   scenePrompt: string
   shotPrompt: string
   digitalHumanIds: string[]
@@ -52,6 +56,7 @@ const reviewShots: ReviewShot[] = [
   },
   {
     lyrics: '누난 너무 예뻐서 남자들이 가만 안 둬',
+    lyricsZh: '姐姐太漂亮了，男生们都不会放过她',
     scenePrompt: '秋日校园林荫道，金色落叶铺满小路，阳光透过树叶缝隙洒下斑驳光影。一位长发女子走在路上，裙摆随风轻扬，所有路过的男生都忍不住回头看她。少年站在人群后远远望着她。',
     shotPrompt: '韩式青春MV风格，温暖回忆氛围。秋日校园林荫道，满地金黄落叶，阳光透过树叶缝隙洒下斑驳光影。一位24岁韩系长发女子，黑色长发中分披肩，穿米白色长款针织开衫和浅色长裙，在金色阳光下缓步行走，裙摆随风轻轻摆动。周圍男生纷纷回头注目。少年站在远处树下默默注视。全景，平视角度，慢动作跟拍运镜。暖金色秋日色调，逆光勾勒人物轮廓，斑驳树影洒落一地。高清电影质感，人物面部稳定不变形、五官清晰、动作连贯自然，保持无字幕，不要生成水印，不要生成Logo，视频全程禁止出现外形、着装、配饰完全一致的人物，禁止生成同款分身、双胞胎效果。',
     digitalHumanIds: ['dh-noona', 'dh-sonyeon'],
@@ -60,6 +65,7 @@ const reviewShots: ReviewShot[] = [
   },
   {
     lyrics: '흔들리는 그녀의 맘 사실 알고 있어',
+    lyricsZh: '其实我知道她那颤动的心',
     scenePrompt: '学校天台，傍晚时分天空泛着蓝紫色。少年独自靠在围栏边，低头轻声自语。城市天际线在远方展开。风吹动他的头发和衣角。',
     shotPrompt: '韩式青春电影风格，忧伤氛围。学校天台傍晚，蓝紫色天空泛着暮色余晖，城市天际线在远方展开。18岁少年靠在铁网围栏边，双手撑在栏杆上微微低头，风吹动他的深棕色碎发和白色衬衫衣角，他抬眼望向远方，轻轻叹了口气。中景，微微仰视角度，固定镜头，沉稳构图。蓝紫暮色调，天空自然光，微风吹拂的静谧感。高清电影质感，人物面部稳定不变形、五官清晰、动作连贯自然，保持无字幕，不要生成水印，不要生成Logo。',
     digitalHumanIds: ['dh-sonyeon'],
@@ -68,6 +74,7 @@ const reviewShots: ReviewShot[] = [
   },
   {
     lyrics: '아마 그녀는 어린 내가 부담스러운가봐 날 바라보는 눈빛이 말해주잖아',
+    lyricsZh: '也许她觉得年少的我是种负担，她看我的眼神已经说明了一切',
     scenePrompt: '温馨的小咖啡馆，阳光透过玻璃窗，窗外街景模糊。两人面对面坐着，女子低头搅动咖啡杯，眼神闪烁躲闪，笑得勉强。少年直视着她，眼中有不安和心酸。',
     shotPrompt: '韩式青春电影风格，微妙的紧张氛围。温馨小咖啡馆，午后阳光透过玻璃窗洒在木桌面上，空气中飘浮着细微的咖啡香气。24岁长发女子和18岁少年面对面坐着，女子低头搅动咖啡，目光闪躲不愿直视，嘴角挂着勉强的礼貌微笑。少年直直望着她，眼神中有不安和心酸，放在桌上的手指微微攥紧。近景，平视角度，缓慢推近运镜，镜头缓缓靠近捕捉两人微妙的表情互动。暖黄色室内调，窗外自然侧光，咖啡蒸汽在光线下袅袅升腾。高清电影质感，人物面部稳定不变形、五官清晰、动作连贯自然，保持无字幕，不要生成水印，不要生成Logo，视频全程禁止出现外形、着装、配饰完全一致的人物，禁止生成同款分身、双胞胎效果。',
     digitalHumanIds: ['dh-noona', 'dh-sonyeon'],
@@ -77,34 +84,84 @@ const reviewShots: ReviewShot[] = [
 ]
 
 /** 初始脚本（一条 = 一个分镜）：直接载入审核 MV 的前 5 个真实分镜 */
-export const initialLines: ScriptLine[] = reviewShots.map((s): ScriptLine => {
-  const assetId = nextId('asset')
-  return {
-    id: nextId(),
-    lyrics: s.lyrics,
-    scenePrompt: s.scenePrompt,
-    shotPrompt: s.shotPrompt,
-    digitalHumanIds: [...s.digitalHumanIds],
-    voice: { status: 'none' },
-    scene: { status: 'none' },
-    shot: {
-      status: 'done',
-      currentAssetId: assetId,
-      assets: [
-        {
-          id: assetId,
-          coverUrl: '',
-          videoUrl: s.video,
-          duration: s.duration,
-          digitalHumanIds: [...s.digitalHumanIds],
-        },
-      ],
-    },
-  }
-})
+export const makeReviewLines = (): ScriptLine[] =>
+  reviewShots.map((s): ScriptLine => {
+    const assetId = nextId('asset')
+    return {
+      id: nextId(),
+      lyrics: s.lyrics,
+      lyricsZh: s.lyricsZh,
+      scenePrompt: s.scenePrompt,
+      shotPrompt: s.shotPrompt,
+      digitalHumanIds: [...s.digitalHumanIds],
+      voice: { status: 'none' },
+      scene: { status: 'none' },
+      shot: {
+        status: 'done',
+        currentAssetId: assetId,
+        assets: [
+          {
+            id: assetId,
+            coverUrl: '',
+            videoUrl: s.video,
+            duration: s.duration,
+            digitalHumanIds: [...s.digitalHumanIds],
+          },
+        ],
+      },
+    }
+  })
+
+export const initialLines: ScriptLine[] = makeReviewLines()
 
 /** 审核 MV 的全局角色阵容（女主 누나 + 男主 少年） */
 export const initialCastIds = ['dh-noona', 'dh-sonyeon']
+
+/** 歌曲项目列表（侧边栏目录：一个目录处理一首歌曲，目录下是处理任务） */
+export const mockSongProjects: SongProject[] = [
+  {
+    id: 'song-nunan',
+    name: '누난 너무 예뻐 (Replay)',
+    artist: 'SHINee',
+    tasks: [{ id: 'task-nunan-1', title: 'MV 分镜制作', updatedAt: '刚刚' }],
+  },
+  {
+    id: 'song-night',
+    name: '夜色搁浅',
+    artist: '原创 demo',
+    tasks: [{ id: 'task-night-1', title: '歌词分镜草稿', updatedAt: '3天' }],
+  },
+  {
+    id: 'song-station',
+    name: '旧车站',
+    artist: '原创 demo',
+    tasks: [{ id: 'task-station-1', title: '场景概念设计', updatedAt: '5天' }],
+  },
+  { id: 'song-new', name: '未命名新歌', tasks: [] },
+]
+
+/** 按歌曲 id 生成对应的分镜脚本与角色阵容（未知歌曲返回空脚本） */
+export function makeSongScript(songId: string): { cast: string[]; lines: ScriptLine[] } {
+  if (songId === 'song-nunan') return { cast: [...initialCastIds], lines: makeReviewLines() }
+  const magic =
+    songId === 'song-night' ? magicScripts[0] : songId === 'song-station' ? magicScripts[1] : undefined
+  if (!magic) return { cast: [], lines: [] }
+  return {
+    cast: [...magic.cast],
+    lines: magic.lines.map(
+      (item): ScriptLine => ({
+        id: nextId(),
+        lyrics: item.lyrics,
+        scenePrompt: item.scenePrompt,
+        shotPrompt: item.shotPrompt,
+        digitalHumanIds: [...item.digitalHumanIds],
+        voice: { status: 'none' },
+        scene: { status: 'none' },
+        shot: { status: 'none', assets: [] },
+      }),
+    ),
+  }
+}
 
 /** AI 魔法脚本预置假数据：每套脚本带一个统一的角色阵容（cast），
  *  每个分镜只从阵容中挑选出演角色（可为空 = 空镜头，也可多人同框） */

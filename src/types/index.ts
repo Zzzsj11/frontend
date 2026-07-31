@@ -1,6 +1,23 @@
 /** 生成状态 */
 export type GenStatus = 'none' | 'generating' | 'done'
 
+/** 歌曲目录下的处理任务（一个任务 = 一次 MV 制作会话） */
+export interface SongTask {
+  id: string
+  title: string
+  /** 相对时间标注，如「刚刚」「3天」 */
+  updatedAt: string
+}
+
+/** 歌曲项目（侧边栏一个目录处理一首歌曲） */
+export interface SongProject {
+  id: string
+  /** 歌曲名 / 目录名 */
+  name: string
+  artist?: string
+  tasks: SongTask[]
+}
+
 /** 数字人资产 */
 export interface DigitalHuman {
   id: string
@@ -9,6 +26,8 @@ export interface DigitalHuman {
   style: string
   avatar: string
   description: string
+  /** 生成形象时使用的完整提示词（可在编辑界面查看 / 修改后重新生成） */
+  avatarPrompt?: string
 }
 
 /** 配音信息 */
@@ -50,11 +69,21 @@ export interface ShotInfo {
   assets: ShotAsset[]
 }
 
+/** 分镜视频生成参数（清晰度 / 时长 / 画幅） */
+export interface ShotGenOptions {
+  resolution: '480p' | '720p' | '1080p'
+  /** 时长（秒） */
+  duration: number
+  ratio: '16:9' | '9:16' | '4:3' | '1:1'
+}
+
 /** 脚本行（每一条 = 一个分镜） */
 export interface ScriptLine {
   id: string
   /** 当前分镜歌词 */
   lyrics: string
+  /** 歌词中文翻译（歌词非中文时展示在歌词下方） */
+  lyricsZh?: string
   /** 场景提示词（生成分镜的背景场景） */
   scenePrompt: string
   /** 分镜提示词（镜头运动、角色表演等，与场景、角色一起生成视频片段） */
@@ -64,6 +93,8 @@ export interface ScriptLine {
   voice: VoiceInfo
   scene: SceneInfo
   shot: ShotInfo
+  /** 分镜视频生成参数（未设置时使用默认值） */
+  shotOptions?: ShotGenOptions
 }
 
 /** 时间轴片段 */

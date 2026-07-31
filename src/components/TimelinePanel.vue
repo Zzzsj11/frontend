@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { formatTime, useProjectStore } from '../stores/project'
+import AppIcon from './AppIcon.vue'
 
 const store = useProjectStore()
 
@@ -84,7 +85,7 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
       <div class="track-labels">
         <div class="track-label-spacer" />
         <div class="track-label">
-          <span class="track-icon">🖼️</span>
+          <span class="track-icon"><AppIcon name="movie" :size="15" /></span>
           <span>分镜轨道</span>
         </div>
       </div>
@@ -94,7 +95,13 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
         <div class="track-content" :style="{ width: totalWidth + 'px' }">
           <!-- 时间刻度 -->
           <div class="ruler">
-            <span v-for="tick in ticks" :key="tick.time" class="tick" :style="{ left: tick.x + 'px' }">
+            <span
+              v-for="tick in ticks"
+              :key="tick.time"
+              class="tick"
+              :class="{ 'tick-end': tick.x > totalWidth - 20 }"
+              :style="{ left: tick.x + 'px' }"
+            >
               {{ formatTime(tick.time) }}
             </span>
           </div>
@@ -123,7 +130,7 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
                 class="clip-thumb"
                 alt=""
               />
-              <span v-else class="clip-icon">🖼️</span>
+              <span v-else class="clip-icon"><AppIcon name="image" :size="16" /></span>
               <span class="clip-index">{{ String(clip.index + 1).padStart(2, '0') }}</span>
             </div>
           </div>
@@ -178,7 +185,8 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
   color: var(--text);
 }
 .track-icon {
-  font-size: 15px;
+  display: inline-flex;
+  color: var(--primary);
 }
 .track-area {
   flex: 1;
@@ -202,6 +210,10 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
   font-size: 11px;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
+}
+/* 末尾刻度左对齐，避免标签文字撑出容器导致横向滚动 */
+.tick-end {
+  transform: translateX(-100%);
 }
 .track {
   position: relative;
@@ -237,7 +249,8 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
   opacity: 0.85;
 }
 .clip-icon {
-  font-size: 15px;
+  display: inline-flex;
+  color: var(--text-secondary);
   z-index: 1;
 }
 .clip-index {

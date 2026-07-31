@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { formatTime, useProjectStore } from '../stores/project'
+import AppIcon from './AppIcon.vue'
 
 const store = useProjectStore()
 
@@ -140,14 +141,19 @@ const toggleFullscreen = () => {
       />
       <img v-else-if="currentImage" :src="currentImage" alt="分镜预览" class="preview-img" />
       <p v-else class="preview-placeholder">生成分镜后在此查看预览</p>
-      <!-- MV 歌词字幕 -->
-      <p v-if="store.currentLine?.lyrics" class="preview-lyrics">{{ store.currentLine.lyrics }}</p>
+      <!-- MV 歌词字幕（非中文歌词附中文翻译） -->
+      <div v-if="store.currentLine?.lyrics" class="preview-lyrics">
+        <p class="lyric-line">{{ store.currentLine.lyrics }}</p>
+        <p v-if="store.translationOf(store.currentLine)" class="lyric-zh">
+          {{ store.translationOf(store.currentLine) }}
+        </p>
+      </div>
       <audio ref="audioRef" />
     </div>
 
     <div class="controls">
       <button class="play-btn" :title="store.isPlaying ? '暂停' : '播放'" @click="store.togglePlay()">
-        {{ store.isPlaying ? '⏸' : '▶' }}
+        <AppIcon :name="store.isPlaying ? 'pause' : 'play'" :size="20" />
       </button>
       <span class="time-label">
         {{ formatTime(store.currentTime) }} / {{ formatTime(store.totalDuration) }}
@@ -157,9 +163,11 @@ const toggleFullscreen = () => {
         <div class="progress-thumb" :style="{ left: progressPercent + '%' }" />
       </div>
       <button class="ctrl-icon" :title="store.muted ? '取消静音' : '静音'" @click="store.muted = !store.muted">
-        {{ store.muted ? '🔇' : '🔊' }}
+        <AppIcon :name="store.muted ? 'volume-off' : 'volume-on'" :size="17" />
       </button>
-      <button class="ctrl-icon" title="全屏" @click="toggleFullscreen">⛶</button>
+      <button class="ctrl-icon" title="全屏" @click="toggleFullscreen">
+        <AppIcon name="fullscreen" :size="17" />
+      </button>
     </div>
 
     <footer class="player-footer">
@@ -193,8 +201,14 @@ const toggleFullscreen = () => {
         <template v-if="store.synthesis.status === 'running'">
           合成中 {{ store.synthesis.progress }}%
         </template>
-        <template v-else-if="store.synthesis.status === 'done'">🎬 合成完成</template>
-        <template v-else>🎬 合成视频</template>
+        <template v-else-if="store.synthesis.status === 'done'">
+          <AppIcon name="movie" :size="15" />
+          合成完成
+        </template>
+        <template v-else>
+          <AppIcon name="movie" :size="15" />
+          合成视频
+        </template>
       </button>
     </footer>
   </section>
@@ -248,6 +262,15 @@ const toggleFullscreen = () => {
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.45));
   pointer-events: none;
 }
+.preview-lyrics .lyric-line {
+  margin: 0;
+}
+/* 非中文歌词的中文翻译 */
+.preview-lyrics .lyric-zh {
+  margin: 4px 0 0;
+  font-size: 13px;
+  opacity: 0.85;
+}
 .controls {
   display: flex;
   align-items: center;
@@ -259,9 +282,14 @@ const toggleFullscreen = () => {
   height: 36px;
   border: none;
   background: transparent;
-  font-size: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   color: var(--text);
+}
+.play-btn:hover {
+  color: var(--primary);
 }
 .time-label {
   font-size: 13px;
@@ -294,9 +322,14 @@ const toggleFullscreen = () => {
 .ctrl-icon {
   border: none;
   background: transparent;
-  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   color: var(--text-secondary);
+}
+.ctrl-icon:hover {
+  color: var(--text);
 }
 .player-footer {
   display: flex;

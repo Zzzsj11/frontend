@@ -3,6 +3,8 @@ import { ref } from 'vue'
 import { useProjectStore } from '../stores/project'
 import ScriptLineItem from './ScriptLine.vue'
 import ShotDetailModal from './ShotDetailModal.vue'
+import MagicScriptModal from './MagicScriptModal.vue'
+import AppIcon from './AppIcon.vue'
 
 const store = useProjectStore()
 
@@ -34,18 +36,14 @@ const onDrop = (index: number) => {
       </div>
       <div class="header-actions">
         <button class="btn-outline" @click="store.openLibrary()">
-          👥 角色阵容
+          <AppIcon name="users" :size="15" />
+          角色阵容
           <span v-if="store.castHumans.length" class="cast-count">{{ store.castHumans.length }}</span>
         </button>
-        <button class="btn-outline" :disabled="store.batchShooting" @click="store.generateAllShots()">
-          <span v-if="store.batchShooting" class="spinner" />
-          <span v-else>🎬</span>
-          全部分镜
-        </button>
-        <button class="btn-primary" :disabled="store.magicLoading" @click="store.runMagicScript()">
+        <button class="btn-primary" :disabled="store.magicLoading" @click="store.openMagic()">
           <span v-if="store.magicLoading" class="spinner light" />
-          <span v-else>✨</span>
-          AI 魔法脚本
+          <AppIcon v-else name="sparkles" :size="15" />
+          MV 分镜
         </button>
       </div>
     </header>
@@ -66,15 +64,19 @@ const onDrop = (index: number) => {
       </div>
 
       <p v-if="store.lines.length === 0" class="empty-tip">
-        暂无分镜，点击下方按钮或「AI 魔法脚本」开始创作
+        暂无分镜，点击下方按钮或「MV 分镜」开始创作
       </p>
     </div>
 
     <footer class="editor-footer">
-      <button class="btn-add" @click="store.addLine()">＋ 单个分镜</button>
+      <button class="btn-add" @click="store.addLine()">
+        <AppIcon name="plus" :size="14" />
+        单个分镜
+      </button>
     </footer>
 
     <ShotDetailModal />
+    <MagicScriptModal />
   </section>
 </template>
 
@@ -143,6 +145,9 @@ const onDrop = (index: number) => {
   padding-top: 14px;
 }
 .btn-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px dashed var(--border-dark);
   border-radius: 10px;
   background: #fff;

@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { ScriptLine } from '../types'
 import { useProjectStore } from '../stores/project'
+import AppIcon from './AppIcon.vue'
 
 const props = defineProps<{
   line: ScriptLine
@@ -15,6 +16,8 @@ const humans = computed(() => store.lineHumans(props.line))
 /** 缩略图：真实视频 > 视频封面 > 场景底图 */
 const video = computed(() => store.videoOf(props.line))
 const cover = computed(() => store.coverOf(props.line))
+/** 歌词非中文时的中文翻译 */
+const translation = computed(() => store.translationOf(props.line))
 
 // 点开分镜行 → 选中并打开编辑弹窗
 const openDetail = () => store.openEditor(props.line.id)
@@ -29,7 +32,7 @@ const openDetail = () => store.openEditor(props.line.id)
     <div class="shot-thumb">
       <video v-if="video" :src="video" preload="metadata" muted />
       <img v-else-if="cover" :src="cover" alt="分镜缩略图" />
-      <span v-else class="thumb-placeholder">🖼️</span>
+      <span v-else class="thumb-placeholder"><AppIcon name="image" :size="18" /></span>
       <div v-if="line.shot.status === 'generating' || line.scene.status === 'generating'" class="thumb-loading">
         <span class="spinner light" />
       </div>
@@ -43,6 +46,7 @@ const openDetail = () => store.openEditor(props.line.id)
     <!-- 歌词 + 提示词摘要 -->
     <div class="line-info">
       <p class="lyrics">{{ line.lyrics || '（未填写歌词）' }}</p>
+      <p v-if="translation" class="lyrics-zh"><span class="zh-tag">译</span>{{ translation }}</p>
       <p class="prompt">{{ line.shotPrompt || line.scenePrompt || '暂无提示词，点击编辑场景与分镜' }}</p>
     </div>
 
@@ -56,10 +60,12 @@ const openDetail = () => store.openEditor(props.line.id)
         @click="store.generateShotFor(line.id)"
       >
         <span v-if="line.shot.status === 'generating'" class="spinner" />
-        <span v-else>🎬</span>
+        <AppIcon v-else name="movie" :size="15" />
       </button>
       <!-- 删除 -->
-      <button class="icon-btn danger" title="删除" @click="store.removeLine(line.id)">🗑️</button>
+      <button class="icon-btn danger" title="删除" @click="store.removeLine(line.id)">
+        <AppIcon name="trash" :size="15" />
+      </button>
     </div>
   </div>
 </template>
@@ -111,8 +117,9 @@ const openDetail = () => store.openEditor(props.line.id)
   object-fit: cover;
 }
 .thumb-placeholder {
-  font-size: 16px;
-  opacity: 0.5;
+  display: inline-flex;
+  color: var(--text-secondary);
+  opacity: 0.6;
 }
 .thumb-loading {
   position: absolute;
@@ -149,6 +156,29 @@ const openDetail = () => store.openEditor(props.line.id)
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* 非中文歌词的中文翻译 */
+.lyrics-zh {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--text);
+  opacity: 0.65;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 翻译行左侧「译」标识 */
+.zh-tag {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 15px;
+  border-radius: 4px;
+  color: var(--primary);
+  background: var(--primary-light);
+  border: 1px solid rgba(255, 90, 44, 0.35);
+  vertical-align: 1px;
+}
 .prompt {
   margin: 3px 0 0;
   font-size: 12px;
@@ -171,12 +201,14 @@ const openDetail = () => store.openEditor(props.line.id)
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #fff;
+  color: var(--text-secondary);
   cursor: pointer;
   font-size: 14px;
-  transition: border-color 0.15s, background 0.15s;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
 }
 .icon-btn:hover:not(:disabled) {
   border-color: var(--primary);
+  color: var(--primary);
 }
 .icon-btn:disabled {
   opacity: 0.4;
@@ -185,9 +217,11 @@ const openDetail = () => store.openEditor(props.line.id)
 .icon-btn.active {
   border-color: var(--primary);
   background: rgba(255, 90, 44, 0.08);
+  color: var(--primary);
 }
 .icon-btn.danger:hover {
   border-color: #e33;
   background: rgba(238, 51, 51, 0.06);
+  color: #e33;
 }
 </style>
