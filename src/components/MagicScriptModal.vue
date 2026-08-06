@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
 
@@ -8,12 +8,10 @@ const store = useProjectStore()
 // 表单草稿
 const songId = ref('')
 const assFile = ref<File | null>(null)
-const characterImages = ref<File[]>([])
-const previewUrls = ref<string[]>([])
+const selectedHumanIds = ref<string[]>([])
 const extraRequirement = ref('')
 
 const assInputRef = ref<HTMLInputElement>()
-const imgInputRef = ref<HTMLInputElement>()
 
 const canSubmit = computed(() => songId.value.trim() !== '' && assFile.value !== null)
 
@@ -25,20 +23,12 @@ watch(
   },
 )
 
-const revokeAll = () => {
-  previewUrls.value.forEach((u) => URL.revokeObjectURL(u))
-  previewUrls.value = []
-}
-
 const resetForm = () => {
   songId.value = ''
   assFile.value = null
-  characterImages.value = []
+  selectedHumanIds.value = [...store.castIds]
   extraRequirement.value = ''
-  revokeAll()
 }
-
-onBeforeUnmount(revokeAll)
 
 // ---------- ass 文件 ----------
 const pickAss = (files: FileList | null) => {
@@ -52,24 +42,10 @@ const onAssChange = (e: Event) => {
 }
 const onAssDrop = (e: DragEvent) => pickAss(e.dataTransfer?.files ?? null)
 
-// ---------- 人物图 ----------
-const addImages = (files: FileList | null) => {
-  if (!files) return
-  for (const file of Array.from(files)) {
-    if (!file.type.startsWith('image/')) continue
-    characterImages.value.push(file)
-    previewUrls.value.push(URL.createObjectURL(file))
-  }
-}
-const onImgChange = (e: Event) => {
-  addImages((e.target as HTMLInputElement).files)
-  ;(e.target as HTMLInputElement).value = ''
-}
-const onImgDrop = (e: DragEvent) => addImages(e.dataTransfer?.files ?? null)
-const removeImage = (index: number) => {
-  characterImages.value.splice(index, 1)
-  URL.revokeObjectURL(previewUrls.value[index])
-  previewUrls.value.splice(index, 1)
+// ---------- 从已有角色库选择 ----------
+const toggleHuman = (id: string) => {
+  const index = selectedHumanIds.value.indexOf(id)
+  index >= 0 ? selectedHumanIds.value.splice(index, 1) : selectedHumanIds.value.push(id)
 }
 
 // ---------- 提交 ----------
@@ -78,7 +54,7 @@ const submit = () => {
   store.runMagicScript({
     songId: songId.value.trim(),
     assFile: assFile.value!,
-    characterImages: characterImages.value.length ? [...characterImages.value] : undefined,
+    digitalHumanIds: selectedHumanIds.value.length ? [...selectedHumanIds.value] : undefined,
     extraRequirement: extraRequirement.value.trim() || undefined,
   })
 }
@@ -93,7 +69,7 @@ const cancel = () => {
     <div v-if="store.magicOpen" class="modal-mask" @click.self="cancel">
       <div class="modal">
         <header class="modal-header">
-          <h3><AppIcon name="sparkles" :size="17" /> MV 分镜</h3>
+          <h3><AppIcon name="sparkles" :size="17" /> ASS 分镜</h3>
           <button class="close-btn" @click="cancel"><AppIcon name="close" :size="13" /> 关闭</button>
         </header>
 
@@ -106,7 +82,29 @@ const cancel = () => {
             placeholder="输入歌曲编号，如 SM-2026-0731"
           />
 
-          <!-- 三栏：ass 文件 / 人物图 / 额外要求 -->
+          <!-- 完整角色库横向多选 -->
+          <div class="role-section">
+            <p class="field-label">从已有角色库选择 <span class="optional">（可多选，人物镜轮流使用）</span></p>
+            <div class="role-picker" :class="{ filled: selectedHumanIds.length }">
+              <button
+                v-for="human in store.digitalHumans"
+                :key="human.id"
+                class="role-card"
+                :class="{ selected: selectedHumanIds.includes(human.id) }"
+                :title="`${human.name} · ${human.style}`"
+                @click="toggleHuman(human.id)"
+              >
+                <img :src="human.avatar" :alt="human.name" />
+                <span>{{ human.name }}</span>
+                <span v-if="selectedHumanIds.includes(human.id)" class="role-check">
+                  <AppIcon name="check" :size="10" />
+                </span>
+              </button>
+              <p v-if="!store.digitalHumans.length" class="role-empty">角色库暂无可选人物</p>
+            </div>
+          </div>
+
+          <!-- 两栏：ass 文件 / 额外要求 -->
           <div class="upload-grid">
             <div class="upload-col">
               <p class="field-label">上传 ass 字幕文件 <span class="required">*</span></p>
@@ -129,44 +127,6 @@ const cancel = () => {
                 </template>
               </div>
               <input ref="assInputRef" type="file" accept=".ass" hidden @change="onAssChange" />
-            </div>
-
-            <div class="upload-col">
-              <p class="field-label">上传人物图 <span class="optional">（可空）</span></p>
-              <div
-                class="dropzone"
-                :class="{ filled: characterImages.length }"
-                @click="imgInputRef?.click()"
-                @dragover.prevent
-                @drop.prevent="onImgDrop"
-              >
-                <template v-if="characterImages.length">
-                  <div class="img-list" @click.stop>
-                    <div v-for="(url, i) in previewUrls" :key="url" class="img-thumb">
-                      <img :src="url" alt="" />
-                      <button class="img-remove" title="移除" @click="removeImage(i)">
-                        <AppIcon name="close" :size="10" />
-                      </button>
-                    </div>
-                    <button class="img-add" title="继续添加" @click="imgInputRef?.click()">
-                      <AppIcon name="plus" :size="18" />
-                    </button>
-                  </div>
-                </template>
-                <template v-else>
-                  <span class="file-icon"><AppIcon name="user" :size="28" /></span>
-                  <span class="drop-text">点击选择或拖入人物参考图</span>
-                  <span class="file-tip">用于统一 MV 角色形象，可多张</span>
-                </template>
-              </div>
-              <input
-                ref="imgInputRef"
-                type="file"
-                accept="image/*"
-                multiple
-                hidden
-                @change="onImgChange"
-              />
             </div>
 
             <div class="upload-col extra-col">
@@ -208,7 +168,7 @@ const cancel = () => {
   padding: 24px;
 }
 .modal {
-  width: 760px;
+  width: 1040px;
   max-width: 100%;
   max-height: 92vh;
   background: #fff;
@@ -281,11 +241,11 @@ const cancel = () => {
   border-color: var(--primary);
 }
 
-/* 三栏上传区 */
+/* ASS 文件与额外要求 */
 .upload-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.75fr);
-  gap: 14px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  gap: 18px;
   margin-top: 16px;
 }
 @media (max-width: 640px) {
@@ -345,59 +305,82 @@ const cancel = () => {
   color: var(--text-secondary);
 }
 
-/* 人物图预览 */
-.img-list {
+/* 已有角色库多选 */
+.role-picker {
+  min-height: 130px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1.5px dashed var(--border-dark);
+  border-radius: 12px;
+  background: #fafafa;
+  padding: 10px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
-  cursor: default;
+  flex-wrap: nowrap;
+  gap: 10px;
+  align-items: flex-start;
 }
-.img-thumb {
+.role-section {
+  margin-top: 16px;
+}
+.role-picker.filled {
+  border-color: rgba(255, 90, 44, 0.45);
+  background: #fff;
+}
+.role-card {
   position: relative;
-  width: 64px;
-  height: 64px;
-  border-radius: 8px;
-  overflow: hidden;
+  flex: 0 0 76px;
+  width: 76px;
   border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 3px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
 }
-.img-thumb img {
+.role-card:hover {
+  border-color: var(--primary);
+  transform: translateY(-1px);
+}
+.role-card.selected {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+}
+.role-card img {
   width: 100%;
-  height: 100%;
+  height: 88px;
   object-fit: cover;
+  border-radius: 6px;
   display: block;
 }
-.img-remove {
+.role-card > span:not(.role-check) {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.role-check {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 5px;
+  right: 5px;
   width: 18px;
   height: 18px;
-  border: none;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--primary);
   color: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
 }
-.img-add {
-  width: 64px;
-  height: 64px;
-  border: 1.5px dashed var(--border-dark);
-  border-radius: 8px;
-  background: transparent;
+.role-empty {
+  width: 100%;
+  margin: auto 0;
+  text-align: center;
   color: var(--text-secondary);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
-}
-.img-add:hover {
-  border-color: var(--primary);
-  color: var(--primary);
+  font-size: 12px;
 }
 
 /* 额外要求 */

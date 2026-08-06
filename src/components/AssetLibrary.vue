@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
+import { confirmDialog } from '../composables/useConfirmDialog'
 
 const store = useProjectStore()
 
@@ -65,12 +66,12 @@ const cancelRenameStyle = () => {
   styleEditingName.value = null
 }
 
-const removeStyle = (s: string) => {
+const removeStyle = async (s: string) => {
   const count = store.digitalHumans.filter((d) => d.style === s).length
   const msg = count
     ? `确定删除分类「${s}」？该分类下的 ${count} 个数字人将归入「未分类」`
     : `确定删除分类「${s}」？`
-  if (!window.confirm(msg)) return
+  if (!await confirmDialog({ title: '删除风格分类', message: msg, confirmText: '删除', danger: true })) return
   store.deleteDhStyle(s)
   if (activeStyle.value === s) activeStyle.value = '全部'
 }
@@ -80,6 +81,8 @@ const genOpen = ref(false)
 const genName = ref('')
 const genStyle = ref('')
 const genDesc = ref('')
+const genReference = ref('')
+const genFileRef = ref<HTMLInputElement>()
 const genError = ref('')
 const canGen = computed(() => !!genName.value.trim() && !!genDesc.value.trim())
 
@@ -91,15 +94,38 @@ const submitGen = async () => {
       name: genName.value.trim(),
       style: genStyle.value.trim() || '自定义',
       description: genDesc.value.trim(),
+      referenceImage: genReference.value || undefined,
     })
     genOpen.value = false
     genName.value = ''
     genStyle.value = ''
     genDesc.value = ''
+    genReference.value = ''
     activeStyle.value = '全部'
   } catch (e) {
     genError.value = e instanceof Error ? e.message : '生成失败，请稍后重试'
   }
+}
+
+/** 选择生成参考图：与上传数字人头像一致，压缩为 3:4 范围内的 data URL */
+const onGenReferenceChange = (e: Event) => {
+  const target = e.target as HTMLInputElement
+  const file = target.files?.[0]
+  target.value = ''
+  if (!file || !file.type.startsWith('image/')) return
+  const url = URL.createObjectURL(file)
+  const img = new Image()
+  img.onload = () => {
+    const ratio = Math.min(600 / img.width, 800 / img.height, 1)
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(img.width * ratio)
+    canvas.height = Math.round(img.height * ratio)
+    canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height)
+    genReference.value = canvas.toDataURL('image/jpeg', 0.85)
+    URL.revokeObjectURL(url)
+  }
+  img.onerror = () => URL.revokeObjectURL(url)
+  img.src = url
 }
 
 // 上传自定义数字人：自备头像 + 名称/风格（名称、风格为必填，头像/描述可选）
@@ -219,7 +245,7 @@ const saveEdit = () => {
 /** 用当前提示词重新生成形象，成功后图片本地化存储并替换头像（会覆盖当前形象，需二次确认） */
 const regenAvatar = async () => {
   if (!editing.value || regenBusy.value || !editPrompt.value.trim()) return
-  if (!window.confirm(`确定重新生成「${editing.value.name}」的形象？当前形象将被覆盖`)) return
+  if (!await confirmDialog({ title: '重新生成数字人形象', message: `确定重新生成「${editing.value.name}」的形象？当前形象将被覆盖。`, confirmText: '重新生成' })) return
   editError.value = ''
   applyEdit()
   try {
@@ -229,9 +255,9 @@ const regenAvatar = async () => {
   }
 }
 
-const removeDh = () => {
+const removeDh = async () => {
   if (!editing.value || regenBusy.value) return
-  if (!window.confirm(`确定删除数字人「${editing.value.name}」？将同时从角色阵容与所有分镜中移除`)) return
+  if (!await confirmDialog({ title: '删除数字人', message: `确定删除数字人「${editing.value.name}」？将同时从角色阵容与所有分镜中移除。`, confirmText: '删除', danger: true })) return
   store.deleteDigitalHuman(editing.value.id)
   editId.value = null
 }
@@ -264,16 +290,41 @@ const removeDh = () => {
 
         <!-- 生成数字人表单（真实生图接口） -->
         <div v-if="genOpen" class="gen-panel">
-          <div class="gen-row">
-            <input v-model="genName" class="gen-input gen-name" placeholder="角色名称（必填）" />
-            <input v-model="genStyle" class="gen-input gen-style" list="dh-style-options" placeholder="风格，如：韩系青春" />
+          <div class="upload-body">
+            <div
+              class="upload-avatar gen-reference"
+              :class="{ filled: genReference }"
+              title="点击上传生成参考图（可选）"
+              @click="genFileRef?.click()"
+            >
+              <img v-if="genReference" :src="genReference" alt="生成参考图预览" />
+              <template v-else>
+                <AppIcon name="image" :size="24" />
+                <span>上传参考图<br />（可选）</span>
+              </template>
+              <button
+                v-if="genReference"
+                class="reference-remove"
+                title="移除参考图"
+                @click.stop="genReference = ''"
+              >
+                <AppIcon name="close" :size="10" />
+              </button>
+            </div>
+            <input ref="genFileRef" type="file" accept="image/*" hidden @change="onGenReferenceChange" />
+            <div class="upload-fields">
+              <div class="gen-row">
+                <input v-model="genName" class="gen-input gen-name" placeholder="角色名称（必填）" />
+                <input v-model="genStyle" class="gen-input gen-style" list="dh-style-options" placeholder="风格，如：韩系青春" />
+              </div>
+              <textarea
+                v-model="genDesc"
+                class="gen-desc"
+                rows="2"
+                placeholder="形象描述提示词（必填），例如：22岁短发女生，穿 oversize 卫衣，元气笑容，阳光温暖…"
+              />
+            </div>
           </div>
-          <textarea
-            v-model="genDesc"
-            class="gen-desc"
-            rows="2"
-            placeholder="形象描述提示词（必填），例如：22岁短发女生，穿 oversize 卫衣，元气笑容，阳光温暖…"
-          />
           <div class="gen-actions">
             <span v-if="genError" class="gen-error">{{ genError }}</span>
             <button class="gen-submit" :disabled="!canGen || store.dhGenerating" @click="submitGen">
@@ -676,6 +727,7 @@ const removeDh = () => {
   cursor: pointer;
   overflow: hidden;
   transition: border-color 0.15s;
+  position: relative;
 }
 .upload-avatar:hover {
   border-color: var(--primary);
@@ -689,6 +741,21 @@ const removeDh = () => {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+.reference-remove {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 .upload-fields {
   flex: 1;

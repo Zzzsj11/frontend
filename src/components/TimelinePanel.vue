@@ -5,8 +5,9 @@ import AppIcon from './AppIcon.vue'
 
 const store = useProjectStore()
 
-/** 最大 像素/秒 缩放比例；实际比例自适应容器宽度，保证全部片段无需横向滚动 */
+/** 最大 像素/秒缩放比例；时间轴默认最多展示约 6 个片段，超出后横向滚动 */
 const PX_MAX = 60
+const TARGET_VISIBLE_CLIPS = 6
 const trackAreaRef = ref<HTMLDivElement>()
 const areaWidth = ref(0)
 
@@ -22,10 +23,17 @@ onMounted(() => {
 })
 onBeforeUnmount(() => resizeObserver?.disconnect())
 
-/** 自适应 像素/秒：总时长超出可视宽度时整体缩小铺满 */
+/**
+ * 自适应像素/秒：
+ * - 6 个以内铺满可视区域；
+ * - 超过 6 个时保证平均每个片段约占容器的 1/6，产生横向滚动；
+ * - 同时保留不同时长片段之间的宽度比例。
+ */
 const pxPerSec = computed(() => {
   if (store.totalDuration <= 0 || areaWidth.value <= 0) return PX_MAX
-  return Math.min(PX_MAX, (areaWidth.value - 2) / store.totalDuration)
+  const visibleCount = Math.min(store.timelineClips.length, TARGET_VISIBLE_CLIPS)
+  const targetWidth = (areaWidth.value - 2) * (store.timelineClips.length / visibleCount)
+  return Math.min(PX_MAX, targetWidth / store.totalDuration)
 })
 
 const playheadX = computed(() => store.currentTime * pxPerSec.value)

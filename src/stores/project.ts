@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { DigitalHuman, ScriptLine, ShotAsset, ShotGenOptions, SongProject, SynthesisState, TimelineClip } from '../types'
+import type { DigitalHuman, GeneralStoryboardOptions, GeneralStoryboardRequest, ScriptLine, ShotAsset, ShotGenOptions, SongProject, SynthesisState, TimelineClip } from '../types'
 import * as api from '../mock/api'
 import * as imageGen from '../api/imageGen'
 import { initialCastIds, initialLines, mockDigitalHumans, nextId } from '../mock/data'
@@ -67,6 +67,8 @@ export const useProjectStore = defineStore('project', {
     dhStyles: loadDhStyles(),
     /** 歌曲项目列表（左侧任务栏：一个目录处理一首歌曲） */
     songProjects: [] as SongProject[],
+    songProjectsLoading: false,
+    songProjectsError: null as string | null,
     /** 当前打开的歌曲项目 id */
     activeSongId: 'song-nunan',
     /** 当前选中的处理任务 id */
@@ -80,10 +82,17 @@ export const useProjectStore = defineStore('project', {
     selectedLineId: (initialLines[0]?.id ?? null) as string | null,
     /** 当前在弹窗中编辑的分镜行 */
     editingLineId: null as string | null,
+    /** 打开分镜编辑弹窗时默认展开的选项 */
+    editingTab: null as 'cast' | 'shot' | 'scene' | null,
     /** 资产库（角色阵容管理）弹窗开关 */
     libraryOpen: false,
     /** AI 魔法脚本弹窗开关 */
     magicOpen: false,
+    /** 通用分镜参数弹窗 */
+    generalStoryboardOpen: false,
+    generalStoryboardLoading: false,
+    generalStoryboardError: null as string | null,
+    generalStoryboardOptions: null as GeneralStoryboardOptions | null,
     currentTime: 0,
     isPlaying: false,
     playMode: { single: true, loop: false },
@@ -203,7 +212,16 @@ export const useProjectStore = defineStore('project', {
   actions: {
     /** 载入歌曲项目列表（侧边栏挂载时调用） */
     async loadSongProjects() {
-      this.songProjects = await api.fetchSongProjects()
+      if (this.songProjectsLoading) return
+      this.songProjectsLoading = true
+      this.songProjectsError = null
+      try {
+        this.songProjects = await api.fetchSongProjects()
+      } catch (err) {
+        this.songProjectsError = err instanceof Error ? err.message : '歌曲项目加载失败'
+      } finally {
+        this.songProjectsLoading = false
+      }
     },
 
     /** 新建歌曲项目并加入列表 */
@@ -325,6 +343,7 @@ export const useProjectStore = defineStore('project', {
     addLine() {
       const line: ScriptLine = {
         id: nextId(),
+        source: 'manual',
         lyrics: '',
         scenePrompt: '',
         shotPrompt: '',
@@ -392,13 +411,15 @@ export const useProjectStore = defineStore('project', {
       if (clip && this.playMode.single) this.seek(clip.start)
     },
 
-    openEditor(lineId: string) {
+    openEditor(lineId: string, tab: 'cast' | 'shot' | 'scene' | null = null) {
       this.selectLine(lineId)
+      this.editingTab = tab
       this.editingLineId = lineId
     },
 
     closeEditor() {
       this.editingLineId = null
+      this.editingTab = null
     },
 
     // ---------- 资产库 / 全局角色阵容 ----------
@@ -425,12 +446,16 @@ export const useProjectStore = defineStore('project', {
     },
 
     /** 调用真实异步生图接口生成数字人形象，图片本地化存储后加入资产库 */
-    async generateDigitalHuman(input: { name: string; style: string; description: string }): Promise<DigitalHuman> {
+    async generateDigitalHuman(input: { name: string; style: string; description: string; referenceImage?: string }): Promise<DigitalHuman> {
       this.dhGenerating = true
       try {
         const prompt = imageGen.buildPortraitPrompt(input.description, input.style)
         const id = nextId('dh')
-        const remoteUrl = await imageGen.generateImage(prompt, { size: '768x1024', quality: 'medium' })
+        const remoteUrl = await imageGen.generateImage(prompt, {
+          size: '768x1024',
+          quality: 'medium',
+          ...(input.referenceImage ? { image: input.referenceImage } : {}),
+        })
         const avatar = await imageGen.localizeImage(id, remoteUrl)
         const dh: DigitalHuman = {
           id,
@@ -596,6 +621,68 @@ export const useProjectStore = defineStore('project', {
       this.magicOpen = false
     },
 
+    async openGeneralStoryboard() {
+      this.generalStoryboardOpen = true
+      this.generalStoryboardError = null
+      if (!this.generalStoryboardOptions) {
+        try {
+          this.generalStoryboardOptions = await api.fetchGeneralStoryboardOptions()
+        } catch (err) {
+          this.generalStoryboardError = err instanceof Error ? err.message : '加载选项失败'
+        }
+      }
+    },
+
+    closeGeneralStoryboard() {
+      if (!this.generalStoryboardLoading) this.generalStoryboardOpen = false
+    },
+
+    /** 按曲风、人物与镜头规模生成无歌词的通用分镜脚本 */
+    async runGeneralStoryboard(req: GeneralStoryboardRequest) {
+      if (this.generalStoryboardLoading) return
+      this.generalStoryboardLoading = true
+      this.generalStoryboardError = null
+      try {
+        const result = await api.generateGeneralStoryboard(req)
+        const lines: ScriptLine[] = result.lines.map((item) => ({
+          id: nextId(),
+          source: 'general',
+          shotType: item.shotType,
+          plannedDuration: item.plannedDuration,
+          lyrics: '',
+          scenePrompt: item.scenePrompt,
+          shotPrompt: item.shotPrompt,
+          digitalHumanIds: [...item.digitalHumanIds],
+          voice: { status: 'none' },
+          scene: { status: 'none' },
+          shot: { status: 'none', assets: [] },
+          shotOptions: { ...DEFAULT_SHOT_OPTIONS, ratio: req.ratio },
+        }))
+        this._cacheCurrentTask()
+        let song = this.songProjects.find((s) => s.id === this.activeSongId)
+        if (!song) {
+          song = { id: nextId('song'), name: req.singer?.trim() || '未命名歌曲', tasks: [] }
+          this.songProjects.push(song)
+          this.activeSongId = song.id
+        }
+        const task = { id: nextId('task'), title: result.title, updatedAt: '刚刚' }
+        song.tasks.push(task)
+        this.stop()
+        this.editingLineId = null
+        this.castIds = [...result.cast]
+        this.lines = lines
+        this.taskScripts[task.id] = { cast: this.castIds, lines: this.lines }
+        this.activeTaskId = task.id
+        this.selectedLineId = this.lines[0]?.id ?? null
+        this.currentTime = 0
+        this.generalStoryboardOpen = false
+      } catch (err) {
+        this.generalStoryboardError = err instanceof Error ? err.message : '通用分镜生成失败'
+      } finally {
+        this.generalStoryboardLoading = false
+      }
+    },
+
     /** 提交魔法脚本表单：生成成功后在当前歌曲目录下新建一个子项目(任务)并载入生成的脚本 */
     async runMagicScript(req?: api.MagicScriptRequest) {
       if (this.magicLoading) return
@@ -605,6 +692,7 @@ export const useProjectStore = defineStore('project', {
         // 脚本自带统一的角色阵容
         const lines: ScriptLine[] = script.lines.map((item) => ({
           id: nextId(),
+          source: 'ass',
           lyrics: item.lyrics,
           scenePrompt: item.scenePrompt,
           shotPrompt: item.shotPrompt,
@@ -712,7 +800,7 @@ export const useProjectStore = defineStore('project', {
       this.batchVoicing = true
       try {
         for (const line of [...this.lines]) {
-          if (line.voice.status !== 'done') await this.generateVoiceFor(line.id)
+          if (line.source !== 'general' && line.voice.status !== 'done') await this.generateVoiceFor(line.id)
         }
       } finally {
         this.batchVoicing = false

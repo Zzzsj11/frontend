@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { DEFAULT_SHOT_OPTIONS, useProjectStore } from '../stores/project'
 import type { ShotAsset, ShotGenOptions } from '../types'
 import AppIcon from './AppIcon.vue'
+import { confirmDialog } from '../composables/useConfirmDialog'
 
 const store = useProjectStore()
 
@@ -14,9 +15,6 @@ const shotPromptDraft = ref('')
 // 当前展开的调整面板：默认全部折叠，只展示人物 / 分镜 / 场景三个预览
 type TabKey = 'cast' | 'shot' | 'scene'
 const activeTab = ref<TabKey | null>(null)
-const toggleTab = (tab: TabKey) => {
-  activeTab.value = activeTab.value === tab ? null : tab
-}
 
 // 分镜视频生成参数草稿（清晰度 / 时长 / 画幅），重新生成分镜时生效
 const optionsDraft = ref<ShotGenOptions>({ ...DEFAULT_SHOT_OPTIONS })
@@ -30,6 +28,7 @@ const lyricsTranslation = computed(() => {
   if (!zh || !lyricsDraft.value || /[\u4e00-\u9fff]/.test(lyricsDraft.value)) return undefined
   return zh
 })
+const isGeneral = computed(() => store.editingLine?.source === 'general')
 
 // 人物预览：当前分镜出演角色（空 = 空镜头）
 const castOfLine = computed(() => {
@@ -63,19 +62,9 @@ const closePreview = () => {
   previewAsset.value = null
 }
 
-// 点击分镜预览：有片段则弹出播放当前片段，否则展开分镜调整面板
+// 点击分镜预览：选中并展开分镜调整面板；历史片段仍可在展开后的列表中点击预览
 const onShotPreviewClick = () => {
-  const line = store.editingLine
-  if (!line) return
-  const assets = line.shot.assets
-  if (!assets.length) {
-    toggleTab('shot')
-    return
-  }
-  let idx = assets.findIndex((a) => a.id === line.shot.currentAssetId)
-  if (idx < 0) idx = assets.length - 1
-  previewAsset.value = assets[idx]
-  previewIndex.value = idx
+  activeTab.value = 'shot'
 }
 
 /** 预览片段的真实可播放视频地址（mock:// 假地址除外，退化为展示封面） */
@@ -86,32 +75,32 @@ const previewVideo = computed(() =>
 )
 
 watch(
-  () => store.editingLineId,
+  () => [store.editingLineId, store.editingTab] as const,
   () => {
     const line = store.editingLine
     lyricsDraft.value = line?.lyrics ?? ''
     scenePromptDraft.value = line?.scenePrompt ?? ''
     shotPromptDraft.value = line?.shotPrompt ?? ''
     optionsDraft.value = { ...(line?.shotOptions ?? DEFAULT_SHOT_OPTIONS) }
-    activeTab.value = null
+    activeTab.value = store.editingTab
     previewAsset.value = null
   },
   { immediate: true },
 )
 
 /** 生成 / 重新生成场景（仅场景提示词）；已有场景图时二次确认（会被覆盖） */
-const regenScene = () => {
+const regenScene = async () => {
   const line = store.editingLine
   if (!line) return
-  if (line.scene.imageUrl && !window.confirm('确定重新生成场景？当前场景图将被覆盖')) return
+  if (line.scene.imageUrl && !await confirmDialog({ title: '重新生成场景', message: '确定重新生成场景？当前场景图将被覆盖。', confirmText: '重新生成' })) return
   store.generateSceneFor(line.id, scenePromptDraft.value)
 }
 
 /** 生成 / 重新生成分镜视频片段（场景 × 分镜提示词 × 出演角色 × 生成参数）；已有片段时二次确认 */
-const regenShot = () => {
+const regenShot = async () => {
   const line = store.editingLine
   if (!line) return
-  if (line.shot.assets.length && !window.confirm('确定重新生成分镜视频片段？将新增一个视频版本')) return
+  if (line.shot.assets.length && !await confirmDialog({ title: '重新生成分镜', message: '确定重新生成分镜视频片段？将新增一个视频版本。', confirmText: '重新生成' })) return
   // 重新生成前先持久化当前编辑中的场景提示词
   store.updateScenePrompt(line.id, scenePromptDraft.value)
   store.generateShotFor(line.id, shotPromptDraft.value, { ...optionsDraft.value })
@@ -147,7 +136,7 @@ const cancel = () => store.closeEditor()
           <div class="preview-cards">
             <!-- 人物 -->
             <div class="pcard" :class="{ open: activeTab === 'cast' }">
-              <div class="pcard-media" title="点击展开人物调整" @click="toggleTab('cast')">
+              <div class="pcard-media" title="点击展开人物调整" @click="activeTab = 'cast'">
                 <div v-if="castOfLine.length" class="pcard-avatars">
                   <img
                     v-for="dh in castOfLine"
@@ -159,7 +148,7 @@ const cancel = () => store.closeEditor()
                 </div>
                 <span v-else class="pcard-empty"><AppIcon name="user" :size="24" />空镜头</span>
               </div>
-              <button class="pcard-tab" :class="{ active: activeTab === 'cast' }" @click="toggleTab('cast')">
+              <button class="pcard-tab" :class="{ active: activeTab === 'cast' }" @click="activeTab = 'cast'">
                 <AppIcon name="users" :size="13" />
                 人物
                 <span class="pcard-count">{{ castOfLine.length }}</span>
@@ -180,7 +169,7 @@ const cancel = () => store.closeEditor()
                   <span class="spinner light" />
                 </div>
               </div>
-              <button class="pcard-tab" :class="{ active: activeTab === 'shot' }" @click="toggleTab('shot')">
+              <button class="pcard-tab" :class="{ active: activeTab === 'shot' }" @click="activeTab = 'shot'">
                 <AppIcon name="movie" :size="13" />
                 分镜
               </button>
@@ -188,7 +177,7 @@ const cancel = () => store.closeEditor()
 
             <!-- 场景预览 -->
             <div class="pcard" :class="{ open: activeTab === 'scene' }">
-              <div class="pcard-media" title="点击展开场景调整" @click="toggleTab('scene')">
+              <div class="pcard-media" title="点击展开场景调整" @click="activeTab = 'scene'">
                 <img
                   v-if="store.editingLine.scene.imageUrl"
                   :src="store.editingLine.scene.imageUrl"
@@ -199,7 +188,7 @@ const cancel = () => store.closeEditor()
                   <span class="spinner light" />
                 </div>
               </div>
-              <button class="pcard-tab" :class="{ active: activeTab === 'scene' }" @click="toggleTab('scene')">
+              <button class="pcard-tab" :class="{ active: activeTab === 'scene' }" @click="activeTab = 'scene'">
                 <AppIcon name="scene" :size="13" />
                 场景
               </button>
@@ -235,9 +224,15 @@ const cancel = () => store.closeEditor()
 
           <!-- 分镜调整面板 -->
           <div v-if="activeTab === 'shot'" class="tab-panel">
-            <p class="panel-title">歌词（当前分镜）</p>
-            <input v-model="lyricsDraft" class="lyrics-input" placeholder="输入这句分镜对应的歌词…" />
-            <p v-if="lyricsTranslation" class="lyrics-zh-hint">中文翻译：{{ lyricsTranslation }}</p>
+            <template v-if="!isGeneral">
+              <p class="panel-title">歌词（当前分镜）</p>
+              <input v-model="lyricsDraft" class="lyrics-input" placeholder="输入这句分镜对应的歌词…" />
+              <p v-if="lyricsTranslation" class="lyrics-zh-hint">中文翻译：{{ lyricsTranslation }}</p>
+            </template>
+            <p v-else class="general-shot-tip">
+              {{ store.editingLine.shotType === 'empty' ? '空镜' : '人物镜' }}
+              · 规划时长 {{ store.editingLine.plannedDuration ?? 0 }} 秒
+            </p>
 
             <template v-if="store.editingLine.shot.assets.length">
               <p class="panel-title mt">已生成片段 <span class="field-tip">点击选用并预览</span></p>
@@ -281,10 +276,16 @@ const cancel = () => store.closeEditor()
               </label>
             </div>
 
-            <div class="panel-head mt">
-              <span class="panel-title">分镜提示词</span>
+            <p class="panel-title mt">分镜提示词</p>
+            <div class="prompt-editor">
+              <textarea
+                v-model="shotPromptDraft"
+                class="prompt-input prompt-shot"
+                rows="6"
+                placeholder="描述镜头运动与角色表演，将与场景、出演角色一起生成视频片段…"
+              />
               <button
-                class="btn-outline regen-btn"
+                class="btn-outline prompt-action"
                 :disabled="store.editingLine.shot.status === 'generating' || !shotPromptDraft.trim()"
                 @click="regenShot"
               >
@@ -293,20 +294,20 @@ const cancel = () => store.closeEditor()
                 {{ store.editingLine.shot.assets.length ? '重新生成分镜' : '生成分镜' }}
               </button>
             </div>
-            <textarea
-              v-model="shotPromptDraft"
-              class="prompt-input prompt-shot"
-              rows="6"
-              placeholder="描述镜头运动与角色表演，将与场景、出演角色一起生成视频片段…"
-            />
           </div>
 
           <!-- 场景调整面板 -->
           <div v-if="activeTab === 'scene'" class="tab-panel">
-            <div class="panel-head">
-              <span class="panel-title">场景提示词</span>
+            <p class="panel-title">场景提示词</p>
+            <div class="prompt-editor">
+              <textarea
+                v-model="scenePromptDraft"
+                class="prompt-input"
+                rows="3"
+                placeholder="描述这个分镜的背景场景：环境、光线、色调、氛围…"
+              />
               <button
-                class="btn-outline regen-btn"
+                class="btn-outline prompt-action"
                 :disabled="store.editingLine.scene.status === 'generating' || !scenePromptDraft.trim()"
                 @click="regenScene"
               >
@@ -315,12 +316,6 @@ const cancel = () => store.closeEditor()
                 {{ store.editingLine.scene.imageUrl ? '重新生成场景' : '生成场景' }}
               </button>
             </div>
-            <textarea
-              v-model="scenePromptDraft"
-              class="prompt-input"
-              rows="3"
-              placeholder="描述这个分镜的背景场景：环境、光线、色调、氛围…"
-            />
           </div>
         </div>
 
@@ -721,6 +716,37 @@ const cancel = () => store.closeEditor()
 .prompt-input {
   resize: vertical;
   min-height: 72px;
+  display: block;
+}
+.prompt-editor {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-dark);
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.prompt-editor:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(255, 90, 44, 0.12);
+}
+.prompt-editor .prompt-input {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.prompt-editor .prompt-input:focus {
+  border-color: transparent;
+  box-shadow: none;
+}
+.prompt-action {
+  align-self: flex-end;
+  flex-shrink: 0;
+  margin: 0 12px 12px;
+  padding: 6px 12px;
+  background: #fff;
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.06);
 }
 /* 分镜提示词框加大，方便编写较长的镜头描述 */
 .prompt-input.prompt-shot {

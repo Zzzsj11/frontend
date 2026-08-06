@@ -80,6 +80,12 @@ export interface ShotGenOptions {
 /** 脚本行（每一条 = 一个分镜） */
 export interface ScriptLine {
   id: string
+  /** 脚本来源；通用分镜不包含歌词与翻译 */
+  source?: 'ass' | 'general' | 'manual'
+  /** 通用分镜的镜头类型 */
+  shotType?: 'empty' | 'character'
+  /** 脚本规划时长（秒），不等同于单次视频生成时长 */
+  plannedDuration?: number
   /** 当前分镜歌词 */
   lyrics: string
   /** 歌词中文翻译（歌词非中文时展示在歌词下方） */
@@ -97,6 +103,49 @@ export interface ScriptLine {
   shotOptions?: ShotGenOptions
   /** 是否手动添加的分镜（仅手动添加的分镜允许删除，脚本生成的分镜不可删） */
   manual?: boolean
+}
+
+export interface StoryboardCategoryOption {
+  value: string
+  label: string
+  children?: StoryboardCategoryOption[]
+}
+
+export interface GeneralStoryboardOptions {
+  genres: StoryboardCategoryOption[]
+  seasons: string[]
+  ageGroups: string[]
+  visualStyles: string[]
+  ratios: ShotGenOptions['ratio'][]
+}
+
+export interface GeneralStoryboardRequest {
+  genre: string
+  secondaryCategory: string
+  tertiaryCategory?: string
+  season: string
+  singer?: string
+  ageGroup: string
+  visualStyle: string
+  ratio: ShotGenOptions['ratio']
+  emptyShotCount: number
+  characterShotCount: number
+  totalDuration: number
+  digitalHumanIds?: string[]
+  extraRequirement?: string
+}
+
+export interface GeneralStoryboardResult {
+  title: string
+  cast: string[]
+  totalDuration: number
+  lines: Array<{
+    shotType: 'empty' | 'character'
+    plannedDuration: number
+    scenePrompt: string
+    shotPrompt: string
+    digitalHumanIds: string[]
+  }>
 }
 
 /** 时间轴片段 */

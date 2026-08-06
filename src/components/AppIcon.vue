@@ -22,6 +22,7 @@ export type IconName =
   | 'edit'
   | 'trash'
   | 'folder'
+  | 'chevron-right'
 
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
 
@@ -65,6 +66,7 @@ const paths: Record<IconName, string[]> = {
   ],
   trash: ['M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z'],
   folder: ['M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z'],
+  'chevron-right': ['M9.29 6.71a.996.996 0 0 0 0 1.41L13.17 12l-3.88 3.88a.996.996 0 1 0 1.41 1.41l4.59-4.59a.996.996 0 0 0 0-1.41L10.7 6.7a.996.996 0 0 0-1.41.01z'],
 }
 </script>
 

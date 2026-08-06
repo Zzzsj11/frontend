@@ -1,12 +1,34 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import { useProjectStore } from '../stores/project'
 import ScriptLineItem from './ScriptLine.vue'
 import ShotDetailModal from './ShotDetailModal.vue'
 import MagicScriptModal from './MagicScriptModal.vue'
+import GeneralStoryboardModal from './GeneralStoryboardModal.vue'
 import AppIcon from './AppIcon.vue'
 
 const store = useProjectStore()
+const lineListRef = ref<HTMLDivElement>()
+
+/** 时间线或其他入口选中不可见分镜时，将对应卡片平滑滚动到列表中央 */
+watch(
+  () => store.selectedLineId,
+  async (lineId) => {
+    if (!lineId) return
+    await nextTick()
+    const list = lineListRef.value
+    const item = list?.querySelector<HTMLElement>(`[data-line-id="${lineId}"]`)
+    if (!list || !item) return
+    const listRect = list.getBoundingClientRect()
+    const itemRect = item.getBoundingClientRect()
+    const outsideView = itemRect.top < listRect.top || itemRect.bottom > listRect.bottom
+    if (!outsideView) return
+    list.scrollTo({
+      top: list.scrollTop + itemRect.top - listRect.top - (list.clientHeight - itemRect.height) / 2,
+      behavior: 'smooth',
+    })
+  },
+)
 
 // HTML5 拖拽排序
 const dragIndex = ref(-1)
@@ -31,8 +53,7 @@ const onDrop = (index: number) => {
   <section class="panel script-editor">
     <header class="panel-header">
       <div class="title-group">
-        <h2>脚本编辑器</h2>
-        <span class="subtitle">每一条为一个分镜，点击编辑歌词、场景与出演角色</span>
+        <h2>分镜编辑器</h2>
       </div>
       <div class="header-actions">
         <button class="btn-outline" @click="store.openLibrary()">
@@ -43,16 +64,26 @@ const onDrop = (index: number) => {
         <button class="btn-primary" :disabled="store.magicLoading" @click="store.openMagic()">
           <span v-if="store.magicLoading" class="spinner light" />
           <AppIcon v-else name="sparkles" :size="15" />
-          MV 分镜
+          ASS 分镜
+        </button>
+        <button
+          class="btn-primary"
+          :disabled="store.generalStoryboardLoading"
+          @click="store.openGeneralStoryboard()"
+        >
+          <span v-if="store.generalStoryboardLoading" class="spinner light" />
+          <AppIcon v-else name="movie" :size="15" />
+          通用分镜
         </button>
       </div>
     </header>
 
-    <div class="line-list">
+    <div ref="lineListRef" class="line-list">
       <div
         v-for="(line, index) in store.lines"
         :key="line.id"
         class="line-wrapper"
+        :data-line-id="line.id"
         :class="{ 'drag-over': overIndex === index && dragIndex !== index }"
         draggable="true"
         @dragstart="onDragStart(index, $event)"
@@ -64,7 +95,7 @@ const onDrop = (index: number) => {
       </div>
 
       <p v-if="store.lines.length === 0" class="empty-tip">
-        暂无分镜，点击下方按钮或「MV 分镜」开始创作
+        暂无分镜，您可以点击下方【单个分镜】按钮或顶部「ASS 分镜」/【通用分镜】开始创作
       </p>
     </div>
 
@@ -77,6 +108,7 @@ const onDrop = (index: number) => {
 
     <ShotDetailModal />
     <MagicScriptModal />
+    <GeneralStoryboardModal />
   </section>
 </template>
 
@@ -98,10 +130,6 @@ const onDrop = (index: number) => {
   align-items: baseline;
   gap: 10px;
 }
-.subtitle {
-  color: var(--text-secondary);
-  font-size: 13px;
-}
 .header-actions {
   display: flex;
   gap: 8px;
@@ -120,13 +148,15 @@ const onDrop = (index: number) => {
 }
 .line-list {
   flex: 1;
+  height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 10px;
   margin-top: 14px;
   padding-right: 4px;
-  min-height: 200px;
+  min-height: 0;
 }
 .line-wrapper.drag-over {
   outline: 2px dashed var(--primary);
