@@ -1,16 +1,6 @@
-/** 异步生图真实接口（api-aigc.fzyinghe.com）
- *  - POST /image/generation/tasks 发起图片创建任务（带 image 字段则为图生图）
- *  - GET  /image/generation/tasks/{taskId} 轮询任务结果
- *  开发环境经 vite 代理 /aigc 转发，规避浏览器跨域限制（见 vite.config.ts） */
+/** 图片生成由 Python 后端代理，第三方密钥不会再暴露到浏览器。 */
 
-const BASE = '/aigc'
-const API_KEY = 'yh-tc6lxzhy3hjnzrj59qr4d8y213fvyixwv61t9tcq0dsbsot'
-
-interface ApiResponse<T> {
-  code: number
-  msg: string
-  data: T
-}
+const BASE = '/api'
 
 export interface ImageTaskOptions {
   /** WIDTHxHEIGHT，宽 × 高必须小于 8,294,400，默认 1024x1024 */
@@ -22,55 +12,46 @@ export interface ImageTaskOptions {
   image?: string | string[]
 }
 
-interface CreatedTask {
-  taskId: string
+interface GenerationJob {
+  id: string
   status: string
-}
-
-interface TaskResult {
-  taskId: string
-  status: string
-  progress?: number
-  resultUrls?: string[]
-  resultUrl?: string
-  failReason?: string | null
+  progress: number
+  result?: { urls?: string[] }
+  error?: string | null
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
-      'x-api-key': API_KEY,
       'Content-Type': 'application/json',
-      Accept: '*/*',
+      Accept: 'application/json',
       ...init?.headers,
     },
   })
-  if (!res.ok) throw new Error(`生图接口请求失败（HTTP ${res.status}）`)
-  const body = (await res.json()) as ApiResponse<T>
-  if (body.code !== 200) throw new Error(body.msg || `生图接口错误（code=${body.code}）`)
-  return body.data
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(body.detail || `后端请求失败（HTTP ${res.status}）`)
+  return body as T
 }
 
 /** 发起图片创建任务，返回 taskId */
 export async function createImageTask(prompt: string, options: ImageTaskOptions = {}): Promise<string> {
-  const data = await request<CreatedTask>('/image/generation/tasks', {
+  const data = await request<GenerationJob>('/generations/images', {
     method: 'POST',
     body: JSON.stringify({
-      model: 'gpt-image-2',
       prompt,
       size: options.size ?? '1024x1024',
       quality: options.quality ?? 'auto',
       n: options.n ?? 1,
-      ...(options.image ? { image: options.image } : {}),
+      ...(options.image ? { images: Array.isArray(options.image) ? options.image : [options.image] } : {}),
     }),
   })
-  return data.taskId
+  return data.id
 }
 
 /** 查询任务状态 */
-export function getImageTask(taskId: string): Promise<TaskResult> {
-  return request<TaskResult>(`/image/generation/tasks/${taskId}`)
+export function getImageTask(taskId: string): Promise<GenerationJob> {
+  return request<GenerationJob>(`/generations/${taskId}`)
 }
 
 /** 轮询直至任务完成，返回首张图片地址 */
@@ -81,13 +62,13 @@ export async function waitForImage(
   const deadline = Date.now() + timeoutMs
   for (;;) {
     const task = await getImageTask(taskId)
-    const status = (task.status ?? '').toUpperCase()
-    if (status === 'SUCCESS') {
-      const url = task.resultUrl ?? task.resultUrls?.[0]
+    const status = (task.status ?? '').toLowerCase()
+    if (status === 'succeeded') {
+      const url = task.result?.urls?.[0]
       if (!url) throw new Error('任务成功但未返回图片地址')
       return url
     }
-    if (status.includes('FAIL')) throw new Error(task.failReason || '图片生成失败')
+    if (status === 'failed' || status === 'cancelled') throw new Error(task.error || '图片生成失败')
     if (Date.now() > deadline) throw new Error('图片生成超时，请稍后重试')
     await new Promise((r) => setTimeout(r, intervalMs))
   }
@@ -104,21 +85,8 @@ export function buildPortraitPrompt(description: string, style: string): string 
   return `数字人角色定妆照：${description}。风格：${style}。竖版 3:4 半身人像，单人出镜，人物居中，五官清晰，干净纯色背景，摄影棚柔光，高质量细节，不要文字水印`
 }
 
-/** 把远程签名图片 URL 本地化存储（dev server 下载保存到 public/digital-humans/），
- *  失败时降级返回原始远程地址，保证功能可用 */
+/** 生成结果已经由后端落入本地存储或 TOS，无需浏览器二次下载。 */
 export async function localizeImage(id: string, url: string): Promise<string> {
-  try {
-    const res = await fetch('/local-store/digital-human', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, url }),
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const body = (await res.json()) as { code: number; path?: string; msg?: string }
-    if (body.code !== 200 || !body.path) throw new Error(body.msg || '本地化存储失败')
-    return body.path
-  } catch (err) {
-    console.warn('[localizeImage] 本地化存储失败，回退使用远程地址：', err)
-    return url
-  }
+  void id
+  return url
 }

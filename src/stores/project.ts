@@ -768,6 +768,7 @@ export const useProjectStore = defineStore('project', {
         idx,
         variant,
         genOptions,
+        line.scene.imageUrl,
       )
       const still = this.lines.find((l) => l.id === lineId)
       if (still) {

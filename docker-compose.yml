@@ -1,0 +1,83 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.chat
+      - ./backend/.env
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8000
+      APP_CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-5173}
+      DATABASE_URL: postgresql+asyncpg://mvagent:mvagent@postgres:5432/mvagent
+      REDIS_URL: redis://redis:6379/0
+      LLM_API_MODE: ${LLM_API_MODE:-openai}
+      STORAGE_BACKEND: tos
+    secrets:
+      - provider_config
+    volumes:
+      - mvagent_media:/app/data/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mvagent
+      POSTGRES_USER: mvagent
+      POSTGRES_PASSWORD: mvagent
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - mvagent_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mvagent -d mvagent"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    volumes:
+      - mvagent_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  mvagent_postgres:
+  mvagent_redis:
+  mvagent_media:
+
+secrets:
+  provider_config:
+    file: ./backend/.provider_config.py

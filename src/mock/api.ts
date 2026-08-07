@@ -8,9 +8,6 @@ import type {
   SongProject,
 } from '../types'
 import {
-  magicScripts,
-  makeSceneImage,
-  makeShotCover,
   makeSilentWav,
   makeSongScript,
   mockDigitalHumans,
@@ -18,6 +15,7 @@ import {
   nextId,
 } from './data'
 import type { MagicScript } from './data'
+import * as mediaGen from '../api/mediaGen'
 
 /**
  * Mock API 层 —— 模拟后端接口，每个函数对应一个规划中的 HTTP 接口：
@@ -25,7 +23,7 @@ import type { MagicScript } from './data'
  *  GET  /api/songs/{id}/script     -> fetchSongScript
  *  POST /api/songs                 -> createSongProject
  *  GET  /api/assets/digital-humans -> fetchDigitalHumans
- *  POST /api/script/magic          -> generateMagicScript
+ *  POST /api/storyboards/ass       -> generateMagicScript (real backend)
  *  POST /api/voice/generate        -> generateVoice
  *  POST /api/scene/generate        -> generateSceneImage
  *  POST /api/shot/generate-video   -> generateShotVideo
@@ -63,8 +61,6 @@ export async function fetchDigitalHumans(): Promise<DigitalHuman[]> {
   return mockDigitalHumans
 }
 
-let magicIndex = 0
-
 /** POST /api/script/magic 的请求参数（规划为 multipart/form-data） */
 export interface MagicScriptRequest {
   /** 歌曲编号 */
@@ -79,25 +75,18 @@ export interface MagicScriptRequest {
 
 /** POST /api/script/magic — 根据歌曲编号 + ass 字幕 + 已选角色生成一套 MV 脚本 */
 export async function generateMagicScript(req?: MagicScriptRequest): Promise<MagicScript> {
-  await delay(1200, 2000)
-  const script = magicScripts[magicIndex % magicScripts.length]
-  magicIndex++
-  const selectedIds = (req?.digitalHumanIds ?? []).filter((id) =>
-    mockDigitalHumans.some((human) => human.id === id),
-  )
-  if (!selectedIds.length) {
-    return { cast: [...script.cast], lines: script.lines.map((line) => ({ ...line, digitalHumanIds: [...line.digitalHumanIds] })) }
+  if (!req) throw new Error('缺少 ASS 分镜参数')
+  const form = new FormData()
+  form.append('song_id', req.songId)
+  form.append('ass_file', req.assFile)
+  form.append('digital_human_ids', JSON.stringify(req.digitalHumanIds ?? []))
+  form.append('extra_requirement', req.extraRequirement ?? '')
+  const response = await fetch('/api/storyboards/ass', { method: 'POST', body: form })
+  if (!response.ok) {
+    const body = await response.json().catch(() => null)
+    throw new Error(body?.detail || `ASS 分镜生成失败（HTTP ${response.status}）`)
   }
-  let roleIndex = 0
-  return {
-    cast: [...selectedIds],
-    lines: script.lines.map((line) => ({
-      ...line,
-      digitalHumanIds: line.digitalHumanIds.length
-        ? [selectedIds[roleIndex++ % selectedIds.length]]
-        : [],
-    })),
-  }
+  return response.json()
 }
 
 const generalStoryboardOptions: GeneralStoryboardOptions = {
@@ -212,35 +201,28 @@ export async function generateVoice(_lineId: string): Promise<{ url: string; dur
 
 /** POST /api/scene/generate — 根据场景提示词生成分镜的背景场景图 */
 export async function generateSceneImage(
-  _scenePrompt: string,
-  index: number,
-  variant: number,
+  scenePrompt: string,
+  _index: number,
+  _variant: number,
 ): Promise<{ imageUrl: string }> {
-  await delay(1000, 2000)
-  return { imageUrl: makeSceneImage(index, variant) }
+  return mediaGen.generateScene(scenePrompt)
 }
 
 /** POST /api/shot/generate-video — 根据场景 + 分镜提示词 + 出演角色（可空/可多人）+ 生成参数（清晰度/时长/画幅）生成分镜视频片段 */
 export async function generateShotVideo(
-  _scenePrompt: string,
-  _shotPrompt: string,
-  digitalHumanIds: string[],
-  index: number,
-  variant: number,
+  scenePrompt: string,
+  shotPrompt: string,
+  _digitalHumanIds: string[],
+  _index: number,
+  _variant: number,
   options?: ShotGenOptions,
+  referenceImageUrl?: string,
 ): Promise<{ coverUrl: string; videoUrl: string; duration: number }> {
-  await delay(1500, 3000)
-  const dhNames = digitalHumanIds
-    .map((id) => mockDigitalHumans.find((d) => d.id === id)?.name)
-    .filter(Boolean)
-    .join(' / ')
-  // 时长按所选参数生效；未指定时随机 3~6s（清晰度/画幅在 mock 阶段仅透传，不影响假素材）
-  const duration = options?.duration ?? Math.round((3 + Math.random() * 3) * 10) / 10
-  return {
-    coverUrl: makeShotCover(index, variant, dhNames),
-    videoUrl: `mock://video/shot-${index + 1}-v${variant + 1}.mp4`,
-    duration,
-  }
+  return mediaGen.generateShotVideo(
+    [scenePrompt, shotPrompt].filter(Boolean).join('。'),
+    referenceImageUrl,
+    options ?? { resolution: '1080p', duration: 5, ratio: '16:9' },
+  )
 }
 
 /** POST /api/video/synthesize — 模拟合成进度，最后返回假视频地址 */

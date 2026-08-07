@@ -8,6 +8,14 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+backend/.venv/
+backend/.env
+backend/.env.chat
+backend/.provider_config.py
+backend/data/
+__pycache__/
+*.py[cod]
+.pytest_cache/
 dist
 dist-ssr
 *.local
