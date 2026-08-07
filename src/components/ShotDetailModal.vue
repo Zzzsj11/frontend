@@ -4,6 +4,7 @@ import { DEFAULT_SHOT_OPTIONS, useProjectStore } from '../stores/project'
 import type { ShotAsset, ShotGenOptions } from '../types'
 import AppIcon from './AppIcon.vue'
 import { confirmDialog } from '../composables/useConfirmDialog'
+import { normalizeShotOptions, VIDEO_DURATION_CHOICES } from '../mediaConstraints'
 
 const store = useProjectStore()
 
@@ -19,7 +20,7 @@ const activeTab = ref<TabKey | null>(null)
 // 分镜视频生成参数草稿（清晰度 / 时长 / 画幅），重新生成分镜时生效
 const optionsDraft = ref<ShotGenOptions>({ ...DEFAULT_SHOT_OPTIONS })
 const resolutionChoices: ShotGenOptions['resolution'][] = ['480p', '720p', '1080p']
-const durationChoices = [3, 5, 8, 10, 12]
+const durationChoices = VIDEO_DURATION_CHOICES
 const ratioChoices: ShotGenOptions['ratio'][] = ['16:9', '9:16', '4:3', '1:1']
 
 // 歌词非中文（不含汉字）且存在译文时，在歌词下方展示中文翻译
@@ -81,7 +82,7 @@ watch(
     lyricsDraft.value = line?.lyrics ?? ''
     scenePromptDraft.value = line?.scenePrompt ?? ''
     shotPromptDraft.value = line?.shotPrompt ?? ''
-    optionsDraft.value = { ...(line?.shotOptions ?? DEFAULT_SHOT_OPTIONS) }
+    optionsDraft.value = normalizeShotOptions(line?.shotOptions ?? DEFAULT_SHOT_OPTIONS)
     activeTab.value = store.editingTab
     previewAsset.value = null
   },

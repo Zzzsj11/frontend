@@ -28,6 +28,16 @@ export interface DigitalHuman {
   description: string
   /** 生成形象时使用的完整提示词（可在编辑界面查看 / 修改后重新生成） */
   avatarPrompt?: string
+  scope?: 'system' | 'private'
+  readOnly?: boolean
+  styleId?: string
+  assetCode?: string
+  gender?: string
+  ageDescription?: string
+  appearanceStyle?: string
+  clothingDescription?: string
+  suitableMusicStyles?: string
+  systemPrompt?: string
 }
 
 /** 配音信息 */
@@ -103,6 +113,9 @@ export interface ScriptLine {
   shotOptions?: ShotGenOptions
   /** 是否手动添加的分镜（仅手动添加的分镜允许删除，脚本生成的分镜不可删） */
   manual?: boolean
+  generationStatus?: 'pending' | 'running' | 'succeeded' | 'failed'
+  generationError?: string
+  generationAttempt?: number
 }
 
 export interface StoryboardCategoryOption {
@@ -120,6 +133,7 @@ export interface GeneralStoryboardOptions {
 }
 
 export interface GeneralStoryboardRequest {
+  projectId?: string
   genre: string
   secondaryCategory: string
   tertiaryCategory?: string
@@ -136,15 +150,18 @@ export interface GeneralStoryboardRequest {
 }
 
 export interface GeneralStoryboardResult {
+  taskId: string
   title: string
   cast: string[]
   totalDuration: number
   lines: Array<{
+    id?: string
     shotType: 'empty' | 'character'
     plannedDuration: number
     scenePrompt: string
     shotPrompt: string
     digitalHumanIds: string[]
+    generationStatus?: ScriptLine['generationStatus']
   }>
 }
 

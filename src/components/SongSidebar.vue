@@ -22,7 +22,7 @@ const createBusy = ref(false)
 const createError = ref('')
 const submitCreate = async () => {
   const name = newName.value.trim()
-  if (!name || createBusy.value) return
+  if (!name || createBusy.value || store.songProjectsLoading) return
   createBusy.value = true
   createError.value = ''
   try {
@@ -30,7 +30,6 @@ const submitCreate = async () => {
     const nextCollapsed = new Set(collapsed.value)
     nextCollapsed.delete(song.id)
     collapsed.value = nextCollapsed
-    await store.selectSongTask(song.id, null)
     creating.value = false
     newName.value = ''
   } catch (err) {
@@ -102,7 +101,7 @@ onMounted(() => {
 <template>
   <aside class="panel song-sidebar">
     <div class="sidebar-top">
-      <button class="create-btn" @click="creating = !creating">
+      <button class="create-btn" :disabled="store.songProjectsLoading" @click="creating = !creating">
         <AppIcon name="plus" :size="14" />
         创建歌曲项目
       </button>
@@ -117,7 +116,7 @@ onMounted(() => {
           @keyup.enter="submitCreate"
           @keyup.esc="creating = false"
         />
-        <button class="create-ok" :disabled="!newName.trim() || createBusy" @click="submitCreate">
+        <button class="create-ok" :disabled="!newName.trim() || createBusy || store.songProjectsLoading" @click="submitCreate">
           <span v-if="createBusy" class="spinner light" />
           <template v-else>创建</template>
         </button>

@@ -54,6 +54,12 @@ const onDrop = (index: number) => {
     <header class="panel-header">
       <div class="title-group">
         <h2>分镜编辑器</h2>
+        <span v-if="store.storyboardProgress.total" class="generation-progress">
+          已生成 {{ store.storyboardProgress.completed }}/{{ store.storyboardProgress.total }}
+          <button v-if="store.storyboardProgress.failed" class="retry-all" @click="store.retryFailedStoryboardLines()">
+            {{ store.storyboardProgress.failed }} 条失败，重试
+          </button>
+        </span>
       </div>
       <div class="header-actions">
         <button class="btn-outline" @click="store.openLibrary()">
@@ -61,14 +67,14 @@ const onDrop = (index: number) => {
           角色阵容
           <span v-if="store.castHumans.length" class="cast-count">{{ store.castHumans.length }}</span>
         </button>
-        <button class="btn-primary" :disabled="store.magicLoading" @click="store.openMagic()">
+        <button class="btn-primary" :disabled="store.magicLoading || store.songSwitching" @click="store.openMagic()">
           <span v-if="store.magicLoading" class="spinner light" />
           <AppIcon v-else name="sparkles" :size="15" />
           ASS 分镜
         </button>
         <button
           class="btn-primary"
-          :disabled="store.generalStoryboardLoading"
+          :disabled="store.generalStoryboardLoading || store.songSwitching"
           @click="store.openGeneralStoryboard()"
         >
           <span v-if="store.generalStoryboardLoading" class="spinner light" />
@@ -125,6 +131,8 @@ const onDrop = (index: number) => {
   gap: 12px;
   flex-wrap: wrap;
 }
+.generation-progress { margin-left: 10px; color: var(--text-muted); font-size: 12px; }
+.retry-all { border: 0; background: transparent; color: var(--primary); cursor: pointer; padding: 0 4px; }
 .title-group {
   display: flex;
   align-items: baseline;

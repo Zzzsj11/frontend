@@ -24,7 +24,7 @@ alembic upgrade head
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-In another terminal, start the Vue frontend with `npm run dev`. Vite proxies `/api` and `/media` to port 8000.
+In another terminal, start the Vue frontend with `npm run dev`. Vite proxies `/api` to port 8000. Media is served directly from TOS.
 
 ## Run the complete stack with Docker
 
@@ -41,8 +41,7 @@ The browser never receives provider or TOS credentials. Put them in `backend/.en
 - `VIDEO_*`: Yinghe Seedance task API
 - `DATABASE_URL`: PostgreSQL SQLAlchemy async connection URL
 - `REDIS_URL`: Redis connection URL
-- `STORAGE_BACKEND=local`: saves under `backend/data/media`
-- `STORAGE_BACKEND=tos`: archives references and generated assets to TOS
+- `STORAGE_BACKEND=tos` is required. Uploaded images, generated images/videos, covers and export archives are all persisted to TOS.
 
 TOS settings follow the conventions used by `chouka-tools`: separate reference/video buckets and prefixes, with `TOS_PUBLIC_BUCKET_DOMAIN` producing stable public URLs.
 

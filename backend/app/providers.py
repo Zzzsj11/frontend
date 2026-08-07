@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import uuid
+import asyncio
+import tempfile
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -8,7 +11,7 @@ import httpx
 from .config import settings
 from .jobs import Job, jobs
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
-from .storage import import_remote
+from .storage import get_storage, import_remote, safe_key
 
 
 class ProviderError(RuntimeError):
@@ -24,6 +27,13 @@ def _unwrap(body: dict[str, Any]) -> dict[str, Any]:
     if body.get("code") != 200:
         raise ProviderError(body.get("msg") or f"上游接口返回错误：{body.get('code')}")
     return body.get("data") or {}
+
+
+def _usage(data: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(data.get("usage"), dict):
+        return data["usage"]
+    keys = ("input_tokens", "inputTokens", "prompt_tokens", "promptTokens", "output_tokens", "outputTokens", "completion_tokens", "completionTokens", "total_tokens", "totalTokens")
+    return {key: data[key] for key in keys if key in data}
 
 
 async def _poll(client: httpx.AsyncClient, url: str, headers: dict[str, str], job: Job) -> dict[str, Any]:
@@ -60,15 +70,17 @@ async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, 
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(f"{base}/image/generation/tasks", headers=headers, json=payload)
         response.raise_for_status()
-        task_id = _unwrap(response.json()).get("taskId")
+        created = _unwrap(response.json())
+        task_id = created.get("taskId")
         if not task_id:
             raise ProviderError("生图接口未返回 taskId")
         data = await _poll(client, f"{base}/image/generation/tasks/{task_id}", headers, job)
     urls = data.get("resultUrls") or ([data["resultUrl"]] if data.get("resultUrl") else [])
     if not urls:
         raise ProviderError("生图成功但未返回图片地址")
-    stored = [await import_remote(url, "images") for url in urls]
-    return {"provider": "yinghe", "providerTaskId": task_id, "urls": stored, "sourceUrls": urls}
+    owner_prefix = f"users/{job.user_id}/generated/images"
+    stored = [await import_remote(url, owner_prefix) for url in urls]
+    return {"provider": "yinghe", "providerTaskId": task_id, "model": request.model or settings.image_model, "urls": stored, "sourceUrls": urls, "usage": _usage(data) or _usage(created)}
 
 
 async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
@@ -92,22 +104,47 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(f"{base}/video/generation/tasks", headers=headers, json=payload)
         response.raise_for_status()
-        task_id = _unwrap(response.json()).get("taskId")
+        created = _unwrap(response.json())
+        task_id = created.get("taskId")
         if not task_id:
             raise ProviderError("视频接口未返回 taskId")
         data = await _poll(client, f"{base}/video/generation/tasks/{task_id}", headers, job)
     source_url = data.get("resultUrl")
     if not source_url:
         raise ProviderError("视频生成成功但未返回地址")
-    stored_url = await import_remote(source_url, "videos", f"{task_id}.mp4")
+    owner_prefix = f"users/{job.user_id}/generated"
+    stored_url = await import_remote(source_url, f"{owner_prefix}/videos", f"{task_id}.mp4")
     cover_url = data.get("coverUrl") or data.get("firstFrameUrl")
-    stored_cover = await import_remote(cover_url, "covers") if cover_url else None
+    stored_cover = await import_remote(cover_url, f"{owner_prefix}/covers") if cover_url else await _video_first_frame(source_url, task_id, job.user_id)
     return {
         "provider": "yinghe",
         "providerTaskId": task_id,
+        "model": request.model or settings.video_model,
+        "usage": _usage(data) or _usage(created),
         "videoUrl": stored_url,
         "coverUrl": stored_cover,
         "sourceUrl": source_url,
         "duration": request.duration,
         "ratio": request.ratio,
     }
+
+
+async def _video_first_frame(video_url: str, task_id: str, user_id: str | None) -> str:
+    """Extract the default shot cover from the generated video's first frame."""
+    async with httpx.AsyncClient(timeout=180, follow_redirects=True) as client:
+        response = await client.get(video_url)
+        response.raise_for_status()
+    with tempfile.TemporaryDirectory(prefix="mvagent-cover-") as temp_dir:
+        video_path = Path(temp_dir) / "source.mp4"
+        cover_path = Path(temp_dir) / "cover.jpg"
+        video_path.write_bytes(response.content)
+        from imageio_ffmpeg import get_ffmpeg_exe
+        process = await asyncio.create_subprocess_exec(
+            get_ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-y", "-ss", "0", "-i", str(video_path),
+            "-frames:v", "1", "-q:v", "2", str(cover_path),
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await process.communicate()
+        if process.returncode or not cover_path.is_file():
+            raise ProviderError(f"提取视频首帧失败：{stderr.decode(errors='replace')[:300]}")
+        return await get_storage().put_bytes(safe_key(f"users/{user_id}/generated/covers", f"{task_id}.jpg"), cover_path.read_bytes(), "image/jpeg")

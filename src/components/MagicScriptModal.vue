@@ -35,6 +35,9 @@ const pickAss = (files: FileList | null) => {
   const file = files?.[0]
   if (!file) return
   assFile.value = file
+  store.magicError = null
+  const codes = file.name.match(/(?<!\d)\d{5,}(?!\d)/g) ?? []
+  if (codes.length === 1) songId.value = codes[0]
 }
 const onAssChange = (e: Event) => {
   pickAss((e.target as HTMLInputElement).files)
@@ -138,6 +141,7 @@ const cancel = () => {
               />
             </div>
           </div>
+          <p v-if="store.magicError" class="error-tip" role="alert">{{ store.magicError }}</p>
         </div>
 
         <footer class="modal-footer">
@@ -411,5 +415,13 @@ const cancel = () => {
   justify-content: center;
   font-size: 15px;
   padding: 11px 0;
+}
+.error-tip {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff0f0;
+  color: #c33;
+  font-size: 13px;
 }
 </style>

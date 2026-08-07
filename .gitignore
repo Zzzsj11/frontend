@@ -16,6 +16,10 @@ backend/data/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+test-results/
+playwright-report/
+test-artifacts/full-journey/runs/
+coverage/
 dist
 dist-ssr
 *.local

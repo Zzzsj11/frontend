@@ -147,7 +147,7 @@ const openUpload = () => {
   if (uploadOpen.value) genOpen.value = false
 }
 
-// 选择头像：等比缩放到 3:4 竖版范围内并转 data URL，避免 localStorage 膨胀
+// 选择头像：等比缩放到 3:4 竖版范围内并转 data URL，提交时上传 TOS
 const onUpAvatarChange = (e: Event) => {
   const target = e.target as HTMLInputElement
   const file = target.files?.[0]
@@ -226,7 +226,7 @@ const closeEdit = () => {
   editId.value = null
 }
 
-/** 把表单草稿写回 store（含 localStorage 持久化） */
+/** 把表单草稿写回 store，并同步保存到后端 */
 const applyEdit = () => {
   if (!editing.value) return
   store.updateDigitalHuman(editing.value.id, {

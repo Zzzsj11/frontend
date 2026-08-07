@@ -73,6 +73,13 @@ const onGenerateShot = async () => {
 
     <!-- 歌词 + 提示词摘要 -->
     <div class="line-info">
+      <div v-if="line.generationStatus === 'pending' || line.generationStatus === 'running'" class="prompt-generation-state">
+        <span class="spinner" /> {{ line.generationStatus === 'pending' ? '等待生成提示词' : '正在生成提示词' }}
+      </div>
+      <div v-else-if="line.generationStatus === 'failed'" class="prompt-generation-state failed">
+        生成失败
+        <button @click.stop="store.retryStoryboardLine(line.id)">重新生成</button>
+      </div>
       <div v-if="isGeneral" class="general-meta">
         <span class="shot-type" :class="line.shotType">{{ line.shotType === 'empty' ? '空镜' : '人物镜' }}</span>
         <span v-if="line.plannedDuration" class="planned-duration">预计 {{ line.plannedDuration }} 秒</span>
@@ -115,6 +122,9 @@ const onGenerateShot = async () => {
   cursor: default;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
+.prompt-generation-state { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; margin-bottom: 4px; }
+.prompt-generation-state.failed { color: #c0392b; }
+.prompt-generation-state button { border: 0; background: transparent; color: var(--primary); cursor: pointer; padding: 0; }
 .script-line.selected {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px rgba(255, 90, 44, 0.12);

@@ -269,19 +269,19 @@ const toggleFullscreen = () => {
       </label>
       <button
         class="btn-outline synth-btn"
-        :disabled="!store.hasAssets || store.synthesis.status === 'running'"
+        :disabled="!store.hasVideoAssets || store.synthesis.status === 'running'"
         @click="store.runSynthesize()"
       >
         <template v-if="store.synthesis.status === 'running'">
-          合成中 {{ store.synthesis.progress }}%
+          正在导出素材 {{ store.synthesis.progress }}%
         </template>
         <template v-else-if="store.synthesis.status === 'done'">
           <AppIcon name="movie" :size="15" />
-          合成完成
+          素材已导出
         </template>
         <template v-else>
           <AppIcon name="movie" :size="15" />
-          合成视频
+          导出素材
         </template>
       </button>
     </footer>

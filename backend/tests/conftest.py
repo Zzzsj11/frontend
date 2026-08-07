@@ -18,6 +18,8 @@ def client():
     from app.main import app
 
     with TestClient(app) as test_client:
+        login = test_client.post("/api/auth/login", json={"username": "admin", "password": "123456"})
+        assert login.status_code == 200
+        test_client.headers["Authorization"] = f"Bearer {login.json()['accessToken']}"
         yield test_client
     TEST_DB.unlink(missing_ok=True)
-

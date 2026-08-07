@@ -7,6 +7,24 @@ def test_health(client) -> None:
     assert body["redis"] is True
 
 
+def test_api_errors_are_logged_with_tracking_code_and_redaction(client) -> None:
+    response = client.post("/api/auth/login", json={"username": "admin", "password": "wrong-password"})
+    assert response.status_code == 401
+    assert response.json()["errorCode"].startswith("ERR-")
+    logs = client.get("/api/admin/api-errors").json()["items"]
+    item = next(value for value in logs if value["errorCode"] == response.json()["errorCode"])
+    assert item["path"] == "/api/auth/login"
+    assert item["statusCode"] == 401
+    assert item["requestPayload"]["password"] == "***"
+
+
+def test_auth_me_and_refresh(client) -> None:
+    assert client.get("/api/auth/me").json()["username"] == "admin"
+    refreshed = client.post("/api/auth/refresh")
+    assert refreshed.status_code == 200
+    assert refreshed.json()["accessToken"]
+
+
 def test_generation_not_found(client) -> None:
     response = client.get("/api/generations/missing")
     assert response.status_code == 404

@@ -2,13 +2,15 @@ import { defineStore } from 'pinia'
 import type { DigitalHuman, GeneralStoryboardOptions, GeneralStoryboardRequest, ScriptLine, ShotAsset, ShotGenOptions, SongProject, SynthesisState, TimelineClip } from '../types'
 import * as api from '../mock/api'
 import * as imageGen from '../api/imageGen'
-import { initialCastIds, initialLines, mockDigitalHumans, nextId } from '../mock/data'
+import { nextId } from '../mock/data'
+import { reportApiError } from '../errorBus'
+import { DEFAULT_VIDEO_DURATION, normalizeShotOptions } from '../mediaConstraints'
 
 /** 无配音时的占位时长（秒） */
 export const DEFAULT_CLIP_DURATION = 5
 
 /** 分镜视频生成参数默认值（清晰度 / 时长 / 画幅） */
-export const DEFAULT_SHOT_OPTIONS: ShotGenOptions = { resolution: '1080p', duration: 5, ratio: '16:9' }
+export const DEFAULT_SHOT_OPTIONS: ShotGenOptions = { resolution: '1080p', duration: DEFAULT_VIDEO_DURATION, ratio: '16:9' }
 
 let rafId = 0
 let lastTick = 0
@@ -16,70 +18,32 @@ let lastTick = 0
 const sceneVariants: Record<string, number> = {}
 
 /** 数字人资产库本地持久化 key */
-const DH_STORAGE_KEY = 'mv-digital-humans'
-
-/** 风格分类列表本地持久化 key */
-const DH_STYLE_STORAGE_KEY = 'mv-dh-styles'
-
 /** 删除分类后，该分类下数字人的归属分类 */
 const FALLBACK_STYLE = '未分类'
 
-/** 从 localStorage 恢复风格分类列表，无存档时从初始数字人推导 */
-function loadDhStyles(): string[] {
-  try {
-    const raw = localStorage.getItem(DH_STYLE_STORAGE_KEY)
-    if (raw) {
-      const list = JSON.parse(raw) as string[]
-      if (Array.isArray(list) && list.length) {
-        return [...new Set(list.filter((s) => typeof s === 'string' && s.trim()))]
-      }
-    }
-  } catch {
-    /* 存档损坏时回退推导数据 */
-  }
-  return [...new Set(mockDigitalHumans.map((d) => d.style))]
-}
-
-/** 从 localStorage 恢复数字人资产库（新增/编辑/删除刷新后不丢），无存档时用初始数据 */
-function loadDigitalHumans(): DigitalHuman[] {
-  try {
-    const raw = localStorage.getItem(DH_STORAGE_KEY)
-    if (raw) {
-      const list = JSON.parse(raw) as DigitalHuman[]
-      if (Array.isArray(list) && list.length) {
-        return list.map((d) => ({
-          ...d,
-          avatarPrompt: d.avatarPrompt ?? imageGen.buildPortraitPrompt(d.description, d.style),
-        }))
-      }
-    }
-  } catch {
-    /* 存档损坏时回退初始数据 */
-  }
-  return mockDigitalHumans.map((d) => ({ ...d }))
-}
-
 export const useProjectStore = defineStore('project', {
   state: () => ({
-    lines: initialLines as ScriptLine[],
-    digitalHumans: loadDigitalHumans(),
+    lines: [] as ScriptLine[],
+    digitalHumans: [] as DigitalHuman[],
     /** 风格分类列表（支持增删改查，空分类也会保留） */
-    dhStyles: loadDhStyles(),
+    dhStyles: [] as string[],
+    dhStyleIds: {} as Record<string, string>,
+    systemDhStyles: [] as string[],
     /** 歌曲项目列表（左侧任务栏：一个目录处理一首歌曲） */
     songProjects: [] as SongProject[],
     songProjectsLoading: false,
     songProjectsError: null as string | null,
     /** 当前打开的歌曲项目 id */
-    activeSongId: 'song-nunan',
+    activeSongId: '',
     /** 当前选中的处理任务 id */
-    activeTaskId: 'task-nunan-1' as string | null,
+    activeTaskId: null as string | null,
     /** 正在切换歌曲（载入脚本中） */
     songSwitching: false,
     /** 各子项目(任务)的脚本编辑现场缓存(按 taskId)，切回时不丢编辑状态 */
     taskScripts: {} as Record<string, { cast: string[]; lines: ScriptLine[] }>,
     /** 全局角色阵容：本 MV 选定的数字人（全片统一），分镜只能从阵容中挑选出演角色 */
-    castIds: [...initialCastIds] as string[],
-    selectedLineId: (initialLines[0]?.id ?? null) as string | null,
+    castIds: [] as string[],
+    selectedLineId: null as string | null,
     /** 当前在弹窗中编辑的分镜行 */
     editingLineId: null as string | null,
     /** 打开分镜编辑弹窗时默认展开的选项 */
@@ -88,6 +52,7 @@ export const useProjectStore = defineStore('project', {
     libraryOpen: false,
     /** AI 魔法脚本弹窗开关 */
     magicOpen: false,
+    magicError: null as string | null,
     /** 通用分镜参数弹窗 */
     generalStoryboardOpen: false,
     generalStoryboardLoading: false,
@@ -194,9 +159,19 @@ export const useProjectStore = defineStore('project', {
       return line.lyricsZh?.trim() || undefined
     },
 
-    /** 是否有任何配音或分镜素材（决定合成按钮可用性） */
-    hasAssets(state): boolean {
-      return state.lines.some((l) => l.voice.status === 'done' || l.shot.status === 'done')
+    /** 是否有可导出的视频片段 */
+    hasVideoAssets(state): boolean {
+      return state.lines.some((line) => line.shot.assets.some((asset) => /^(https?:)/.test(asset.videoUrl)))
+    },
+
+    storyboardProgress(state): { total: number; completed: number; failed: number; active: boolean } {
+      const generated = state.lines.filter((line) => line.generationStatus)
+      return {
+        total: generated.length,
+        completed: generated.filter((line) => line.generationStatus === 'succeeded').length,
+        failed: generated.filter((line) => line.generationStatus === 'failed').length,
+        active: generated.some((line) => line.generationStatus === 'pending' || line.generationStatus === 'running'),
+      }
     },
 
     /** 播放范围（单个分镜模式只播选中片段） */
@@ -216,7 +191,17 @@ export const useProjectStore = defineStore('project', {
       this.songProjectsLoading = true
       this.songProjectsError = null
       try {
-        this.songProjects = await api.fetchSongProjects()
+        const [projects, humans, styles] = await Promise.all([api.fetchSongProjects(), api.fetchDigitalHumans(), api.fetchDigitalHumanStyles()])
+        this.songProjects = projects
+        this.digitalHumans = humans
+        this.dhStyles = styles.map((item) => item.name)
+        this.dhStyleIds = Object.fromEntries(styles.map((item) => [item.name, item.id]))
+        this.systemDhStyles = styles.filter((item) => item.readOnly).map((item) => item.name)
+        if (!this.activeSongId && projects[0]) {
+          this.activeSongId = projects[0].id
+          const taskId = projects[0].tasks[0]?.id
+          if (taskId) await this._loadTask(projects[0].id, taskId)
+        }
       } catch (err) {
         this.songProjectsError = err instanceof Error ? err.message : '歌曲项目加载失败'
       } finally {
@@ -228,6 +213,16 @@ export const useProjectStore = defineStore('project', {
     async createSongProject(name: string): Promise<SongProject> {
       const song = await api.createSongProject(name)
       this.songProjects.push(song)
+      // Creating a project is also a navigation action. Keep both operations in
+      // one store transaction so a concurrent/finishing selection cannot leave
+      // the editor attached to the previously active project.
+      this._cacheCurrentTask()
+      this.songSwitching = true
+      try {
+        await this._loadTask(song.id, null)
+      } finally {
+        this.songSwitching = false
+      }
       return song
     },
 
@@ -240,7 +235,7 @@ export const useProjectStore = defineStore('project', {
 
     /** 载入指定子项目(任务)的脚本到编辑区（不负责缓存当前，调用方自行处理） */
     async _loadTask(songId: string, taskId: string | null) {
-      const script = (taskId && this.taskScripts[taskId]) || (await api.fetchSongScript(songId))
+      const script = taskId ? await api.fetchSongScript(taskId) : { cast: [], lines: [] }
       if (taskId) this.taskScripts[taskId] = script
       this.stop()
       this.editingLineId = null
@@ -250,6 +245,55 @@ export const useProjectStore = defineStore('project', {
       this.activeTaskId = taskId
       this.selectedLineId = this.lines[0]?.id ?? null
       this.currentTime = 0
+      if (taskId) {
+        const pending = this.lines.filter((line) => line.generationStatus === 'pending').map((line) => line.id)
+        if (pending.length) void this._generateStoryboardQueue(taskId, pending)
+      }
+    },
+
+    async _generateStoryboardQueue(taskId: string, lineIds: string[], force = false) {
+      let cursor = 0
+      const worker = async () => {
+        while (cursor < lineIds.length) {
+          const lineId = lineIds[cursor++]
+          const local = this.lines.find((line) => line.id === lineId)
+          if (local && this.activeTaskId === taskId) {
+            local.generationStatus = 'running'
+            local.generationError = undefined
+          }
+          try {
+            const item = await api.generateStoryboardLine(taskId, lineId, force)
+            const current = this.lines.find((line) => line.id === lineId)
+            if (current && this.activeTaskId === taskId) {
+              current.scenePrompt = String(item.scenePrompt || '')
+              current.shotPrompt = String(item.shotPrompt || '')
+              current.digitalHumanIds = (item.digitalHumanIds as string[]) || []
+              current.generationStatus = 'succeeded'
+              current.generationError = undefined
+              current.generationAttempt = Number(item.generationAttempt || current.generationAttempt || 1)
+            }
+          } catch (error) {
+            const current = this.lines.find((line) => line.id === lineId)
+            if (current && this.activeTaskId === taskId) {
+              current.generationStatus = 'failed'
+              current.generationError = error instanceof Error ? error.message : '单条分镜生成失败'
+            }
+          }
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(4, lineIds.length) }, () => worker()))
+      if (this.activeTaskId === taskId) this._cacheCurrentTask()
+    },
+
+    async retryStoryboardLine(lineId: string) {
+      if (!this.activeTaskId) return
+      await this._generateStoryboardQueue(this.activeTaskId, [lineId], true)
+    },
+
+    async retryFailedStoryboardLines() {
+      if (!this.activeTaskId) return
+      const { lineIds } = await api.resetFailedStoryboardLines(this.activeTaskId)
+      await this._generateStoryboardQueue(this.activeTaskId, lineIds, true)
     },
 
     /** 切换到某歌曲的处理任务(子项目)：每个任务是独立脚本，当前编辑现场先写入缓存 */
@@ -272,6 +316,7 @@ export const useProjectStore = defineStore('project', {
       const trimmed = name.trim()
       if (!song || !trimmed) return
       song.name = trimmed
+      void api.updateSongProject(songId, trimmed)
     },
 
     /** 删除歌曲项目(目录)：连同其下所有子项目与脚本缓存；删除激活项时切到其余首个任务 */
@@ -279,6 +324,7 @@ export const useProjectStore = defineStore('project', {
       const idx = this.songProjects.findIndex((s) => s.id === songId)
       if (idx < 0) return
       const [removed] = this.songProjects.splice(idx, 1)
+      await api.deleteSongProject(songId)
       removed.tasks.forEach((t) => delete this.taskScripts[t.id])
       if (songId !== this.activeSongId) return
       // 删除的是当前激活歌曲：切到剩余首个歌曲的首个任务，否则清空编辑区
@@ -309,6 +355,7 @@ export const useProjectStore = defineStore('project', {
       const trimmed = title.trim()
       if (!task || !trimmed) return
       task.title = trimmed
+      void api.updateSongTask(taskId, trimmed)
     },
 
     /** 删除子项目(任务)：删除激活任务时切到同歌曲相邻任务，否则清空编辑区 */
@@ -318,6 +365,7 @@ export const useProjectStore = defineStore('project', {
       const idx = song.tasks.findIndex((t) => t.id === taskId)
       if (idx < 0) return
       song.tasks.splice(idx, 1)
+      await api.deleteSongTask(taskId)
       delete this.taskScripts[taskId]
       if (taskId !== this.activeTaskId) return
       const next = song.tasks[idx] ?? song.tasks[idx - 1]
@@ -355,6 +403,7 @@ export const useProjectStore = defineStore('project', {
       }
       this.lines.push(line)
       this.selectedLineId = line.id
+      if (this.activeTaskId) void api.createStoryboardLine(this.activeTaskId,{source:'manual',lyrics:'',scene_prompt:'',shot_prompt:'',digital_human_ids:[]}).then((saved)=>{ line.id=saved.id; this.selectedLineId=saved.id })
     },
 
     removeLine(lineId: string) {
@@ -362,6 +411,7 @@ export const useProjectStore = defineStore('project', {
       if (idx < 0) return
       // 脚本生成的分镜不允许删除，仅手动添加的分镜可删
       if (!this.lines[idx].manual) return
+      void api.deleteStoryboardLine(lineId)
       this.lines.splice(idx, 1)
       if (this.selectedLineId === lineId) {
         this.selectedLineId = this.lines[Math.min(idx, this.lines.length - 1)]?.id ?? null
@@ -371,23 +421,27 @@ export const useProjectStore = defineStore('project', {
 
     updateLyrics(lineId: string, lyrics: string) {
       const line = this.lines.find((l) => l.id === lineId)
-      if (line) line.lyrics = lyrics
+      if (line) { line.lyrics = lyrics; void api.updateStoryboardLine(lineId,{lyrics}) }
     },
 
     updateScenePrompt(lineId: string, scenePrompt: string) {
       const line = this.lines.find((l) => l.id === lineId)
-      if (line) line.scenePrompt = scenePrompt
+      if (line) { line.scenePrompt = scenePrompt; void api.updateStoryboardLine(lineId,{scene_prompt:scenePrompt}) }
     },
 
     updateShotPrompt(lineId: string, shotPrompt: string) {
       const line = this.lines.find((l) => l.id === lineId)
-      if (line) line.shotPrompt = shotPrompt
+      if (line) { line.shotPrompt = shotPrompt; void api.updateStoryboardLine(lineId,{shot_prompt:shotPrompt}) }
     },
 
     /** 更新分镜视频生成参数（清晰度 / 时长 / 画幅） */
     updateShotOptions(lineId: string, options: ShotGenOptions) {
       const line = this.lines.find((l) => l.id === lineId)
-      if (line) line.shotOptions = { ...options }
+      if (line) {
+        const normalized = normalizeShotOptions(options)
+        line.shotOptions = normalized
+        void api.updateStoryboardLine(lineId,{shot_options:normalized})
+      }
     },
 
     /** 切换某分镜的出演角色（只能选全局阵容内的数字人，可多选/可全不选） */
@@ -396,12 +450,14 @@ export const useProjectStore = defineStore('project', {
       if (!line || !this.castIds.includes(digitalHumanId)) return
       const idx = line.digitalHumanIds.indexOf(digitalHumanId)
       idx >= 0 ? line.digitalHumanIds.splice(idx, 1) : line.digitalHumanIds.push(digitalHumanId)
+      void api.updateStoryboardLine(lineId,{digital_human_ids:line.digitalHumanIds})
     },
 
     moveLine(fromIndex: number, toIndex: number) {
       if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return
       const [moved] = this.lines.splice(fromIndex, 1)
       this.lines.splice(toIndex, 0, moved)
+      if(this.activeTaskId) void api.reorderStoryboardLines(this.activeTaskId,this.lines.map((line)=>line.id))
     },
 
     selectLine(lineId: string) {
@@ -443,6 +499,8 @@ export const useProjectStore = defineStore('project', {
       } else {
         this.castIds.push(digitalHumanId)
       }
+      if(this.activeTaskId) void api.updateTaskCast(this.activeTaskId,this.castIds)
+      this.lines.forEach((line)=>void api.updateStoryboardLine(line.id,{digital_human_ids:line.digitalHumanIds}))
     },
 
     /** 调用真实异步生图接口生成数字人形象，图片本地化存储后加入资产库 */
@@ -457,7 +515,7 @@ export const useProjectStore = defineStore('project', {
           ...(input.referenceImage ? { image: input.referenceImage } : {}),
         })
         const avatar = await imageGen.localizeImage(id, remoteUrl)
-        const dh: DigitalHuman = {
+        const draft: DigitalHuman = {
           id,
           name: input.name,
           style: input.style,
@@ -465,8 +523,8 @@ export const useProjectStore = defineStore('project', {
           description: input.description,
           avatarPrompt: prompt,
         }
+        const dh = await api.createDigitalHuman({ name:draft.name, styleId:this.dhStyleIds[draft.style], description:draft.description, avatar:draft.avatar, avatarPrompt:draft.avatarPrompt, source:'generated' })
         this.digitalHumans.push(dh)
-        this.persistDigitalHumans()
         this.ensureDhStyle(dh.style)
         return dh
       } finally {
@@ -475,34 +533,23 @@ export const useProjectStore = defineStore('project', {
     },
 
     /** 上传自定义数字人：用户自备头像与信息直接加入资产库（名称、风格必填，不调用生图接口） */
-    addCustomDigitalHuman(input: {
+    async addCustomDigitalHuman(input: {
       name: string
       style: string
       description?: string
       avatar: string
-    }): DigitalHuman {
-      const dh: DigitalHuman = {
-        id: nextId('dh'),
-        name: input.name,
-        style: input.style,
-        avatar: input.avatar,
-        description: input.description ?? '',
-        avatarPrompt: '',
-      }
+    }): Promise<DigitalHuman> {
+      const tosAvatar = await api.uploadDataUrl(input.avatar, `${nextId('avatar')}.png`)
+      const dh = await api.createDigitalHuman({ name:input.name, styleId:this.dhStyleIds[input.style], description:input.description ?? '', avatar:tosAvatar, avatarPrompt:'', source:'uploaded' })
       this.digitalHumans.push(dh)
-      this.persistDigitalHumans()
       this.ensureDhStyle(dh.style)
       return dh
     },
 
     // ---------- 风格分类增删改查 ----------
-    /** 风格分类列表写入 localStorage */
+    /** 分类持久化已迁移至 PostgreSQL */
     persistDhStyles() {
-      try {
-        localStorage.setItem(DH_STYLE_STORAGE_KEY, JSON.stringify(this.dhStyles))
-      } catch {
-        /* 存储超限时忽略，不影响当前会话使用 */
-      }
+      /* 分类由 PostgreSQL 持久化；本方法保留以兼容现有同步 UI。 */
     },
 
     /** 登记某风格到分类列表（生成/上传/编辑数字人使用新风格时自动登记） */
@@ -510,7 +557,7 @@ export const useProjectStore = defineStore('project', {
       const s = style.trim()
       if (!s || this.dhStyles.includes(s)) return
       this.dhStyles.push(s)
-      this.persistDhStyles()
+      void api.createDigitalHumanStyle(s).then((item) => { this.dhStyleIds[s] = item.id })
     },
 
     /** 新增风格分类；名称为空或已存在时返回 false */
@@ -518,12 +565,13 @@ export const useProjectStore = defineStore('project', {
       const s = name.trim()
       if (!s || s === '全部' || this.allDhStyles.includes(s)) return false
       this.dhStyles.push(s)
-      this.persistDhStyles()
+      void api.createDigitalHumanStyle(s).then((item) => { this.dhStyleIds[s] = item.id })
       return true
     },
 
     /** 重命名风格分类：同步更新该分类下所有数字人；目标名已存在时合并到该分类 */
     renameDhStyle(oldName: string, newName: string): boolean {
+      if (this.systemDhStyles.includes(oldName)) return false
       const s = newName.trim()
       if (!s || s === '全部' || s === oldName) return false
       const idx = this.dhStyles.indexOf(oldName)
@@ -542,12 +590,13 @@ export const useProjectStore = defineStore('project', {
         }
       })
       this.persistDhStyles()
-      if (touched) this.persistDigitalHumans()
+      if (touched) this.digitalHumans.filter((d)=>d.style===s && !d.readOnly).forEach((d)=>void api.updateDigitalHuman(d.id,{style_id:this.dhStyleIds[s]}))
       return true
     },
 
     /** 删除风格分类：该分类下的数字人归入「未分类」 */
     deleteDhStyle(name: string) {
+      if (this.systemDhStyles.includes(name)) return
       const idx = this.dhStyles.indexOf(name)
       if (idx >= 0) this.dhStyles.splice(idx, 1)
       let moved = false
@@ -559,16 +608,12 @@ export const useProjectStore = defineStore('project', {
       })
       if (moved && !this.dhStyles.includes(FALLBACK_STYLE)) this.dhStyles.push(FALLBACK_STYLE)
       this.persistDhStyles()
-      if (moved) this.persistDigitalHumans()
+      const styleId=this.dhStyleIds[name]; if(styleId) void api.deleteDigitalHumanStyle(styleId)
     },
 
-    /** 数字人资产库写入 localStorage（头像已是本地路径，体积很小） */
+    /** 数字人持久化已迁移至 PostgreSQL */
     persistDigitalHumans() {
-      try {
-        localStorage.setItem(DH_STORAGE_KEY, JSON.stringify(this.digitalHumans))
-      } catch {
-        /* 存储超限时忽略，不影响当前会话使用 */
-      }
+      /* 角色由 PostgreSQL 持久化；本方法保留以兼容现有同步 UI。 */
     },
 
     /** 编辑数字人基础信息 / 提示词 */
@@ -577,16 +622,17 @@ export const useProjectStore = defineStore('project', {
       patch: Partial<Pick<DigitalHuman, 'name' | 'style' | 'description' | 'avatarPrompt'>>,
     ) {
       const dh = this.digitalHumans.find((d) => d.id === id)
-      if (!dh) return
+      if (!dh || dh.readOnly) return
       Object.assign(dh, patch)
-      this.persistDigitalHumans()
+      if (!dh.readOnly) void api.updateDigitalHuman(id,{ name:patch.name, style_id:patch.style ? this.dhStyleIds[patch.style] : undefined, description:patch.description, avatar_prompt:patch.avatarPrompt })
       if (patch.style) this.ensureDhStyle(patch.style)
     },
 
     /** 删除数字人：同步从全局阵容与所有分镜出演角色中移除 */
     deleteDigitalHuman(id: string) {
       const idx = this.digitalHumans.findIndex((d) => d.id === id)
-      if (idx < 0) return
+      if (idx < 0 || this.digitalHumans[idx].readOnly) return
+      void api.deleteDigitalHuman(id)
       this.digitalHumans.splice(idx, 1)
       const c = this.castIds.indexOf(id)
       if (c >= 0) this.castIds.splice(c, 1)
@@ -600,14 +646,14 @@ export const useProjectStore = defineStore('project', {
     /** 用（可能已修改的）提示词重新生成数字人形象，成功后本地化存储并替换头像 */
     async regenerateDigitalHumanAvatar(id: string, prompt?: string): Promise<void> {
       const dh = this.digitalHumans.find((d) => d.id === id)
-      if (!dh || this.dhRegeneratingId) return
+      if (!dh || dh.readOnly || this.dhRegeneratingId) return
       this.dhRegeneratingId = id
       try {
         const finalPrompt = (prompt ?? dh.avatarPrompt ?? imageGen.buildPortraitPrompt(dh.description, dh.style)).trim()
         const remoteUrl = await imageGen.generateImage(finalPrompt, { size: '768x1024', quality: 'medium' })
         dh.avatar = await imageGen.localizeImage(dh.id, remoteUrl)
         dh.avatarPrompt = finalPrompt
-        this.persistDigitalHumans()
+        if (!dh.readOnly) await api.updateDigitalHuman(id,{avatar_url:dh.avatar,avatar_prompt:finalPrompt})
       } finally {
         this.dhRegeneratingId = null
       }
@@ -615,6 +661,7 @@ export const useProjectStore = defineStore('project', {
 
     // ---------- Mock API 联动 ----------
     openMagic() {
+      this.magicError = null
       this.magicOpen = true
     },
     closeMagic() {
@@ -643,9 +690,9 @@ export const useProjectStore = defineStore('project', {
       this.generalStoryboardLoading = true
       this.generalStoryboardError = null
       try {
-        const result = await api.generateGeneralStoryboard(req)
+        const result = await api.generateGeneralStoryboard({ ...req, projectId: this.activeSongId })
         const lines: ScriptLine[] = result.lines.map((item) => ({
-          id: nextId(),
+          id: item.id || nextId(),
           source: 'general',
           shotType: item.shotType,
           plannedDuration: item.plannedDuration,
@@ -657,6 +704,7 @@ export const useProjectStore = defineStore('project', {
           scene: { status: 'none' },
           shot: { status: 'none', assets: [] },
           shotOptions: { ...DEFAULT_SHOT_OPTIONS, ratio: req.ratio },
+          generationStatus: item.generationStatus || 'pending',
         }))
         this._cacheCurrentTask()
         let song = this.songProjects.find((s) => s.id === this.activeSongId)
@@ -665,7 +713,7 @@ export const useProjectStore = defineStore('project', {
           this.songProjects.push(song)
           this.activeSongId = song.id
         }
-        const task = { id: nextId('task'), title: result.title, updatedAt: '刚刚' }
+        const task = { id: result.taskId, title: result.title, updatedAt: '刚刚' }
         song.tasks.push(task)
         this.stop()
         this.editingLineId = null
@@ -676,6 +724,7 @@ export const useProjectStore = defineStore('project', {
         this.selectedLineId = this.lines[0]?.id ?? null
         this.currentTime = 0
         this.generalStoryboardOpen = false
+        void this._generateStoryboardQueue(task.id, lines.map((line) => line.id))
       } catch (err) {
         this.generalStoryboardError = err instanceof Error ? err.message : '通用分镜生成失败'
       } finally {
@@ -687,11 +736,13 @@ export const useProjectStore = defineStore('project', {
     async runMagicScript(req?: api.MagicScriptRequest) {
       if (this.magicLoading) return
       this.magicLoading = true
+      this.magicError = null
       try {
-        const script = await api.generateMagicScript(req)
+        if (!req || !this.activeSongId) throw new Error('请先选择歌曲项目')
+        const script = await api.generateMagicScript({ ...req, projectId: this.activeSongId })
         // 脚本自带统一的角色阵容
         const lines: ScriptLine[] = script.lines.map((item) => ({
-          id: nextId(),
+          id: (item as typeof item & { id?: string }).id || nextId(),
           source: 'ass',
           lyrics: item.lyrics,
           scenePrompt: item.scenePrompt,
@@ -700,6 +751,7 @@ export const useProjectStore = defineStore('project', {
           voice: { status: 'none' },
           scene: { status: 'none' },
           shot: { status: 'none', assets: [] },
+          generationStatus: (item as typeof item & { generationStatus?: ScriptLine['generationStatus'] }).generationStatus || 'pending',
         }))
         // 先缓存当前子项目编辑现场，避免被新脚本覆盖丢失
         this._cacheCurrentTask()
@@ -710,7 +762,7 @@ export const useProjectStore = defineStore('project', {
           this.songProjects.push(song)
           this.activeSongId = song.id
         }
-        const task = { id: nextId('task'), title: 'MV 分镜制作', updatedAt: '刚刚' }
+        const task = { id: script.taskId, title: 'MV 分镜制作', updatedAt: '刚刚' }
         song.tasks.push(task)
         // 载入生成结果到新子项目
         this.stop()
@@ -722,6 +774,9 @@ export const useProjectStore = defineStore('project', {
         this.selectedLineId = this.lines[0]?.id ?? null
         this.currentTime = 0
         this.magicOpen = false
+        void this._generateStoryboardQueue(task.id, lines.map((line) => line.id))
+      } catch (err) {
+        this.magicError = err instanceof Error ? err.message : 'ASS 分镜生成失败'
       } finally {
         this.magicLoading = false
       }
@@ -746,9 +801,15 @@ export const useProjectStore = defineStore('project', {
       line.scene.status = 'generating'
       const variant = sceneVariants[lineId] ?? 0
       sceneVariants[lineId] = variant + 1
-      const { imageUrl } = await api.generateSceneImage(line.scenePrompt, idx, variant)
-      const still = this.lines.find((l) => l.id === lineId)
-      if (still) still.scene = { status: 'done', imageUrl }
+      try {
+        const { imageUrl } = await api.generateSceneImage(line.scenePrompt, idx, variant, this.activeTaskId ?? undefined, lineId, line.shotOptions?.ratio ?? '16:9')
+        const still = this.lines.find((l) => l.id === lineId)
+        if (still) still.scene = { status: 'done', imageUrl }
+      } catch (error) {
+        const still = this.lines.find((l) => l.id === lineId)
+        if (still) still.scene.status = 'none'
+        throw reportApiError(error, '场景图生成失败')
+      }
     },
 
     /** 生成/重新生成分镜视频片段（场景 × 分镜提示词 × 出演角色 × 生成参数）；新片段作为资产追加并选中 */
@@ -757,11 +818,12 @@ export const useProjectStore = defineStore('project', {
       if (idx < 0 || this.lines[idx].shot.status === 'generating') return
       const line = this.lines[idx]
       if (shotPrompt !== undefined) line.shotPrompt = shotPrompt
-      if (options) line.shotOptions = { ...options }
-      const genOptions = line.shotOptions ?? DEFAULT_SHOT_OPTIONS
+      if (options) line.shotOptions = normalizeShotOptions(options)
+      const genOptions = normalizeShotOptions(line.shotOptions ?? DEFAULT_SHOT_OPTIONS)
       line.shot.status = 'generating'
       const variant = line.shot.assets.length
-      const { coverUrl, videoUrl, duration } = await api.generateShotVideo(
+      try {
+        const { coverUrl, videoUrl, duration } = await api.generateShotVideo(
         line.scenePrompt,
         line.shotPrompt,
         line.digitalHumanIds,
@@ -769,9 +831,11 @@ export const useProjectStore = defineStore('project', {
         variant,
         genOptions,
         line.scene.imageUrl,
-      )
-      const still = this.lines.find((l) => l.id === lineId)
-      if (still) {
+        this.activeTaskId ?? undefined,
+        lineId,
+        )
+        const still = this.lines.find((l) => l.id === lineId)
+        if (still) {
         const asset: ShotAsset = {
           id: nextId('asset'),
           coverUrl,
@@ -782,7 +846,12 @@ export const useProjectStore = defineStore('project', {
         still.shot.assets.push(asset)
         still.shot.currentAssetId = asset.id
         still.shot.imageUrl = coverUrl
-        still.shot.status = 'done'
+          still.shot.status = 'done'
+        }
+      } catch (error) {
+        const still = this.lines.find((l) => l.id === lineId)
+        if (still) still.shot.status = 'none'
+        throw reportApiError(error, '分镜视频生成失败')
       }
     },
 
@@ -821,12 +890,20 @@ export const useProjectStore = defineStore('project', {
     },
 
     async runSynthesize() {
-      if (this.synthesis.status === 'running' || !this.hasAssets) return
+      if (this.synthesis.status === 'running' || !this.hasVideoAssets || !this.activeTaskId) return
       this.synthesis = { status: 'running', progress: 0 }
-      const { videoUrl } = await api.synthesizeVideo((p) => {
-        this.synthesis.progress = p
-      })
-      this.synthesis = { status: 'done', progress: 100, videoUrl }
+      try {
+        const { archiveUrl } = await api.exportMaterials(this.activeTaskId)
+        this.synthesis = { status: 'done', progress: 100, videoUrl: archiveUrl }
+        const link = document.createElement('a')
+        link.href = archiveUrl
+        link.download = ''
+        link.rel = 'noopener'
+        link.click()
+      } catch (error) {
+        this.synthesis = { status: 'idle', progress: 0 }
+        throw reportApiError(error, '导出素材失败')
+      }
     },
 
     // ---------- 播放控制 ----------

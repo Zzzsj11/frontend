@@ -26,10 +26,9 @@ services:
       REDIS_URL: redis://redis:6379/0
       LLM_API_MODE: ${LLM_API_MODE:-openai}
       STORAGE_BACKEND: tos
+      JWT_SECRET: ${JWT_SECRET:-development-only-change-me-at-least-32-bytes}
     secrets:
       - provider_config
-    volumes:
-      - mvagent_media:/app/data/media
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,7 +75,6 @@ services:
 volumes:
   mvagent_postgres:
   mvagent_redis:
-  mvagent_media:
 
 secrets:
   provider_config:

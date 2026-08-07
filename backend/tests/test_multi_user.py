@@ -1,0 +1,65 @@
+def bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def create_and_login_user(client, username: str) -> tuple[str, dict[str, str]]:
+    created = client.post("/api/admin/users", json={"username": username, "password": "secure-pass-123", "display_name": username})
+    assert created.status_code == 201
+    login = client.post("/api/auth/login", json={"username": username, "password": "secure-pass-123"})
+    assert login.status_code == 200
+    return created.json()["id"], bearer(login.json()["accessToken"])
+
+
+def test_projects_and_private_resources_are_isolated(client) -> None:
+    _, user_a = create_and_login_user(client, "user-a")
+    _, user_b = create_and_login_user(client, "user-b")
+    project_a = client.post("/api/projects", headers=user_a, json={"name": "A project"}).json()
+    project_b = client.post("/api/projects", headers=user_b, json={"name": "B project"}).json()
+
+    assert [item["id"] for item in client.get("/api/projects", headers=user_a).json()] == [project_a["id"]]
+    assert [item["id"] for item in client.get("/api/projects", headers=user_b).json()] == [project_b["id"]]
+    assert client.patch(f"/api/projects/{project_b['id']}", headers=user_a, json={"name": "stolen"}).status_code == 404
+    assert client.delete(f"/api/projects/{project_b['id']}", headers=user_a).status_code == 404
+
+
+def test_system_characters_are_visible_and_read_only_for_every_user(client) -> None:
+    _, user = create_and_login_user(client, "system-role-viewer")
+    humans = client.get("/api/digital-humans", headers=user).json()
+    assert len([item for item in humans if item["scope"] == "system"]) == 30
+    luoli = next(item for item in humans if item["id"] == "dh-system-020")
+    assert luoli["scope"] == "system"
+    assert luoli["readOnly"] is True
+    assert luoli["assetCode"] == "020" and "图片ID：020" in luoli["systemPrompt"]
+    assert client.patch("/api/digital-humans/dh-system-020", headers=user, json={"name": "changed"}).status_code == 404
+    assert client.delete("/api/digital-humans/dh-system-020", headers=user).status_code == 404
+
+
+def test_all_deletes_are_soft_deletes(client) -> None:
+    user_id, headers = create_and_login_user(client, "soft-delete-user")
+    project = client.post("/api/projects", headers=headers, json={"name": "Temporary"}).json()
+    assert client.delete(f"/api/projects/{project['id']}", headers=headers).json() == {"ok": True}
+    assert client.get("/api/projects", headers=headers).json() == []
+
+    import sqlite3
+    with sqlite3.connect("/tmp/mv-agent-backend-test.sqlite3") as connection:
+        owner, deleted_at = connection.execute("SELECT user_id, deleted_at FROM projects WHERE id = ?", (project["id"],)).fetchone()
+    assert owner == user_id
+    assert deleted_at is not None
+
+
+def test_general_storyboard_persists_type_specific_configuration(client) -> None:
+    _, headers = create_and_login_user(client, "general-user")
+    project = client.post("/api/projects", headers=headers, json={"name": "General MV"}).json()
+    response = client.post(f"/api/projects/{project['id']}/storyboards/general", headers=headers, json={
+        "genre": "pop", "secondary_category": "positive-love", "tertiary_category": "young-crush",
+        "season": "春", "age_group": "青年", "visual_style": "电影写实", "ratio": "16:9",
+        "empty_shot_count": 1, "character_shot_count": 1, "total_duration": 10,
+        "digital_human_ids": ["dh-system-020"], "overall_prompt": "统一暖色电影质感",
+    })
+    assert response.status_code == 201
+    result = response.json()
+    assert result["storyboardConfig"]["genre"] == "pop"
+    assert {line["shotType"] for line in result["lines"]} == {"empty", "character"}
+    task = client.get(f"/api/tasks/{result['taskId']}", headers=headers).json()
+    assert task["storyboardType"] == "general"
+    assert task["overallPrompt"] == "统一暖色电影质感"

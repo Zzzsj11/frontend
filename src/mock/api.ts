@@ -9,13 +9,10 @@ import type {
 } from '../types'
 import {
   makeSilentWav,
-  makeSongScript,
-  mockDigitalHumans,
-  mockSongProjects,
-  nextId,
 } from './data'
 import type { MagicScript } from './data'
 import * as mediaGen from '../api/mediaGen'
+import { apiRequest } from '../api/client'
 
 /**
  * Mock API 层 —— 模拟后端接口，每个函数对应一个规划中的 HTTP 接口：
@@ -35,34 +32,32 @@ const delay = (min = 800, max = 2000) =>
 
 /** GET /api/songs — 歌曲项目列表（侧边栏目录，一个目录处理一首歌曲） */
 export async function fetchSongProjects(): Promise<SongProject[]> {
-  await delay(150, 400)
-  return mockSongProjects.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }))
+  return apiRequest<SongProject[]>('/projects')
 }
 
 /** GET /api/songs/{id}/script — 载入某首歌曲的分镜脚本与角色阵容 */
-export async function fetchSongScript(songId: string): Promise<{ cast: string[]; lines: ScriptLine[] }> {
-  await delay(400, 900)
-  return makeSongScript(songId)
+export async function fetchSongScript(taskId: string): Promise<{ cast: string[]; lines: ScriptLine[] }> {
+  const task = await apiRequest<{ cast: string[]; lines: Array<Record<string, unknown>> }>(`/tasks/${taskId}`)
+  return { cast: task.cast, lines: task.lines.map((item) => {
+    const sceneAssets = (item.sceneAssets as Array<{ id:string; imageUrl:string; isCurrent:boolean }>) || []
+    const shotAssets = (item.shotAssets as Array<{ id:string; coverUrl:string; videoUrl:string; duration:number; isCurrent:boolean }>) || []
+    return { id: String(item.id), source: item.source as ScriptLine['source'], shotType: item.shotType as ScriptLine['shotType'], plannedDuration: item.plannedDuration as number | undefined, lyrics: String(item.lyrics || ''), lyricsZh: item.lyricsZh as string | undefined, scenePrompt: String(item.scenePrompt || ''), shotPrompt: String(item.shotPrompt || ''), digitalHumanIds: item.digitalHumanIds as string[], shotOptions: item.shotOptions as ScriptLine['shotOptions'], generationStatus: item.generationStatus as ScriptLine['generationStatus'], generationError: item.generationError as string | undefined, generationAttempt: Number(item.generationAttempt || 0), voice: { status: 'none' }, scene: { status: sceneAssets.length ? 'done' : 'none', imageUrl: sceneAssets.find((a)=>a.isCurrent)?.imageUrl }, shot: { status: shotAssets.length ? 'done' : 'none', imageUrl: shotAssets.find((a)=>a.isCurrent)?.coverUrl, assets: shotAssets.map((a)=>({ ...a, digitalHumanIds: item.digitalHumanIds as string[] })), currentAssetId: shotAssets.find((a)=>a.isCurrent)?.id } }
+  }) }
 }
 
 /** POST /api/songs — 新建空歌曲项目，用户随后选择 ASS 分镜或通用分镜 */
 export async function createSongProject(name: string): Promise<SongProject> {
-  await delay(300, 600)
-  return {
-    id: nextId('song'),
-    name,
-    tasks: [],
-  }
+  return apiRequest<SongProject>('/projects', { method: 'POST', body: JSON.stringify({ name }) })
 }
 
 /** GET /api/assets/digital-humans — 数字人资产列表 */
 export async function fetchDigitalHumans(): Promise<DigitalHuman[]> {
-  await delay(100, 300)
-  return mockDigitalHumans
+  return apiRequest<DigitalHuman[]>('/digital-humans')
 }
 
 /** POST /api/script/magic 的请求参数（规划为 multipart/form-data） */
 export interface MagicScriptRequest {
+  projectId?: string
   /** 歌曲编号 */
   songId: string
   /** 歌词字幕 .ass 文件 */
@@ -74,20 +69,37 @@ export interface MagicScriptRequest {
 }
 
 /** POST /api/script/magic — 根据歌曲编号 + ass 字幕 + 已选角色生成一套 MV 脚本 */
-export async function generateMagicScript(req?: MagicScriptRequest): Promise<MagicScript> {
+export async function generateMagicScript(req?: MagicScriptRequest): Promise<MagicScript & { taskId: string }> {
   if (!req) throw new Error('缺少 ASS 分镜参数')
+  if (!req.projectId) throw new Error('请先选择歌曲项目')
   const form = new FormData()
   form.append('song_id', req.songId)
+  form.append('project_id', req.projectId)
   form.append('ass_file', req.assFile)
   form.append('digital_human_ids', JSON.stringify(req.digitalHumanIds ?? []))
   form.append('extra_requirement', req.extraRequirement ?? '')
-  const response = await fetch('/api/storyboards/ass', { method: 'POST', body: form })
-  if (!response.ok) {
-    const body = await response.json().catch(() => null)
-    throw new Error(body?.detail || `ASS 分镜生成失败（HTTP ${response.status}）`)
-  }
-  return response.json()
+  return apiRequest<MagicScript & { taskId: string }>('/storyboards/ass', { method: 'POST', body: form })
 }
+
+export const updateSongProject = (id: string, name: string) => apiRequest(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) })
+export const deleteSongProject = (id: string) => apiRequest(`/projects/${id}`, { method: 'DELETE' })
+export const updateSongTask = (id: string, title: string) => apiRequest(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) })
+export const deleteSongTask = (id: string) => apiRequest(`/tasks/${id}`, { method: 'DELETE' })
+export const createDigitalHuman = (input: { name:string; styleId?:string; description:string; avatar:string; avatarPrompt?:string; source:'uploaded'|'generated' }) => apiRequest<DigitalHuman>('/digital-humans', { method:'POST', body:JSON.stringify({ name:input.name, style_id:input.styleId, description:input.description, avatar_url:input.avatar, avatar_prompt:input.avatarPrompt || '', source:input.source }) })
+export const updateDigitalHuman = (id:string, input: Record<string, unknown>) => apiRequest<DigitalHuman>(`/digital-humans/${id}`, { method:'PATCH', body:JSON.stringify(input) })
+export const deleteDigitalHuman = (id:string) => apiRequest(`/digital-humans/${id}`, { method:'DELETE' })
+export const fetchDigitalHumanStyles = () => apiRequest<Array<{id:string;name:string;scope:string;readOnly:boolean}>>('/digital-human-styles')
+export const createDigitalHumanStyle = (name:string) => apiRequest<{id:string;name:string}>('/digital-human-styles',{method:'POST',body:JSON.stringify({name})})
+export const deleteDigitalHumanStyle = (id:string) => apiRequest(`/digital-human-styles/${id}`,{method:'DELETE'})
+export async function uploadDataUrl(dataUrl:string, filename:string): Promise<string> { const response=await fetch(dataUrl); const blob=await response.blob(); const form=new FormData(); form.append('file',blob,filename); return (await apiRequest<{url:string}>('/uploads?category=digital-humans',{method:'POST',body:form})).url }
+export const exportMaterials = (taskId:string) => apiRequest<{archiveUrl:string}>(`/tasks/${taskId}/material-export`,{method:'POST'})
+export const createStoryboardLine = (taskId:string,input:Record<string,unknown>) => apiRequest<{id:string}>(`/tasks/${taskId}/storyboard/lines`,{method:'POST',body:JSON.stringify(input)})
+export const updateStoryboardLine = (id:string,input:Record<string,unknown>) => apiRequest(`/storyboard-lines/${id}`,{method:'PATCH',body:JSON.stringify(input)})
+export const deleteStoryboardLine = (id:string) => apiRequest(`/storyboard-lines/${id}`,{method:'DELETE'})
+export const reorderStoryboardLines = (taskId:string,lineIds:string[]) => apiRequest(`/tasks/${taskId}/storyboard/reorder`,{method:'POST',body:JSON.stringify({line_ids:lineIds})})
+export const updateTaskCast = (taskId:string,ids:string[]) => apiRequest(`/tasks/${taskId}/cast`,{method:'PUT',body:JSON.stringify({digital_human_ids:ids})})
+export const generateStoryboardLine = (taskId:string,lineId:string,force=false) => apiRequest<Record<string,unknown>>(`/tasks/${taskId}/storyboard-lines/${lineId}/generate`,{method:'POST',body:JSON.stringify({force})})
+export const resetFailedStoryboardLines = (taskId:string) => apiRequest<{lineIds:string[]}>(`/tasks/${taskId}/storyboard/retry-failed`,{method:'POST'})
 
 const generalStoryboardOptions: GeneralStoryboardOptions = {
   genres: [
@@ -137,59 +149,9 @@ export async function fetchGeneralStoryboardOptions(): Promise<GeneralStoryboard
   return structuredClone(generalStoryboardOptions)
 }
 
-const emptyScenes = [
-  ['深秋傍晚的城市旧街，潮湿路面倒映暖橙色路灯，金黄色落叶散落在石板路上', '低机位沿街道缓慢向前推进，落叶从镜头前掠过，浅景深，画面稳定，无人物出镜'],
-  ['安静河岸边的空长椅，树叶在晚风中轻轻晃动，远处城市灯光刚刚亮起', '镜头从水面倒影缓慢抬升到长椅，轻微横摇，营造等待与思念的情绪'],
-  ['老唱片机在暖色房间里缓慢旋转，唱针旁积着细小灰尘，窗外光线渐暗', '微距拍摄唱针落下，镜头沿唱片纹理缓慢旋转，柔和胶片颗粒'],
-  ['空荡的旧火车站台延伸向远方，昏黄顶灯依次亮起，轨道泛着冷光', '大远景固定构图，列车灯光从远方靠近，风卷起站台上的落叶'],
-  ['夜色中的天桥横跨城市车流，汽车灯光汇成流动光轨，天空呈深蓝色', '航拍镜头缓慢下降并向前推进，强调城市空间感和孤独氛围'],
-]
-
-const characterScenes = [
-  ['老式公寓窗边，秋日余晖穿过薄纱窗帘，房间内漂浮细小尘埃', '歌手独自靠在窗边凝视远方，镜头从中景缓慢推进至面部近景，捕捉若有所思的微表情'],
-  ['傍晚十字路口，人群在霓虹灯下匆匆经过，背景车辆虚化成彩色光斑', '歌手逆着人流缓慢前行，目光在人群中寻找熟悉身影，手持镜头平稳跟随'],
-  ['临街咖啡馆靠窗座位，桌面放着两杯咖啡，其中一把椅子空着', '歌手抬头看见窗外熟悉背影，短暂停顿后起身，镜头快速跟焦到眼神变化'],
-  ['旧车站候车区，电子钟闪烁，广播灯牌发出冷白色光线', '歌手站在站台边欲言又止，双手轻轻握紧，镜头绕人物小幅环拍'],
-  ['城市天台的夜风吹动衣角，远方楼宇灯光铺满天际线', '歌手回头露出释然微笑，镜头缓慢后拉成远景，让人物融入城市夜色'],
-]
-
 export async function generateGeneralStoryboard(req: GeneralStoryboardRequest): Promise<GeneralStoryboardResult> {
-  await delay(1200, 2000)
-  const total = req.emptyShotCount + req.characterShotCount
-  const plannedDuration = Math.round((req.totalDuration / total) * 10) / 10
-  const cast = [...(req.digitalHumanIds ?? [])]
-  const lines: GeneralStoryboardResult['lines'] = []
-  let emptyIndex = 0
-  let characterIndex = 0
-  while (lines.length < total) {
-    if (emptyIndex < req.emptyShotCount) {
-      const [scene, shot] = emptyScenes[emptyIndex % emptyScenes.length]
-      lines.push({
-        shotType: 'empty', plannedDuration,
-        scenePrompt: `${scene}。${req.season}季，${req.visualStyle}风格。`,
-        shotPrompt: `${shot}。主题情绪：${req.tertiaryCategory || req.secondaryCategory}。${req.extraRequirement ?? ''}`.trim(),
-        digitalHumanIds: [],
-      })
-      emptyIndex++
-    }
-    if (characterIndex < req.characterShotCount) {
-      const [scene, shot] = characterScenes[characterIndex % characterScenes.length]
-      const ids = cast.length ? [cast[characterIndex % cast.length]] : []
-      lines.push({
-        shotType: 'character', plannedDuration,
-        scenePrompt: `${scene}。${req.season}季，${req.visualStyle}风格。`,
-        shotPrompt: `${req.ageGroup}${req.singer ? `歌手${req.singer}` : '歌手'}，${shot}。主题情绪：${req.tertiaryCategory || req.secondaryCategory}。${req.extraRequirement ?? ''}`.trim(),
-        digitalHumanIds: ids,
-      })
-      characterIndex++
-    }
-  }
-  return {
-    title: `通用分镜 · ${req.tertiaryCategory || req.secondaryCategory}`,
-    cast,
-    totalDuration: req.totalDuration,
-    lines,
-  }
+  if (!req.projectId) throw new Error('请先选择歌曲项目')
+  return apiRequest<GeneralStoryboardResult>(`/projects/${req.projectId}/storyboards/general`, { method: 'POST', body: JSON.stringify({ genre: req.genre, secondary_category: req.secondaryCategory, tertiary_category: req.tertiaryCategory, season: req.season, singer: req.singer, age_group: req.ageGroup, visual_style: req.visualStyle, ratio: req.ratio, empty_shot_count: req.emptyShotCount, character_shot_count: req.characterShotCount, total_duration: req.totalDuration, digital_human_ids: req.digitalHumanIds ?? [], extra_requirement: req.extraRequirement ?? '', overall_prompt: req.extraRequirement ?? '' }) })
 }
 
 /** POST /api/voice/generate — 返回当前分镜的演唱/配音音频与时长 */
@@ -204,8 +166,11 @@ export async function generateSceneImage(
   scenePrompt: string,
   _index: number,
   _variant: number,
+  projectTaskId?: string,
+  storyboardLineId?: string,
+  ratio: ShotGenOptions['ratio'] = '16:9',
 ): Promise<{ imageUrl: string }> {
-  return mediaGen.generateScene(scenePrompt)
+  return mediaGen.generateScene(scenePrompt, projectTaskId, storyboardLineId, ratio)
 }
 
 /** POST /api/shot/generate-video — 根据场景 + 分镜提示词 + 出演角色（可空/可多人）+ 生成参数（清晰度/时长/画幅）生成分镜视频片段 */
@@ -217,11 +182,15 @@ export async function generateShotVideo(
   _variant: number,
   options?: ShotGenOptions,
   referenceImageUrl?: string,
+  projectTaskId?: string,
+  storyboardLineId?: string,
 ): Promise<{ coverUrl: string; videoUrl: string; duration: number }> {
   return mediaGen.generateShotVideo(
     [scenePrompt, shotPrompt].filter(Boolean).join('。'),
     referenceImageUrl,
     options ?? { resolution: '1080p', duration: 5, ratio: '16:9' },
+    projectTaskId,
+    storyboardLineId,
   )
 }
 

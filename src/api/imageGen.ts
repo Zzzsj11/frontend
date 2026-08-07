@@ -1,6 +1,6 @@
 /** 图片生成由 Python 后端代理，第三方密钥不会再暴露到浏览器。 */
 
-const BASE = '/api'
+import { apiRequest } from './client'
 
 export interface ImageTaskOptions {
   /** WIDTHxHEIGHT，宽 × 高必须小于 8,294,400，默认 1024x1024 */
@@ -21,17 +21,7 @@ interface GenerationJob {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...init?.headers,
-    },
-  })
-  const body = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(body.detail || `后端请求失败（HTTP ${res.status}）`)
-  return body as T
+  return apiRequest<T>(path, init)
 }
 
 /** 发起图片创建任务，返回 taskId */
@@ -43,6 +33,7 @@ export async function createImageTask(prompt: string, options: ImageTaskOptions 
       size: options.size ?? '1024x1024',
       quality: options.quality ?? 'auto',
       n: options.n ?? 1,
+      purpose: 'digital_human',
       ...(options.image ? { images: Array.isArray(options.image) ? options.image : [options.image] } : {}),
     }),
   })
