@@ -1,6 +1,10 @@
 # Logs
 logs
 *.log
+*.pid
+*.db
+*.sqlite3
+*.seed
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -22,6 +26,7 @@ test-artifacts/full-journey/runs/
 coverage/
 dist
 dist-ssr
+*.zip
 *.local
 
 # Editor directories and files
