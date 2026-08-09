@@ -2,7 +2,8 @@ ARG BACKEND_BASE_IMAGE=python:3.12-slim
 FROM ${BACKEND_BASE_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_INDEX_URL=https://pypi.org/simple
 WORKDIR /srv/mvagent
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
