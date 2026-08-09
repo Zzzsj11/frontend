@@ -23,6 +23,7 @@ __pycache__/
 test-results/
 playwright-report/
 test-artifacts/full-journey/runs/
+test-artifacts/remote/runs/
 coverage/
 dist
 dist-ssr

@@ -54,7 +54,8 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
     mimeType: 'text/plain',
     buffer: Buffer.from('[Script Info]\n[V4+ Styles]\n[Events]\n'),
   })
-  await expect(page.getByPlaceholder('输入歌曲编号，如 SM-2026-0731')).toHaveValue('10012204')
+  await expect(page.locator('.song-input')).toBeDisabled()
+  await expect(page.locator('.song-input')).toHaveValue('10012204')
   await expect(page.getByLabel('画幅 *')).toHaveValue('16:9')
   await expect(page.getByLabel('清晰度 *')).toHaveValue('720p')
   await expect(page.getByLabel('视频模型 *')).toHaveValue('doubao-seedance-2.0')
