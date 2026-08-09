@@ -13,6 +13,9 @@
     "test:e2e:real": "REAL_GENERATION_E2E=1 playwright test e2e/full-real-generation.spec.ts --workers=1",
     "test:e2e:real:general": "REAL_GENERATION_E2E=1 REAL_E2E_PHASE=general playwright test e2e/full-real-generation.spec.ts --workers=1",
     "test:e2e:real:export": "REAL_GENERATION_E2E=1 REAL_E2E_PHASE=general-export playwright test e2e/full-real-generation.spec.ts --workers=1",
+    "test:remote:api": "REMOTE_API_E2E=1 playwright test e2e/remote-api.spec.ts --workers=1",
+    "test:remote:frontend": "REAL_GENERATION_E2E=1 playwright test e2e/full-real-generation.spec.ts --workers=1",
+    "test:remote:all": "npm run test:remote:api && npm run test:remote:frontend",
     "test:all": "npm run test && npm run test:e2e"
   },
   "dependencies": {

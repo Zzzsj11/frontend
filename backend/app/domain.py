@@ -494,6 +494,7 @@ async def create_line(task_id: str, payload: StoryboardLineCreate, user: Current
     data = payload.model_dump(exclude={"digital_human_ids"})
     line = StoryboardLineModel(id=uid("line"), project_task_id=task_id, sort_order=count, generation_status="succeeded", generated_at=utcnow(), **data)
     db.add(line)
+    await db.flush()
     for index, human_id in enumerate(payload.digital_human_ids):
         db.add(StoryboardLineCastModel(id=uid("linecast"), storyboard_line_id=line.id, digital_human_id=human_id, sort_order=index))
     await db.commit()
