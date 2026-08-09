@@ -215,6 +215,7 @@ const regenBusy = computed(() => !!editing.value && store.dhRegeneratingId === e
 const openEdit = (id: string) => {
   const dh = store.digitalHumans.find((d) => d.id === id)
   if (!dh) return
+  previewing.value = null
   editId.value = id
   editName.value = dh.name
   editStyle.value = dh.style
@@ -497,7 +498,7 @@ const removeDh = async () => {
             </div>
             <label class="edit-label">形象描述</label>
             <textarea v-model="editDesc" class="gen-desc" rows="2" :disabled="editing.readOnly" />
-            <label class="edit-label">生成提示词（修改后可重新生成形象，图片自动本地化存储）</label>
+            <label class="edit-label">生成提示词（修改后可重新生成形象，图片自动存储到 TOS）</label>
             <textarea v-model="editPrompt" class="gen-desc edit-prompt" rows="5" :disabled="editing.readOnly" />
             <span v-if="editing.readOnly" class="readonly-tip">系统人物为全局只读资产，所有用户均可使用，但不能编辑、重新生成或删除。</span>
             <span v-if="editError" class="gen-error">{{ editError }}</span>
