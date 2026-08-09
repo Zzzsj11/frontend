@@ -11,7 +11,7 @@ import httpx
 from .config import settings
 from .jobs import Job, jobs
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
-from .storage import get_storage, import_remote, safe_key
+from .storage import get_storage, import_remote, import_remote_image, safe_key
 
 
 class ProviderError(RuntimeError):
@@ -79,8 +79,8 @@ async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, 
     if not urls:
         raise ProviderError("生图成功但未返回图片地址")
     owner_prefix = f"users/{job.user_id}/generated/images"
-    stored = [await import_remote(url, owner_prefix) for url in urls]
-    return {"provider": "yinghe", "providerTaskId": task_id, "model": request.model or settings.image_model, "urls": stored, "sourceUrls": urls, "usage": _usage(data) or _usage(created)}
+    stored_assets = [await import_remote_image(url, owner_prefix) for url in urls]
+    return {"provider": "yinghe", "providerTaskId": task_id, "model": request.model or settings.image_model, "urls": [item[0] for item in stored_assets], "thumbnailUrls": [item[1] for item in stored_assets], "sourceUrls": urls, "usage": _usage(data) or _usage(created)}
 
 
 async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:

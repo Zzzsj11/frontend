@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 import io
 import zipfile
+from PIL import Image
 
 
 ASS_CONTENT = b"""[Script Info]
@@ -74,12 +75,15 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     assert project.status_code == 201
     project_id = project.json()["id"]
 
+    image = io.BytesIO()
+    Image.new("RGB", (2, 2), "white").save(image, format="PNG")
     upload = client.post(
         "/api/uploads?category=references",
-        files={"file": ("reference.png", b"png-data", "image/png")},
+        files={"file": ("reference.png", image.getvalue(), "image/png")},
     )
     assert upload.status_code == 200
     assert upload.json()["url"].startswith("https://tos.test/users/")
+    assert upload.json()["thumbnailUrl"].startswith("https://tos.test/users/")
 
     storyboard = client.post(
         "/api/storyboards/ass",

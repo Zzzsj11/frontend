@@ -12,6 +12,7 @@ from typing import Protocol
 from urllib.parse import quote, urljoin, urlparse
 
 import httpx
+from PIL import Image, ImageOps
 
 from .config import settings
 
@@ -117,6 +118,30 @@ async def import_remote(url: str, category: str, filename: str | None = None) ->
     if "." not in guessed:
         guessed += mimetypes.guess_extension(content_type) or ""
     return await get_storage().put_bytes(safe_key(category, guessed), content, content_type)
+
+
+def make_image_thumbnail(content: bytes, max_size: tuple[int, int] = (640, 640)) -> bytes:
+    """Create a lightweight JPEG preview while preserving the complete image aspect ratio."""
+    with Image.open(io.BytesIO(content)) as source:
+        image = ImageOps.exif_transpose(source).convert("RGB")
+        image.thumbnail(max_size, Image.Resampling.LANCZOS)
+        output = io.BytesIO()
+        image.save(output, format="JPEG", quality=78, optimize=True, progressive=True)
+        return output.getvalue()
+
+
+async def put_image_with_thumbnail(key: str, content: bytes, content_type: str | None = None) -> tuple[str, str]:
+    storage = get_storage()
+    original_url = await storage.put_bytes(key, content, content_type)
+    thumbnail_key = f"{key.rsplit('.', 1)[0]}-thumbnail.jpg"
+    thumbnail_url = await storage.put_bytes(thumbnail_key, make_image_thumbnail(content), "image/jpeg")
+    return original_url, thumbnail_url
+
+
+async def import_remote_image(url: str, category: str, filename: str | None = None) -> tuple[str, str]:
+    response_url, content, content_type = await download_public_url(url)
+    guessed = filename or Path(httpx.URL(response_url).path).name or "image.png"
+    return await put_image_with_thumbnail(safe_key(category, guessed), content, content_type)
 
 
 async def _validate_public_url(url: str) -> None:

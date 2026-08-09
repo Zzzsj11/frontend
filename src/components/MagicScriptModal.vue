@@ -349,9 +349,9 @@ const cancel = () => {
 
 /* 已有角色库多选 */
 .role-picker {
-  min-height: 130px;
-  overflow-x: auto;
-  overflow-y: hidden;
+  min-height: 120px;
+  max-height: 250px;
+  overflow: auto;
   border: 1.5px dashed var(--border-dark);
   border-radius: 12px;
   background: #fafafa;
@@ -370,8 +370,8 @@ const cancel = () => {
 }
 .role-card {
   position: relative;
-  flex: 0 0 76px;
-  width: 76px;
+  flex: 0 0 124px;
+  width: 124px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #fff;
@@ -391,8 +391,8 @@ const cancel = () => {
 }
 .role-card img {
   width: 100%;
-  height: 88px;
-  object-fit: cover;
+  height: 70px;
+  object-fit: contain;
   border-radius: 6px;
   display: block;
 }

@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
 import { confirmDialog } from '../composables/useConfirmDialog'
+import type { DigitalHuman } from '../types'
 
 const store = useProjectStore()
 
@@ -13,6 +14,7 @@ const filtered = computed(() =>
     ? store.digitalHumans
     : store.digitalHumans.filter((d) => d.style === activeStyle.value),
 )
+const previewing = ref<DigitalHuman | null>(null)
 
 // 风格分类管理：增删改查（分类独立于数字人存在，重命名/删除会同步更新所属数字人）
 const styleManaging = ref(false)
@@ -335,19 +337,19 @@ const removeDh = async () => {
           </div>
         </div>
 
-        <!-- 上传自定义数字人（自备头像，名称、风格必填） -->
+        <!-- 上传参考图后统一生成三视图数字人（名称、风格必填） -->
         <div v-if="uploadOpen" class="gen-panel upload-panel">
           <div class="upload-body">
             <div
               class="upload-avatar"
               :class="{ filled: upAvatar }"
-              title="点击上传头像（可选）"
+              title="点击上传人物参考图（将统一生成三视图）"
               @click="upFileRef?.click()"
             >
               <img v-if="upAvatar" :src="upAvatar" alt="头像预览" />
               <template v-else>
                 <AppIcon name="image" :size="24" />
-                <span>上传头像<br />（可选）</span>
+                <span>上传人物参考图<br />（推荐）</span>
               </template>
             </div>
             <input ref="upFileRef" type="file" accept="image/*" hidden @change="onUpAvatarChange" />
@@ -365,7 +367,7 @@ const removeDh = async () => {
             </div>
           </div>
           <div class="gen-actions">
-            <span class="upload-tip">自备头像的自定义角色，无需 AI 生成，可直接加入阵容</span>
+            <span class="upload-tip">参考图会先存入 TOS，再按系统人物样式生成正面、侧面、背面三视图</span>
             <button class="gen-submit" :disabled="!canUpload" @click="submitUpload">
               <AppIcon name="check" :size="14" /> 添加到资产库
             </button>
@@ -446,12 +448,14 @@ const removeDh = async () => {
             :key="dh.id"
             class="dh-card"
             :class="{ active: store.castIds.includes(dh.id) }"
+            @mouseenter="previewing = dh"
+            @mouseleave="previewing = null"
             @click="store.toggleCast(dh.id)"
           >
             <div class="dh-portrait" title="点击编辑数字人" @click.stop="openEdit(dh.id)">
               <img :src="dh.avatar" :alt="dh.name" />
               <span v-if="store.castIds.includes(dh.id)" class="dh-check"><AppIcon name="check" :size="11" /> 已入阵容</span>
-              <span class="dh-edit-badge"><AppIcon name="edit" :size="11" /> 编辑</span>
+              <span class="dh-edit-badge"><AppIcon :name="dh.readOnly ? 'user' : 'edit'" :size="11" /> {{ dh.readOnly ? '查看' : '编辑' }}</span>
             </div>
             <div class="dh-info">
               <div class="dh-name-row">
@@ -474,7 +478,7 @@ const removeDh = async () => {
         </header>
         <div class="edit-body">
           <div class="edit-portrait">
-            <img :src="editing.avatar" :alt="editing.name" />
+            <img :src="editing.originalAvatar || editing.avatar" :alt="editing.name" />
             <div v-if="regenBusy" class="edit-regen-mask">
               <span class="spinner light" />
               正在重新生成形象…
@@ -484,22 +488,23 @@ const removeDh = async () => {
             <div class="edit-row">
               <div class="edit-col">
                 <label class="edit-label">名称</label>
-                <input v-model="editName" class="gen-input" />
+                <input v-model="editName" class="gen-input" :disabled="editing.readOnly" />
               </div>
               <div class="edit-col">
                 <label class="edit-label">风格</label>
-                <input v-model="editStyle" class="gen-input" list="dh-style-options" />
+                <input v-model="editStyle" class="gen-input" list="dh-style-options" :disabled="editing.readOnly" />
               </div>
             </div>
             <label class="edit-label">形象描述</label>
-            <textarea v-model="editDesc" class="gen-desc" rows="2" />
+            <textarea v-model="editDesc" class="gen-desc" rows="2" :disabled="editing.readOnly" />
             <label class="edit-label">生成提示词（修改后可重新生成形象，图片自动本地化存储）</label>
-            <textarea v-model="editPrompt" class="gen-desc edit-prompt" rows="5" />
+            <textarea v-model="editPrompt" class="gen-desc edit-prompt" rows="5" :disabled="editing.readOnly" />
+            <span v-if="editing.readOnly" class="readonly-tip">系统人物为全局只读资产，所有用户均可使用，但不能编辑、重新生成或删除。</span>
             <span v-if="editError" class="gen-error">{{ editError }}</span>
           </div>
         </div>
         <footer class="edit-foot">
-          <button class="edit-delete" :disabled="regenBusy" @click="removeDh">
+          <button v-if="!editing.readOnly" class="edit-delete" :disabled="regenBusy" @click="removeDh">
             <AppIcon name="trash" :size="13" /> 删除数字人
           </button>
           <div class="edit-foot-right">
@@ -507,15 +512,20 @@ const removeDh = async () => {
               <AppIcon :name="store.castIds.includes(editing.id) ? 'check' : 'users'" :size="13" />
               {{ store.castIds.includes(editing.id) ? '已在阵容 · 点击移出' : '加入当前阵容' }}
             </button>
-            <button class="edit-regen" :disabled="regenBusy || !editPrompt.trim()" @click="regenAvatar">
+            <button v-if="!editing.readOnly" class="edit-regen" :disabled="regenBusy || !editPrompt.trim()" @click="regenAvatar">
               <span v-if="regenBusy" class="spinner" />
               <AppIcon v-else name="sparkles" :size="13" />
               {{ regenBusy ? '生成中（约需半分钟）…' : '重新生成形象' }}
             </button>
-            <button class="edit-save" :disabled="regenBusy" @click="saveEdit">保存</button>
+            <button v-if="!editing.readOnly" class="edit-save" :disabled="regenBusy" @click="saveEdit">保存</button>
+            <button v-else class="edit-save" @click="closeEdit">关闭</button>
           </div>
         </footer>
       </div>
+    </div>
+    <div v-if="previewing" class="dh-original-preview" aria-hidden="true">
+      <img :src="previewing.originalAvatar || previewing.avatar" :alt="previewing.name" />
+      <span>{{ previewing.name }} · 原图预览</span>
     </div>
   </Teleport>
 </template>
@@ -898,10 +908,12 @@ const removeDh = async () => {
 /* 数字人卡片 */
 .dh-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 180px);
   gap: 14px;
   padding: 16px 22px 22px;
-  overflow-y: auto;
+  min-width: 1000px;
+  max-height: 56vh;
+  overflow: auto;
 }
 .dh-card {
   border: 2px solid var(--border);
@@ -921,13 +933,13 @@ const removeDh = async () => {
 }
 .dh-portrait {
   position: relative;
-  aspect-ratio: 3 / 4;
+  aspect-ratio: 16 / 9;
   background: #f5f5f5;
 }
 .dh-portrait img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
 }
 .dh-check {
@@ -962,6 +974,7 @@ const removeDh = async () => {
 .dh-portrait:hover .dh-edit-badge {
   opacity: 1;
 }
+.dh-original-preview{position:fixed;z-index:1000;left:50%;top:50%;display:flex;width:min(900px,82vw);max-height:82vh;transform:translate(-50%,-50%);flex-direction:column;gap:7px;padding:10px;border:1px solid rgba(255,255,255,.8);border-radius:14px;background:rgba(25,22,20,.94);box-shadow:0 24px 80px rgba(0,0,0,.42);pointer-events:none}.dh-original-preview img{width:100%;max-height:74vh;object-fit:contain;border-radius:9px;background:#eee}.dh-original-preview span{color:#fff;text-align:center;font-size:12px}.readonly-tip{padding:8px 10px;border-radius:8px;background:#fff7ed;color:#a85d29;font-size:12px}.edit-form :disabled{background:#f5f3f1;color:#887d74;cursor:not-allowed}
 .dh-info {
   padding: 8px 10px 10px;
 }

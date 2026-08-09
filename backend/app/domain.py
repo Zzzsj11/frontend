@@ -415,7 +415,7 @@ async def delete_style(style_id: str, user: CurrentUser, db: AsyncSession = Db) 
 
 
 def human_json(item: DigitalHumanModel, style_name: str | None = None) -> dict:
-    return {"id": item.id, "name": item.name, "styleId": item.style_id, "style": style_name or "未分类", "avatar": item.avatar_url, "description": item.description, "avatarPrompt": item.avatar_prompt, "assetCode": item.asset_code, "gender": item.gender, "ageDescription": item.age_description, "appearanceStyle": item.appearance_style, "clothingDescription": item.clothing_description, "suitableMusicStyles": item.suitable_music_styles, "systemPrompt": item.system_prompt, "scope": item.scope, "readOnly": item.scope == "system"}
+    return {"id": item.id, "name": item.name, "styleId": item.style_id, "style": style_name or "未分类", "avatar": item.avatar_thumbnail_url or item.avatar_url, "originalAvatar": item.avatar_url, "description": item.description, "avatarPrompt": item.avatar_prompt, "assetCode": item.asset_code, "gender": item.gender, "ageDescription": item.age_description, "appearanceStyle": item.appearance_style, "clothingDescription": item.clothing_description, "suitableMusicStyles": item.suitable_music_styles, "systemPrompt": item.system_prompt, "scope": item.scope, "readOnly": item.scope == "system"}
 
 
 @router.get("/digital-humans")
@@ -428,7 +428,7 @@ async def list_humans(user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
 
 @router.post("/digital-humans", status_code=201)
 async def create_human(payload: DigitalHumanCreate, user: CurrentUser, db: AsyncSession = Db) -> dict:
-    if not is_tos_url(payload.avatar_url):
+    if not is_tos_url(payload.avatar_url) or (payload.avatar_thumbnail_url and not is_tos_url(payload.avatar_thumbnail_url)):
         raise HTTPException(422, "角色图片必须先上传到配置的 TOS")
     if payload.style_id:
         style = await db.get(DigitalHumanStyleModel, payload.style_id)
@@ -447,7 +447,7 @@ async def update_human(human_id: str, payload: DigitalHumanUpdate, user: Current
     if not item:
         raise HTTPException(404, "私有角色不存在")
     for key, value in payload.model_dump(exclude_unset=True).items():
-        if key == "avatar_url" and value and not is_tos_url(str(value)):
+        if key in {"avatar_url", "avatar_thumbnail_url"} and value and not is_tos_url(str(value)):
             raise HTTPException(422, "角色图片必须存储在配置的 TOS")
         setattr(item, key, value)
     await db.commit()

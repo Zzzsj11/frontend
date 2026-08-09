@@ -94,9 +94,10 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
       styleId = style.id
 
       const upload = await json(await user.post('/api/uploads?category=e2e', {
-        multipart: { file: { name: `avatar-${runId}.png`, mimeType: 'image/png', buffer: Buffer.from('remote-e2e-image') } },
+        multipart: { file: { name: `avatar-${runId}.png`, mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') } },
       }))
       expect(upload.url).toMatch(/^https:\/\//)
+      expect(upload.thumbnailUrl).toMatch(/^https:\/\//)
       const imported = await json(await user.post('/api/uploads/import', {
         data: { url: upload.url, category: 'e2e-imports', filename: `import-${runId}.png` },
       }))
@@ -104,7 +105,7 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
 
       const human = await json(await user.post('/api/digital-humans', {
         data: {
-          name: `E2E human ${runId}`, style_id: styleId, description: 'remote test character', avatar_url: upload.url,
+          name: `E2E human ${runId}`, style_id: styleId, description: 'remote test character', avatar_url: upload.url, avatar_thumbnail_url: upload.thumbnailUrl,
           avatar_prompt: 'test portrait', gender: 'unknown', age_description: 'adult', appearance_style: 'realistic',
           clothing_description: 'plain', suitable_music_styles: 'all', system_prompt: 'remote test only', source: 'uploaded',
         },

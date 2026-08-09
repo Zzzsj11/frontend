@@ -16,7 +16,7 @@ interface GenerationJob {
   id: string
   status: string
   progress: number
-  result?: { urls?: string[] }
+  result?: { urls?: string[]; thumbnailUrls?: string[] }
   error?: string | null
 }
 
@@ -46,10 +46,10 @@ export function getImageTask(taskId: string): Promise<GenerationJob> {
 }
 
 /** 轮询直至任务完成，返回首张图片地址 */
-export async function waitForImage(
+export async function waitForImageAsset(
   taskId: string,
   { intervalMs = 3000, timeoutMs = 300_000 } = {},
-): Promise<string> {
+): Promise<{ url: string; thumbnailUrl?: string }> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
     const task = await getImageTask(taskId)
@@ -57,7 +57,7 @@ export async function waitForImage(
     if (status === 'succeeded') {
       const url = task.result?.urls?.[0]
       if (!url) throw new Error('任务成功但未返回图片地址')
-      return url
+      return { url, thumbnailUrl: task.result?.thumbnailUrls?.[0] }
     }
     if (status === 'failed' || status === 'cancelled') throw new Error(task.error || '图片生成失败')
     if (Date.now() > deadline) throw new Error('图片生成超时，请稍后重试')
@@ -68,12 +68,17 @@ export async function waitForImage(
 /** 一步到位：发起任务并轮询取回图片地址 */
 export async function generateImage(prompt: string, options?: ImageTaskOptions): Promise<string> {
   const taskId = await createImageTask(prompt, options)
-  return waitForImage(taskId)
+  return (await waitForImageAsset(taskId)).url
+}
+
+export async function generateImageAsset(prompt: string, options?: ImageTaskOptions): Promise<{ url: string; thumbnailUrl?: string }> {
+  const taskId = await createImageTask(prompt, options)
+  return waitForImageAsset(taskId)
 }
 
 /** 数字人定妆照提示词模板（与批量生成脚本 scripts/generate-digital-humans.mjs 保持一致） */
 export function buildPortraitPrompt(description: string, style: string): string {
-  return `数字人角色定妆照：${description}。风格：${style}。竖版 3:4 半身人像，单人出镜，人物居中，五官清晰，干净纯色背景，摄影棚柔光，高质量细节，不要文字水印`
+  return `MV 数字人角色三视图设定板。角色描述：${description || '依据参考图保持人物身份特征'}。视觉风格：${style || '电影写实'}。横版 16:9，单一角色，必须在同一张图中从左到右完整展示正面、90度侧面、背面三个人物全身视图；三视图必须保持同一张脸、同一发型、同一体型、同一服装、同一配饰和完全一致的色彩材质。人物从头顶到鞋底完整可见，站姿自然中性，比例准确，视图之间留有均匀间距。浅灰或米白纯色摄影棚背景，均匀柔光，无场景、无道具、无文字、无标签、无水印、无 Logo、无边框。禁止裁切身体，禁止额外人物，禁止把三个视图生成成不同角色。高质量角色设计参考图，可直接用于后续 MV 分镜人物一致性参考。`
 }
 
 /** 生成结果已经由后端落入本地存储或 TOS，无需浏览器二次下载。 */

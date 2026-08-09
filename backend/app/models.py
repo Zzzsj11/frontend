@@ -102,6 +102,7 @@ class DigitalHumanModel(LifecycleMixin, Base):
     name: Mapped[str] = mapped_column(String(120))
     description: Mapped[str] = mapped_column(Text, default="")
     avatar_url: Mapped[str] = mapped_column(Text)
+    avatar_thumbnail_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     avatar_prompt: Mapped[str] = mapped_column(Text, default="")
     asset_code: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     gender: Mapped[str | None] = mapped_column(String(32), nullable=True)

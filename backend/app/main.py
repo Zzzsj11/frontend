@@ -7,6 +7,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Annotated, Literal
+from PIL import UnidentifiedImageError
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
@@ -42,7 +43,7 @@ from .models import ProjectCastModel, ProjectTaskModel, SongEmotionProfileModel,
 from .providers import generate_image, generate_video
 from .redis_store import close_redis, redis_ok
 from .schemas import ChatMessageCreate, ChatSessionCreate, ImageGenerationCreate, LoginCreate, PasswordChange, RemoteImportCreate, VideoGenerationCreate
-from .storage import get_storage, import_remote, safe_key
+from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
 from .seed import recover_stale_storyboard_generation, seed_system_data
 from .story_bible import build_ass_story_bible
 from .error_logging import record_api_error, request_payload
@@ -148,8 +149,18 @@ async def upload(user: CurrentUser, file: UploadFile = File(...), category: str 
     if len(content) > 100 * 1024 * 1024:
         raise HTTPException(413, "文件不能超过 100MB")
     key = safe_key(f"users/{user.id}/{category}", file.filename or "upload.bin")
-    url = await get_storage().put_bytes(key, content, file.content_type)
-    return {"url": url, "key": key, "filename": file.filename}
+    if (file.content_type or "").startswith("image/"):
+        try:
+            thumbnail = make_image_thumbnail(content)
+        except (UnidentifiedImageError, OSError) as exc:
+            raise HTTPException(422, "图片文件无法解析") from exc
+        storage = get_storage()
+        url = await storage.put_bytes(key, content, file.content_type)
+        thumbnail_url = await storage.put_bytes(f"{key.rsplit('.', 1)[0]}-thumbnail.jpg", thumbnail, "image/jpeg")
+    else:
+        url = await get_storage().put_bytes(key, content, file.content_type)
+        thumbnail_url = None
+    return {"url": url, "thumbnailUrl": thumbnail_url, "key": key, "filename": file.filename}
 
 
 @app.post("/api/uploads/import")

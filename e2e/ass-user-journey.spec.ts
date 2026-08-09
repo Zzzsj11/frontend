@@ -43,6 +43,7 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await page.getByLabel('密码').fill('123456')
   await page.getByRole('button', { name: '登录' }).click()
   await expect(page.getByRole('heading', { name: '分镜编辑器' })).toBeVisible()
+  await expect(page.locator('.balance-value')).toHaveText('287.39')
   await expect(page.getByRole('link', { name: '返回镜序 MV 工作台' })).toBeVisible()
   await expect(page.getByRole('button', { name: /287\.39/ })).toBeVisible()
   await page.getByRole('button', { name: /管理员/ }).click()

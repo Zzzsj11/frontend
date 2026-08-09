@@ -471,10 +471,10 @@ const cancel = () => store.closeEditor()
   gap: 0;
 }
 .pcard-avatars img {
-  width: 54px;
-  height: 72px;
+  width: 96px;
+  height: 54px;
   border-radius: 8px;
-  object-fit: cover;
+  object-fit: contain;
   border: 2px solid #fff;
   margin-left: -12px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);

@@ -69,6 +69,7 @@ class DigitalHumanCreate(BaseModel):
     style_id: str | None = None
     description: str = Field(default="", max_length=10_000)
     avatar_url: str
+    avatar_thumbnail_url: str | None = None
     avatar_prompt: str = Field(default="", max_length=20_000)
     gender: str | None = Field(default=None, max_length=32)
     age_description: str = Field(default="", max_length=255)
@@ -84,6 +85,7 @@ class DigitalHumanUpdate(BaseModel):
     style_id: str | None = None
     description: str | None = Field(default=None, max_length=10_000)
     avatar_url: str | None = None
+    avatar_thumbnail_url: str | None = None
     avatar_prompt: str | None = Field(default=None, max_length=20_000)
     gender: str | None = Field(default=None, max_length=32)
     age_description: str | None = Field(default=None, max_length=255)

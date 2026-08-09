@@ -27,6 +27,8 @@ export interface DigitalHuman {
   /** 风格（国风 / 赛博朋克 / 二次元 …） */
   style: string
   avatar: string
+  /** TOS 原图；avatar 默认是列表缩略图。 */
+  originalAvatar?: string
   description: string
   /** 生成形象时使用的完整提示词（可在编辑界面查看 / 修改后重新生成） */
   avatarPrompt?: string

@@ -189,10 +189,10 @@ const onGenerateShot = async () => {
   margin-left: -12px;
 }
 .dh-chip {
-  width: 30px;
-  height: 40px;
+  width: 48px;
+  height: 27px;
   border-radius: 6px;
-  object-fit: cover;
+  object-fit: contain;
   border: 1px solid var(--border);
   box-shadow: 0 0 0 2px #fff;
   transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;

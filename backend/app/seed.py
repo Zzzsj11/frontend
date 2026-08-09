@@ -34,18 +34,21 @@ async def seed_system_data() -> None:
         for data in SYSTEM_HUMANS:
             human_id = f"dh-system-{data['asset_code']}"
             human = await session.get(DigitalHumanModel, human_id)
-            bucket, object_key = TosStorage._bucket_for(f"system/digital-humans/{data['asset_code']}.png")
+            bucket, object_key = TosStorage._bucket_for(f"system/digital-humans/{data['asset_code']}.jpg")
             avatar_url = TosStorage._public_url(bucket, object_key)
+            thumbnail_bucket, thumbnail_key = TosStorage._bucket_for(f"system/digital-humans/thumbnails/{data['asset_code']}.jpg")
+            thumbnail_url = TosStorage._public_url(thumbnail_bucket, thumbnail_key)
             if not human:
                 human = DigitalHumanModel(
                     id=human_id, user_id=None, style_id=style.id, source="builtin", scope="system",
                     status="active", avatar_prompt=data["system_prompt"], description=data["appearance_style"],
-                    avatar_url=avatar_url, **data,
+                    avatar_url=avatar_url, avatar_thumbnail_url=thumbnail_url, **data,
                 )
                 session.add(human)
             else:
                 human.style_id, human.deleted_at, human.status = style.id, None, "active"
-                human.avatar_url, human.avatar_prompt, human.description = avatar_url, data["system_prompt"], data["appearance_style"]
+                human.avatar_url, human.avatar_thumbnail_url = avatar_url, thumbnail_url
+                human.avatar_prompt, human.description = data["system_prompt"], data["appearance_style"]
                 for key, value in data.items():
                     setattr(human, key, value)
 

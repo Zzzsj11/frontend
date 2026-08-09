@@ -510,12 +510,13 @@ export const useProjectStore = defineStore('project', {
       try {
         const prompt = imageGen.buildPortraitPrompt(input.description, input.style)
         const id = nextId('dh')
-        const remoteUrl = await imageGen.generateImage(prompt, {
-          size: '768x1024',
+        const referenceImage = input.referenceImage || this.digitalHumans.find((human) => human.readOnly)?.originalAvatar
+        const generated = await imageGen.generateImageAsset(prompt, {
+          size: '1344x768',
           quality: 'medium',
-          ...(input.referenceImage ? { image: input.referenceImage } : {}),
+          ...(referenceImage ? { image: referenceImage } : {}),
         })
-        const avatar = await imageGen.localizeImage(id, remoteUrl)
+        const avatar = await imageGen.localizeImage(id, generated.url)
         const draft: DigitalHuman = {
           id,
           name: input.name,
@@ -524,7 +525,7 @@ export const useProjectStore = defineStore('project', {
           description: input.description,
           avatarPrompt: prompt,
         }
-        const dh = await api.createDigitalHuman({ name:draft.name, styleId:this.dhStyleIds[draft.style], description:draft.description, avatar:draft.avatar, avatarPrompt:draft.avatarPrompt, source:'generated' })
+        const dh = await api.createDigitalHuman({ name:draft.name, styleId:this.dhStyleIds[draft.style], description:draft.description, avatar:draft.avatar, thumbnail:generated.thumbnailUrl, avatarPrompt:draft.avatarPrompt, source:'generated' })
         this.digitalHumans.push(dh)
         this.ensureDhStyle(dh.style)
         return dh
@@ -540,11 +541,18 @@ export const useProjectStore = defineStore('project', {
       description?: string
       avatar: string
     }): Promise<DigitalHuman> {
-      const tosAvatar = await api.uploadDataUrl(input.avatar, `${nextId('avatar')}.png`)
-      const dh = await api.createDigitalHuman({ name:input.name, styleId:this.dhStyleIds[input.style], description:input.description ?? '', avatar:tosAvatar, avatarPrompt:'', source:'uploaded' })
-      this.digitalHumans.push(dh)
-      this.ensureDhStyle(dh.style)
-      return dh
+      this.dhGenerating = true
+      try {
+        const prompt = imageGen.buildPortraitPrompt(input.description || input.name, input.style)
+        const reference = await api.uploadDataUrl(input.avatar, `${nextId('reference')}.jpg`)
+        const generated = await imageGen.generateImageAsset(prompt, { size:'1344x768', quality:'medium', image:reference.url })
+        const dh = await api.createDigitalHuman({ name:input.name, styleId:this.dhStyleIds[input.style], description:input.description ?? '', avatar:generated.url, thumbnail:generated.thumbnailUrl, avatarPrompt:prompt, source:'uploaded' })
+        this.digitalHumans.push(dh)
+        this.ensureDhStyle(dh.style)
+        return dh
+      } finally {
+        this.dhGenerating = false
+      }
     },
 
     // ---------- 风格分类增删改查 ----------
@@ -651,10 +659,11 @@ export const useProjectStore = defineStore('project', {
       this.dhRegeneratingId = id
       try {
         const finalPrompt = (prompt ?? dh.avatarPrompt ?? imageGen.buildPortraitPrompt(dh.description, dh.style)).trim()
-        const remoteUrl = await imageGen.generateImage(finalPrompt, { size: '768x1024', quality: 'medium' })
-        dh.avatar = await imageGen.localizeImage(dh.id, remoteUrl)
+        const generated = await imageGen.generateImageAsset(finalPrompt, { size: '1344x768', quality: 'medium', image:dh.originalAvatar || dh.avatar })
+        dh.avatar = generated.thumbnailUrl || generated.url
+        dh.originalAvatar = await imageGen.localizeImage(dh.id, generated.url)
         dh.avatarPrompt = finalPrompt
-        if (!dh.readOnly) await api.updateDigitalHuman(id,{avatar_url:dh.avatar,avatar_prompt:finalPrompt})
+        if (!dh.readOnly) await api.updateDigitalHuman(id,{avatar_url:dh.originalAvatar,avatar_thumbnail_url:generated.thumbnailUrl,avatar_prompt:finalPrompt})
       } finally {
         this.dhRegeneratingId = null
       }
