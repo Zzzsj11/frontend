@@ -281,3 +281,80 @@ class ApiErrorLogModel(LifecycleMixin, Base):
     traceback: Mapped[str] = mapped_column(Text, default="")
     client_ip: Mapped[str | None] = mapped_column(String(80), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class AdminRoleModel(LifecycleMixin, Base):
+    __tablename__ = "admin_roles"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    code: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(Text, default="")
+
+
+class AdminPermissionModel(LifecycleMixin, Base):
+    __tablename__ = "admin_permissions"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    code: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120))
+
+
+class AdminRolePermissionModel(LifecycleMixin, Base):
+    __tablename__ = "admin_role_permissions"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    role_id: Mapped[str] = mapped_column(ForeignKey("admin_roles.id"), index=True)
+    permission_id: Mapped[str] = mapped_column(ForeignKey("admin_permissions.id"), index=True)
+
+
+class UserAdminRoleModel(LifecycleMixin, Base):
+    __tablename__ = "user_admin_roles"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    role_id: Mapped[str] = mapped_column(ForeignKey("admin_roles.id"), index=True)
+
+
+class AdminOperationLogModel(LifecycleMixin, Base):
+    __tablename__ = "admin_operation_logs"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    admin_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    action: Mapped[str] = mapped_column(String(120), index=True)
+    target_type: Mapped[str] = mapped_column(String(80), index=True)
+    target_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    before_data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    after_data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    client_ip: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
+class AiProviderModel(LifecycleMixin, Base):
+    __tablename__ = "ai_providers"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    code: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    base_url: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+
+
+class AiModelModel(LifecycleMixin, Base):
+    __tablename__ = "ai_models"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    provider_id: Mapped[str] = mapped_column(ForeignKey("ai_providers.id"), index=True)
+    code: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    modality: Mapped[str] = mapped_column(String(32), index=True)
+    provider_model_id: Mapped[str] = mapped_column(String(200))
+    capabilities: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    user_visible: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ModelPriceVersionModel(LifecycleMixin, Base):
+    __tablename__ = "model_price_versions"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    model_id: Mapped[str] = mapped_column(ForeignKey("ai_models.id"), index=True)
+    currency: Mapped[str] = mapped_column(String(16), default="CNY")
+    unit: Mapped[str] = mapped_column(String(32), default="request")
+    input_price: Mapped[float] = mapped_column(Float, default=0)
+    output_price: Mapped[float] = mapped_column(Float, default=0)
+    unit_price: Mapped[float] = mapped_column(Float, default=0)
+    effective_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

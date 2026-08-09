@@ -17,6 +17,9 @@
     "test:remote:frontend": "REMOTE_FRONTEND_E2E=1 playwright test e2e/remote-frontend.spec.ts --workers=1",
     "test:remote:frontend:real": "REAL_GENERATION_E2E=1 playwright test e2e/full-real-generation.spec.ts --workers=1",
     "test:remote:all": "npm run test:remote:api && npm run test:remote:frontend",
+    "test:admin:api": "ADMIN_API_E2E=1 playwright test e2e/admin-api.spec.ts --workers=1",
+    "test:admin:frontend": "ADMIN_CONSOLE_E2E=1 playwright test e2e/admin-console.spec.ts --workers=1",
+    "test:admin": "npm run test:admin:api && npm run test:admin:frontend",
     "test:remote:all:real": "npm run test:remote:api && npm run test:remote:frontend && npm run test:remote:frontend:real",
     "test:all": "npm run test && npm run test:e2e"
   },

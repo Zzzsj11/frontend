@@ -5,9 +5,10 @@ import type { ShotAsset, ShotGenOptions } from '../types'
 import AppIcon from './AppIcon.vue'
 import { confirmDialog } from '../composables/useConfirmDialog'
 import { normalizeShotOptions, VIDEO_DURATION_CHOICES } from '../mediaConstraints'
-import { IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS } from '../generationModels'
+import { IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, loadGenerationModels } from '../generationModels'
 
 const store = useProjectStore()
+void loadGenerationModels()
 
 // 弹窗内的编辑草稿，保存时才写回 store
 const lyricsDraft = ref('')

@@ -4,9 +4,10 @@ import type { GeneralStoryboardRequest, ShotGenOptions } from '../types'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
 import { MAX_VIDEO_DURATION, MIN_VIDEO_DURATION } from '../mediaConstraints'
-import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS } from '../generationModels'
+import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, loadGenerationModels } from '../generationModels'
 
 const store = useProjectStore()
+void loadGenerationModels()
 const genre = ref('')
 const secondary = ref('')
 const tertiary = ref('')

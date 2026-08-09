@@ -16,6 +16,7 @@ from .auth import CurrentUser
 from .database import database_session
 from .models import (
     ApiErrorLogModel,
+    AiModelModel,
     DigitalHumanModel,
     DigitalHumanStyleModel,
     GenerationJobModel,
@@ -313,6 +314,9 @@ async def create_task(project_id: str, payload: TaskCreate, user: CurrentUser, d
 @router.post("/projects/{project_id}/storyboards/general", status_code=201)
 async def create_general_storyboard(project_id: str, payload: GeneralStoryboardCreate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     await owned_project(db, user.id, project_id)
+    for code,modality in [(payload.image_model,"image"),(payload.video_model,"video")]:
+        model=(await db.execute(select(AiModelModel).where(AiModelModel.code==code,AiModelModel.modality==modality,AiModelModel.status=="active",AiModelModel.deleted_at.is_(None)))).scalar_one_or_none()
+        if not model: raise HTTPException(422,f"不支持或已停用的{modality}模型：{code}")
     total = payload.empty_shot_count + payload.character_shot_count
     if total < 1:
         raise HTTPException(422, "至少需要一个分镜")

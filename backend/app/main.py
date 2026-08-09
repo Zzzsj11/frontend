@@ -39,7 +39,7 @@ from .database import close_database, database_ok, database_session, init_databa
 from .domain import owned_line, owned_project, owned_task, router as domain_router, uid, visible_humans
 from .jobs import jobs
 from .media_constraints import normalize_video_duration
-from .models import ProjectCastModel, ProjectTaskModel, SongEmotionProfileModel, StoryboardLineCastModel, StoryboardLineModel, UserModel
+from .models import AiModelModel, ProjectCastModel, ProjectTaskModel, SongEmotionProfileModel, StoryboardLineCastModel, StoryboardLineModel, UserModel
 from .providers import generate_image, generate_video
 from .redis_store import close_redis, redis_ok
 from .schemas import ChatMessageCreate, ChatSessionCreate, ImageGenerationCreate, LoginCreate, PasswordChange, RemoteImportCreate, VideoGenerationCreate
@@ -47,6 +47,7 @@ from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
 from .seed import recover_stale_storyboard_generation, seed_system_data
 from .story_bible import build_ass_story_bible
 from .error_logging import record_api_error, request_payload
+from .admin import router as admin_router, public_router as model_options_router
 
 
 @asynccontextmanager
@@ -63,6 +64,8 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="MV Agent API", version="0.3.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.include_router(domain_router)
+app.include_router(admin_router)
+app.include_router(model_options_router)
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -87,6 +90,10 @@ async def unhandled_error_handler(request: Request, exc: Exception) -> JSONRespo
 
 def sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+async def require_active_model(db: AsyncSession, code: str, modality: str) -> None:
+    model=(await db.execute(select(AiModelModel).where(AiModelModel.code==code,AiModelModel.modality==modality,AiModelModel.status=="active",AiModelModel.deleted_at.is_(None)))).scalar_one_or_none()
+    if not model: raise HTTPException(422,f"不支持或已停用的{modality}模型：{code}")
 
 
 @app.get("/api/health")
@@ -182,11 +189,12 @@ async def create_ass_storyboard(
     extra_requirement: str = Form(""),
     ratio: Literal["16:9", "9:16", "4:3", "1:1"] = Form("16:9"),
     resolution: Literal["480p", "720p", "1080p"] = Form("720p"),
-    image_model: Literal["gpt-image-2"] = Form("gpt-image-2"),
-    video_model: Literal["doubao-seedance-2.0"] = Form("doubao-seedance-2.0"),
+    image_model: str = Form("gpt-image-2"),
+    video_model: str = Form("doubao-seedance-2.0"),
     db: AsyncSession = Depends(database_session),
 ) -> dict:
     await owned_project(db, user.id, project_id)
+    await require_active_model(db,image_model,"image"); await require_active_model(db,video_model,"video")
     if not ass_file.filename or not ass_file.filename.lower().endswith(".ass"):
         raise HTTPException(422, "仅支持 .ass 文件")
     number_candidates = list(dict.fromkeys(re.findall(r"(?<!\d)\d{5,}(?!\d)", ass_file.filename)))
@@ -260,6 +268,7 @@ async def generation_context(user: UserModel, task_id: str | None, line_id: str 
 
 @app.post("/api/generations/images", status_code=202)
 async def create_image_generation(payload: ImageGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
+    await require_active_model(db,payload.model or settings.image_model,"image")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
     job = await jobs.create("image", payload.model_dump(mode="json"), lambda item: generate_image(payload, item), user_id=user.id, project_id=project_id, project_task_id=task_id, storyboard_line_id=line_id)
     return job.public()
@@ -267,6 +276,7 @@ async def create_image_generation(payload: ImageGenerationCreate, user: CurrentU
 
 @app.post("/api/generations/videos", status_code=202)
 async def create_video_generation(payload: VideoGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
+    await require_active_model(db,payload.model or settings.video_model,"video")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
     job = await jobs.create("video", payload.model_dump(mode="json"), lambda item: generate_video(payload, item), user_id=user.id, project_id=project_id, project_task_id=task_id, storyboard_line_id=line_id)
     return job.public()

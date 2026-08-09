@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
 import type { ShotGenOptions } from '../types'
-import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS } from '../generationModels'
+import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, loadGenerationModels } from '../generationModels'
 
 const store = useProjectStore()
 
@@ -25,7 +25,7 @@ const canSubmit = computed(() => songId.value.trim() !== '' && assFile.value !==
 watch(
   () => store.magicOpen,
   (open) => {
-    if (open) resetForm()
+    if (open) { resetForm(); void loadGenerationModels() }
   },
 )
 
