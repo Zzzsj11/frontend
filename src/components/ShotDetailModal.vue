@@ -47,6 +47,11 @@ const shotCover = computed(() => {
   const line = store.editingLine
   return line ? store.coverOf(line) : undefined
 })
+const shotOriginalCover = computed(() => {
+  const line = store.editingLine
+  return line?.shot.assets.find((asset) => asset.id === line.shot.currentAssetId)?.originalCoverUrl || shotCover.value
+})
+const hoverOriginal = ref<string | null>(null)
 
 /** 弹出预览中的视频片段（点击缩略图时选用并预览） */
 const previewAsset = ref<ShotAsset | null>(null)
@@ -159,9 +164,9 @@ const cancel = () => store.closeEditor()
 
             <!-- 分镜预览 -->
             <div class="pcard" :class="{ open: activeTab === 'shot' }">
-              <div class="pcard-media" title="点击播放当前片段" @click="onShotPreviewClick">
-                <video v-if="shotVideo" :src="shotVideo" preload="metadata" muted />
-                <img v-else-if="shotCover" :src="shotCover" alt="分镜预览" />
+              <div class="pcard-media" title="点击播放当前片段" @click="onShotPreviewClick" @mouseenter="hoverOriginal = shotOriginalCover || null" @mouseleave="hoverOriginal = null">
+                <img v-if="shotCover" :src="shotCover" alt="分镜预览" />
+                <video v-else-if="shotVideo" :src="shotVideo" preload="metadata" muted />
                 <span v-else class="pcard-empty"><AppIcon name="movie" :size="24" />暂无分镜</span>
                 <span v-if="shotVideo || shotCover" class="pcard-play"><AppIcon name="play" :size="16" /></span>
                 <span v-if="store.editingLine.shot.assets.length > 1" class="pcard-badge">
@@ -179,7 +184,7 @@ const cancel = () => store.closeEditor()
 
             <!-- 场景预览 -->
             <div class="pcard" :class="{ open: activeTab === 'scene' }">
-              <div class="pcard-media" title="点击展开场景调整" @click="activeTab = 'scene'">
+              <div class="pcard-media" title="点击展开场景调整" @click="activeTab = 'scene'" @mouseenter="hoverOriginal = store.editingLine.scene.originalImageUrl || null" @mouseleave="hoverOriginal = null">
                 <img
                   v-if="store.editingLine.scene.imageUrl"
                   :src="store.editingLine.scene.imageUrl"
@@ -246,6 +251,8 @@ const cancel = () => store.closeEditor()
                   :class="{ active: asset.id === store.editingLine.shot.currentAssetId }"
                   :title="`片段 v${i + 1} · ${asset.duration}s，点击选用并预览`"
                   @click="pickAsset(asset, i)"
+                  @mouseenter="hoverOriginal = asset.originalCoverUrl || null"
+                  @mouseleave="hoverOriginal = null"
                 >
                   <video v-if="!asset.coverUrl" :src="asset.videoUrl" preload="metadata" muted />
                   <img v-else :src="asset.coverUrl" alt="" />
@@ -364,11 +371,22 @@ const cancel = () => store.closeEditor()
           </div>
         </div>
       </div>
+      <div v-if="hoverOriginal" class="media-original-preview" aria-hidden="true">
+        <img :src="hoverOriginal" alt="媒体原图预览" />
+        <span>原图预览</span>
+      </div>
     </div>
   </Teleport>
 </template>
 
 <style scoped>
+.media-original-preview {
+  position: fixed; z-index: 1500; inset: 50% auto auto 50%; transform: translate(-50%, -50%);
+  max-width: min(80vw, 1100px); max-height: 82vh; padding: 10px; border-radius: 12px;
+  background: rgba(15, 15, 18, 0.94); box-shadow: 0 18px 60px rgba(0,0,0,.42); pointer-events: none;
+}
+.media-original-preview img { display: block; max-width: 100%; max-height: calc(82vh - 38px); object-fit: contain; border-radius: 8px; }
+.media-original-preview span { display: block; margin-top: 7px; color: #fff; text-align: center; font-size: 12px; }
 .modal-mask {
   position: fixed;
   inset: 0;

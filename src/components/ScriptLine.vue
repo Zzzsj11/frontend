@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { ScriptLine } from '../types'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
@@ -17,6 +17,11 @@ const humans = computed(() => store.lineHumans(props.line))
 /** 缩略图：真实视频 > 视频封面 > 场景底图 */
 const video = computed(() => store.videoOf(props.line))
 const cover = computed(() => store.coverOf(props.line))
+const originalCover = computed(() => {
+  const asset = props.line.shot.assets.find((item) => item.id === props.line.shot.currentAssetId)
+  return asset?.originalCoverUrl || props.line.scene.originalImageUrl || cover.value
+})
+const hoveringPreview = ref(false)
 /** 歌词非中文时的中文翻译 */
 const translation = computed(() => store.translationOf(props.line))
 const isGeneral = computed(() => props.line.source === 'general')
@@ -52,6 +57,8 @@ const onGenerateShot = async () => {
       class="shot-thumb"
       :title="!line.scene.imageUrl && line.shot.assets.length ? '编辑分镜' : '编辑场景'"
       @click.stop="openThumbnailEditor"
+      @mouseenter="hoveringPreview = true"
+      @mouseleave="hoveringPreview = false"
     >
       <video v-if="video" :src="video" preload="metadata" muted />
       <img v-else-if="cover" :src="cover" alt="分镜缩略图" />
@@ -60,6 +67,13 @@ const onGenerateShot = async () => {
         <span class="spinner light" />
       </div>
     </div>
+
+    <Teleport to="body">
+      <div v-if="hoveringPreview && originalCover" class="media-original-preview" aria-hidden="true">
+        <img :src="originalCover" alt="分镜原图预览" />
+        <span>原图预览</span>
+      </div>
+    </Teleport>
 
     <!-- 出演角色（叠放展示，空 = 空镜头） -->
     <div
@@ -111,6 +125,21 @@ const onGenerateShot = async () => {
 </template>
 
 <style scoped>
+.media-original-preview {
+  position: fixed;
+  z-index: 1500;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  max-width: min(80vw, 1100px);
+  max-height: 82vh;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(15, 15, 18, 0.94);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.42);
+  pointer-events: none;
+}
+.media-original-preview img { display: block; max-width: 100%; max-height: calc(82vh - 38px); object-fit: contain; border-radius: 8px; }
+.media-original-preview span { display: block; margin-top: 7px; color: #fff; text-align: center; font-size: 12px; }
 .script-line {
   display: flex;
   align-items: center;

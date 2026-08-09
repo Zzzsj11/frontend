@@ -98,13 +98,14 @@ class JobManager:
                 current = (await session.execute(select(SceneAssetModel).where(SceneAssetModel.storyboard_line_id == job.storyboard_line_id, SceneAssetModel.deleted_at.is_(None), SceneAssetModel.is_current.is_(True)))).scalars().all()
                 for item in current:
                     item.is_current = False
-                session.add(SceneAssetModel(id=f"scene-{uuid.uuid4().hex}", storyboard_line_id=job.storyboard_line_id, generation_job_id=job.id, image_url=job.result["urls"][0], prompt=str((job.request or {}).get("prompt") or ""), is_current=True))
+                thumbnails = job.result.get("thumbnailUrls") or []
+                session.add(SceneAssetModel(id=f"scene-{uuid.uuid4().hex}", storyboard_line_id=job.storyboard_line_id, generation_job_id=job.id, image_url=job.result["urls"][0], image_thumbnail_url=thumbnails[0] if thumbnails else None, prompt=str((job.request or {}).get("prompt") or ""), is_current=True))
             elif job.storyboard_line_id and job.kind == "video" and job.result.get("videoUrl"):
                 current = (await session.execute(select(ShotAssetModel).where(ShotAssetModel.storyboard_line_id == job.storyboard_line_id, ShotAssetModel.deleted_at.is_(None), ShotAssetModel.is_current.is_(True)))).scalars().all()
                 for item in current:
                     item.is_current = False
                 request = job.request or {}
-                session.add(ShotAssetModel(id=f"shot-{uuid.uuid4().hex}", storyboard_line_id=job.storyboard_line_id, generation_job_id=job.id, cover_url=job.result["coverUrl"], video_url=job.result["videoUrl"], duration=float(job.result.get("duration") or 0), resolution=str(request.get("resolution") or "720p"), ratio=str(job.result.get("ratio") or request.get("ratio") or "16:9"), prompt=str(request.get("prompt") or ""), is_current=True))
+                session.add(ShotAssetModel(id=f"shot-{uuid.uuid4().hex}", storyboard_line_id=job.storyboard_line_id, generation_job_id=job.id, cover_url=job.result["coverUrl"], cover_thumbnail_url=job.result.get("coverThumbnailUrl"), video_url=job.result["videoUrl"], duration=float(job.result.get("duration") or 0), resolution=str(request.get("resolution") or "720p"), ratio=str(job.result.get("ratio") or request.get("ratio") or "16:9"), prompt=str(request.get("prompt") or ""), is_current=True))
             await session.commit()
 
     async def get(self, job_id: str, user_id: str | None = None) -> Job | None:

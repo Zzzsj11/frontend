@@ -11,7 +11,7 @@ import httpx
 from .config import settings
 from .jobs import Job, jobs
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
-from .storage import get_storage, import_remote, import_remote_image, safe_key
+from .storage import import_remote, import_remote_image, put_image_with_thumbnail, safe_key
 
 
 class ProviderError(RuntimeError):
@@ -116,7 +116,7 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
     owner_prefix = f"users/{job.user_id}/generated"
     stored_url = await import_remote(source_url, f"{owner_prefix}/videos", f"{task_id}.mp4")
     cover_url = data.get("coverUrl") or data.get("firstFrameUrl")
-    stored_cover = await import_remote(cover_url, f"{owner_prefix}/covers") if cover_url else await _video_first_frame(source_url, task_id, job.user_id)
+    stored_cover, stored_cover_thumbnail = await import_remote_image(cover_url, f"{owner_prefix}/covers") if cover_url else await _video_first_frame(source_url, task_id, job.user_id)
     return {
         "provider": "yinghe",
         "providerTaskId": task_id,
@@ -124,13 +124,14 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         "usage": _usage(data) or _usage(created),
         "videoUrl": stored_url,
         "coverUrl": stored_cover,
+        "coverThumbnailUrl": stored_cover_thumbnail,
         "sourceUrl": source_url,
         "duration": request.duration,
         "ratio": request.ratio,
     }
 
 
-async def _video_first_frame(video_url: str, task_id: str, user_id: str | None) -> str:
+async def _video_first_frame(video_url: str, task_id: str, user_id: str | None) -> tuple[str, str]:
     """Extract the default shot cover from the generated video's first frame."""
     async with httpx.AsyncClient(timeout=180, follow_redirects=True) as client:
         response = await client.get(video_url)
@@ -148,4 +149,4 @@ async def _video_first_frame(video_url: str, task_id: str, user_id: str | None) 
         _, stderr = await process.communicate()
         if process.returncode or not cover_path.is_file():
             raise ProviderError(f"提取视频首帧失败：{stderr.decode(errors='replace')[:300]}")
-        return await get_storage().put_bytes(safe_key(f"users/{user_id}/generated/covers", f"{task_id}.jpg"), cover_path.read_bytes(), "image/jpeg")
+        return await put_image_with_thumbnail(safe_key(f"users/{user_id}/generated/covers", f"{task_id}.jpg"), cover_path.read_bytes(), "image/jpeg")

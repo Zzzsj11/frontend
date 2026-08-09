@@ -25,15 +25,15 @@ async function waitForJob<T>(id: string, timeoutMs = 660_000): Promise<T> {
   }
 }
 
-export async function generateScene(prompt: string, projectTaskId?: string, storyboardLineId?: string, ratio: ShotGenOptions['ratio'] = '16:9', model?: ImageModelId): Promise<{ imageUrl: string }> {
+export async function generateScene(prompt: string, projectTaskId?: string, storyboardLineId?: string, ratio: ShotGenOptions['ratio'] = '16:9', model?: ImageModelId): Promise<{ imageUrl: string; thumbnailUrl?: string }> {
   const size = ratio === '9:16' ? '1024x1536' : ratio === '1:1' ? '1024x1024' : ratio === '4:3' ? '1365x1024' : '1536x1024'
   const job = await request<GenerationJob>('/generations/images', {
     method: 'POST',
     body: JSON.stringify({ prompt, size, quality: 'auto', n: 1, model, purpose: 'scene', project_task_id: projectTaskId, storyboard_line_id: storyboardLineId }),
   })
-  const result = await waitForJob<{ urls: string[] }>(job.id)
+  const result = await waitForJob<{ urls: string[]; thumbnailUrls?: string[] }>(job.id)
   if (!result.urls?.[0]) throw new Error('场景生成成功但没有图片')
-  return { imageUrl: result.urls[0] }
+  return { imageUrl: result.urls[0], thumbnailUrl: result.thumbnailUrls?.[0] }
 }
 
 export async function generateShotVideo(
@@ -42,7 +42,7 @@ export async function generateShotVideo(
   options: ShotGenOptions,
   projectTaskId?: string,
   storyboardLineId?: string,
-): Promise<{ coverUrl: string; videoUrl: string; duration: number }> {
+): Promise<{ coverUrl: string; coverThumbnailUrl?: string; videoUrl: string; duration: number }> {
   const job = await request<GenerationJob>('/generations/videos', {
     method: 'POST',
     body: JSON.stringify({
@@ -57,9 +57,10 @@ export async function generateShotVideo(
       storyboard_line_id: storyboardLineId,
     }),
   })
-  const result = await waitForJob<{ coverUrl?: string; videoUrl: string; duration: number }>(job.id)
+  const result = await waitForJob<{ coverUrl?: string; coverThumbnailUrl?: string; videoUrl: string; duration: number }>(job.id)
   return {
     coverUrl: result.coverUrl || referenceImageUrl || '',
+    coverThumbnailUrl: result.coverThumbnailUrl,
     videoUrl: result.videoUrl,
     duration: result.duration,
   }

@@ -40,9 +40,11 @@ export async function fetchSongProjects(): Promise<SongProject[]> {
 export async function fetchSongScript(taskId: string): Promise<{ cast: string[]; lines: ScriptLine[] }> {
   const task = await apiRequest<{ cast: string[]; lines: Array<Record<string, unknown>> }>(`/tasks/${taskId}`)
   return { cast: task.cast, lines: task.lines.map((item) => {
-    const sceneAssets = (item.sceneAssets as Array<{ id:string; imageUrl:string; isCurrent:boolean }>) || []
-    const shotAssets = (item.shotAssets as Array<{ id:string; coverUrl:string; videoUrl:string; duration:number; isCurrent:boolean }>) || []
-    return { id: String(item.id), source: item.source as ScriptLine['source'], shotType: item.shotType as ScriptLine['shotType'], plannedDuration: item.plannedDuration as number | undefined, lyrics: String(item.lyrics || ''), lyricsZh: item.lyricsZh as string | undefined, scenePrompt: String(item.scenePrompt || ''), shotPrompt: String(item.shotPrompt || ''), digitalHumanIds: item.digitalHumanIds as string[], shotOptions: item.shotOptions as ScriptLine['shotOptions'], generationStatus: item.generationStatus as ScriptLine['generationStatus'], generationError: item.generationError as string | undefined, generationAttempt: Number(item.generationAttempt || 0), voice: { status: 'none' }, scene: { status: sceneAssets.length ? 'done' : 'none', imageUrl: sceneAssets.find((a)=>a.isCurrent)?.imageUrl }, shot: { status: shotAssets.length ? 'done' : 'none', imageUrl: shotAssets.find((a)=>a.isCurrent)?.coverUrl, assets: shotAssets.map((a)=>({ ...a, digitalHumanIds: item.digitalHumanIds as string[] })), currentAssetId: shotAssets.find((a)=>a.isCurrent)?.id } }
+    const sceneAssets = (item.sceneAssets as Array<{ id:string; imageUrl:string; originalImageUrl?:string; isCurrent:boolean }>) || []
+    const shotAssets = (item.shotAssets as Array<{ id:string; coverUrl:string; originalCoverUrl?:string; videoUrl:string; duration:number; isCurrent:boolean }>) || []
+    const currentScene = sceneAssets.find((a)=>a.isCurrent)
+    const currentShot = shotAssets.find((a)=>a.isCurrent)
+    return { id: String(item.id), source: item.source as ScriptLine['source'], shotType: item.shotType as ScriptLine['shotType'], plannedDuration: item.plannedDuration as number | undefined, lyrics: String(item.lyrics || ''), lyricsZh: item.lyricsZh as string | undefined, scenePrompt: String(item.scenePrompt || ''), shotPrompt: String(item.shotPrompt || ''), digitalHumanIds: item.digitalHumanIds as string[], shotOptions: item.shotOptions as ScriptLine['shotOptions'], generationStatus: item.generationStatus as ScriptLine['generationStatus'], generationError: item.generationError as string | undefined, generationAttempt: Number(item.generationAttempt || 0), voice: { status: 'none' }, scene: { status: sceneAssets.length ? 'done' : 'none', imageUrl: currentScene?.imageUrl, originalImageUrl: currentScene?.originalImageUrl }, shot: { status: shotAssets.length ? 'done' : 'none', imageUrl: currentShot?.coverUrl, assets: shotAssets.map((a)=>({ ...a, digitalHumanIds: item.digitalHumanIds as string[] })), currentAssetId: currentShot?.id } }
   }) }
 }
 
@@ -179,7 +181,7 @@ export async function generateSceneImage(
   storyboardLineId?: string,
   ratio: ShotGenOptions['ratio'] = '16:9',
   imageModel?: ShotGenOptions['imageModel'],
-): Promise<{ imageUrl: string }> {
+): Promise<{ imageUrl: string; thumbnailUrl?: string }> {
   return mediaGen.generateScene(scenePrompt, projectTaskId, storyboardLineId, ratio, imageModel)
 }
 
@@ -194,7 +196,7 @@ export async function generateShotVideo(
   referenceImageUrl?: string,
   projectTaskId?: string,
   storyboardLineId?: string,
-): Promise<{ coverUrl: string; videoUrl: string; duration: number }> {
+): Promise<{ coverUrl: string; coverThumbnailUrl?: string; videoUrl: string; duration: number }> {
   return mediaGen.generateShotVideo(
     [scenePrompt, shotPrompt].filter(Boolean).join('。'),
     referenceImageUrl,

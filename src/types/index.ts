@@ -57,6 +57,8 @@ export interface ShotAsset {
   id: string
   /** 视频封面图 */
   coverUrl: string
+  /** 视频封面原图，仅在放大预览时加载 */
+  originalCoverUrl?: string
   /** 视频地址（mock） */
   videoUrl: string
   /** 片段时长（秒） */
@@ -70,6 +72,8 @@ export interface SceneInfo {
   status: GenStatus
   /** 场景图 */
   imageUrl?: string
+  /** 场景原图，仅在放大预览时加载 */
+  originalImageUrl?: string
 }
 
 /** 分镜信息 */

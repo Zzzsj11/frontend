@@ -814,9 +814,9 @@ export const useProjectStore = defineStore('project', {
       sceneVariants[lineId] = variant + 1
       try {
         const options = normalizeShotOptions(line.shotOptions ?? DEFAULT_SHOT_OPTIONS)
-        const { imageUrl } = await api.generateSceneImage(line.scenePrompt, idx, variant, this.activeTaskId ?? undefined, lineId, options.ratio, options.imageModel)
+        const { imageUrl, thumbnailUrl } = await api.generateSceneImage(line.scenePrompt, idx, variant, this.activeTaskId ?? undefined, lineId, options.ratio, options.imageModel)
         const still = this.lines.find((l) => l.id === lineId)
-        if (still) still.scene = { status: 'done', imageUrl }
+        if (still) still.scene = { status: 'done', imageUrl: thumbnailUrl || imageUrl, originalImageUrl: imageUrl }
       } catch (error) {
         const still = this.lines.find((l) => l.id === lineId)
         if (still) still.scene.status = 'none'
@@ -835,7 +835,7 @@ export const useProjectStore = defineStore('project', {
       line.shot.status = 'generating'
       const variant = line.shot.assets.length
       try {
-        const { coverUrl, videoUrl, duration } = await api.generateShotVideo(
+        const { coverUrl, coverThumbnailUrl, videoUrl, duration } = await api.generateShotVideo(
         line.scenePrompt,
         line.shotPrompt,
         line.digitalHumanIds,
@@ -851,13 +851,15 @@ export const useProjectStore = defineStore('project', {
         const asset: ShotAsset = {
           id: nextId('asset'),
           coverUrl,
+          originalCoverUrl: coverUrl,
           videoUrl,
           duration,
           digitalHumanIds: [...line.digitalHumanIds],
         }
         still.shot.assets.push(asset)
         still.shot.currentAssetId = asset.id
-        still.shot.imageUrl = coverUrl
+        asset.coverUrl = coverThumbnailUrl || coverUrl
+        still.shot.imageUrl = asset.coverUrl
           still.shot.status = 'done'
         }
       } catch (error) {

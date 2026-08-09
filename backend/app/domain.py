@@ -555,8 +555,8 @@ async def line_json(db: AsyncSession, line: StoryboardLineModel, cast: list[str]
         "generationStatus": line.generation_status, "generationError": line.generation_error,
         "generationAttempt": line.generation_attempt, "generatedAt": line.generated_at.isoformat() if line.generated_at else None,
         "digitalHumanIds": cast,
-        "sceneAssets": [{"id": a.id, "imageUrl": a.image_url, "isCurrent": a.is_current} for a in scenes],
-        "shotAssets": [{"id": a.id, "coverUrl": a.cover_url, "videoUrl": a.video_url, "duration": a.duration, "resolution": a.resolution, "ratio": a.ratio, "isCurrent": a.is_current} for a in shots],
+        "sceneAssets": [{"id": a.id, "imageUrl": a.image_thumbnail_url or a.image_url, "originalImageUrl": a.image_url, "isCurrent": a.is_current} for a in scenes],
+        "shotAssets": [{"id": a.id, "coverUrl": a.cover_thumbnail_url or a.cover_url, "originalCoverUrl": a.cover_url, "videoUrl": a.video_url, "duration": a.duration, "resolution": a.resolution, "ratio": a.ratio, "isCurrent": a.is_current} for a in shots],
         "voiceAssets": [{"id": a.id, "url": a.audio_url, "duration": a.duration, "isCurrent": a.is_current} for a in voices],
     }
 
