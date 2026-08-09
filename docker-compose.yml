@@ -21,7 +21,7 @@ services:
     environment:
       APP_HOST: 0.0.0.0
       APP_PORT: 8000
-      APP_CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-5173}
+      APP_CORS_ORIGINS: https://mv.yangxiaren.club,https://www.mv.yangxiaren.club,http://localhost:${FRONTEND_PORT:-5173}
       DATABASE_URL: postgresql+asyncpg://mvagent:mvagent@postgres:5432/mvagent
       REDIS_URL: redis://redis:6379/0
       LLM_API_MODE: ${LLM_API_MODE:-openai}
