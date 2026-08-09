@@ -1,4 +1,5 @@
 import type { ShotGenOptions } from '../types'
+import type { ImageModelId } from '../generationModels'
 import { apiRequest } from './client'
 
 interface GenerationJob<T = Record<string, unknown>> {
@@ -24,11 +25,11 @@ async function waitForJob<T>(id: string, timeoutMs = 660_000): Promise<T> {
   }
 }
 
-export async function generateScene(prompt: string, projectTaskId?: string, storyboardLineId?: string, ratio: ShotGenOptions['ratio'] = '16:9'): Promise<{ imageUrl: string }> {
+export async function generateScene(prompt: string, projectTaskId?: string, storyboardLineId?: string, ratio: ShotGenOptions['ratio'] = '16:9', model?: ImageModelId): Promise<{ imageUrl: string }> {
   const size = ratio === '9:16' ? '1024x1536' : ratio === '1:1' ? '1024x1024' : ratio === '4:3' ? '1365x1024' : '1536x1024'
   const job = await request<GenerationJob>('/generations/images', {
     method: 'POST',
-    body: JSON.stringify({ prompt, size, quality: 'auto', n: 1, purpose: 'scene', project_task_id: projectTaskId, storyboard_line_id: storyboardLineId }),
+    body: JSON.stringify({ prompt, size, quality: 'auto', n: 1, model, purpose: 'scene', project_task_id: projectTaskId, storyboard_line_id: storyboardLineId }),
   })
   const result = await waitForJob<{ urls: string[] }>(job.id)
   if (!result.urls?.[0]) throw new Error('场景生成成功但没有图片')
@@ -48,6 +49,8 @@ export async function generateShotVideo(
       prompt,
       duration: options.duration,
       ratio: options.ratio,
+      resolution: options.resolution,
+      model: options.videoModel,
       image_urls: referenceImageUrl ? [referenceImageUrl] : [],
       generate_audio: false,
       project_task_id: projectTaskId,

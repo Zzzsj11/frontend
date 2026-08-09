@@ -99,6 +99,10 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     assert generated_line.status_code == 200, generated_line.text
     assert generated_line.json()["usage"] == {"inputTokens": 120, "outputTokens": 40, "cachedInputTokens": 0, "totalTokens": 160}
     line = generated_line.json()
+    assert line["shotOptions"]["ratio"] == "16:9"
+    assert line["shotOptions"]["resolution"] == "720p"
+    assert line["shotOptions"]["imageModel"] == "gpt-image-2"
+    assert line["shotOptions"]["videoModel"] == "doubao-seedance-2.0"
 
     image_created = client.post("/api/generations/images", json={"prompt": line["scenePrompt"], "project_task_id": storyboard.json()["taskId"], "storyboard_line_id": line["id"], "purpose": "scene"})
     assert image_created.status_code == 202
@@ -180,6 +184,18 @@ def test_user_journey_rejects_invalid_inputs(client) -> None:
         json={"prompt": "test", "duration": 1, "ratio": "21:9"},
     )
     assert bad_video.status_code == 422
+
+    unsupported_video_model = client.post(
+        "/api/generations/videos",
+        json={"prompt": "test", "duration": 5, "ratio": "16:9", "model": "future-video-model"},
+    )
+    assert unsupported_video_model.status_code == 422
+
+    unsupported_image_model = client.post(
+        "/api/generations/images",
+        json={"prompt": "test", "model": "future-image-model"},
+    )
+    assert unsupported_image_model.status_code == 422
 
 
 def test_ass_storyboard_generates_one_line_with_full_lyrics_context(client, monkeypatch) -> None:

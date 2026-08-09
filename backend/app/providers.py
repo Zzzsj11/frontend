@@ -98,6 +98,7 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         "content": content,
         "generate_audio": request.generate_audio,
         "ratio": request.ratio,
+        "resolution": request.resolution,
         "duration": request.duration,
         "watermark": request.watermark,
     }

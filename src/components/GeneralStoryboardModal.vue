@@ -4,6 +4,7 @@ import type { GeneralStoryboardRequest, ShotGenOptions } from '../types'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
 import { MAX_VIDEO_DURATION, MIN_VIDEO_DURATION } from '../mediaConstraints'
+import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS } from '../generationModels'
 
 const store = useProjectStore()
 const genre = ref('')
@@ -14,6 +15,9 @@ const singer = ref('')
 const ageGroup = ref('青年')
 const visualStyle = ref('电影写实')
 const ratio = ref<ShotGenOptions['ratio']>('16:9')
+const resolution = ref<ShotGenOptions['resolution']>('720p')
+const imageModel = ref(DEFAULT_IMAGE_MODEL)
+const videoModel = ref(DEFAULT_VIDEO_MODEL)
 const emptyShotCount = ref(5)
 const characterShotCount = ref(5)
 const totalDuration = ref(100)
@@ -40,6 +44,9 @@ const reset = () => {
   ageGroup.value = options?.ageGroups.includes('青年') ? '青年' : (options?.ageGroups[0] ?? '')
   visualStyle.value = options?.visualStyles.includes('电影写实') ? '电影写实' : (options?.visualStyles[0] ?? '')
   ratio.value = options?.ratios[0] ?? '16:9'
+  resolution.value = '720p'
+  imageModel.value = DEFAULT_IMAGE_MODEL
+  videoModel.value = DEFAULT_VIDEO_MODEL
   singer.value = ''
   emptyShotCount.value = 5
   characterShotCount.value = 5
@@ -77,6 +84,9 @@ const submit = () => {
     ageGroup: ageGroup.value,
     visualStyle: visualStyle.value,
     ratio: ratio.value,
+    resolution: resolution.value,
+    imageModel: imageModel.value,
+    videoModel: videoModel.value,
     emptyShotCount: Math.max(0, Math.round(emptyShotCount.value)),
     characterShotCount: Math.max(0, Math.round(characterShotCount.value)),
     totalDuration: Math.round(totalDuration.value),
@@ -147,6 +157,12 @@ const submit = () => {
                 <label><span>总时长（秒）</span><input v-model.number="totalDuration" type="number" :min="minimumTotalDuration" :max="maximumTotalDuration" /></label>
               </div>
               <p class="estimate" :class="{ invalid: totalShots > 0 && !durationIsValid }">将生成 <strong>{{ totalShots }}</strong> 个分镜：{{ emptyShotCount }} 个空镜、{{ characterShotCount }} 个人物镜，平均每镜约 <strong>{{ averageDuration }} 秒</strong>；允许总时长 <strong>{{ minimumTotalDuration }}–{{ maximumTotalDuration }} 秒</strong>（每镜 4–15 秒）</p>
+              <div class="field-grid three model-grid">
+                <label><span>清晰度 *</span><select v-model="resolution"><option value="480p">480p</option><option value="720p">720p</option><option value="1080p">1080p</option></select></label>
+                <label><span>视频模型 *</span><select v-model="videoModel" disabled><option v-for="item in VIDEO_MODEL_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+                <label><span>图片模型 *</span><select v-model="imageModel" disabled><option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+              </div>
+              <p class="model-hint">当前内测版模型固定，选项已保留用于后续扩展。</p>
               <label class="extra-field"><span>额外要求（可选）</span><textarea v-model="extraRequirement" rows="3" placeholder="例如：雨夜、克制情绪、避免舞蹈场面，多使用缓慢运镜…" /></label>
             </section>
           </template>
@@ -169,4 +185,5 @@ const submit = () => {
 .modal-mask{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.48);display:flex;align-items:center;justify-content:center;padding:24px}.modal{width:920px;max-width:100%;max-height:94vh;background:#fff;border-radius:16px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.28)}.modal-header{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--border)}.modal-header h3{margin:0;display:flex;align-items:center;gap:8px;font-size:18px}.modal-header h3 .app-icon{color:var(--primary)}.close-btn{border:0;background:none;color:var(--text-secondary);display:flex;align-items:center;gap:4px;cursor:pointer}.modal-body{padding:18px 22px;overflow-y:auto}.form-section{margin-bottom:20px}.form-section:last-child{margin-bottom:0}.form-section h4{margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border);font-size:14px}.field-label{margin:0 0 8px;font-size:13px;font-weight:600}.field-label span,.extra-field>span{color:var(--text-secondary);font-weight:400}.people-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.upload-box,.cast-list{min-height:106px;border:1px dashed var(--border-dark);border-radius:10px;background:#fafafa;padding:10px}.upload-box{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:7px;color:var(--text-secondary);cursor:pointer}.upload-box:hover{border-color:var(--primary);background:var(--primary-light)}.image-list,.cast-list{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.image-list{width:100%;border:0;padding:0;background:transparent}.image-thumb{width:58px;height:72px;position:relative;border-radius:8px;overflow:hidden}.image-thumb img{width:100%;height:100%;object-fit:cover}.image-thumb button{position:absolute;right:3px;top:3px;width:18px;height:18px;border:0;border-radius:50%;background:rgba(0,0,0,.6);color:#fff}.image-add{width:58px;height:72px;border:1px dashed var(--border-dark);border-radius:8px;background:#fff;color:var(--text-secondary)}.cast-item{position:relative;width:62px;border:1px solid var(--border);border-radius:9px;background:#fff;padding:4px;color:var(--text-secondary);cursor:pointer}.cast-item.active{border-color:var(--primary);color:var(--primary);background:var(--primary-light)}.cast-item img{width:100%;height:56px;object-fit:cover;border-radius:6px}.cast-item span{display:block;font-size:11px;overflow:hidden;white-space:nowrap}.cast-item .app-icon{position:absolute;right:5px;top:5px;background:var(--primary);color:#fff;border-radius:50%;padding:2px}.empty-cast{font-size:12px;color:var(--text-secondary)}.field-grid{display:grid;gap:12px}.field-grid.three{grid-template-columns:repeat(3,1fr)}.field-grid.five{grid-template-columns:repeat(5,1fr)}.field-grid label,.extra-field{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--text-secondary)}select,input,textarea{width:100%;border:1px solid var(--border-dark);border-radius:9px;background:#fff;padding:9px 10px;font:inherit;color:var(--text);outline:none}select:focus,input:focus,textarea:focus{border-color:var(--primary)}textarea{resize:vertical}.estimate{margin:11px 0;padding:9px 12px;border-radius:8px;background:var(--primary-light);color:var(--text-secondary);font-size:12px}.estimate strong{color:var(--primary)}.modal-footer{display:flex;justify-content:flex-end;gap:10px;padding:14px 22px 18px;border-top:1px solid var(--border)}.cancel-btn{border:1px solid var(--border-dark);border-radius:20px;background:#fff;padding:9px 20px;cursor:pointer}.error-tip{padding:10px 12px;border-radius:8px;background:#fff0f0;color:#d33}.loading-tip{display:flex;align-items:center;justify-content:center;gap:8px;padding:40px;color:var(--text-secondary)}@media(max-width:760px){.people-grid,.field-grid.three,.field-grid.five{grid-template-columns:1fr 1fr}}@media(max-width:520px){.people-grid,.field-grid.three,.field-grid.five{grid-template-columns:1fr}}
 .cast-list{max-height:210px;overflow-y:auto;align-content:flex-start}
 .estimate.invalid{background:#fff0f0;color:#c33}.estimate.invalid strong{color:#c33}
+.model-grid{margin:12px 0 6px}.model-grid select:disabled{background:#f5f5f6;color:#777;cursor:not-allowed}.model-hint{margin:0 0 12px;color:var(--text-secondary);font-size:12px}
 </style>

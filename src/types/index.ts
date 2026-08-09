@@ -1,4 +1,6 @@
 /** 生成状态 */
+import type { ImageModelId, VideoModelId } from '../generationModels'
+
 export type GenStatus = 'none' | 'generating' | 'done'
 
 /** 歌曲目录下的处理任务（一个任务 = 一次 MV 制作会话） */
@@ -85,6 +87,8 @@ export interface ShotGenOptions {
   /** 时长（秒） */
   duration: number
   ratio: '16:9' | '9:16' | '4:3' | '1:1'
+  imageModel: ImageModelId
+  videoModel: VideoModelId
 }
 
 /** 脚本行（每一条 = 一个分镜） */
@@ -142,6 +146,9 @@ export interface GeneralStoryboardRequest {
   ageGroup: string
   visualStyle: string
   ratio: ShotGenOptions['ratio']
+  resolution: ShotGenOptions['resolution']
+  imageModel: ImageModelId
+  videoModel: VideoModelId
   emptyShotCount: number
   characterShotCount: number
   totalDuration: number

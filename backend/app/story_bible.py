@@ -29,15 +29,18 @@ def build_ass_story_bible(*, segments: list[dict[str, Any]], emotion: dict[str, 
     total = len(segments)
     shots = []
     for index, segment in enumerate(segments):
-        roles = [] if not role_ids or index == 0 else [role_ids[(index - 1) % len(role_ids)]]
-        if index == total - 1 and len(role_ids) > 1:
+        if total == 1:
+            roles = role_ids[:]
+        else:
+            roles = [] if not role_ids or index == 0 else [role_ids[(index - 1) % len(role_ids)]]
+        if total > 1 and index == total - 1 and len(role_ids) > 1:
             roles = role_ids[:]
         shots.append({"index": index, "stage": _stage(index, total), "lyrics": segment.get("lyrics", ""), "preferredCharacterIds": roles})
     return {
         "version": STORY_BIBLE_VERSION,
         "logline": f"{emotion.get('songName') or emotion.get('songCode')} 的情绪化 MV，以 {emotion.get('materialCategory') or '歌曲情感'} 为叙事核心。",
         "visualContinuity": {"season": emotion.get("seasons"), "atmosphere": emotion.get("atmosphere"), "stylePriority": extra_requirement or "保持同一时间线、主色调和空间逻辑"},
-        "characterPolicy": "首镜优先建立环境，中段按情绪和歌词轮换角色，收束镜允许多人同框；不得改变人物身份和服装。",
+        "characterPolicy": "用户未选角色时全部生成无人空镜；用户选择角色后，首镜优先建立环境，中段只在所选角色内轮换，收束镜允许所选角色多人同框；不得引入其他人物，也不得改变人物身份和服装。",
         "shots": shots,
     }
 

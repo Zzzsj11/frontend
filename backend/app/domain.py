@@ -348,7 +348,7 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
     output = []
     for index, (shot_type, (scene, shot), roles) in enumerate(definitions):
         duration = durations[index]
-        line = StoryboardLineModel(id=uid("line"), project_task_id=task.id, sort_order=index, source="general", shot_type=shot_type, planned_duration=duration, scene_prompt="", shot_prompt="", shot_options={"ratio": payload.ratio, "duration": normalize_video_duration(duration), "outlineScene": scene, "outlineShot": shot}, generation_status="pending")
+        line = StoryboardLineModel(id=uid("line"), project_task_id=task.id, sort_order=index, source="general", shot_type=shot_type, planned_duration=duration, scene_prompt="", shot_prompt="", shot_options={"ratio": payload.ratio, "resolution": payload.resolution, "imageModel": payload.image_model, "videoModel": payload.video_model, "duration": normalize_video_duration(duration), "outlineScene": scene, "outlineShot": shot}, generation_status="pending")
         db.add(line)
         await db.flush()
         for role_index, human_id in enumerate(roles):

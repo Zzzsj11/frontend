@@ -73,6 +73,11 @@ class Settings:
     video_api_base_url: str = os.getenv("VIDEO_API_BASE_URL", "https://api-aigc.fzyinghe.com")
     video_api_key: str = os.getenv("VIDEO_API_KEY") or SHARED_PROVIDER_KEY
     video_model: str = os.getenv("VIDEO_MODEL", "doubao-seedance-2.0")
+    business_api_key: str = os.getenv("BUSINESS_API_KEY", "")
+    business_user_id: str = os.getenv("BUSINESS_USER_ID", "")
+    business_balance_url: str = os.getenv("BUSINESS_BALANCE_URL", "https://api-aigc.fzyinghe.com/business/reconcile/balance")
+    business_balance_timeout: float = float(os.getenv("BUSINESS_BALANCE_TIMEOUT", "10"))
+    business_balance_cache_seconds: int = max(5, int(os.getenv("BUSINESS_BALANCE_CACHE_SECONDS", "30")))
     storage_backend: str = os.getenv("STORAGE_BACKEND", "tos").lower()
     tos_endpoint: str = os.getenv("TOS_ENDPOINT", "")
     tos_region: str = os.getenv("TOS_REGION", "")

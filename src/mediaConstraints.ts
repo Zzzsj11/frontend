@@ -1,4 +1,5 @@
 import type { ShotGenOptions } from './types'
+import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL } from './generationModels'
 
 export const MIN_VIDEO_DURATION = 4
 export const MAX_VIDEO_DURATION = 15
@@ -16,4 +17,6 @@ export const normalizeVideoDuration = (value?: number): number => {
 export const normalizeShotOptions = (options: ShotGenOptions): ShotGenOptions => ({
   ...options,
   duration: normalizeVideoDuration(options.duration),
+  imageModel: options.imageModel || DEFAULT_IMAGE_MODEL,
+  videoModel: options.videoModel || DEFAULT_VIDEO_MODEL,
 })

@@ -5,6 +5,7 @@ import type { ShotAsset, ShotGenOptions } from '../types'
 import AppIcon from './AppIcon.vue'
 import { confirmDialog } from '../composables/useConfirmDialog'
 import { normalizeShotOptions, VIDEO_DURATION_CHOICES } from '../mediaConstraints'
+import { IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS } from '../generationModels'
 
 const store = useProjectStore()
 
@@ -17,7 +18,7 @@ const shotPromptDraft = ref('')
 type TabKey = 'cast' | 'shot' | 'scene'
 const activeTab = ref<TabKey | null>(null)
 
-// 分镜视频生成参数草稿（清晰度 / 时长 / 画幅），重新生成分镜时生效
+// 分镜视频生成参数草稿（清晰度 / 时长 / 画幅 / 模型），重新生成分镜时生效
 const optionsDraft = ref<ShotGenOptions>({ ...DEFAULT_SHOT_OPTIONS })
 const resolutionChoices: ShotGenOptions['resolution'][] = ['480p', '720p', '1080p']
 const durationChoices = VIDEO_DURATION_CHOICES
@@ -254,7 +255,7 @@ const cancel = () => store.closeEditor()
               </div>
             </template>
 
-            <!-- 生成参数：清晰度 / 时长 / 画幅，重新生成分镜时生效 -->
+            <!-- 生成参数：清晰度 / 时长 / 画幅 / 模型，重新生成分镜时生效 -->
             <p class="panel-title mt">生成参数</p>
             <div class="gen-options">
               <label class="opt-item">
@@ -273,6 +274,18 @@ const cancel = () => store.closeEditor()
                 <span class="opt-label">画幅</span>
                 <select v-model="optionsDraft.ratio" class="opt-select">
                   <option v-for="r in ratioChoices" :key="r" :value="r">{{ r }}</option>
+                </select>
+              </label>
+              <label class="opt-item">
+                <span class="opt-label">视频模型</span>
+                <select v-model="optionsDraft.videoModel" class="opt-select" disabled>
+                  <option v-for="item in VIDEO_MODEL_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
+                </select>
+              </label>
+              <label class="opt-item">
+                <span class="opt-label">图片模型</span>
+                <select v-model="optionsDraft.imageModel" class="opt-select" disabled>
+                  <option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
                 </select>
               </label>
             </div>
@@ -754,7 +767,7 @@ const cancel = () => store.closeEditor()
   min-height: 132px;
 }
 
-/* 生成参数选择（清晰度 / 时长 / 画幅） */
+/* 生成参数选择（清晰度 / 时长 / 画幅 / 模型） */
 .gen-options {
   display: flex;
   align-items: center;

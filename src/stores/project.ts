@@ -5,12 +5,13 @@ import * as imageGen from '../api/imageGen'
 import { nextId } from '../mock/data'
 import { reportApiError } from '../errorBus'
 import { DEFAULT_VIDEO_DURATION, normalizeShotOptions } from '../mediaConstraints'
+import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL } from '../generationModels'
 
 /** 无配音时的占位时长（秒） */
 export const DEFAULT_CLIP_DURATION = 5
 
 /** 分镜视频生成参数默认值（清晰度 / 时长 / 画幅） */
-export const DEFAULT_SHOT_OPTIONS: ShotGenOptions = { resolution: '1080p', duration: DEFAULT_VIDEO_DURATION, ratio: '16:9' }
+export const DEFAULT_SHOT_OPTIONS: ShotGenOptions = { resolution: '720p', duration: DEFAULT_VIDEO_DURATION, ratio: '16:9', imageModel: DEFAULT_IMAGE_MODEL, videoModel: DEFAULT_VIDEO_MODEL }
 
 let rafId = 0
 let lastTick = 0
@@ -703,7 +704,7 @@ export const useProjectStore = defineStore('project', {
           voice: { status: 'none' },
           scene: { status: 'none' },
           shot: { status: 'none', assets: [] },
-          shotOptions: { ...DEFAULT_SHOT_OPTIONS, ratio: req.ratio },
+          shotOptions: { ...DEFAULT_SHOT_OPTIONS, ratio: req.ratio, resolution: req.resolution, imageModel: req.imageModel, videoModel: req.videoModel },
           generationStatus: item.generationStatus || 'pending',
         }))
         this._cacheCurrentTask()
@@ -751,6 +752,7 @@ export const useProjectStore = defineStore('project', {
           voice: { status: 'none' },
           scene: { status: 'none' },
           shot: { status: 'none', assets: [] },
+          shotOptions: { ...DEFAULT_SHOT_OPTIONS, ratio: req.ratio, resolution: req.resolution, imageModel: req.imageModel, videoModel: req.videoModel },
           generationStatus: (item as typeof item & { generationStatus?: ScriptLine['generationStatus'] }).generationStatus || 'pending',
         }))
         // 先缓存当前子项目编辑现场，避免被新脚本覆盖丢失
@@ -802,7 +804,8 @@ export const useProjectStore = defineStore('project', {
       const variant = sceneVariants[lineId] ?? 0
       sceneVariants[lineId] = variant + 1
       try {
-        const { imageUrl } = await api.generateSceneImage(line.scenePrompt, idx, variant, this.activeTaskId ?? undefined, lineId, line.shotOptions?.ratio ?? '16:9')
+        const options = normalizeShotOptions(line.shotOptions ?? DEFAULT_SHOT_OPTIONS)
+        const { imageUrl } = await api.generateSceneImage(line.scenePrompt, idx, variant, this.activeTaskId ?? undefined, lineId, options.ratio, options.imageModel)
         const still = this.lines.find((l) => l.id === lineId)
         if (still) still.scene = { status: 'done', imageUrl }
       } catch (error) {

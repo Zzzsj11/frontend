@@ -135,6 +135,9 @@ class GeneralStoryboardCreate(BaseModel):
     age_group: str
     visual_style: str
     ratio: Literal["16:9", "9:16", "1:1", "4:3"] = "16:9"
+    resolution: Literal["480p", "720p", "1080p"] = "720p"
+    image_model: Literal["gpt-image-2"] = "gpt-image-2"
+    video_model: Literal["doubao-seedance-2.0"] = "doubao-seedance-2.0"
     empty_shot_count: int = Field(ge=0, le=100)
     character_shot_count: int = Field(ge=0, le=100)
     total_duration: float = Field(gt=0, le=3600)
@@ -161,7 +164,7 @@ class ImageGenerationCreate(BaseModel):
     quality: Literal["auto", "low", "medium", "high"] = "auto"
     n: int = Field(default=1, ge=1, le=4)
     images: list[str] = Field(default_factory=list)
-    model: str | None = None
+    model: Literal["gpt-image-2"] | None = None
     purpose: Literal["scene", "digital_human", "other"] = "other"
     project_task_id: str | None = None
     storyboard_line_id: str | None = None
@@ -171,10 +174,11 @@ class VideoGenerationCreate(BaseModel):
     prompt: str = Field(min_length=1, max_length=30_000)
     duration: int = Field(default=DEFAULT_VIDEO_DURATION, ge=MIN_VIDEO_DURATION, le=MAX_VIDEO_DURATION)
     ratio: Literal["16:9", "9:16", "1:1", "4:3"] = "16:9"
+    resolution: Literal["480p", "720p", "1080p"] = "720p"
     image_urls: list[str] = Field(default_factory=list)
     generate_audio: bool = False
     watermark: bool = False
-    model: str | None = None
+    model: Literal["doubao-seedance-2.0"] | None = None
     project_task_id: str | None = None
     storyboard_line_id: str | None = None
 

@@ -13,6 +13,7 @@ import {
 import type { MagicScript } from './data'
 import * as mediaGen from '../api/mediaGen'
 import { apiRequest } from '../api/client'
+import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL } from '../generationModels'
 
 /**
  * Mock API 层 —— 模拟后端接口，每个函数对应一个规划中的 HTTP 接口：
@@ -66,6 +67,10 @@ export interface MagicScriptRequest {
   digitalHumanIds?: string[]
   /** 额外要求（可空） */
   extraRequirement?: string
+  ratio: ShotGenOptions['ratio']
+  resolution: ShotGenOptions['resolution']
+  imageModel: ShotGenOptions['imageModel']
+  videoModel: ShotGenOptions['videoModel']
 }
 
 /** POST /api/script/magic — 根据歌曲编号 + ass 字幕 + 已选角色生成一套 MV 脚本 */
@@ -78,6 +83,10 @@ export async function generateMagicScript(req?: MagicScriptRequest): Promise<Mag
   form.append('ass_file', req.assFile)
   form.append('digital_human_ids', JSON.stringify(req.digitalHumanIds ?? []))
   form.append('extra_requirement', req.extraRequirement ?? '')
+  form.append('ratio', req.ratio)
+  form.append('resolution', req.resolution)
+  form.append('image_model', req.imageModel)
+  form.append('video_model', req.videoModel)
   return apiRequest<MagicScript & { taskId: string }>('/storyboards/ass', { method: 'POST', body: form })
 }
 
@@ -151,7 +160,7 @@ export async function fetchGeneralStoryboardOptions(): Promise<GeneralStoryboard
 
 export async function generateGeneralStoryboard(req: GeneralStoryboardRequest): Promise<GeneralStoryboardResult> {
   if (!req.projectId) throw new Error('请先选择歌曲项目')
-  return apiRequest<GeneralStoryboardResult>(`/projects/${req.projectId}/storyboards/general`, { method: 'POST', body: JSON.stringify({ genre: req.genre, secondary_category: req.secondaryCategory, tertiary_category: req.tertiaryCategory, season: req.season, singer: req.singer, age_group: req.ageGroup, visual_style: req.visualStyle, ratio: req.ratio, empty_shot_count: req.emptyShotCount, character_shot_count: req.characterShotCount, total_duration: req.totalDuration, digital_human_ids: req.digitalHumanIds ?? [], extra_requirement: req.extraRequirement ?? '', overall_prompt: req.extraRequirement ?? '' }) })
+  return apiRequest<GeneralStoryboardResult>(`/projects/${req.projectId}/storyboards/general`, { method: 'POST', body: JSON.stringify({ genre: req.genre, secondary_category: req.secondaryCategory, tertiary_category: req.tertiaryCategory, season: req.season, singer: req.singer, age_group: req.ageGroup, visual_style: req.visualStyle, ratio: req.ratio, resolution: req.resolution, image_model: req.imageModel, video_model: req.videoModel, empty_shot_count: req.emptyShotCount, character_shot_count: req.characterShotCount, total_duration: req.totalDuration, digital_human_ids: req.digitalHumanIds ?? [], extra_requirement: req.extraRequirement ?? '', overall_prompt: req.extraRequirement ?? '' }) })
 }
 
 /** POST /api/voice/generate — 返回当前分镜的演唱/配音音频与时长 */
@@ -169,8 +178,9 @@ export async function generateSceneImage(
   projectTaskId?: string,
   storyboardLineId?: string,
   ratio: ShotGenOptions['ratio'] = '16:9',
+  imageModel?: ShotGenOptions['imageModel'],
 ): Promise<{ imageUrl: string }> {
-  return mediaGen.generateScene(scenePrompt, projectTaskId, storyboardLineId, ratio)
+  return mediaGen.generateScene(scenePrompt, projectTaskId, storyboardLineId, ratio, imageModel)
 }
 
 /** POST /api/shot/generate-video — 根据场景 + 分镜提示词 + 出演角色（可空/可多人）+ 生成参数（清晰度/时长/画幅）生成分镜视频片段 */
@@ -188,7 +198,7 @@ export async function generateShotVideo(
   return mediaGen.generateShotVideo(
     [scenePrompt, shotPrompt].filter(Boolean).join('。'),
     referenceImageUrl,
-    options ?? { resolution: '1080p', duration: 5, ratio: '16:9' },
+    options ?? { resolution: '720p', duration: 5, ratio: '16:9', imageModel: DEFAULT_IMAGE_MODEL, videoModel: DEFAULT_VIDEO_MODEL },
     projectTaskId,
     storyboardLineId,
   )

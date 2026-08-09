@@ -39,6 +39,12 @@ def test_ass_story_bible_has_shared_arc_and_character_plan() -> None:
     assert bible["shots"][-1]["preferredCharacterIds"] == ["a", "b"]
     assert bible["visualContinuity"]["season"] == "冬"
 
+    single = build_ass_story_bible(
+        segments=[{"lyrics": "single"}], emotion={"songCode": "1"},
+        role_ids=["a", "b"], extra_requirement="",
+    )
+    assert single["shots"][0]["preferredCharacterIds"] == ["a", "b"]
+
 
 def test_storyboard_output_schema_is_strict() -> None:
     humans = [{"id": "a"}]
@@ -48,6 +54,8 @@ def test_storyboard_output_schema_is_strict() -> None:
         _validate({"scenePrompt": "scene", "shotPrompt": "shot", "digitalHumanIds": ["a"], "extra": True}, source="general", current={"plannedDigitalHumanIds": ["a"]}, allowed_humans=humans)
     with pytest.raises(ValueError, match="不可用角色"):
         _validate({"scenePrompt": "scene", "shotPrompt": "shot", "digitalHumanIds": ["x"]}, source="ass", current={}, allowed_humans=humans)
+    with pytest.raises(ValueError, match="预分配人物不一致"):
+        _validate({"scenePrompt": "scene", "shotPrompt": "shot", "digitalHumanIds": []}, source="ass", current={"plannedDigitalHumanIds": ["a"]}, allowed_humans=humans)
     with pytest.raises(ValueError, match="额外内容"):
         _extract_json('{"scenePrompt":"x"} trailing')
 
@@ -83,3 +91,14 @@ def test_general_storyboard_enforces_four_to_fifteen_seconds_per_shot(client) ->
     )
     assert too_long.status_code == 422
     assert "8–30" in too_long.json()["detail"]
+
+    valid = client.post(
+        f"/api/projects/{project['id']}/storyboards/general",
+        json={**base, "total_duration": 8},
+    )
+    assert valid.status_code == 201
+    task = client.get(f"/api/tasks/{valid.json()['taskId']}").json()
+    assert task["storyboardConfig"]["resolution"] == "720p"
+    assert task["storyboardConfig"]["image_model"] == "gpt-image-2"
+    assert task["storyboardConfig"]["video_model"] == "doubao-seedance-2.0"
+    assert all(line["shotOptions"]["resolution"] == "720p" for line in task["lines"])

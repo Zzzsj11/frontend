@@ -104,7 +104,7 @@ class JobManager:
                 for item in current:
                     item.is_current = False
                 request = job.request or {}
-                session.add(ShotAssetModel(id=f"shot-{uuid.uuid4().hex}", storyboard_line_id=job.storyboard_line_id, generation_job_id=job.id, cover_url=job.result["coverUrl"], video_url=job.result["videoUrl"], duration=float(job.result.get("duration") or 0), resolution=str(request.get("resolution") or "1080p"), ratio=str(job.result.get("ratio") or request.get("ratio") or "16:9"), prompt=str(request.get("prompt") or ""), is_current=True))
+                session.add(ShotAssetModel(id=f"shot-{uuid.uuid4().hex}", storyboard_line_id=job.storyboard_line_id, generation_job_id=job.id, cover_url=job.result["coverUrl"], video_url=job.result["videoUrl"], duration=float(job.result.get("duration") or 0), resolution=str(request.get("resolution") or "720p"), ratio=str(job.result.get("ratio") or request.get("ratio") or "16:9"), prompt=str(request.get("prompt") or ""), is_current=True))
             await session.commit()
 
     async def get(self, job_id: str, user_id: str | None = None) -> Job | None:

@@ -6,7 +6,7 @@ import re
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
@@ -32,6 +32,7 @@ from .auth import (
     verify_password,
 )
 from .chat import chat_manager
+from .balance import query_business_balance
 from .config import settings
 from .database import close_database, database_ok, database_session, init_database
 from .domain import owned_line, owned_project, owned_task, router as domain_router, uid, visible_humans
@@ -93,6 +94,11 @@ async def health(response: Response) -> dict:
     if not postgres or not redis:
         response.status_code = 503
     return {"ok": postgres and redis, "postgres": postgres, "redis": redis, "storage": settings.storage_backend, "chatConfigured": bool(settings.llm_api_key), "imageConfigured": bool(settings.image_api_key), "videoConfigured": bool(settings.video_api_key)}
+
+
+@app.get("/api/account/balance")
+async def account_balance(_user: CurrentUser, force: bool = False) -> dict:
+    return await query_business_balance(force=force)
 
 
 @app.post("/api/auth/login")
@@ -163,6 +169,10 @@ async def create_ass_storyboard(
     ass_file: UploadFile = File(...),
     digital_human_ids: str = Form("[]"),
     extra_requirement: str = Form(""),
+    ratio: Literal["16:9", "9:16", "4:3", "1:1"] = Form("16:9"),
+    resolution: Literal["480p", "720p", "1080p"] = Form("720p"),
+    image_model: Literal["gpt-image-2"] = Form("gpt-image-2"),
+    video_model: Literal["doubao-seedance-2.0"] = Form("doubao-seedance-2.0"),
     db: AsyncSession = Depends(database_session),
 ) -> dict:
     await owned_project(db, user.id, project_id)
@@ -205,16 +215,16 @@ async def create_ass_storyboard(
     ass_url = await get_storage().put_bytes(safe_key(f"users/{user.id}/ass", ass_file.filename), content, ass_file.content_type)
     title = f"ASS 分镜 · {emotion.song_code} · {emotion.song_name}"
     story_bible = build_ass_story_bible(segments=segments, emotion=emotion_context, role_ids=role_ids, extra_requirement=extra_requirement.strip())
-    task = ProjectTaskModel(id=uid("task"), project_id=project_id, title=title, storyboard_type="ass", status="generating", source_ass_url=ass_url, extra_requirement=extra_requirement.strip(), overall_prompt=extra_requirement.strip(), storyboard_config={"songId": emotion.song_code, "songEmotion": emotion_context, "storyBible": story_bible, "meta": {"encoding": encoding, "dialogues": len(cues), "segments": len(segments)}})
+    task = ProjectTaskModel(id=uid("task"), project_id=project_id, title=title, storyboard_type="ass", status="generating", source_ass_url=ass_url, extra_requirement=extra_requirement.strip(), overall_prompt=extra_requirement.strip(), storyboard_config={"songId": emotion.song_code, "songEmotion": emotion_context, "ratio": ratio, "resolution": resolution, "imageModel": image_model, "videoModel": video_model, "storyBible": story_bible, "meta": {"encoding": encoding, "dialogues": len(cues), "segments": len(segments)}})
     db.add(task)
     await db.flush()
     for index, human_id in enumerate(role_ids):
         db.add(ProjectCastModel(id=uid("cast"), project_task_id=task.id, digital_human_id=human_id, sort_order=index))
     result_lines = []
     for index, value in enumerate(segments):
-        assigned_roles = [role_ids[index % len(role_ids)]] if role_ids else []
+        assigned_roles = list(story_bible["shots"][index]["preferredCharacterIds"])
         planned_duration = round(float(value.get("end") or 0) - float(value.get("start") or 0), 1)
-        line = StoryboardLineModel(id=uid("line"), project_task_id=task.id, sort_order=index, source="ass", lyrics=value.get("lyrics", ""), start_time=value.get("start"), end_time=value.get("end"), planned_duration=planned_duration, scene_prompt="", shot_prompt="", shot_options={"ratio": "16:9", "duration": normalize_video_duration(planned_duration)}, generation_status="pending")
+        line = StoryboardLineModel(id=uid("line"), project_task_id=task.id, sort_order=index, source="ass", lyrics=value.get("lyrics", ""), start_time=value.get("start"), end_time=value.get("end"), planned_duration=planned_duration, scene_prompt="", shot_prompt="", shot_options={"ratio": ratio, "resolution": resolution, "imageModel": image_model, "videoModel": video_model, "duration": normalize_video_duration(planned_duration)}, generation_status="pending")
         db.add(line)
         await db.flush()
         for role_index, human_id in enumerate(assigned_roles):

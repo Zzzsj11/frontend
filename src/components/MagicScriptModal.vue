@@ -2,6 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
+import type { ShotGenOptions } from '../types'
+import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS } from '../generationModels'
 
 const store = useProjectStore()
 
@@ -10,6 +12,10 @@ const songId = ref('')
 const assFile = ref<File | null>(null)
 const selectedHumanIds = ref<string[]>([])
 const extraRequirement = ref('')
+const ratio = ref<ShotGenOptions['ratio']>('16:9')
+const resolution = ref<ShotGenOptions['resolution']>('720p')
+const imageModel = ref(DEFAULT_IMAGE_MODEL)
+const videoModel = ref(DEFAULT_VIDEO_MODEL)
 
 const assInputRef = ref<HTMLInputElement>()
 
@@ -28,6 +34,10 @@ const resetForm = () => {
   assFile.value = null
   selectedHumanIds.value = [...store.castIds]
   extraRequirement.value = ''
+  ratio.value = '16:9'
+  resolution.value = '720p'
+  imageModel.value = DEFAULT_IMAGE_MODEL
+  videoModel.value = DEFAULT_VIDEO_MODEL
 }
 
 // ---------- ass 文件 ----------
@@ -37,7 +47,7 @@ const pickAss = (files: FileList | null) => {
   assFile.value = file
   store.magicError = null
   const codes = file.name.match(/(?<!\d)\d{5,}(?!\d)/g) ?? []
-  if (codes.length === 1) songId.value = codes[0]
+  songId.value = codes.length === 1 ? codes[0] : ''
 }
 const onAssChange = (e: Event) => {
   pickAss((e.target as HTMLInputElement).files)
@@ -59,6 +69,10 @@ const submit = () => {
     assFile: assFile.value!,
     digitalHumanIds: selectedHumanIds.value.length ? [...selectedHumanIds.value] : undefined,
     extraRequirement: extraRequirement.value.trim() || undefined,
+    ratio: ratio.value,
+    resolution: resolution.value,
+    imageModel: imageModel.value,
+    videoModel: videoModel.value,
   })
 }
 
@@ -82,12 +96,25 @@ const cancel = () => {
           <input
             v-model="songId"
             class="song-input"
-            placeholder="输入歌曲编号，如 SM-2026-0731"
+            placeholder="上传 ASS 文件后自动提取歌曲编号"
+            disabled
           />
+          <p class="song-id-hint">歌曲编号仅从 ASS 文件名提取，不支持手动修改。</p>
+
+          <section class="generation-config">
+            <p class="field-label">生成配置 <span class="required">*</span></p>
+            <div class="config-grid">
+              <label><span>画幅 *</span><select v-model="ratio"><option value="16:9">16:9</option><option value="9:16">9:16</option><option value="4:3">4:3</option><option value="1:1">1:1</option></select></label>
+              <label><span>清晰度 *</span><select v-model="resolution"><option value="480p">480p</option><option value="720p">720p</option><option value="1080p">1080p</option></select></label>
+              <label><span>视频模型 *</span><select v-model="videoModel" disabled><option v-for="item in VIDEO_MODEL_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+              <label><span>图片模型 *</span><select v-model="imageModel" disabled><option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+            </div>
+            <p class="model-hint">当前内测版模型固定，选项已保留用于后续扩展。</p>
+          </section>
 
           <!-- 完整角色库横向多选 -->
           <div class="role-section">
-            <p class="field-label">从已有角色库选择 <span class="optional">（可多选，人物镜轮流使用）</span></p>
+            <p class="field-label">从已有角色库选择 <span class="optional">（可不选；选择后人物镜仅使用所选角色）</span></p>
             <div class="role-picker" :class="{ filled: selectedHumanIds.length }">
               <button
                 v-for="human in store.digitalHumans"
@@ -244,6 +271,17 @@ const cancel = () => {
 .song-input:focus {
   border-color: var(--primary);
 }
+.song-input:disabled {
+  background: #f5f5f6;
+  color: var(--text-secondary);
+  cursor: not-allowed;
+}
+.song-id-hint {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.generation-config{margin-top:16px}.config-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.config-grid label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--text-secondary)}.config-grid select{width:100%;border:1px solid var(--border-dark);border-radius:9px;background:#fff;padding:9px 10px;color:var(--text)}.config-grid select:disabled{background:#f5f5f6;color:#777;cursor:not-allowed}.model-hint{margin:7px 0 0;color:var(--text-secondary);font-size:12px}@media(max-width:760px){.config-grid{grid-template-columns:1fr 1fr}}
 
 /* ASS 文件与额外要求 */
 .upload-grid {

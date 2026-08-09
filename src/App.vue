@@ -82,8 +82,7 @@ onBeforeUnmount(stopSidebarResize)
     'sidebar timeline timeline';
   gap: 14px;
   padding: 14px;
-  height: 100vh;
-  height: 100dvh;
+  height: 100%;
   max-width: 100vw;
   overflow: hidden;
   box-sizing: border-box;

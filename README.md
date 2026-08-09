@@ -11,6 +11,7 @@
 - 渐进式生成：单次 API 只生成一条分镜提示词，前端以受控并发完成全量任务，减少首条结果等待时间。
 - 角色库：内置 30 个系统角色，所有用户可见；用户上传或生成的私有角色及媒体彼此隔离。
 - 媒体生成：场景图与视频异步生成，视频时长支持 4–15 秒整数，画幅支持 16:9、9:16、4:3、1:1。
+- 生成配置：ASS 与通用分镜均保存画幅、清晰度、图片模型和视频模型；当前固定为 Img2 与 sd2.0，扩展事项见 [`TODO-LIST.md`](TODO-LIST.md)。
 - 素材导出：将子项目内的视频片段与整体提示词 Markdown 打包成 ZIP 并提供下载。
 - 多用户与鉴权：短期 Access Token + Refresh Token，管理员和普通用户的数据按所有权隔离。
 - 数据审计：所有业务删除均为软删除；模型调用记录输入、输出及缓存 Token；后端 API 错误脱敏后入库。
@@ -136,6 +137,7 @@ cp backend/.env.example backend/.env
 - `IMAGE_*`：图片生成服务。
 - `VIDEO_*`：视频生成服务。
 - `TOS_*`：引用媒体桶、视频归档桶、前缀和公开域名。
+- `BUSINESS_API_KEY`、`BUSINESS_USER_ID`：顶部栏业务余额查询凭证；未配置时安全显示 `--`，不会阻塞其他功能。
 - `DATABASE_URL`、`REDIS_URL`：本地启动时的数据服务地址。
 
 项目也支持将统一供应商配置放在 `backend/.provider_config.py`，Compose 会将其作为 secret 挂载。`backend/.env`、`.env.chat` 和 `.provider_config.py` 均已被 Git 忽略，严禁提交真实密钥。
