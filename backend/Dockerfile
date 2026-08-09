@@ -3,7 +3,8 @@ FROM ${BACKEND_BASE_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_INDEX_URL=https://pypi.org/simple
+    PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple \
+    PIP_TRUSTED_HOST=mirrors.cloud.tencent.com
 WORKDIR /srv/mvagent
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
