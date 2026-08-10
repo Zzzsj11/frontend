@@ -173,6 +173,30 @@ cd /opt/mv-agent-frontend
 
 私有仓库需要给服务器单独配置只读 deploy key 或其他受控 Git 凭证；不要复制个人 Git 私钥到服务器。
 
+#### GitHub 不可达时的服务器裸仓库通道
+
+中国大陆服务器访问 GitHub 可能超时。当前服务器已经准备了专用裸仓库 `/opt/mv-agent-frontend.git`，线上工作区将它配置为 `server` 远端。该通道仍是完整 Git 发布：开发机把已提交的对象推入裸仓库，线上工作区只执行 `fetch` 和 `--ff-only` 快进；禁止用 `scp`、`rsync` 或压缩包直接覆盖线上源码。
+
+新服务器首次配置该通道时，在服务器执行：
+
+```bash
+sudo git init --bare /opt/mv-agent-frontend.git
+sudo chown -R ubuntu:ubuntu /opt/mv-agent-frontend.git
+cd /opt/mv-agent-frontend
+git remote add server /opt/mv-agent-frontend.git
+git remote -v
+```
+
+如果 `server` 已存在，不要重复添加。开发机不必永久增加远端，可以直接使用 SSH URL 推送。先确认开发机已把同一提交推送到 GitHub；随后在开发机执行：
+
+```bash
+git status --short
+git rev-parse HEAD
+git push ssh://ubuntu@124.222.219.76/opt/mv-agent-frontend.git main:main
+```
+
+如使用 `mv-agent-test` SSH 别名，URL 可写成 `ssh://mv-agent-test/opt/mv-agent-frontend.git`。出现“Git LFS locking API 不受支持”的提示不影响当前仓库，因为发布内容不依赖 Git LFS 锁；真正的推送失败必须处理，不能继续部署。
+
 ### 4.3 创建服务器配置
 
 当前脚本内部沿用 `.env.production` 这个历史文件名，但它在 v1.0.0 前仅代表“服务器测试环境”，不代表正式生产环境：
@@ -229,6 +253,8 @@ git push origin <当前分支>
 
 ### 5.2 服务器获取精确版本
 
+优先使用 GitHub 远端。在服务器执行：
+
 ```bash
 ssh mv-agent-test
 cd /opt/mv-agent-frontend
@@ -240,6 +266,35 @@ git rev-parse HEAD
 ```
 
 若 `git status --short` 有输出，立即停止。不要 stash、覆盖或删除未知文件；先查明服务器为何存在源码改动。确认 `git rev-parse HEAD` 与待发布 SHA 完全一致。
+
+如果 `git fetch origin` 长时间无输出，用带超时的只读命令确认是否为 GitHub 网络问题：
+
+```bash
+timeout 20 git ls-remote origin HEAD
+curl -I --max-time 10 https://github.com
+```
+
+两者均超时时，不要持续重试占用发布窗口，也不要改线上源码。改用上一节的服务器裸仓库通道：先在开发机执行 `git push ssh://ubuntu@124.222.219.76/opt/mv-agent-frontend.git main:main`，再在服务器执行：
+
+```bash
+cd /opt/mv-agent-frontend
+git status --short
+git fetch server main
+git switch main
+git merge --ff-only server/main
+git rev-parse HEAD
+git status --short
+```
+
+最终必须同时满足：服务器完整 SHA 与开发机待发布 SHA 完全一致、服务器 `git status --short` 无输出。不要手工拼写完整 SHA；直接复制 `git rev-parse HEAD` 的输出，或使用以下双端核对方式：
+
+```bash
+# 开发机
+git rev-parse HEAD
+
+# 服务器
+ssh mv-agent-test 'cd /opt/mv-agent-frontend && git rev-parse HEAD && git status --short'
+```
 
 ### 5.3 构建版本化镜像并部署
 
@@ -274,7 +329,8 @@ docker system df
 
 ```bash
 cd /opt/mv-agent-frontend
-cat .deployed-version
+export RELEASE_VERSION="$(cat .deployed-version)"
+printf 'RELEASE_VERSION=%s\n' "$RELEASE_VERSION"
 docker compose --env-file .env.production \
   -f docker-compose.yml -f docker-compose.production.yml ps
 curl -fsS http://127.0.0.1:8000/api/health
@@ -290,6 +346,8 @@ docker compose --env-file .env.production \
 docker compose --env-file .env.production \
   -f docker-compose.yml -f docker-compose.production.yml logs --tail=200 backend frontend
 ```
+
+`docker-compose.production.yml` 的镜像名要求 `RELEASE_VERSION`。若未先从 `.deployed-version` 导出，会出现 `required variable RELEASE_VERSION is missing`；这是检查命令缺少参数，不代表容器故障。
 
 日志中不得出现持续重启、迁移失败、数据库认证失败或供应商密钥缺失。
 
@@ -356,6 +414,7 @@ ssh -vvv mv-agent-test
 - `git status --short` 非空：停止部署，确认改动来源。
 - `git pull --ff-only` 失败：说明服务器分支发生分叉，禁止强制 reset；在本地整理分支后再部署。
 - 私有仓库认证失败：检查服务器 deploy key 是否仍有仓库只读权限。
+- 服务器访问 GitHub 超时：按 4.2 和 5.2 使用 `/opt/mv-agent-frontend.git` 裸仓库通道，仍然只允许 Git fast-forward 发布。
 
 ### Docker 构建慢或失败
 
@@ -367,6 +426,8 @@ journalctl -u docker --since "30 min ago" --no-pager
 ```
 
 不要同时运行多个构建。只清理确认不再用于回滚的旧镜像；不要执行会删除卷的命令。依赖源变更必须先在本地验证并提交到 Git，禁止只改服务器 Dockerfile。
+
+Compose 输出 `buildx isn't installed` 时会回退到 Docker 默认 builder；只要后续镜像构建完成即可。若要消除警告，应在独立维护窗口安装与当前 Docker Engine 匹配的 Buildx 插件，不要在发布过程中临时切换构建器。
 
 ### 服务不健康
 
