@@ -2,7 +2,7 @@
 set -uo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-/opt/mv-agent-frontend}"
-DOMAIN="${DOMAIN:-mv.yangxiaren.club}"
+DOMAIN="${DOMAIN:-}"
 failures=0
 
 pass() { printf '[PASS] %s\n' "$1"; }
@@ -37,20 +37,24 @@ docker compose exec -T postgres sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POST
   && pass 'Redis responds PONG' \
   || fail 'Redis connection'
 
-http_code="$(curl -sS -o /dev/null --max-time 10 -w '%{http_code}' "http://$DOMAIN" || true)"
-[ "$http_code" = '301' ] || [ "$http_code" = '308' ] \
-  && pass "HTTP redirects to HTTPS ($http_code)" \
-  || fail "HTTP redirect for $DOMAIN (status ${http_code:-000})"
+if [ -n "$DOMAIN" ]; then
+  http_code="$(curl -sS -o /dev/null --max-time 10 -w '%{http_code}' "http://$DOMAIN" || true)"
+  [ "$http_code" = '301' ] || [ "$http_code" = '308' ] \
+    && pass "HTTP redirects to HTTPS ($http_code)" \
+    || fail "HTTP redirect for $DOMAIN (status ${http_code:-000})"
 
-https_code="$(curl -sS -o /dev/null --max-time 15 -w '%{http_code}' "https://$DOMAIN" || true)"
-[ "$https_code" = '200' ] \
-  && pass "HTTPS frontend ($https_code)" \
-  || fail "HTTPS frontend for $DOMAIN (status ${https_code:-000})"
+  https_code="$(curl -sS -o /dev/null --max-time 15 -w '%{http_code}' "https://$DOMAIN" || true)"
+  [ "$https_code" = '200' ] \
+    && pass "HTTPS frontend ($https_code)" \
+    || fail "HTTPS frontend for $DOMAIN (status ${https_code:-000})"
 
-api_code="$(curl -sS -o /dev/null --max-time 15 -w '%{http_code}' "https://$DOMAIN/api/health" || true)"
-[ "$api_code" = '200' ] \
-  && pass "HTTPS API ($api_code)" \
-  || fail "HTTPS API for $DOMAIN (status ${api_code:-000})"
+  api_code="$(curl -sS -o /dev/null --max-time 15 -w '%{http_code}' "https://$DOMAIN/api/health" || true)"
+  [ "$api_code" = '200' ] \
+    && pass "HTTPS API ($api_code)" \
+    || fail "HTTPS API for $DOMAIN (status ${api_code:-000})"
+else
+  pass 'domain/HTTPS checks skipped (DOMAIN not set)'
+fi
 
 if [ "$failures" -eq 0 ]; then
   printf '\nAll online checks passed.\n'

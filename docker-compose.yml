@@ -18,19 +18,19 @@ services:
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     env_file:
-      - ./backend/.env.chat
-      - ./backend/.env
+      - path: ./backend/.env.chat
+        required: false
+      - path: ./backend/.env
+        required: false
     environment:
       APP_HOST: 0.0.0.0
       APP_PORT: 8000
-      APP_CORS_ORIGINS: https://mv.yangxiaren.club,https://www.mv.yangxiaren.club,http://localhost:${FRONTEND_PORT:-5173}
+      APP_CORS_ORIGINS: http://124.222.219.76:${FRONTEND_PORT:-5173},http://localhost:${FRONTEND_PORT:-5173}
       DATABASE_URL: postgresql+asyncpg://mvagent:mvagent@postgres:5432/mvagent
       REDIS_URL: redis://redis:6379/0
       LLM_API_MODE: ${LLM_API_MODE:-openai}
       STORAGE_BACKEND: tos
       JWT_SECRET: ${JWT_SECRET:-development-only-change-me-at-least-32-bytes}
-    secrets:
-      - provider_config
     depends_on:
       postgres:
         condition: service_healthy
@@ -77,7 +77,3 @@ services:
 volumes:
   mvagent_postgres:
   mvagent_redis:
-
-secrets:
-  provider_config:
-    file: ./backend/.provider_config.py

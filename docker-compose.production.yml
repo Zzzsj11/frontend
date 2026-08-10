@@ -5,6 +5,8 @@ services:
   backend:
     image: ${REGISTRY:?set REGISTRY}/mv-agent-backend:${RELEASE_VERSION:?set RELEASE_VERSION}
     build: !reset null
+    secrets:
+      - provider_config
     environment:
       APP_ENV: production
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
@@ -17,3 +19,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
   redis:
     ports: !reset []
+
+secrets:
+  provider_config:
+    file: ./backend/.provider_config.py

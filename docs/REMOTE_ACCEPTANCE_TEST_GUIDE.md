@@ -14,7 +14,7 @@
 export PLAYWRIGHT_BASE_URL="http://124.222.219.76:5173"
 export REMOTE_API_BASE_URL="$PLAYWRIGHT_BASE_URL"
 export REMOTE_E2E_USERNAME="admin"
-export REMOTE_E2E_PASSWORD="123456"
+export REMOTE_E2E_PASSWORD="supermv007"
 export REMOTE_E2E_RUN_ID="$(date +%Y%m%d-%H%M%S)"
 ```
 
