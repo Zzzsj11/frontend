@@ -53,16 +53,9 @@ async function generateAllMedia(page: Page, count: number, prefix: string) {
 
   for (let index = 0; index < count; index++) {
     const line = page.locator('.line-wrapper').nth(index)
-    // 提示词区域是“编辑分镜”的稳定语义入口；缩略图同时包含独立的大图按钮，
-    // 自动化不应依赖图片内部坐标来区分两种操作。
-    await line.locator('.prompt').click()
-    const dialog = page.locator('.modal').filter({ hasText: '编辑分镜内容' })
-    await expect(dialog).toBeVisible()
-    await dialog.locator('.gen-options select').nth(0).selectOption('480p')
-    await dialog.locator('.gen-options select').nth(1).selectOption('5')
-    await dialog.getByRole('button', { name: '生成分镜', exact: true }).click()
+    await line.getByRole('button', { name: '生成视频片段（场景 × 分镜 × 角色）' }).click()
     await capture(page, `${prefix}-line-${index + 1}-video-started`)
-    await dialog.getByTitle('关闭').click()
+    await expect(line.locator('.shot-thumb video')).toHaveCount(1, { timeout: 25 * 60_000 })
   }
   await expect(page.locator('.line-wrapper .shot-thumb video')).toHaveCount(count, { timeout: 25 * 60_000 })
   await capture(page, `${prefix}-all-videos-complete`)
