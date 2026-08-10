@@ -4,7 +4,7 @@ from typing import Any
 
 from .media_constraints import MAX_VIDEO_DURATION, MIN_VIDEO_DURATION
 
-STORY_BIBLE_VERSION = "story-bible-v1"
+STORY_BIBLE_VERSION = "story-bible-v2"
 
 
 def _stage(index: int, total: int) -> str:
@@ -24,22 +24,26 @@ def _stage(index: int, total: int) -> str:
     return "留白、回应与收束"
 
 
-def build_ass_story_bible(*, segments: list[dict[str, Any]], emotion: dict[str, Any], role_ids: list[str], extra_requirement: str) -> dict[str, Any]:
+def build_ass_story_bible(
+    *, segments: list[dict[str, Any]], emotion: dict[str, Any], role_ids: list[str], extra_requirement: str, shot_plan: list[dict[str, Any]]
+) -> dict[str, Any]:
     total = len(segments)
-    shots = []
-    for index, segment in enumerate(segments):
-        if total == 1:
-            roles = role_ids[:]
-        else:
-            roles = [] if not role_ids or index == 0 else [role_ids[(index - 1) % len(role_ids)]]
-        if total > 1 and index == total - 1 and len(role_ids) > 1:
-            roles = role_ids[:]
-        shots.append({"index": index, "stage": _stage(index, total), "lyrics": segment.get("lyrics", ""), "preferredCharacterIds": roles})
+    shots = [
+        {
+            "index": index,
+            "stage": _stage(index, total),
+            "lyrics": segment.get("lyrics", ""),
+            "shotType": plan["shotType"],
+            "intent": plan["intent"],
+            "requiredCharacterIds": list(plan["requiredCharacterIds"]),
+        }
+        for index, (segment, plan) in enumerate(zip(segments, shot_plan, strict=True))
+    ]
     return {
         "version": STORY_BIBLE_VERSION,
         "logline": f"{emotion.get('songName') or emotion.get('songCode')} 的情绪化 MV，以 {emotion.get('materialCategory') or '歌曲情感'} 为叙事核心。",
         "visualContinuity": {"season": emotion.get("seasons"), "atmosphere": emotion.get("atmosphere"), "stylePriority": extra_requirement or "保持同一时间线、主色调和空间逻辑"},
-        "characterPolicy": "用户未选角色时全部生成无人空镜；用户选择角色后，首镜优先建立环境，中段只在所选角色内轮换，收束镜允许所选角色多人同框；不得引入其他人物，也不得改变人物身份和服装。",
+        "characterPolicy": "逐镜人物与空镜类型已在全局歌词大纲中确定。单条生成必须严格沿用 requiredCharacterIds 和 shotType；不得临时改为空镜、替换人物、引入其他人物或改变人物身份服装。",
         "shots": shots,
     }
 

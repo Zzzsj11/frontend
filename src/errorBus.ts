@@ -18,7 +18,10 @@ export class ApiError extends Error {
 }
 
 export function reportApiError(error: unknown, fallback = '请求失败'): ApiError {
-  const value = error instanceof ApiError ? error : new ApiError(error instanceof Error ? error.message : fallback)
+  const localMessage = error instanceof Error ? error.message : ''
+  const isBrowserNetworkError = error instanceof TypeError && /failed to fetch|networkerror|load failed/i.test(localMessage)
+  const isBrowserTimeout = error instanceof DOMException && error.name === 'AbortError'
+  const value = error instanceof ApiError ? error : new ApiError(isBrowserTimeout ? '请求超时，请稍后重试' : isBrowserNetworkError ? fallback : localMessage || fallback)
   errorBus.show({ title: value.status && value.status >= 500 ? '服务异常' : '操作未完成', message: value.message, errorCode: value.errorCode, status: value.status })
   return value
 }

@@ -48,6 +48,9 @@ from .schemas import ChatMessageCreate, ChatSessionCreate, ImageGenerationCreate
 from .seed import recover_stale_storyboard_generation, seed_system_data
 from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
 from .story_bible import build_ass_story_bible
+from .storyboard_prompt import generate_ass_story_outline
+from .token_usage import add_token_usage
+from .usage_quota import consume_daily_quota
 
 
 @asynccontextmanager
@@ -77,7 +80,29 @@ async def http_error_handler(request: Request, exc: StarletteHTTPException) -> J
 
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    message = "; ".join(f"{'.'.join(map(str, item['loc']))}: {item['msg']}" for item in exc.errors())
+    def translated(item: dict) -> str:
+        field = ".".join(str(value) for value in item["loc"] if value not in {"body", "query", "path"}) or "请求参数"
+        kind, context = item.get("type", ""), item.get("ctx") or {}
+        messages = {
+            "missing": "不能为空",
+            "string_type": "必须是文本",
+            "list_type": "必须是数组",
+            "bool_type": "必须是布尔值",
+            "int_type": "必须是整数",
+            "int_parsing": "必须是整数",
+            "float_type": "必须是数值",
+            "float_parsing": "必须是数值",
+            "literal_error": "不是支持的选项",
+            "string_too_short": f"长度不能少于 {context.get('min_length')} 个字符",
+            "string_too_long": f"长度不能超过 {context.get('max_length')} 个字符",
+            "greater_than": f"必须大于 {context.get('gt')}",
+            "greater_than_equal": f"必须大于等于 {context.get('ge')}",
+            "less_than": f"必须小于 {context.get('lt')}",
+            "less_than_equal": f"必须小于等于 {context.get('le')}",
+        }
+        return f"{field}：{messages.get(kind, '格式或取值不正确')}"
+
+    message = "；".join(translated(item) for item in exc.errors())
     error_code = await record_api_error(request, status_code=422, error_type=type(exc).__name__, message=message, exc=exc, payload=await request_payload(request))
     return JSONResponse(status_code=422, content={"detail": message, "errorCode": error_code})
 
@@ -99,7 +124,8 @@ async def require_active_model(db: AsyncSession, code: str, modality: str) -> No
         )
     ).scalar_one_or_none()
     if not model:
-        raise HTTPException(422, f"不支持或已停用的{modality}模型：{code}")
+        label = {"chat": "文本", "image": "图片", "video": "视频", "audio": "音频"}.get(modality, "生成")
+        raise HTTPException(422, f"不支持或已停用的{label}模型：{code}")
 
 
 @app.get("/api/health")
@@ -255,9 +281,51 @@ async def create_ass_storyboard(
         segments = group_cues(cues)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    selected_humans = [
+        {
+            "id": item.id,
+            "name": item.name,
+            "gender": item.gender,
+            "ageDescription": item.age_description,
+            "appearanceStyle": item.appearance_style,
+            "clothingDescription": item.clothing_description,
+            "systemPrompt": item.system_prompt or item.avatar_prompt or item.description,
+        }
+        for human_id in role_ids
+        for item in visible
+        if item.id == human_id
+    ]
+    await consume_daily_quota(db, user_id=user.id, category="chat", limit=settings.daily_chat_limit)
+    try:
+        outline = await generate_ass_story_outline(
+            segments=segments,
+            emotion=emotion_context,
+            selected_humans=selected_humans,
+            extra_requirement=extra_requirement.strip(),
+        )
+    except Exception as exc:
+        for call in getattr(exc, "usage_records", None) or []:
+            add_token_usage(
+                db,
+                operation=f"{call.get('operation') or 'ass_story_outline'}_failed",
+                provider="openai-compatible",
+                model=settings.llm_model,
+                usage=call.get("usage"),
+                user_id=user.id,
+                project_id=project_id,
+                request_id=call.get("requestId"),
+            )
+        await db.commit()
+        raise HTTPException(502, f"ASS 全局分镜大纲生成失败：{exc}") from exc
     ass_url = await get_storage().put_bytes(safe_key(f"users/{user.id}/ass", ass_file.filename), content, ass_file.content_type)
     title = f"ASS 分镜 · {emotion.song_code} · {emotion.song_name}"
-    story_bible = build_ass_story_bible(segments=segments, emotion=emotion_context, role_ids=role_ids, extra_requirement=extra_requirement.strip())
+    story_bible = build_ass_story_bible(
+        segments=segments,
+        emotion=emotion_context,
+        role_ids=role_ids,
+        extra_requirement=extra_requirement.strip(),
+        shot_plan=outline["shots"],
+    )
     task = ProjectTaskModel(
         id=uid("task"),
         project_id=project_id,
@@ -280,24 +348,45 @@ async def create_ass_storyboard(
     )
     db.add(task)
     await db.flush()
+    for call in outline["usageRecords"]:
+        add_token_usage(
+            db,
+            operation=call.get("operation") or "ass_story_outline",
+            provider="openai-compatible",
+            model=settings.llm_model,
+            usage=call.get("usage"),
+            user_id=user.id,
+            project_id=project_id,
+            project_task_id=task.id,
+            request_id=call.get("requestId"),
+        )
     for index, human_id in enumerate(role_ids):
         db.add(ProjectCastModel(id=uid("cast"), project_task_id=task.id, digital_human_id=human_id, sort_order=index))
     result_lines = []
     for index, value in enumerate(segments):
-        assigned_roles = list(story_bible["shots"][index]["preferredCharacterIds"])
+        shot_plan = story_bible["shots"][index]
+        assigned_roles = list(shot_plan["requiredCharacterIds"])
         planned_duration = round(float(value.get("end") or 0) - float(value.get("start") or 0), 1)
         line = StoryboardLineModel(
             id=uid("line"),
             project_task_id=task.id,
             sort_order=index,
             source="ass",
+            shot_type=shot_plan["shotType"],
             lyrics=value.get("lyrics", ""),
             start_time=value.get("start"),
             end_time=value.get("end"),
             planned_duration=planned_duration,
             scene_prompt="",
             shot_prompt="",
-            shot_options={"ratio": ratio, "resolution": resolution, "imageModel": image_model, "videoModel": video_model, "duration": normalize_video_duration(planned_duration)},
+            shot_options={
+                "ratio": ratio,
+                "resolution": resolution,
+                "imageModel": image_model,
+                "videoModel": video_model,
+                "duration": normalize_video_duration(planned_duration),
+                "outlineIntent": shot_plan["intent"],
+            },
             generation_status="pending",
         )
         db.add(line)
@@ -305,7 +394,16 @@ async def create_ass_storyboard(
         for role_index, human_id in enumerate(assigned_roles):
             db.add(StoryboardLineCastModel(id=uid("linecast"), storyboard_line_id=line.id, digital_human_id=human_id, sort_order=role_index))
         result_lines.append(
-            {**value, "id": line.id, "plannedDuration": planned_duration, "scenePrompt": "", "shotPrompt": "", "digitalHumanIds": assigned_roles, "generationStatus": "pending"}
+            {
+                **value,
+                "id": line.id,
+                "shotType": shot_plan["shotType"],
+                "plannedDuration": planned_duration,
+                "scenePrompt": "",
+                "shotPrompt": "",
+                "digitalHumanIds": assigned_roles,
+                "generationStatus": "pending",
+            }
         )
     await db.commit()
     return {
@@ -316,6 +414,7 @@ async def create_ass_storyboard(
         "sourceAssUrl": ass_url,
         "status": "generating",
         "songEmotion": emotion_context,
+        "storyBible": story_bible,
         "lines": result_lines,
     }
 
@@ -337,6 +436,7 @@ async def generation_context(user: UserModel, task_id: str | None, line_id: str 
 async def create_image_generation(payload: ImageGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
     await require_active_model(db, payload.model or settings.image_model, "image")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
+    await consume_daily_quota(db, user_id=user.id, category="image", limit=settings.daily_image_limit)
     job = await jobs.create(
         "image",
         payload.model_dump(mode="json"),
@@ -353,6 +453,7 @@ async def create_image_generation(payload: ImageGenerationCreate, user: CurrentU
 async def create_video_generation(payload: VideoGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
     await require_active_model(db, payload.model or settings.video_model, "video")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
+    await consume_daily_quota(db, user_id=user.id, category="video", limit=settings.daily_video_limit)
     job = await jobs.create(
         "video",
         payload.model_dump(mode="json"),
@@ -422,7 +523,7 @@ async def get_chat_session(session_id: str, user: CurrentUser) -> dict:
 async def post_chat_message(session_id: str, payload: ChatMessageCreate, user: CurrentUser) -> dict:
     session = await chat_or_404(user.id, session_id)
     try:
-        last_seq = await chat_manager.post(session, payload.text.strip())
+        last_seq = await chat_manager.post(session, payload.text.strip(), daily_limit=settings.daily_chat_limit)
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
     return {"ok": True, "lastSeq": last_seq}

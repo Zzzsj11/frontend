@@ -20,6 +20,8 @@ from .config import settings
 class Storage(Protocol):
     async def put_bytes(self, key: str, content: bytes, content_type: str | None = None) -> str: ...
 
+    async def put_file(self, key: str, path: str | Path, content_type: str | None = None) -> str: ...
+
 
 def safe_key(category: str, filename: str) -> str:
     category_parts = []
@@ -88,6 +90,21 @@ class TosStorage:
             except TypeError:
                 stream.seek(0)
                 self.client.put_object(bucket, object_key, len(content), content_type or "application/octet-stream", content=stream)
+
+        await asyncio.to_thread(upload)
+        return self._public_url(bucket, object_key)
+
+    async def put_file(self, key: str, path: str | Path, content_type: str | None = None) -> str:
+        bucket, object_key = self._bucket_for(key)
+        file_path = str(path)
+
+        def upload() -> None:
+            self.client.put_object_from_file(
+                bucket,
+                object_key,
+                file_path,
+                content_type=content_type or "application/octet-stream",
+            )
 
         await asyncio.to_thread(upload)
         return self._public_url(bucket, object_key)
@@ -175,4 +192,38 @@ async def download_public_url(url: str, max_bytes: int = 500 * 1024 * 1024) -> t
                     chunks.append(chunk)
                 content_type = response.headers.get("content-type", "application/octet-stream").split(";", 1)[0]
                 return current, b"".join(chunks), content_type
+    raise ValueError("远程地址重定向次数过多")
+
+
+async def download_public_url_to_path(
+    url: str,
+    destination: str | Path,
+    max_bytes: int = 500 * 1024 * 1024,
+) -> tuple[str, str, int]:
+    """Stream a public HTTPS object to disk instead of retaining it in memory."""
+    current = url
+    target = Path(destination)
+    async with httpx.AsyncClient(timeout=180, follow_redirects=False) as client:
+        for _ in range(4):
+            await _validate_public_url(current)
+            async with client.stream("GET", current) as response:
+                if response.is_redirect:
+                    location = response.headers.get("location")
+                    if not location:
+                        response.raise_for_status()
+                    current = urljoin(current, location)
+                    continue
+                response.raise_for_status()
+                declared = int(response.headers.get("content-length") or 0)
+                if declared > max_bytes:
+                    raise ValueError("远程文件超过允许大小")
+                size = 0
+                with target.open("wb") as output:
+                    async for chunk in response.aiter_bytes():
+                        size += len(chunk)
+                        if size > max_bytes:
+                            raise ValueError("远程文件超过允许大小")
+                        output.write(chunk)
+                content_type = response.headers.get("content-type", "application/octet-stream").split(";", 1)[0]
+                return current, content_type, size
     raise ValueError("远程地址重定向次数过多")

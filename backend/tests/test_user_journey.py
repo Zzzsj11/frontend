@@ -40,6 +40,10 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
             self.objects[key] = content
             return f"https://tos.test/{key}"
 
+        async def put_file(self, key, path, content_type=None):
+            self.objects[key] = path.read_bytes()
+            return f"https://tos.test/{key}"
+
     storage = MemoryStorage()
     monkeypatch.setattr(main, "get_storage", lambda: storage)
     monkeypatch.setattr(domain, "get_storage", lambda: storage)
@@ -54,6 +58,14 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
             "digitalHumanIds": ["dh-system-020"],
             "usage": {"prompt_tokens": 120, "completion_tokens": 40, "total_tokens": 160},
             "requestId": "req-test",
+        }
+
+    async def fake_outline(**kwargs):
+        return {
+            "shots": [{"index": 0, "shotType": "character", "intent": "人物回应整段歌词", "requiredCharacterIds": ["dh-system-020"]}],
+            "usage": {},
+            "usageRecords": [{"operation": "ass_story_outline", "usage": {}, "requestId": "outline-test"}],
+            "requestId": "outline-test",
         }
 
     async def fake_image(payload, job):
@@ -72,6 +84,8 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
         }
 
     monkeypatch.setattr(domain, "generate_storyboard_line", fake_storyboard_line)
+    monkeypatch.setattr(domain, "generate_ass_story_outline", fake_outline)
+    monkeypatch.setattr(main, "generate_ass_story_outline", fake_outline)
     monkeypatch.setattr(main, "generate_image", fake_image)
     monkeypatch.setattr(main, "generate_video", fake_video)
 
@@ -142,28 +156,13 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     usage = client.get(f"/api/token-usage?project_task_id={storyboard.json()['taskId']}").json()
     assert usage["summary"]["inputTokens"] == 120
     assert usage["summary"]["outputTokens"] == 40
-    assert {item["operation"] for item in usage["records"]} == {"storyboard_line", "generation_image", "generation_video"}
+    assert {item["operation"] for item in usage["records"]} == {"ass_story_outline", "storyboard_line", "generation_image", "generation_video"}
 
-    class FakeResponse:
-        content = b"video-bytes"
+    async def fake_download_to_path(url, destination, max_bytes=500 * 1024 * 1024):
+        destination.write_bytes(b"video-bytes")
+        return url, "video/mp4", len(b"video-bytes")
 
-        def raise_for_status(self):
-            pass
-
-    class FakeClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            pass
-
-        async def get(self, url):
-            return FakeResponse()
-
-    monkeypatch.setattr(domain.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(domain, "download_public_url_to_path", fake_download_to_path)
     exported = client.post(f"/api/tasks/{storyboard.json()['taskId']}/material-export")
     assert exported.status_code == 201, exported.text
     archive = next(value for key, value in storage.objects.items() if key.endswith(".zip"))
@@ -171,6 +170,14 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
         assert "prompts.md" in bundle.namelist()
         assert any(name.startswith("videos/") for name in bundle.namelist())
         assert "sunlit room" in bundle.read("prompts.md").decode()
+
+    regenerated_outline = client.post(f"/api/tasks/{storyboard.json()['taskId']}/storyboard-outline/regenerate")
+    assert regenerated_outline.status_code == 200, regenerated_outline.text
+    assert regenerated_outline.json()["storyBible"]["shots"][0]["shotType"] == "character"
+    replanned = client.get(f"/api/tasks/{storyboard.json()['taskId']}").json()["lines"][0]
+    assert replanned["generationStatus"] == "pending"
+    assert replanned["scenePrompt"] == ""
+    assert replanned["digitalHumanIds"] == ["dh-system-020"]
 
     chat = client.post("/api/chat/sessions", json={})
     assert chat.status_code == 201
@@ -237,7 +244,16 @@ def test_ass_storyboard_generates_one_line_with_full_lyrics_context(client, monk
         received.append(kwargs)
         return {"scenePrompt": f"scene-{kwargs['current']['index']}", "shotPrompt": "shot", "digitalHumanIds": [], "usage": {"input_tokens": 10, "output_tokens": 5}}
 
+    async def fake_outline(**kwargs):
+        return {
+            "shots": [{"index": index, "shotType": "empty", "intent": f"歌词意象 {index}", "requiredCharacterIds": []} for index, _segment in enumerate(kwargs["segments"])],
+            "usage": {},
+            "usageRecords": [{"operation": "ass_story_outline", "usage": {}, "requestId": "outline-progressive"}],
+            "requestId": "outline-progressive",
+        }
+
     monkeypatch.setattr(domain, "generate_storyboard_line", fake_line)
+    monkeypatch.setattr(main, "generate_ass_story_outline", fake_outline)
     project_id = client.post("/api/projects", json={"name": "Progressive ASS"}).json()["id"]
     content = b"""[Script Info]\nScript Type: v4.00+\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Arial,20\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,First\nDialogue: 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,Second\n"""
     prepared = client.post(

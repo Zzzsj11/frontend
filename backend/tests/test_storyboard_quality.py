@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from app.media_constraints import normalize_video_duration
 from app.schemas import VideoGenerationCreate
 from app.story_bible import build_ass_story_bible, exact_durations
-from app.storyboard_prompt import _extract_json, _validate
+from app.storyboard_prompt import _extract_json, _validate, _validate_ass_outline
 
 
 def test_exact_durations_preserve_total_and_provider_limits() -> None:
@@ -34,9 +34,14 @@ def test_ass_story_bible_has_shared_arc_and_character_plan() -> None:
         emotion={"songCode": "10012204", "songName": "他不爱我", "materialCategory": "流行歌曲-爱情消极-失恋", "seasons": "冬", "atmosphere": "冷色调"},
         role_ids=["a", "b"],
         extra_requirement="电影感",
+        shot_plan=[
+            {"index": index, "shotType": "empty" if index in {0, 3} else "character", "intent": f"intent {index}", "requiredCharacterIds": [] if index in {0, 3} else ["a", "b"]}
+            for index in range(6)
+        ],
     )
-    assert bible["shots"][0]["preferredCharacterIds"] == []
-    assert bible["shots"][-1]["preferredCharacterIds"] == ["a", "b"]
+    assert bible["shots"][0]["requiredCharacterIds"] == []
+    assert bible["shots"][-1]["requiredCharacterIds"] == ["a", "b"]
+    assert bible["shots"][1]["shotType"] == "character"
     assert bible["visualContinuity"]["season"] == "冬"
 
     single = build_ass_story_bible(
@@ -44,8 +49,24 @@ def test_ass_story_bible_has_shared_arc_and_character_plan() -> None:
         emotion={"songCode": "1"},
         role_ids=["a", "b"],
         extra_requirement="",
+        shot_plan=[{"index": 0, "shotType": "character", "intent": "人物回应歌词", "requiredCharacterIds": ["a", "b"]}],
     )
-    assert single["shots"][0]["preferredCharacterIds"] == ["a", "b"]
+    assert single["shots"][0]["requiredCharacterIds"] == ["a", "b"]
+
+
+def test_ass_outline_rejects_too_many_or_consecutive_empty_shots() -> None:
+    segments = [{"lyrics": str(index)} for index in range(5)]
+    valid = {
+        "shots": [
+            {"index": index, "shotType": "empty" if index in {1, 3} else "character", "intent": f"intent {index}", "requiredCharacterIds": [] if index in {1, 3} else ["a"]}
+            for index in range(5)
+        ]
+    }
+    assert len(_validate_ass_outline(valid, segments=segments, role_ids=["a"])) == 5
+    invalid = {"shots": [dict(item) for item in valid["shots"]]}
+    invalid["shots"][2] = {"index": 2, "shotType": "empty", "intent": "empty", "requiredCharacterIds": []}
+    with pytest.raises(ValueError, match="人物镜不能少于|连续空镜"):
+        _validate_ass_outline(invalid, segments=segments, role_ids=["a"])
 
 
 def test_storyboard_output_schema_is_strict() -> None:

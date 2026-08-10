@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -272,6 +272,16 @@ class TokenUsageModel(LifecycleMixin, Base):
     cached_input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     raw_usage: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class DailyUsageQuotaModel(LifecycleMixin, Base):
+    __tablename__ = "daily_usage_quotas"
+    __table_args__ = (UniqueConstraint("user_id", "usage_date", "category", name="uq_daily_usage_quota_user_date_category"),)
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    usage_date: Mapped[date] = mapped_column(Date, index=True)
+    category: Mapped[str] = mapped_column(String(32), index=True)
+    usage_count: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class ApiErrorLogModel(LifecycleMixin, Base):

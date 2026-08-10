@@ -477,6 +477,7 @@ const removeDh = async () => {
         <div class="edit-body">
           <div class="edit-portrait">
             <img :src="editing.originalAvatar || editing.avatar" :alt="editing.name" />
+            <ImageZoom :src="editing.originalAvatar || editing.avatar" :alt="`${editing.name} · 原图预览`" />
             <div v-if="regenBusy" class="edit-regen-mask">
               <span class="spinner light" />
               正在重新生成形象…
@@ -902,12 +903,12 @@ const removeDh = async () => {
 /* 数字人卡片 */
 .dh-grid {
   display: grid;
-  grid-template-columns: repeat(5, 180px);
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 14px;
   padding: 16px 22px 22px;
-  min-width: 1000px;
   max-height: 56vh;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .dh-card {
   border: 2px solid var(--border);

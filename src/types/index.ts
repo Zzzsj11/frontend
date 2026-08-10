@@ -128,6 +128,25 @@ export interface ScriptLine {
   generationAttempt?: number
 }
 
+export interface StoryOutlineShot {
+  index: number
+  stage: string
+  lyrics?: string
+  shotType: 'empty' | 'character'
+  intent?: string
+  outlineScene?: string
+  outlineShot?: string
+  requiredCharacterIds?: string[]
+  preferredCharacterIds?: string[]
+}
+
+export interface StoryBible {
+  version: string
+  logline: string
+  characterPolicy: string
+  shots: StoryOutlineShot[]
+}
+
 export interface StoryboardCategoryOption {
   value: string
   label: string

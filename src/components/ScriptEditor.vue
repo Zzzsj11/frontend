@@ -6,6 +6,7 @@ import ShotDetailModal from './ShotDetailModal.vue'
 import MagicScriptModal from './MagicScriptModal.vue'
 import GeneralStoryboardModal from './GeneralStoryboardModal.vue'
 import AppIcon from './AppIcon.vue'
+import StoryboardOutlineModal from './StoryboardOutlineModal.vue'
 
 const store = useProjectStore()
 const lineListRef = ref<HTMLDivElement>()
@@ -67,6 +68,10 @@ const onDrop = (index: number) => {
           角色阵容
           <span v-if="store.castHumans.length" class="cast-count">{{ store.castHumans.length }}</span>
         </button>
+        <button class="btn-outline" :disabled="!store.activeStoryBible" @click="store.openOutline()">
+          <AppIcon name="file" :size="13" />
+          查看大纲
+        </button>
         <button class="btn-primary" :disabled="store.magicLoading || store.songSwitching" @click="store.openMagic()">
           <span v-if="store.magicLoading" class="spinner light" />
           <AppIcon v-else name="sparkles" :size="15" />
@@ -115,6 +120,7 @@ const onDrop = (index: number) => {
     <ShotDetailModal />
     <MagicScriptModal />
     <GeneralStoryboardModal />
+    <StoryboardOutlineModal />
   </section>
 </template>
 
@@ -140,7 +146,13 @@ const onDrop = (index: number) => {
 }
 .header-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
+}
+.header-actions button {
+  min-height: 30px;
+  padding: 5px 11px;
+  border-radius: 9px;
+  font-size: 12px;
 }
 .cast-count {
   display: inline-flex;

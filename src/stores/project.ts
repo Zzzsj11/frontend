@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { DigitalHuman, GeneralStoryboardOptions, GeneralStoryboardRequest, ScriptLine, ShotAsset, ShotGenOptions, SongProject, SynthesisState, TimelineClip } from '../types'
+import type { DigitalHuman, GeneralStoryboardOptions, GeneralStoryboardRequest, ScriptLine, ShotAsset, ShotGenOptions, SongProject, StoryBible, SynthesisState, TimelineClip } from '../types'
 import * as api from '../mock/api'
 import * as imageGen from '../api/imageGen'
 import { nextId } from '../mock/data'
@@ -59,6 +59,11 @@ export const useProjectStore = defineStore('project', {
     generalStoryboardLoading: false,
     generalStoryboardError: null as string | null,
     generalStoryboardOptions: null as GeneralStoryboardOptions | null,
+    outlineOpen: false,
+    outlineLoading: false,
+    outlineError: null as string | null,
+    activeStoryBible: null as StoryBible | null,
+    activeStoryboardType: null as string | null,
     currentTime: 0,
     isPlaying: false,
     playMode: { single: true, loop: false },
@@ -236,7 +241,7 @@ export const useProjectStore = defineStore('project', {
 
     /** 载入指定子项目(任务)的脚本到编辑区（不负责缓存当前，调用方自行处理） */
     async _loadTask(songId: string, taskId: string | null) {
-      const script = taskId ? await api.fetchSongScript(taskId) : { cast: [], lines: [] }
+      const script = taskId ? await api.fetchSongScript(taskId) : { cast: [], lines: [], storyboardType: '', storyBible: undefined }
       if (taskId) this.taskScripts[taskId] = script
       this.stop()
       this.editingLineId = null
@@ -244,6 +249,8 @@ export const useProjectStore = defineStore('project', {
       this.lines = script.lines
       this.activeSongId = songId
       this.activeTaskId = taskId
+      this.activeStoryBible = script.storyBible ?? null
+      this.activeStoryboardType = script.storyboardType || null
       this.selectedLineId = this.lines[0]?.id ?? null
       this.currentTime = 0
       if (taskId) {
@@ -295,6 +302,33 @@ export const useProjectStore = defineStore('project', {
       if (!this.activeTaskId) return
       const { lineIds } = await api.resetFailedStoryboardLines(this.activeTaskId)
       await this._generateStoryboardQueue(this.activeTaskId, lineIds, true)
+    },
+
+    openOutline() { if (this.activeTaskId && this.activeStoryBible) this.outlineOpen = true },
+    closeOutline() { if (!this.outlineLoading) this.outlineOpen = false },
+    async regenerateOutline() {
+      if (!this.activeTaskId || this.activeStoryboardType !== 'ass' || this.outlineLoading) return
+      this.outlineLoading = true
+      this.outlineError = null
+      try {
+        const result = await api.regenerateStoryboardOutline(this.activeTaskId)
+        this.activeStoryBible = result.storyBible
+        for (const planned of result.lines) {
+          const line = this.lines.find((item) => item.id === planned.id)
+          if (!line) continue
+          line.shotType = planned.shotType
+          line.digitalHumanIds = [...planned.digitalHumanIds]
+          line.scenePrompt = ''
+          line.shotPrompt = ''
+          line.generationStatus = 'pending'
+          line.generationError = undefined
+        }
+        void this._generateStoryboardQueue(this.activeTaskId, result.lines.map((line) => line.id))
+      } catch (error) {
+        this.outlineError = error instanceof Error ? error.message : '大纲重新生成失败'
+      } finally {
+        this.outlineLoading = false
+      }
     },
 
     /** 切换到某歌曲的处理任务(子项目)：每个任务是独立脚本，当前编辑现场先写入缓存 */
@@ -731,6 +765,8 @@ export const useProjectStore = defineStore('project', {
         this.lines = lines
         this.taskScripts[task.id] = { cast: this.castIds, lines: this.lines }
         this.activeTaskId = task.id
+        this.activeStoryBible = (result as typeof result & { storyboardConfig?: { storyBible?: StoryBible } }).storyboardConfig?.storyBible ?? null
+        this.activeStoryboardType = 'general'
         this.selectedLineId = this.lines[0]?.id ?? null
         this.currentTime = 0
         this.generalStoryboardOpen = false
@@ -754,6 +790,8 @@ export const useProjectStore = defineStore('project', {
         const lines: ScriptLine[] = script.lines.map((item) => ({
           id: (item as typeof item & { id?: string }).id || nextId(),
           source: 'ass',
+          shotType: (item as typeof item & { shotType?: ScriptLine['shotType'] }).shotType,
+          plannedDuration: (item as typeof item & { plannedDuration?: number }).plannedDuration,
           lyrics: item.lyrics,
           scenePrompt: item.scenePrompt,
           shotPrompt: item.shotPrompt,
@@ -782,6 +820,8 @@ export const useProjectStore = defineStore('project', {
         this.lines = lines
         this.taskScripts[task.id] = { cast: this.castIds, lines: this.lines }
         this.activeTaskId = task.id
+        this.activeStoryBible = (script as typeof script & { storyBible?: StoryBible }).storyBible ?? null
+        this.activeStoryboardType = 'ass'
         this.selectedLineId = this.lines[0]?.id ?? null
         this.currentTime = 0
         this.magicOpen = false

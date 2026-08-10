@@ -28,7 +28,7 @@ describe('apiRequest', () => {
   it('does not replay a mutating request after an uncertain network failure', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('Failed to fetch'))
 
-    await expect(apiRequest('/generations/videos', { method: 'POST' })).rejects.toThrow('Failed to fetch')
+    await expect(apiRequest('/generations/videos', { method: 'POST' })).rejects.toThrow('网络连接失败')
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

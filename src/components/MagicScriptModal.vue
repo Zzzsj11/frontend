@@ -351,13 +351,14 @@ const cancel = () => {
 .role-picker {
   min-height: 120px;
   max-height: 250px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 1.5px dashed var(--border-dark);
   border-radius: 12px;
   background: #fafafa;
   padding: 10px;
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: flex-start;
 }
@@ -370,8 +371,9 @@ const cancel = () => {
 }
 .role-card {
   position: relative;
-  flex: 0 0 124px;
+  flex: 1 1 124px;
   width: 124px;
+  max-width: 160px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #fff;

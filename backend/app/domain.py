@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import io
 import json
+import tempfile
 import uuid
 import zipfile
+from pathlib import Path
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,10 +55,11 @@ from .schemas import (
     UserCreate,
     UserUpdate,
 )
-from .storage import get_storage, is_tos_url, safe_key
-from .story_bible import STORY_BIBLE_VERSION, build_general_story_bible, exact_durations
-from .storyboard_prompt import PROMPT_VERSION, SCHEMA_VERSION, generate_storyboard_line
+from .storage import download_public_url_to_path, get_storage, is_tos_url, safe_key
+from .story_bible import STORY_BIBLE_VERSION, build_ass_story_bible, build_general_story_bible, exact_durations
+from .storyboard_prompt import PROMPT_VERSION, SCHEMA_VERSION, generate_ass_story_outline, generate_storyboard_line
 from .token_usage import add_token_usage, normalize_usage
+from .usage_quota import consume_daily_quota
 
 router = APIRouter(prefix="/api")
 Db = Depends(database_session)
@@ -369,7 +370,8 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
             )
         ).scalar_one_or_none()
         if not model:
-            raise HTTPException(422, f"不支持或已停用的{modality}模型：{code}")
+            label = {"chat": "文本", "image": "图片", "video": "视频", "audio": "音频"}.get(modality, "生成")
+            raise HTTPException(422, f"不支持或已停用的{label}模型：{code}")
     total = payload.empty_shot_count + payload.character_shot_count
     if total < 1:
         raise HTTPException(422, "至少需要一个分镜")
@@ -496,6 +498,98 @@ async def update_task(task_id: str, payload: TaskUpdate, user: CurrentUser, db: 
     await db.commit()
     await db.refresh(item)
     return task_json(item)
+
+
+@router.post("/tasks/{task_id}/storyboard-outline/regenerate")
+async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
+    task = await owned_task(db, user.id, task_id)
+    if task.storyboard_type != "ass":
+        raise HTTPException(422, "只有 ASS 分镜支持重新生成全局大纲")
+    lines = list(
+        (
+            await db.execute(
+                select(StoryboardLineModel).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None)).order_by(StoryboardLineModel.sort_order)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    cast_links = list(
+        (await db.execute(select(ProjectCastModel).where(ProjectCastModel.project_task_id == task.id, ProjectCastModel.deleted_at.is_(None)).order_by(ProjectCastModel.sort_order)))
+        .scalars()
+        .all()
+    )
+    role_ids = [item.digital_human_id for item in cast_links]
+    humans = await visible_humans(db, user.id, role_ids)
+    human_by_id = {item.id: item for item in humans}
+    selected_humans = [
+        {
+            "id": item.id,
+            "name": item.name,
+            "gender": item.gender,
+            "ageDescription": item.age_description,
+            "appearanceStyle": item.appearance_style,
+            "clothingDescription": item.clothing_description,
+            "systemPrompt": item.system_prompt or item.avatar_prompt or item.description,
+        }
+        for human_id in role_ids
+        if (item := human_by_id.get(human_id))
+    ]
+    segments = [{"index": line.sort_order, "start": line.start_time, "end": line.end_time, "lyrics": line.lyrics} for line in lines]
+    await consume_daily_quota(db, user_id=user.id, category="chat", limit=settings.daily_chat_limit)
+    outline = await generate_ass_story_outline(
+        segments=segments,
+        emotion=task.storyboard_config.get("songEmotion") or {},
+        selected_humans=selected_humans,
+        extra_requirement=task.extra_requirement,
+    )
+    story_bible = build_ass_story_bible(
+        segments=segments,
+        emotion=task.storyboard_config.get("songEmotion") or {},
+        role_ids=role_ids,
+        extra_requirement=task.extra_requirement,
+        shot_plan=outline["shots"],
+    )
+    config = dict(task.storyboard_config)
+    config["storyBible"] = story_bible
+    task.storyboard_config = config
+    task.status = "generating"
+    now = utcnow()
+    line_ids = [line.id for line in lines]
+    await db.execute(
+        update(StoryboardLineCastModel).where(StoryboardLineCastModel.storyboard_line_id.in_(line_ids), StoryboardLineCastModel.deleted_at.is_(None)).values(deleted_at=now)
+    )
+    for line, plan in zip(lines, story_bible["shots"], strict=True):
+        line.shot_type = plan["shotType"]
+        line.shot_options = {**(line.shot_options or {}), "outlineIntent": plan["intent"]}
+        line.scene_prompt = ""
+        line.shot_prompt = ""
+        line.generation_status = "pending"
+        line.generation_error = None
+        line.prompt_context_hash = None
+        for index, human_id in enumerate(plan["requiredCharacterIds"]):
+            db.add(StoryboardLineCastModel(id=uid("linecast"), storyboard_line_id=line.id, digital_human_id=human_id, sort_order=index))
+    for call in outline["usageRecords"]:
+        add_token_usage(
+            db,
+            operation=call.get("operation") or "ass_story_outline",
+            provider="openai-compatible",
+            model=settings.llm_model,
+            usage=call.get("usage"),
+            user_id=user.id,
+            project_id=task.project_id,
+            project_task_id=task.id,
+            request_id=call.get("requestId"),
+        )
+    await db.commit()
+    return {
+        "storyboardType": task.storyboard_type,
+        "storyBible": story_bible,
+        "lines": [
+            {"id": line.id, "shotType": plan["shotType"], "digitalHumanIds": plan["requiredCharacterIds"], "generationStatus": "pending"}
+            for line, plan in zip(lines, story_bible["shots"], strict=True)
+        ],
+    }
 
 
 @router.delete("/tasks/{task_id}")
@@ -877,6 +971,7 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
     ).hexdigest()
     if not payload.force and line.generation_status == "succeeded" and line.prompt_context_hash == context_hash:
         return await line_json(db, line, [item.digital_human_id for item in line_cast])
+    await consume_daily_quota(db, user_id=user.id, category="chat", limit=settings.daily_chat_limit)
     now = utcnow()
     line.generation_status, line.generation_error = "running", None
     line.generation_attempt += 1
@@ -1045,17 +1140,23 @@ async def export_materials(task_id: str, user: CurrentUser, db: AsyncSession = D
     await db.commit()
     try:
         markdown = [f"# {project.name} · {task.title}", "", "## 整体提示词", "", task.overall_prompt or "（未填写）", "", "## 分镜提示词", ""]
-        archive = io.BytesIO()
-        async with httpx.AsyncClient(timeout=180, follow_redirects=True) as client:
-            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+        with tempfile.TemporaryDirectory(prefix="mvagent-export-") as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            archive_path = temporary_path / f"{task.id}.zip"
+            with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_STORED, allowZip64=True) as bundle:
                 for index, line in enumerate(lines, start=1):
                     markdown.extend([f"### {index:02d}. {line.lyrics or line.shot_type or '分镜'}", "", f"- 场景：{line.scene_prompt}", f"- 镜头：{line.shot_prompt}", ""])
                     for version, asset in enumerate(by_line.get(line.id, []), start=1):
-                        response = await client.get(asset.video_url)
-                        response.raise_for_status()
-                        bundle.writestr(f"videos/{index:02d}-v{version:02d}-{asset.id}.mp4", response.content)
-                bundle.writestr("prompts.md", "\n".join(markdown).encode("utf-8"))
-        archive_url = await get_storage().put_bytes(safe_key(f"users/{user.id}/exports", f"{task.id}.zip"), archive.getvalue(), "application/zip")
+                        video_path = temporary_path / f"{index:02d}-v{version:02d}-{asset.id}.mp4"
+                        await download_public_url_to_path(asset.video_url, video_path)
+                        bundle.write(video_path, f"videos/{video_path.name}")
+                        video_path.unlink(missing_ok=True)
+                bundle.writestr("prompts.md", "\n".join(markdown).encode("utf-8"), compress_type=zipfile.ZIP_DEFLATED)
+            archive_url = await get_storage().put_file(
+                safe_key(f"users/{user.id}/exports", f"{task.id}.zip"),
+                archive_path,
+                "application/zip",
+            )
         export.status = "ready"
         export.archive_url = archive_url
         await db.commit()

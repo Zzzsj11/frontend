@@ -16,6 +16,7 @@ from .database import session_factory
 from .models import ChatMessageModel, ChatSessionModel
 from .redis_store import append_chat_event, chat_events_after, redis
 from .token_usage import add_token_usage
+from .usage_quota import consume_daily_quota
 
 
 @dataclass
@@ -119,7 +120,7 @@ class ChatManager:
         await redis.delete(f"chat:{session_id}:seq", f"chat:{session_id}:events")
         return True
 
-    async def post(self, session: ChatSession, text: str) -> int:
+    async def post(self, session: ChatSession, text: str, *, daily_limit: int) -> int:
         task = self.tasks.get(session.id)
         if task and not task.done():
             raise RuntimeError("助手仍在回复，请等待或先中断")
@@ -127,6 +128,7 @@ class ChatManager:
             model = await db.get(ChatSessionModel, session.id)
             if not model:
                 raise RuntimeError("对话不存在")
+            await consume_daily_quota(db, user_id=session.user_id, category="chat", limit=daily_limit)
             if not session.messages:
                 model.title = text.splitlines()[0][:60]
             model.status = "running"

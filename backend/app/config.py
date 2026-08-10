@@ -73,6 +73,10 @@ class Settings:
     llm_model: str = LLM_MODEL
     llm_api_mode: str = os.getenv("LLM_API_MODE", "openai").lower()
     storyboard_generation_concurrency: int = max(1, min(8, int(os.getenv("STORYBOARD_GENERATION_CONCURRENCY", "4"))))
+    daily_quota_timezone: str = os.getenv("DAILY_QUOTA_TIMEZONE", "Asia/Shanghai")
+    daily_chat_limit: int = max(1, int(os.getenv("DAILY_CHAT_LIMIT", "1000")))
+    daily_image_limit: int = max(1, int(os.getenv("DAILY_IMAGE_LIMIT", "100")))
+    daily_video_limit: int = max(1, int(os.getenv("DAILY_VIDEO_LIMIT", "100")))
     image_api_base_url: str = os.getenv("IMAGE_API_BASE_URL", "https://api-aigc.fzyinghe.com")
     image_api_key: str = os.getenv("IMAGE_API_KEY") or SHARED_PROVIDER_KEY
     image_model: str = os.getenv("IMAGE_MODEL", "gpt-image-2")

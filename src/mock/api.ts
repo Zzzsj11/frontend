@@ -6,6 +6,7 @@ import type {
   ScriptLine,
   ShotGenOptions,
   SongProject,
+  StoryBible,
 } from '../types'
 import {
   makeSilentWav,
@@ -37,9 +38,9 @@ export async function fetchSongProjects(): Promise<SongProject[]> {
 }
 
 /** GET /api/songs/{id}/script — 载入某首歌曲的分镜脚本与角色阵容 */
-export async function fetchSongScript(taskId: string): Promise<{ cast: string[]; lines: ScriptLine[] }> {
-  const task = await apiRequest<{ cast: string[]; lines: Array<Record<string, unknown>> }>(`/tasks/${taskId}`)
-  return { cast: task.cast, lines: task.lines.map((item) => {
+export async function fetchSongScript(taskId: string): Promise<{ cast: string[]; lines: ScriptLine[]; storyboardType: string; storyBible?: StoryBible }> {
+  const task = await apiRequest<{ cast: string[]; storyboardType:string; storyboardConfig?:{storyBible?:StoryBible}; lines: Array<Record<string, unknown>> }>(`/tasks/${taskId}`)
+  return { cast: task.cast, storyboardType:task.storyboardType, storyBible:task.storyboardConfig?.storyBible, lines: task.lines.map((item) => {
     const sceneAssets = (item.sceneAssets as Array<{ id:string; imageUrl:string; originalImageUrl?:string; isCurrent:boolean }>) || []
     const shotAssets = (item.shotAssets as Array<{ id:string; coverUrl:string; originalCoverUrl?:string; videoUrl:string; duration:number; isCurrent:boolean }>) || []
     const currentScene = sceneAssets.find((a)=>a.isCurrent)
@@ -111,6 +112,7 @@ export const reorderStoryboardLines = (taskId:string,lineIds:string[]) => apiReq
 export const updateTaskCast = (taskId:string,ids:string[]) => apiRequest(`/tasks/${taskId}/cast`,{method:'PUT',body:JSON.stringify({digital_human_ids:ids})})
 export const generateStoryboardLine = (taskId:string,lineId:string,force=false) => apiRequest<Record<string,unknown>>(`/tasks/${taskId}/storyboard-lines/${lineId}/generate`,{method:'POST',body:JSON.stringify({force})})
 export const resetFailedStoryboardLines = (taskId:string) => apiRequest<{lineIds:string[]}>(`/tasks/${taskId}/storyboard/retry-failed`,{method:'POST'})
+export const regenerateStoryboardOutline = (taskId:string) => apiRequest<{storyboardType:string;storyBible:StoryBible;lines:Array<{id:string;shotType:'empty'|'character';digitalHumanIds:string[];generationStatus:'pending'}>}>(`/tasks/${taskId}/storyboard-outline/regenerate`,{method:'POST'})
 
 const generalStoryboardOptions: GeneralStoryboardOptions = {
   genres: [

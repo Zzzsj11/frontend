@@ -42,6 +42,13 @@ def test_generation_not_found(client) -> None:
     assert response.status_code == 404
 
 
+def test_local_validation_errors_are_returned_in_chinese(client) -> None:
+    response = client.post("/api/generations/videos", json={"prompt": "test", "duration": "not-a-number"})
+    assert response.status_code == 422
+    assert "duration：必须是整数" in response.json()["detail"]
+    assert "Input should" not in response.json()["detail"]
+
+
 def test_chat_lifecycle(client) -> None:
     created = client.post("/api/chat/sessions", json={}).json()
     session_id = created["id"]

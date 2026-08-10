@@ -187,5 +187,5 @@ const submit = () => {
 .cast-list{max-height:210px;overflow-y:auto;align-content:flex-start}
 .estimate.invalid{background:#fff0f0;color:#c33}.estimate.invalid strong{color:#c33}
 .model-grid{margin:12px 0 6px}.model-grid select:disabled{background:#f5f5f6;color:#777;cursor:not-allowed}.model-hint{margin:0 0 12px;color:var(--text-secondary);font-size:12px}
-.cast-list{max-height:240px;overflow:auto;flex-wrap:nowrap}.cast-item{flex:0 0 124px;width:124px}.cast-item img{height:68px;object-fit:contain;background:#f2f2f2}
+.cast-list{max-height:240px;overflow-x:hidden;overflow-y:auto;flex-wrap:wrap}.cast-item{flex:1 1 124px;width:124px;max-width:160px}.cast-item img{height:68px;object-fit:contain;background:#f2f2f2}
 </style>
