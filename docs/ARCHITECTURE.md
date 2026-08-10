@@ -9,3 +9,7 @@
 统一供应商配置通过 Docker Secret `provider_config` 挂载。检测到其中的 `AIGC_TOKEN` 时，文本模型 Token、聊天 API 地址和默认模型作为同一个配置组生效，优先于遗留的 `LLM_*` 环境变量，避免共享 Token 被误发往其他供应商；只有未配置统一供应商 Secret 时才启用独立 `LLM_*` 配置。
 
 当前任务执行仍在 API 进程内。后续迁移 Worker 时必须保持 `generation_jobs` 状态机和接口契约，先双写/灰度，再切换执行器；详见 `TODO_MODEL_EXPANSION.md`。
+
+素材导出使用 `material_exports` 保存用户、子项目、进度阶段、字节数和 TOS 归档地址，并关联 `generation_jobs`。每次导出拥有独立 ID、临时目录和 TOS 对象键；不同子项目可并行执行且前端状态按 `taskId` 隔离。浏览器通过带 Access Token 的流式 Fetch 订阅 SSE，断线或刷新后以 PostgreSQL 状态恢复，SSE 只承担实时通知而不是事实存储。
+
+ASS 大纲采用三层提示词结构：系统安全与技术约束、歌曲级视觉圣经、当前镜头执行契约。视觉圣经统一时间、天气、色彩和人物服装，同时规划多个可连续移动的场景位置及有限次数的视觉母题；每镜契约固定人物、地点、动作、情绪重点和镜头目的。

@@ -1,0 +1,5 @@
+services:
+  frontend:
+    image: ${REGISTRY:-mvagent-local}/mv-agent-frontend:${RELEASE_VERSION:?set RELEASE_VERSION}
+  backend:
+    image: ${REGISTRY:-mvagent-local}/mv-agent-backend:${RELEASE_VERSION:?set RELEASE_VERSION}

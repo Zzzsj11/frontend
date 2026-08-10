@@ -18,6 +18,39 @@ Dialogue: 0,0:00:04.20,0:00:07.00,Default,,0,0,0,,Second line
 """
 
 
+def outline_result(segments, role_ids):
+    return {
+        "globalVisual": {
+            "visualStyle": "电影写实",
+            "colorPalette": "冷蓝与暖橙",
+            "lighting": "统一夜景光线",
+            "weather": "细雨",
+            "timeOfDay": "夜晚",
+            "continuityRules": ["服装不变", "地点移动可解释"],
+        },
+        "locations": [{"id": "street", "name": "街道", "purpose": "推进关系"}],
+        "motifs": [{"id": "rain", "name": "雨", "meaning": "压抑", "maxAppearances": len(segments)}],
+        "shots": [
+            {
+                "index": index,
+                "shotType": "character" if role_ids else "empty",
+                "intent": f"歌词意图 {index}",
+                "requiredCharacterIds": list(role_ids),
+                "locationId": "street",
+                "locationChange": index == 0,
+                "characterAction": "人物回应歌词" if role_ids else "无人环境变化",
+                "emotionalFocus": "克制",
+                "cameraPurpose": "推进叙事",
+                "motifIds": ["rain"],
+            }
+            for index, _segment in enumerate(segments)
+        ],
+        "usage": {},
+        "usageRecords": [{"operation": "ass_story_outline", "usage": {}, "requestId": "outline-test"}],
+        "requestId": "outline-test",
+    }
+
+
 def wait_for_job(client, job_id: str) -> dict:
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:
@@ -61,12 +94,7 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
         }
 
     async def fake_outline(**kwargs):
-        return {
-            "shots": [{"index": 0, "shotType": "character", "intent": "人物回应整段歌词", "requiredCharacterIds": ["dh-system-020"]}],
-            "usage": {},
-            "usageRecords": [{"operation": "ass_story_outline", "usage": {}, "requestId": "outline-test"}],
-            "requestId": "outline-test",
-        }
+        return outline_result(kwargs["segments"], ["dh-system-020"])
 
     async def fake_image(payload, job):
         assert payload.prompt == "sunlit room"
@@ -158,13 +186,21 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     assert usage["summary"]["outputTokens"] == 40
     assert {item["operation"] for item in usage["records"]} == {"ass_story_outline", "storyboard_line", "generation_image", "generation_video"}
 
-    async def fake_download_to_path(url, destination, max_bytes=500 * 1024 * 1024):
+    async def fake_download_to_path(url, destination, max_bytes=500 * 1024 * 1024, progress_callback=None):
         destination.write_bytes(b"video-bytes")
+        if progress_callback:
+            await progress_callback(len(b"video-bytes"), len(b"video-bytes"))
         return url, "video/mp4", len(b"video-bytes")
 
     monkeypatch.setattr(domain, "download_public_url_to_path", fake_download_to_path)
-    exported = client.post(f"/api/tasks/{storyboard.json()['taskId']}/material-export")
-    assert exported.status_code == 201, exported.text
+    exported = client.post(f"/api/tasks/{storyboard.json()['taskId']}/material-exports")
+    assert exported.status_code == 202, exported.text
+    export_job = wait_for_job(client, exported.json()["jobId"])
+    assert export_job["status"] == "succeeded", export_job["error"]
+    export_status = client.get(f"/api/material-exports/{exported.json()['id']}").json()
+    assert export_status["progress"] == 100
+    assert export_status["stage"] == "导出完成"
+    assert client.get(f"/api/tasks/{storyboard.json()['taskId']}/material-exports").json()[0]["id"] == exported.json()["id"]
     archive = next(value for key, value in storage.objects.items() if key.endswith(".zip"))
     with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
         assert "prompts.md" in bundle.namelist()
@@ -245,12 +281,7 @@ def test_ass_storyboard_generates_one_line_with_full_lyrics_context(client, monk
         return {"scenePrompt": f"scene-{kwargs['current']['index']}", "shotPrompt": "shot", "digitalHumanIds": [], "usage": {"input_tokens": 10, "output_tokens": 5}}
 
     async def fake_outline(**kwargs):
-        return {
-            "shots": [{"index": index, "shotType": "empty", "intent": f"歌词意象 {index}", "requiredCharacterIds": []} for index, _segment in enumerate(kwargs["segments"])],
-            "usage": {},
-            "usageRecords": [{"operation": "ass_story_outline", "usage": {}, "requestId": "outline-progressive"}],
-            "requestId": "outline-progressive",
-        }
+        return outline_result(kwargs["segments"], [])
 
     monkeypatch.setattr(domain, "generate_storyboard_line", fake_line)
     monkeypatch.setattr(main, "generate_ass_story_outline", fake_outline)

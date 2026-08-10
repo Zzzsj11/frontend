@@ -269,15 +269,20 @@ const toggleFullscreen = () => {
       </label>
       <button
         class="btn-outline synth-btn"
-        :disabled="!store.hasVideoAssets || store.synthesis.status === 'running'"
-        @click="store.runSynthesize()"
+        :disabled="!store.hasVideoAssets || ['queued', 'running'].includes(store.synthesis.status)"
+        :title="store.synthesis.stage"
+        @click="store.synthesis.status === 'ready' ? store.downloadLatestExport() : store.runSynthesize()"
       >
-        <template v-if="store.synthesis.status === 'running'">
-          正在导出素材 {{ store.synthesis.progress }}%
+        <template v-if="['queued', 'running'].includes(store.synthesis.status)">
+          {{ store.synthesis.stage || '正在导出素材' }} {{ store.synthesis.progress }}%
         </template>
-        <template v-else-if="store.synthesis.status === 'done'">
+        <template v-else-if="store.synthesis.status === 'ready'">
           <AppIcon name="movie" :size="15" />
-          素材已导出
+          下载导出素材
+        </template>
+        <template v-else-if="store.synthesis.status === 'failed'">
+          <AppIcon name="movie" :size="15" />
+          导出失败，点击重试
         </template>
         <template v-else>
           <AppIcon name="movie" :size="15" />

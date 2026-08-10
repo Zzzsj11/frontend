@@ -42,6 +42,23 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}, retry 
   if (!response.ok) throw reportApiError(new ApiError(body.detail || `请求失败（HTTP ${response.status}）`, response.status, body.errorCode))
   return body as T
 }
+
+export async function openApiStream(path: string, signal?: AbortSignal, retry = true): Promise<Response> {
+  const headers = new Headers()
+  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
+  let response: Response
+  try {
+    response = await fetch(`/api${path}`, { headers, credentials: 'include', signal })
+  } catch (error) {
+    throw reportApiError(error, '实时进度连接失败')
+  }
+  if (response.status === 401 && retry && await refreshAccess()) return openApiStream(path, signal, false)
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw reportApiError(new ApiError(body.detail || `实时进度连接失败（HTTP ${response.status}）`, response.status, body.errorCode))
+  }
+  return response
+}
 export interface AuthUser { id: string; username: string; displayName: string; role: 'admin' | 'user'; mustChangePassword: boolean }
 export async function loginRequest(username: string, password: string) {
   let response: Response

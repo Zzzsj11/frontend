@@ -73,6 +73,8 @@ class Settings:
     llm_model: str = LLM_MODEL
     llm_api_mode: str = os.getenv("LLM_API_MODE", "openai").lower()
     storyboard_generation_concurrency: int = max(1, min(8, int(os.getenv("STORYBOARD_GENERATION_CONCURRENCY", "4"))))
+    export_concurrency: int = max(1, min(8, int(os.getenv("EXPORT_CONCURRENCY", "4"))))
+    export_per_user_concurrency: int = max(1, min(4, int(os.getenv("EXPORT_PER_USER_CONCURRENCY", "2"))))
     daily_quota_timezone: str = os.getenv("DAILY_QUOTA_TIMEZONE", "Asia/Shanghai")
     daily_chat_limit: int = max(1, int(os.getenv("DAILY_CHAT_LIMIT", "1000")))
     daily_image_limit: int = max(1, int(os.getenv("DAILY_IMAGE_LIMIT", "100")))

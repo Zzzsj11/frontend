@@ -4,7 +4,7 @@ from typing import Any
 
 from .media_constraints import MAX_VIDEO_DURATION, MIN_VIDEO_DURATION
 
-STORY_BIBLE_VERSION = "story-bible-v2"
+STORY_BIBLE_VERSION = "story-bible-v3"
 
 
 def _stage(index: int, total: int) -> str:
@@ -24,26 +24,34 @@ def _stage(index: int, total: int) -> str:
     return "留白、回应与收束"
 
 
-def build_ass_story_bible(
-    *, segments: list[dict[str, Any]], emotion: dict[str, Any], role_ids: list[str], extra_requirement: str, shot_plan: list[dict[str, Any]]
-) -> dict[str, Any]:
+def build_ass_story_bible(*, segments: list[dict[str, Any]], emotion: dict[str, Any], role_ids: list[str], extra_requirement: str, outline: dict[str, Any]) -> dict[str, Any]:
     total = len(segments)
     shots = [
         {
+            **plan,
             "index": index,
             "stage": _stage(index, total),
             "lyrics": segment.get("lyrics", ""),
-            "shotType": plan["shotType"],
-            "intent": plan["intent"],
             "requiredCharacterIds": list(plan["requiredCharacterIds"]),
         }
-        for index, (segment, plan) in enumerate(zip(segments, shot_plan, strict=True))
+        for index, (segment, plan) in enumerate(zip(segments, outline["shots"], strict=True))
     ]
     return {
         "version": STORY_BIBLE_VERSION,
         "logline": f"{emotion.get('songName') or emotion.get('songCode')} 的情绪化 MV，以 {emotion.get('materialCategory') or '歌曲情感'} 为叙事核心。",
-        "visualContinuity": {"season": emotion.get("seasons"), "atmosphere": emotion.get("atmosphere"), "stylePriority": extra_requirement or "保持同一时间线、主色调和空间逻辑"},
-        "characterPolicy": "逐镜人物与空镜类型已在全局歌词大纲中确定。单条生成必须严格沿用 requiredCharacterIds 和 shotType；不得临时改为空镜、替换人物、引入其他人物或改变人物身份服装。",
+        "globalVisual": outline["globalVisual"],
+        "locations": outline["locations"],
+        "motifs": outline["motifs"],
+        "visualContinuity": {
+            "season": emotion.get("seasons"),
+            "atmosphere": emotion.get("atmosphere"),
+            "stylePriority": extra_requirement or "统一时间、天气、色彩与人物服装，通过合理空间移动形成场景变化",
+        },
+        "characterPolicy": "逐镜类型、人物、地点与动作均由全局大纲确定。单条生成必须严格沿用 requiredCharacterIds、shotType、locationId 和 characterAction；不得临时改为空镜、替换人物、引入其他人物或改变人物身份服装。",
+        "technicalPolicy": {
+            "negativeConstraints": ["无字幕", "无水印", "无 Logo", "不得出现未指定人物", "不得改变人物服装与身份"],
+            "locationRule": "同一故事世界允许跨多个关联地点推进；一致性来自时间、天气、色彩、服装和空间衔接，而非所有镜头固定在同一地点。",
+        },
         "shots": shots,
     }
 

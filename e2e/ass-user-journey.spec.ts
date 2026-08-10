@@ -4,6 +4,7 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await page.route('**/api/auth/refresh', (route) => route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }))
   await page.route('**/api/auth/login', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ accessToken: 'test-token', user: { id: 'user-e2e', username: 'admin', displayName: '管理员', role: 'admin', mustChangePassword: true } }) }))
   await page.route('**/api/account/balance*', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ available:true, balance:'287.391936', balanceDisplay:'287.39', currency:'credits', updatedAt:'2026-08-07T00:00:00Z' }) }))
+  await page.route('**/api/model-options', (route) => route.fulfill({ contentType:'application/json', body:JSON.stringify({ imageModels:[{code:'gpt-image-2',name:'Img2'}], videoModels:[{code:'doubao-seedance-2.0',name:'SD2.0'}] }) }))
   await page.route('**/api/projects', async (route) => {
     if (route.request().method() === 'GET') await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'project-e2e', name: 'E2E 项目', tasks: [] }]) })
     else await route.fallback()

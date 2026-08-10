@@ -138,12 +138,21 @@ export interface StoryOutlineShot {
   outlineShot?: string
   requiredCharacterIds?: string[]
   preferredCharacterIds?: string[]
+  locationId?: string
+  locationChange?: boolean
+  characterAction?: string
+  emotionalFocus?: string
+  cameraPurpose?: string
+  motifIds?: string[]
 }
 
 export interface StoryBible {
   version: string
   logline: string
   characterPolicy: string
+  globalVisual?: Record<string, unknown>
+  locations?: Array<{ id: string; name: string; purpose: string }>
+  motifs?: Array<{ id: string; name: string; meaning: string; maxAppearances: number }>
   shots: StoryOutlineShot[]
 }
 
@@ -207,7 +216,27 @@ export interface TimelineClip {
 
 /** 合成状态 */
 export interface SynthesisState {
-  status: 'idle' | 'running' | 'done'
+  status: 'idle' | 'queued' | 'running' | 'ready' | 'failed'
   progress: number
+  stage?: string
   videoUrl?: string
+  error?: string
+}
+
+export interface MaterialExport {
+  id: string
+  taskId: string
+  jobId?: string
+  status: 'queued' | 'running' | 'ready' | 'failed'
+  progress: number
+  stage: string
+  totalAssets: number
+  processedAssets: number
+  totalBytes: number
+  processedBytes: number
+  archiveSize?: number
+  archiveUrl?: string
+  error?: string
+  createdAt: string
+  updatedAt: string
 }

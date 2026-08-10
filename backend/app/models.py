@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import JSON, BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -230,9 +230,19 @@ class MaterialExportModel(LifecycleMixin, Base):
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     project_task_id: Mapped[str] = mapped_column(ForeignKey("project_tasks.id"), index=True)
-    status: Mapped[str] = mapped_column(String(32), default="queued")
+    generation_job_id: Mapped[str | None] = mapped_column(ForeignKey("generation_jobs.id"), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    stage: Mapped[str] = mapped_column(String(120), default="等待导出")
+    total_assets: Mapped[int] = mapped_column(Integer, default=0)
+    processed_assets: Mapped[int] = mapped_column(Integer, default=0)
+    total_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    processed_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    archive_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     archive_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ChatSessionModel(LifecycleMixin, Base):

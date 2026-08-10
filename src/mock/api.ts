@@ -3,6 +3,7 @@ import type {
   GeneralStoryboardOptions,
   GeneralStoryboardRequest,
   GeneralStoryboardResult,
+  MaterialExport,
   ScriptLine,
   ShotGenOptions,
   SongProject,
@@ -13,7 +14,7 @@ import {
 } from './data'
 import type { MagicScript } from './data'
 import * as mediaGen from '../api/mediaGen'
-import { apiRequest } from '../api/client'
+import { apiRequest, openApiStream } from '../api/client'
 import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL } from '../generationModels'
 
 /**
@@ -104,7 +105,27 @@ export const fetchDigitalHumanStyles = () => apiRequest<Array<{id:string;name:st
 export const createDigitalHumanStyle = (name:string) => apiRequest<{id:string;name:string}>('/digital-human-styles',{method:'POST',body:JSON.stringify({name})})
 export const deleteDigitalHumanStyle = (id:string) => apiRequest(`/digital-human-styles/${id}`,{method:'DELETE'})
 export async function uploadDataUrl(dataUrl:string, filename:string): Promise<{url:string;thumbnailUrl?:string}> { const response=await fetch(dataUrl); const blob=await response.blob(); const form=new FormData(); form.append('file',blob,filename); return apiRequest<{url:string;thumbnailUrl?:string}>('/uploads?category=digital-humans',{method:'POST',body:form}) }
-export const exportMaterials = (taskId:string) => apiRequest<{archiveUrl:string}>(`/tasks/${taskId}/material-export`,{method:'POST'})
+export const exportMaterials = (taskId:string) => apiRequest<MaterialExport>(`/tasks/${taskId}/material-exports`,{method:'POST'})
+export const fetchMaterialExports = (taskId:string) => apiRequest<MaterialExport[]>(`/tasks/${taskId}/material-exports`)
+export const fetchMaterialExport = (exportId:string) => apiRequest<MaterialExport>(`/material-exports/${exportId}`)
+export async function streamMaterialExport(exportId:string,onExport:(item:MaterialExport)=>void,signal?:AbortSignal):Promise<void>{
+  const response=await openApiStream(`/material-exports/${exportId}/events`,signal)
+  if(!response.body) throw new Error('浏览器不支持实时进度流')
+  const reader=response.body.getReader(),decoder=new TextDecoder()
+  let buffer=''
+  for(;;){
+    const {done,value}=await reader.read()
+    if(done) break
+    buffer+=decoder.decode(value,{stream:true})
+    const events=buffer.split('\n\n');buffer=events.pop()||''
+    for(const event of events){
+      const raw=event.split('\n').find((line)=>line.startsWith('data: '))?.slice(6)
+      if(!raw) continue
+      const payload=JSON.parse(raw) as {type:string;export:MaterialExport}
+      if(payload.type==='export') onExport(payload.export)
+    }
+  }
+}
 export const createStoryboardLine = (taskId:string,input:Record<string,unknown>) => apiRequest<{id:string}>(`/tasks/${taskId}/storyboard/lines`,{method:'POST',body:JSON.stringify(input)})
 export const updateStoryboardLine = (id:string,input:Record<string,unknown>) => apiRequest(`/storyboard-lines/${id}`,{method:'PATCH',body:JSON.stringify(input)})
 export const deleteStoryboardLine = (id:string) => apiRequest(`/storyboard-lines/${id}`,{method:'DELETE'})

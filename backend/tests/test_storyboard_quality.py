@@ -9,6 +9,38 @@ from app.story_bible import build_ass_story_bible, exact_durations
 from app.storyboard_prompt import _extract_json, _validate, _validate_ass_outline
 
 
+def make_outline(segments, empty_indexes=(), role_ids=("a",)):
+    location_count = max(1, (len(segments) + 1) // 2)
+    locations = [{"id": f"place-{index}", "name": f"场景 {index}", "purpose": "推进叙事"} for index in range(location_count)]
+    return {
+        "globalVisual": {
+            "visualStyle": "电影写实",
+            "colorPalette": "冷蓝",
+            "lighting": "统一夜景",
+            "weather": "细雨",
+            "timeOfDay": "夜晚",
+            "continuityRules": ["服装不变"],
+        },
+        "locations": locations,
+        "motifs": [{"id": "rain", "name": "雨", "meaning": "克制", "maxAppearances": max(2, (len(segments) + 4) // 5)}],
+        "shots": [
+            {
+                "index": index,
+                "shotType": "empty" if index in empty_indexes else "character",
+                "intent": f"intent {index}",
+                "requiredCharacterIds": [] if index in empty_indexes else list(role_ids),
+                "locationId": locations[min(index // 2, location_count - 1)]["id"],
+                "locationChange": index == 0 or index % 2 == 0,
+                "characterAction": "无人环境变化" if index in empty_indexes else "人物回应歌词",
+                "emotionalFocus": "克制",
+                "cameraPurpose": "推进叙事",
+                "motifIds": ["rain"] if index < max(2, (len(segments) + 4) // 5) else [],
+            }
+            for index, _segment in enumerate(segments)
+        ],
+    }
+
+
 def test_exact_durations_preserve_total_and_provider_limits() -> None:
     durations = exact_durations(31.7, 7)
     assert sum(durations) == pytest.approx(31.7)
@@ -34,10 +66,7 @@ def test_ass_story_bible_has_shared_arc_and_character_plan() -> None:
         emotion={"songCode": "10012204", "songName": "他不爱我", "materialCategory": "流行歌曲-爱情消极-失恋", "seasons": "冬", "atmosphere": "冷色调"},
         role_ids=["a", "b"],
         extra_requirement="电影感",
-        shot_plan=[
-            {"index": index, "shotType": "empty" if index in {0, 3} else "character", "intent": f"intent {index}", "requiredCharacterIds": [] if index in {0, 3} else ["a", "b"]}
-            for index in range(6)
-        ],
+        outline=make_outline([{"lyrics": str(index)} for index in range(6)], {0, 3}, ("a", "b")),
     )
     assert bible["shots"][0]["requiredCharacterIds"] == []
     assert bible["shots"][-1]["requiredCharacterIds"] == ["a", "b"]
@@ -49,24 +78,39 @@ def test_ass_story_bible_has_shared_arc_and_character_plan() -> None:
         emotion={"songCode": "1"},
         role_ids=["a", "b"],
         extra_requirement="",
-        shot_plan=[{"index": 0, "shotType": "character", "intent": "人物回应歌词", "requiredCharacterIds": ["a", "b"]}],
+        outline=make_outline([{"lyrics": "single"}], role_ids=("a", "b")),
     )
     assert single["shots"][0]["requiredCharacterIds"] == ["a", "b"]
 
 
 def test_ass_outline_rejects_too_many_or_consecutive_empty_shots() -> None:
     segments = [{"lyrics": str(index)} for index in range(5)]
-    valid = {
-        "shots": [
-            {"index": index, "shotType": "empty" if index in {1, 3} else "character", "intent": f"intent {index}", "requiredCharacterIds": [] if index in {1, 3} else ["a"]}
-            for index in range(5)
-        ]
-    }
-    assert len(_validate_ass_outline(valid, segments=segments, role_ids=["a"])) == 5
-    invalid = {"shots": [dict(item) for item in valid["shots"]]}
-    invalid["shots"][2] = {"index": 2, "shotType": "empty", "intent": "empty", "requiredCharacterIds": []}
+    valid = make_outline(segments, {1, 3})
+    assert len(_validate_ass_outline(valid, segments=segments, role_ids=["a"])["shots"]) == 5
+    invalid = {**valid, "shots": [dict(item) for item in valid["shots"]]}
+    invalid["shots"][2] = {**invalid["shots"][2], "shotType": "empty", "requiredCharacterIds": [], "characterAction": "无人环境变化"}
     with pytest.raises(ValueError, match="人物镜不能少于|连续空镜"):
         _validate_ass_outline(invalid, segments=segments, role_ids=["a"])
+
+
+def test_ass_outline_requires_character_actions_and_location_variety() -> None:
+    segments = [
+        {"lyrics": "不是说好拥抱过后一起放手"},
+        {"lyrics": "两个人沿着街一直走"},
+        {"lyrics": "但是我们依然牵着手"},
+        {"lyrics": "求求你不要再看着我"},
+        {"lyrics": "我们微笑约定"},
+        {"lyrics": "时间一点点走过"},
+    ]
+    valid = make_outline(segments, {5})
+    assert len(_validate_ass_outline(valid, segments=segments, role_ids=["a"])["locations"]) >= 3
+    wrong_type = {**valid, "shots": [dict(item) for item in valid["shots"]]}
+    wrong_type["shots"][2] = {**wrong_type["shots"][2], "shotType": "empty", "requiredCharacterIds": [], "characterAction": "无人空镜"}
+    with pytest.raises(ValueError, match="必须规划为人物镜"):
+        _validate_ass_outline(wrong_type, segments=segments, role_ids=["a"])
+    repeated_location = {**valid, "shots": [{**item, "locationId": "place-0"} for item in valid["shots"]]}
+    with pytest.raises(ValueError, match="至少需要 3 个有效场景"):
+        _validate_ass_outline(repeated_location, segments=segments, role_ids=["a"])
 
 
 def test_storyboard_output_schema_is_strict() -> None:

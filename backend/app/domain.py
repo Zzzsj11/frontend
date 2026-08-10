@@ -8,13 +8,15 @@ import uuid
 import zipfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import CurrentUser, hash_password, user_public
 from .config import settings
-from .database import database_session
+from .database import database_session, session_factory
+from .jobs import Job, jobs
 from .media_constraints import normalize_video_duration
 from .models import (
     AiModelModel,
@@ -64,6 +66,7 @@ from .usage_quota import consume_daily_quota
 router = APIRouter(prefix="/api")
 Db = Depends(database_session)
 storyboard_generation_slots = asyncio.Semaphore(settings.storyboard_generation_concurrency)
+export_slots = asyncio.Semaphore(settings.export_concurrency)
 
 
 @router.get("/admin/api-errors")
@@ -548,7 +551,7 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
         emotion=task.storyboard_config.get("songEmotion") or {},
         role_ids=role_ids,
         extra_requirement=task.extra_requirement,
-        shot_plan=outline["shots"],
+        outline=outline,
     )
     config = dict(task.storyboard_config)
     config["storyBible"] = story_bible
@@ -561,7 +564,16 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
     )
     for line, plan in zip(lines, story_bible["shots"], strict=True):
         line.shot_type = plan["shotType"]
-        line.shot_options = {**(line.shot_options or {}), "outlineIntent": plan["intent"]}
+        line.shot_options = {
+            **(line.shot_options or {}),
+            "outlineIntent": plan["intent"],
+            "locationId": plan["locationId"],
+            "locationChange": plan["locationChange"],
+            "characterAction": plan["characterAction"],
+            "emotionalFocus": plan["emotionalFocus"],
+            "cameraPurpose": plan["cameraPurpose"],
+            "motifIds": plan["motifIds"],
+        }
         line.scene_prompt = ""
         line.shot_prompt = ""
         line.generation_status = "pending"
@@ -1108,61 +1120,273 @@ async def list_token_usage(user: CurrentUser, project_task_id: str | None = None
     }
 
 
-@router.post("/tasks/{task_id}/material-export", status_code=201)
-async def export_materials(task_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
+def material_export_public(item: MaterialExportModel) -> dict:
+    return {
+        "id": item.id,
+        "taskId": item.project_task_id,
+        "jobId": item.generation_job_id,
+        "status": item.status,
+        "progress": item.progress,
+        "stage": item.stage,
+        "totalAssets": item.total_assets,
+        "processedAssets": item.processed_assets,
+        "totalBytes": item.total_bytes,
+        "processedBytes": item.processed_bytes,
+        "archiveSize": item.archive_size,
+        "archiveUrl": item.archive_url,
+        "error": item.error,
+        "createdAt": item.created_at.isoformat(),
+        "updatedAt": item.updated_at.isoformat(),
+    }
+
+
+async def _set_export_progress(
+    export_id: str,
+    job: Job,
+    progress: int,
+    stage: str,
+    **values,
+) -> None:
+    progress = max(job.progress, min(progress, 99))
+    async with session_factory() as session:
+        item = await session.get(MaterialExportModel, export_id)
+        if not item or item.deleted_at is not None:
+            raise RuntimeError("导出任务不存在")
+        item.status = "running"
+        item.progress = progress
+        item.stage = stage
+        if item.started_at is None:
+            item.started_at = utcnow()
+        for key, value in values.items():
+            setattr(item, key, value)
+        await session.commit()
+    await jobs.update_progress(job, progress)
+
+
+async def _run_material_export(export_id: str, job: Job) -> dict:
+    try:
+        async with export_slots:
+            async with session_factory() as session:
+                export = await session.get(MaterialExportModel, export_id)
+                if not export or export.deleted_at is not None:
+                    raise RuntimeError("导出任务不存在")
+                task = await session.get(ProjectTaskModel, export.project_task_id)
+                if not task or task.deleted_at is not None:
+                    raise RuntimeError("子项目不存在")
+                project = await session.get(ProjectModel, task.project_id)
+                lines = list(
+                    (
+                        await session.execute(
+                            select(StoryboardLineModel)
+                            .where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None))
+                            .order_by(StoryboardLineModel.sort_order)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                shot_assets = list(
+                    (
+                        await session.execute(
+                            select(ShotAssetModel)
+                            .where(ShotAssetModel.storyboard_line_id.in_([line.id for line in lines]) if lines else False, ShotAssetModel.deleted_at.is_(None))
+                            .order_by(ShotAssetModel.created_at)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                project_name, task_title, overall_prompt = project.name, task.title, task.overall_prompt
+                line_values = [
+                    {"id": line.id, "lyrics": line.lyrics, "shot_type": line.shot_type, "scene_prompt": line.scene_prompt, "shot_prompt": line.shot_prompt} for line in lines
+                ]
+                asset_values = [{"id": asset.id, "line_id": asset.storyboard_line_id, "video_url": asset.video_url} for asset in shot_assets]
+            by_line: dict[str, list[dict]] = {}
+            for asset in asset_values:
+                by_line.setdefault(asset["line_id"], []).append(asset)
+            total_assets = len(shot_assets)
+            await _set_export_progress(export_id, job, 5, "正在整理分镜与素材", total_assets=total_assets)
+            markdown = [f"# {project_name} · {task_title}", "", "## 整体提示词", "", overall_prompt or "（未填写）", "", "## 分镜提示词", ""]
+            processed_assets = processed_bytes = known_total_bytes = 0
+            last_progress = 5
+            with tempfile.TemporaryDirectory(prefix=f"mvagent-export-{export_id}-") as temporary_directory:
+                temporary_path = Path(temporary_directory)
+                archive_path = temporary_path / f"{export_id}.zip"
+                with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_STORED, allowZip64=True) as bundle:
+                    for index, line in enumerate(line_values, start=1):
+                        markdown.extend(
+                            [
+                                f"### {index:02d}. {line['lyrics'] or line['shot_type'] or '分镜'}",
+                                "",
+                                f"- 场景：{line['scene_prompt']}",
+                                f"- 镜头：{line['shot_prompt']}",
+                                "",
+                            ]
+                        )
+                        for version, asset in enumerate(by_line.get(line["id"], []), start=1):
+                            video_path = temporary_path / f"{index:02d}-v{version:02d}-{asset['id']}.mp4"
+
+                            async def on_download(current: int, declared: int | None) -> None:
+                                nonlocal last_progress
+                                fraction = current / declared if declared else 0
+                                progress = 5 + int(75 * (processed_assets + fraction) / max(1, total_assets))
+                                if progress > last_progress:
+                                    last_progress = progress
+                                    await _set_export_progress(
+                                        export_id,
+                                        job,
+                                        progress,
+                                        f"正在下载第 {processed_assets + 1}/{total_assets} 个视频",
+                                        processed_assets=processed_assets,
+                                        processed_bytes=processed_bytes + current,
+                                        total_bytes=known_total_bytes + (declared or 0),
+                                    )
+
+                            _, _, size = await download_public_url_to_path(asset["video_url"], video_path, progress_callback=on_download)
+                            bundle.write(video_path, f"videos/{video_path.name}")
+                            video_path.unlink(missing_ok=True)
+                            processed_assets += 1
+                            processed_bytes += size
+                            known_total_bytes += size
+                            progress = 5 + int(75 * processed_assets / max(1, total_assets))
+                            last_progress = max(last_progress, progress)
+                            await _set_export_progress(
+                                export_id,
+                                job,
+                                progress,
+                                f"已处理 {processed_assets}/{total_assets} 个视频",
+                                processed_assets=processed_assets,
+                                processed_bytes=processed_bytes,
+                                total_bytes=known_total_bytes,
+                            )
+                    bundle.writestr("prompts.md", "\n".join(markdown).encode("utf-8"), compress_type=zipfile.ZIP_DEFLATED)
+                archive_size = archive_path.stat().st_size
+                await _set_export_progress(export_id, job, 90, "正在上传压缩包到 TOS", archive_size=archive_size)
+                archive_url = await get_storage().put_file(
+                    safe_key(f"users/{job.user_id}/exports/{job.project_task_id}", f"{export_id}.zip"),
+                    archive_path,
+                    "application/zip",
+                )
+            async with session_factory() as session:
+                export = await session.get(MaterialExportModel, export_id)
+                export.status = "ready"
+                export.progress = 100
+                export.stage = "导出完成"
+                export.archive_url = archive_url
+                export.archive_size = archive_size
+                export.finished_at = utcnow()
+                await session.commit()
+            return {"exportId": export_id, "archiveUrl": archive_url, "archiveSize": archive_size}
+    except Exception as exc:
+        async with session_factory() as session:
+            export = await session.get(MaterialExportModel, export_id)
+            if export:
+                export.status = "failed"
+                export.stage = "导出失败"
+                export.error = str(exc)
+                export.finished_at = utcnow()
+                await session.commit()
+        raise
+
+
+@router.post("/tasks/{task_id}/material-exports", status_code=202)
+async def create_material_export(task_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
     task = await owned_task(db, user.id, task_id)
-    project = await owned_project(db, user.id, task.project_id)
-    lines = list(
+    active_for_task = (
         (
             await db.execute(
-                select(StoryboardLineModel).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None)).order_by(StoryboardLineModel.sort_order)
+                select(MaterialExportModel).where(
+                    MaterialExportModel.user_id == user.id,
+                    MaterialExportModel.project_task_id == task.id,
+                    MaterialExportModel.status.in_(("queued", "running")),
+                    MaterialExportModel.deleted_at.is_(None),
+                )
             )
         )
         .scalars()
-        .all()
+        .first()
     )
-    shot_assets = list(
-        (
-            await db.execute(
-                select(ShotAssetModel)
-                .where(ShotAssetModel.storyboard_line_id.in_([line.id for line in lines]) if lines else False, ShotAssetModel.deleted_at.is_(None))
-                .order_by(ShotAssetModel.created_at)
-            )
+    if active_for_task:
+        return material_export_public(active_for_task)
+    active_count = len(
+        list(
+            (
+                await db.execute(
+                    select(MaterialExportModel.id).where(
+                        MaterialExportModel.user_id == user.id,
+                        MaterialExportModel.status.in_(("queued", "running")),
+                        MaterialExportModel.deleted_at.is_(None),
+                    )
+                )
+            ).scalars()
         )
-        .scalars()
-        .all()
     )
-    by_line: dict[str, list[ShotAssetModel]] = {}
-    for asset in shot_assets:
-        by_line.setdefault(asset.storyboard_line_id, []).append(asset)
-    export = MaterialExportModel(id=uid("export"), user_id=user.id, project_task_id=task.id, status="running")
+    if active_count >= settings.export_per_user_concurrency:
+        raise HTTPException(429, f"每个用户最多同时导出 {settings.export_per_user_concurrency} 个子项目")
+    export = MaterialExportModel(id=uid("export"), user_id=user.id, project_task_id=task.id)
     db.add(export)
     await db.commit()
-    try:
-        markdown = [f"# {project.name} · {task.title}", "", "## 整体提示词", "", task.overall_prompt or "（未填写）", "", "## 分镜提示词", ""]
-        with tempfile.TemporaryDirectory(prefix="mvagent-export-") as temporary_directory:
-            temporary_path = Path(temporary_directory)
-            archive_path = temporary_path / f"{task.id}.zip"
-            with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_STORED, allowZip64=True) as bundle:
-                for index, line in enumerate(lines, start=1):
-                    markdown.extend([f"### {index:02d}. {line.lyrics or line.shot_type or '分镜'}", "", f"- 场景：{line.scene_prompt}", f"- 镜头：{line.shot_prompt}", ""])
-                    for version, asset in enumerate(by_line.get(line.id, []), start=1):
-                        video_path = temporary_path / f"{index:02d}-v{version:02d}-{asset.id}.mp4"
-                        await download_public_url_to_path(asset.video_url, video_path)
-                        bundle.write(video_path, f"videos/{video_path.name}")
-                        video_path.unlink(missing_ok=True)
-                bundle.writestr("prompts.md", "\n".join(markdown).encode("utf-8"), compress_type=zipfile.ZIP_DEFLATED)
-            archive_url = await get_storage().put_file(
-                safe_key(f"users/{user.id}/exports", f"{task.id}.zip"),
-                archive_path,
-                "application/zip",
+    await db.refresh(export)
+    export_id = export.id
+    job = await jobs.create(
+        "export",
+        {"export_id": export_id},
+        lambda item: _run_material_export(export_id, item),
+        user_id=user.id,
+        project_id=task.project_id,
+        project_task_id=task.id,
+    )
+    export.generation_job_id = job.id
+    await db.commit()
+    await db.refresh(export)
+    return material_export_public(export)
+
+
+@router.get("/tasks/{task_id}/material-exports")
+async def list_material_exports(task_id: str, user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
+    await owned_task(db, user.id, task_id)
+    items = list(
+        (
+            await db.execute(
+                select(MaterialExportModel)
+                .where(MaterialExportModel.user_id == user.id, MaterialExportModel.project_task_id == task_id, MaterialExportModel.deleted_at.is_(None))
+                .order_by(MaterialExportModel.created_at.desc())
             )
-        export.status = "ready"
-        export.archive_url = archive_url
-        await db.commit()
-        return {"id": export.id, "status": export.status, "archiveUrl": archive_url}
-    except Exception as exc:
-        export.status = "failed"
-        export.error = str(exc)
-        await db.commit()
-        raise HTTPException(502, f"素材导出失败：{exc}") from exc
+        )
+        .scalars()
+        .all()
+    )
+    return [material_export_public(item) for item in items]
+
+
+@router.get("/material-exports/{export_id}")
+async def get_material_export(export_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
+    item = await db.get(MaterialExportModel, export_id)
+    if not item or item.deleted_at is not None or item.user_id != user.id:
+        raise HTTPException(404, "导出任务不存在")
+    return material_export_public(item)
+
+
+@router.get("/material-exports/{export_id}/events")
+async def material_export_events(export_id: str, request: Request, user: CurrentUser, db: AsyncSession = Db) -> StreamingResponse:
+    item = await db.get(MaterialExportModel, export_id)
+    if not item or item.deleted_at is not None or item.user_id != user.id:
+        raise HTTPException(404, "导出任务不存在")
+
+    async def stream():
+        last = None
+        while not await request.is_disconnected():
+            async with session_factory() as session:
+                current = await session.get(MaterialExportModel, export_id)
+                if not current or current.deleted_at is not None or current.user_id != user.id:
+                    return
+                marker = (current.status, current.progress, current.stage, current.updated_at)
+                if marker != last:
+                    payload = {"type": "export", "export": material_export_public(current)}
+                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                    last = marker
+                if current.status in {"ready", "failed"}:
+                    return
+            await asyncio.sleep(0.75)
+
+    return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

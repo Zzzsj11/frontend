@@ -324,7 +324,7 @@ async def create_ass_storyboard(
         emotion=emotion_context,
         role_ids=role_ids,
         extra_requirement=extra_requirement.strip(),
-        shot_plan=outline["shots"],
+        outline=outline,
     )
     task = ProjectTaskModel(
         id=uid("task"),
@@ -386,6 +386,12 @@ async def create_ass_storyboard(
                 "videoModel": video_model,
                 "duration": normalize_video_duration(planned_duration),
                 "outlineIntent": shot_plan["intent"],
+                "locationId": shot_plan["locationId"],
+                "locationChange": shot_plan["locationChange"],
+                "characterAction": shot_plan["characterAction"],
+                "emotionalFocus": shot_plan["emotionalFocus"],
+                "cameraPurpose": shot_plan["cameraPurpose"],
+                "motifIds": shot_plan["motifIds"],
             },
             generation_status="pending",
         )

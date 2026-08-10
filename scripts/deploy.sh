@@ -6,7 +6,9 @@ env_file=".env.${env_name}"; test -f "$env_file" || { echo "missing $env_file"; 
 previous="$(cat .deployed-version 2>/dev/null || true)"
 printf '%s\n' "$previous" > .previous-version
 export RELEASE_VERSION="$version"
-docker compose --env-file "$env_file" -f docker-compose.yml -f "docker-compose.${env_name}.yml" pull
+if [[ "${DEPLOY_SKIP_PULL:-0}" != "1" ]]; then
+  docker compose --env-file "$env_file" -f docker-compose.yml -f "docker-compose.${env_name}.yml" pull
+fi
 docker compose --env-file "$env_file" -f docker-compose.yml -f "docker-compose.${env_name}.yml" up -d --remove-orphans
 for _ in {1..30}; do curl -fsS http://127.0.0.1:8000/api/health >/dev/null && break; sleep 2; done
 curl -fsS http://127.0.0.1:8000/api/health >/dev/null

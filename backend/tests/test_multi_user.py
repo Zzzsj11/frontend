@@ -76,3 +76,36 @@ def test_general_storyboard_persists_type_specific_configuration(client) -> None
     task = client.get(f"/api/tasks/{result['taskId']}", headers=headers).json()
     assert task["storyboardType"] == "general"
     assert task["overallPrompt"] == "统一暖色电影质感"
+
+
+def test_material_exports_are_isolated_between_users(client, monkeypatch) -> None:
+    from app import domain
+
+    class Storage:
+        async def put_file(self, key, path, content_type=None):
+            return f"https://tos.test/{key}"
+
+    monkeypatch.setattr(domain, "get_storage", lambda: Storage())
+    _, user_a = create_and_login_user(client, "export-user-a")
+    _, user_b = create_and_login_user(client, "export-user-b")
+    project = client.post("/api/projects", headers=user_a, json={"name": "Export project"}).json()
+    storyboard = client.post(
+        f"/api/projects/{project['id']}/storyboards/general",
+        headers=user_a,
+        json={
+            "genre": "pop",
+            "secondary_category": "positive",
+            "season": "春",
+            "age_group": "青年",
+            "visual_style": "电影写实",
+            "empty_shot_count": 1,
+            "character_shot_count": 0,
+            "total_duration": 5,
+        },
+    ).json()
+    created = client.post(f"/api/tasks/{storyboard['taskId']}/material-exports", headers=user_a)
+    assert created.status_code == 202
+    export_id = created.json()["id"]
+    assert client.get(f"/api/material-exports/{export_id}", headers=user_a).status_code == 200
+    assert client.get(f"/api/material-exports/{export_id}", headers=user_b).status_code == 404
+    assert client.get(f"/api/tasks/{storyboard['taskId']}/material-exports", headers=user_b).status_code == 404

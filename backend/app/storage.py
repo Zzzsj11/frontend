@@ -8,7 +8,7 @@ import re
 import socket
 import uuid
 from pathlib import Path
-from typing import Protocol
+from typing import Awaitable, Callable, Protocol
 from urllib.parse import quote, urljoin, urlparse
 
 import httpx
@@ -199,6 +199,7 @@ async def download_public_url_to_path(
     url: str,
     destination: str | Path,
     max_bytes: int = 500 * 1024 * 1024,
+    progress_callback: Callable[[int, int | None], Awaitable[None]] | None = None,
 ) -> tuple[str, str, int]:
     """Stream a public HTTPS object to disk instead of retaining it in memory."""
     current = url
@@ -218,12 +219,15 @@ async def download_public_url_to_path(
                 if declared > max_bytes:
                     raise ValueError("远程文件超过允许大小")
                 size = 0
+                total = declared or None
                 with target.open("wb") as output:
                     async for chunk in response.aiter_bytes():
                         size += len(chunk)
                         if size > max_bytes:
                             raise ValueError("远程文件超过允许大小")
                         output.write(chunk)
+                        if progress_callback:
+                            await progress_callback(size, total)
                 content_type = response.headers.get("content-type", "application/octet-stream").split(";", 1)[0]
                 return current, content_type, size
     raise ValueError("远程地址重定向次数过多")

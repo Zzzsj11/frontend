@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { DigitalHuman, GeneralStoryboardOptions, GeneralStoryboardRequest, ScriptLine, ShotAsset, ShotGenOptions, SongProject, StoryBible, SynthesisState, TimelineClip } from '../types'
+import type { DigitalHuman, GeneralStoryboardOptions, GeneralStoryboardRequest, MaterialExport, ScriptLine, ShotAsset, ShotGenOptions, SongProject, StoryBible, SynthesisState, TimelineClip } from '../types'
 import * as api from '../mock/api'
 import * as imageGen from '../api/imageGen'
 import { nextId } from '../mock/data'
@@ -17,6 +17,7 @@ let rafId = 0
 let lastTick = 0
 /** 每行场景图重新生成次数（仅用于 mock 占位图换款） */
 const sceneVariants: Record<string, number> = {}
+const exportStreams = new Map<string, AbortController>()
 
 /** 数字人资产库本地持久化 key */
 /** 删除分类后，该分类下数字人的归属分类 */
@@ -76,7 +77,7 @@ export const useProjectStore = defineStore('project', {
     dhGenerating: false,
     /** 编辑弹窗中正在重新生成形象的数字人 id（null 表示空闲） */
     dhRegeneratingId: null as string | null,
-    synthesis: { status: 'idle', progress: 0 } as SynthesisState,
+    exportsByTaskId: {} as Record<string, MaterialExport[]>,
   }),
 
   getters: {
@@ -170,6 +171,18 @@ export const useProjectStore = defineStore('project', {
       return state.lines.some((line) => line.shot.assets.some((asset) => /^(https?:)/.test(asset.videoUrl)))
     },
 
+    synthesis(state): SynthesisState {
+      const latest = state.activeTaskId ? state.exportsByTaskId[state.activeTaskId]?.[0] : undefined
+      if (!latest) return { status: 'idle', progress: 0 }
+      return {
+        status: latest.status,
+        progress: latest.progress,
+        stage: latest.stage,
+        videoUrl: latest.archiveUrl,
+        error: latest.error,
+      }
+    },
+
     storyboardProgress(state): { total: number; completed: number; failed: number; active: boolean } {
       const generated = state.lines.filter((line) => line.generationStatus)
       return {
@@ -254,6 +267,7 @@ export const useProjectStore = defineStore('project', {
       this.selectedLineId = this.lines[0]?.id ?? null
       this.currentTime = 0
       if (taskId) {
+        void this.restoreMaterialExports(taskId)
         const pending = this.lines.filter((line) => line.generationStatus === 'pending').map((line) => line.id)
         if (pending.length) void this._generateStoryboardQueue(taskId, pending)
       }
@@ -943,21 +957,70 @@ export const useProjectStore = defineStore('project', {
       }
     },
 
-    async runSynthesize() {
-      if (this.synthesis.status === 'running' || !this.hasVideoAssets || !this.activeTaskId) return
-      this.synthesis = { status: 'running', progress: 0 }
+    _upsertMaterialExport(item: MaterialExport) {
+      const items = this.exportsByTaskId[item.taskId] || []
+      const next = [item, ...items.filter((current) => current.id !== item.id)]
+      this.exportsByTaskId[item.taskId] = next.sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    },
+
+    async _watchMaterialExport(item: MaterialExport) {
+      if (!item.jobId || exportStreams.has(item.id) || ['ready', 'failed'].includes(item.status)) return
+      const controller = new AbortController()
+      exportStreams.set(item.id, controller)
       try {
-        const { archiveUrl } = await api.exportMaterials(this.activeTaskId)
-        this.synthesis = { status: 'done', progress: 100, videoUrl: archiveUrl }
-        const link = document.createElement('a')
-        link.href = archiveUrl
-        link.download = ''
-        link.rel = 'noopener'
-        link.click()
+        for (let attempt = 0; attempt < 4 && !controller.signal.aborted; attempt += 1) {
+          try {
+            await api.streamMaterialExport(item.id, (update) => this._upsertMaterialExport(update), controller.signal)
+          } catch (error) {
+            if (controller.signal.aborted) return
+            if (attempt === 3) throw error
+            await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)))
+          }
+          const latest = await api.fetchMaterialExport(item.id)
+          this._upsertMaterialExport(latest)
+          if (['ready', 'failed'].includes(latest.status)) return
+        }
       } catch (error) {
-        this.synthesis = { status: 'idle', progress: 0 }
+        reportApiError(error, '导出进度连接失败，可刷新页面恢复')
+      } finally {
+        exportStreams.delete(item.id)
+      }
+    },
+
+    async restoreMaterialExports(taskId: string) {
+      try {
+        const items = await api.fetchMaterialExports(taskId)
+        this.exportsByTaskId[taskId] = items
+        items.filter((item) => ['queued', 'running'].includes(item.status)).forEach((item) => void this._watchMaterialExport(item))
+      } catch (error) {
+        reportApiError(error, '导出任务恢复失败')
+      }
+    },
+
+    async runSynthesize() {
+      if (['queued', 'running'].includes(this.synthesis.status) || !this.hasVideoAssets || !this.activeTaskId) return
+      const taskId = this.activeTaskId
+      try {
+        const item = await api.exportMaterials(taskId)
+        this._upsertMaterialExport(item)
+        void this._watchMaterialExport(item)
+      } catch (error) {
         throw reportApiError(error, '导出素材失败')
       }
+    },
+
+    downloadLatestExport() {
+      if (!this.synthesis.videoUrl) return
+      const link = document.createElement('a')
+      link.href = this.synthesis.videoUrl
+      link.download = ''
+      link.rel = 'noopener'
+      link.click()
+    },
+
+    cancelExportStreams() {
+      exportStreams.forEach((controller) => controller.abort())
+      exportStreams.clear()
     },
 
     // ---------- 播放控制 ----------

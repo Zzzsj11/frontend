@@ -137,19 +137,20 @@ class JobManager:
         if not job.result:
             return
         async with session_factory() as session:
-            add_token_usage(
-                session,
-                operation=f"generation_{job.kind}",
-                provider=str(job.result.get("provider") or ""),
-                model=str(job.result.get("model") or (job.request or {}).get("model") or ""),
-                usage=job.result.get("usage"),
-                user_id=job.user_id,
-                project_id=job.project_id,
-                project_task_id=job.project_task_id,
-                storyboard_line_id=job.storyboard_line_id,
-                generation_job_id=job.id,
-                request_id=job.result.get("providerTaskId"),
-            )
+            if job.kind in {"image", "video"}:
+                add_token_usage(
+                    session,
+                    operation=f"generation_{job.kind}",
+                    provider=str(job.result.get("provider") or ""),
+                    model=str(job.result.get("model") or (job.request or {}).get("model") or ""),
+                    usage=job.result.get("usage"),
+                    user_id=job.user_id,
+                    project_id=job.project_id,
+                    project_task_id=job.project_task_id,
+                    storyboard_line_id=job.storyboard_line_id,
+                    generation_job_id=job.id,
+                    request_id=job.result.get("providerTaskId"),
+                )
             if job.storyboard_line_id and job.kind == "image" and job.result.get("urls"):
                 current = (
                     (
