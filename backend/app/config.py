@@ -24,20 +24,35 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 
-def _read_shared_provider_key() -> str:
-    direct = os.getenv("AIGC_TOKEN", "")
+def _read_provider_value(name: str) -> str:
+    direct = os.getenv(name, "")
     if direct:
         return direct
     for path in (Path("/run/secrets/provider_config"), BACKEND_DIR / ".provider_config.py"):
         if not path.is_file():
             continue
-        match = re.search(r'^AIGC_TOKEN\s*=\s*["\']([^"\']+)["\']', path.read_text(encoding="utf-8"), re.MULTILINE)
+        match = re.search(rf'^{re.escape(name)}\s*=\s*["\']([^"\']+)["\']', path.read_text(encoding="utf-8"), re.MULTILINE)
         if match:
             return match.group(1)
     return ""
 
 
-SHARED_PROVIDER_KEY = _read_shared_provider_key()
+SHARED_PROVIDER_KEY = _read_provider_value("AIGC_TOKEN")
+SHARED_LLM_BASE_URL = _read_provider_value("CHAT_COMPLETIONS_BASE_URL") or "https://ai-aigc.fzyinghe.com/v1"
+SHARED_LLM_MODEL = _read_provider_value("CHAT_DEFAULT_MODEL") or os.getenv("AIGC_CHAT_MODEL", "gpt-5.5")
+
+
+def _resolve_llm_settings(shared_key: str, shared_base_url: str, shared_model: str) -> tuple[str, str, str]:
+    if shared_key:
+        return shared_base_url, shared_key, shared_model
+    return (
+        os.getenv("LLM_BASE_URL") or os.getenv("ANTHROPIC_BASE_URL", "https://api.openai.com/v1"),
+        os.getenv("LLM_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN", ""),
+        os.getenv("LLM_MODEL") or os.getenv("AIGC_CHAT_MODEL") or os.getenv("MODEL_ID", "gpt-4o-mini"),
+    )
+
+
+LLM_BASE_URL, LLM_API_KEY, LLM_MODEL = _resolve_llm_settings(SHARED_PROVIDER_KEY, SHARED_LLM_BASE_URL, SHARED_LLM_MODEL)
 
 
 @dataclass(frozen=True)
@@ -51,9 +66,11 @@ class Settings:
     access_token_minutes: int = int(os.getenv("ACCESS_TOKEN_MINUTES", "15"))
     refresh_token_days: int = int(os.getenv("REFRESH_TOKEN_DAYS", "14"))
     refresh_cookie_secure: bool = os.getenv("REFRESH_COOKIE_SECURE", "false").lower() == "true"
-    llm_base_url: str = os.getenv("LLM_BASE_URL") or ("https://ai-aigc.fzyinghe.com/v1" if SHARED_PROVIDER_KEY else os.getenv("ANTHROPIC_BASE_URL", "https://api.openai.com/v1"))
-    llm_api_key: str = os.getenv("LLM_API_KEY") or SHARED_PROVIDER_KEY or os.getenv("ANTHROPIC_AUTH_TOKEN", "")
-    llm_model: str = os.getenv("LLM_MODEL") or os.getenv("AIGC_CHAT_MODEL") or os.getenv("MODEL_ID", "gpt-4o-mini")
+    # 统一供应商 Secret 中的 Token、地址和模型必须成组使用，避免旧环境变量将
+    # 共享 Token 误发到其他供应商。没有共享 Token 时才允许独立 LLM_* 覆盖。
+    llm_base_url: str = LLM_BASE_URL
+    llm_api_key: str = LLM_API_KEY
+    llm_model: str = LLM_MODEL
     llm_api_mode: str = os.getenv("LLM_API_MODE", "openai").lower()
     storyboard_generation_concurrency: int = max(1, min(8, int(os.getenv("STORYBOARD_GENERATION_CONCURRENCY", "4"))))
     image_api_base_url: str = os.getenv("IMAGE_API_BASE_URL", "https://api-aigc.fzyinghe.com")

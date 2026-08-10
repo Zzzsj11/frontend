@@ -2,8 +2,8 @@
 import { computed, ref } from 'vue'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
+import ImageZoom from './ImageZoom.vue'
 import { confirmDialog } from '../composables/useConfirmDialog'
-import type { DigitalHuman } from '../types'
 
 const store = useProjectStore()
 
@@ -14,7 +14,6 @@ const filtered = computed(() =>
     ? store.digitalHumans
     : store.digitalHumans.filter((d) => d.style === activeStyle.value),
 )
-const previewing = ref<DigitalHuman | null>(null)
 
 // 风格分类管理：增删改查（分类独立于数字人存在，重命名/删除会同步更新所属数字人）
 const styleManaging = ref(false)
@@ -215,7 +214,6 @@ const regenBusy = computed(() => !!editing.value && store.dhRegeneratingId === e
 const openEdit = (id: string) => {
   const dh = store.digitalHumans.find((d) => d.id === id)
   if (!dh) return
-  previewing.value = null
   editId.value = id
   editName.value = dh.name
   editStyle.value = dh.style
@@ -449,12 +447,11 @@ const removeDh = async () => {
             :key="dh.id"
             class="dh-card"
             :class="{ active: store.castIds.includes(dh.id) }"
-            @mouseenter="previewing = dh"
-            @mouseleave="previewing = null"
             @click="store.toggleCast(dh.id)"
           >
             <div class="dh-portrait" title="点击编辑数字人" @click.stop="openEdit(dh.id)">
               <img :src="dh.avatar" :alt="dh.name" />
+              <ImageZoom :src="dh.originalAvatar || dh.avatar" :alt="`${dh.name} · 原图预览`" />
               <span v-if="store.castIds.includes(dh.id)" class="dh-check"><AppIcon name="check" :size="11" /> 已入阵容</span>
               <span class="dh-edit-badge"><AppIcon :name="dh.readOnly ? 'user' : 'edit'" :size="11" /> {{ dh.readOnly ? '查看' : '编辑' }}</span>
             </div>
@@ -523,10 +520,6 @@ const removeDh = async () => {
           </div>
         </footer>
       </div>
-    </div>
-    <div v-if="previewing" class="dh-original-preview" aria-hidden="true">
-      <img :src="previewing.originalAvatar || previewing.avatar" :alt="previewing.name" />
-      <span>{{ previewing.name }} · 原图预览</span>
     </div>
   </Teleport>
 </template>
@@ -975,7 +968,7 @@ const removeDh = async () => {
 .dh-portrait:hover .dh-edit-badge {
   opacity: 1;
 }
-.dh-original-preview{position:fixed;z-index:1000;left:50%;top:50%;display:flex;width:min(900px,82vw);max-height:82vh;transform:translate(-50%,-50%);flex-direction:column;gap:7px;padding:10px;border:1px solid rgba(255,255,255,.8);border-radius:14px;background:rgba(25,22,20,.94);box-shadow:0 24px 80px rgba(0,0,0,.42);pointer-events:none}.dh-original-preview img{width:100%;max-height:74vh;object-fit:contain;border-radius:9px;background:#eee}.dh-original-preview span{color:#fff;text-align:center;font-size:12px}.readonly-tip{padding:8px 10px;border-radius:8px;background:#fff7ed;color:#a85d29;font-size:12px}.edit-form :disabled{background:#f5f3f1;color:#887d74;cursor:not-allowed}
+.readonly-tip{padding:8px 10px;border-radius:8px;background:#fff7ed;color:#a85d29;font-size:12px}.edit-form :disabled{background:#f5f3f1;color:#887d74;cursor:not-allowed}
 .dh-info {
   padding: 8px 10px 10px;
 }
