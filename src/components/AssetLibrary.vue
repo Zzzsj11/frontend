@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
+import CharacterPortrait from './CharacterPortrait.vue'
 import ImageZoom from './ImageZoom.vue'
 import { confirmDialog } from '../composables/useConfirmDialog'
 
@@ -136,6 +137,7 @@ const upStyle = ref('')
 const upDesc = ref('')
 const upAvatar = ref('')
 const upFileRef = ref<HTMLInputElement>()
+const uploadError = ref('')
 const canUpload = computed(() => !!upName.value.trim() && !!upStyle.value.trim())
 
 // 生成 / 上传 两个面板互斥展开
@@ -145,7 +147,10 @@ const openGen = () => {
 }
 const openUpload = () => {
   uploadOpen.value = !uploadOpen.value
-  if (uploadOpen.value) genOpen.value = false
+  if (uploadOpen.value) {
+    genOpen.value = false
+    uploadError.value = ''
+  }
 }
 
 // 选择头像：等比缩放到 3:4 竖版范围内并转 data URL，提交时上传 TOS
@@ -183,22 +188,27 @@ const initialsAvatar = (name: string, style: string): string => {
   return 'data:image/svg+xml,' + encodeURIComponent(svg)
 }
 
-const submitUpload = () => {
-  if (!canUpload.value) return
+const submitUpload = async () => {
+  if (!canUpload.value || store.dhGenerating) return
   const name = upName.value.trim()
   const style = upStyle.value.trim()
-  store.addCustomDigitalHuman({
-    name,
-    style,
-    description: upDesc.value.trim(),
-    avatar: upAvatar.value || initialsAvatar(name, style),
-  })
-  uploadOpen.value = false
-  upName.value = ''
-  upStyle.value = ''
-  upDesc.value = ''
-  upAvatar.value = ''
-  activeStyle.value = '全部'
+  uploadError.value = ''
+  try {
+    await store.addCustomDigitalHuman({
+      name,
+      style,
+      description: upDesc.value.trim(),
+      avatar: upAvatar.value || initialsAvatar(name, style),
+    })
+    uploadOpen.value = false
+    upName.value = ''
+    upStyle.value = ''
+    upDesc.value = ''
+    upAvatar.value = ''
+    activeStyle.value = '全部'
+  } catch (error) {
+    uploadError.value = error instanceof Error ? error.message : '数字人上传失败，请稍后重试'
+  }
 }
 
 // 编辑数字人：点击头像打开，可查看/修改提示词、重新生成形象、删除数字人
@@ -258,7 +268,7 @@ const regenAvatar = async () => {
 
 const removeDh = async () => {
   if (!editing.value || regenBusy.value) return
-  if (!await confirmDialog({ title: '删除数字人', message: `确定删除数字人「${editing.value.name}」？将同时从角色阵容与所有分镜中移除。`, confirmText: '删除', danger: true })) return
+  if (!await confirmDialog({ title: '删除数字人', message: `确定删除数字人「${editing.value.name}」？将同时从角色阵容与所有视频中移除。`, confirmText: '删除', danger: true })) return
   store.deleteDigitalHuman(editing.value.id)
   editId.value = null
 }
@@ -271,7 +281,7 @@ const removeDh = async () => {
         <header class="lib-header">
           <div>
             <h3>数字人资产库 · 角色阵容</h3>
-            <p class="lib-hint">点击卡片加入/移出本 MV 的角色阵容，全片统一使用同一批角色；每个分镜再从阵容中挑选出演角色（可空镜头 / 可多人）</p>
+            <p class="lib-hint">点击卡片加入/移出本 MV 的角色阵容，全片统一使用同一批角色；每个视频再从阵容中挑选出演角色（可空镜头 / 可多人）</p>
           </div>
           <div class="header-actions">
             <button class="btn-upload-dh" @click="openUpload">
@@ -367,10 +377,13 @@ const removeDh = async () => {
           </div>
           <div class="gen-actions">
             <span class="upload-tip">参考图会先存入 TOS，再按系统人物样式生成正面、侧面、背面三视图</span>
-            <button class="gen-submit" :disabled="!canUpload" @click="submitUpload">
-              <AppIcon name="check" :size="14" /> 添加到资产库
+            <button class="gen-submit" :disabled="!canUpload || store.dhGenerating" @click="submitUpload">
+              <span v-if="store.dhGenerating" class="spinner light" />
+              <AppIcon v-else name="check" :size="14" />
+              {{ store.dhGenerating ? '正在上传并生成三视图…' : '添加到资产库' }}
             </button>
           </div>
+          <p v-if="uploadError" class="error-tip" role="alert">{{ uploadError }}</p>
         </div>
 
         <!-- 当前阵容 -->
@@ -378,12 +391,12 @@ const removeDh = async () => {
           <span class="cast-label">当前阵容（{{ store.castHumans.length }}）：</span>
           <template v-if="store.castHumans.length">
             <span v-for="dh in store.castHumans" :key="dh.id" class="cast-chip">
-              <img :src="dh.avatar" :alt="dh.name" />
+              <CharacterPortrait :src="dh.avatar" :alt="dh.name" />
               {{ dh.name }}
               <button class="cast-remove" title="移出阵容" @click="store.toggleCast(dh.id)"><AppIcon name="close" :size="10" /></button>
             </span>
           </template>
-          <span v-else class="cast-empty">暂无角色，所有分镜将以空镜头生成</span>
+          <span v-else class="cast-empty">暂无角色，所有视频将以空镜头生成</span>
         </div>
 
         <!-- 风格筛选 + 分类管理（增删改查） -->
@@ -406,7 +419,7 @@ const removeDh = async () => {
               @click="activeStyle = s"
             >
               {{ s }}
-              <template v-if="styleManaging && s !== '全部'">
+              <template v-if="styleManaging && s !== '全部' && !store.systemDhStyles.includes(s)">
                 <span class="style-op" title="重命名分类" @click.stop="startRenameStyle(s)">
                   <AppIcon name="edit" :size="11" />
                 </span>
@@ -450,7 +463,7 @@ const removeDh = async () => {
             @click="store.toggleCast(dh.id)"
           >
             <div class="dh-portrait" title="点击编辑数字人" @click.stop="openEdit(dh.id)">
-              <img :src="dh.avatar" :alt="dh.name" />
+              <CharacterPortrait :src="dh.avatar" :alt="dh.name" />
               <ImageZoom :src="dh.originalAvatar || dh.avatar" :alt="`${dh.name} · 原图预览`" />
               <span v-if="store.castIds.includes(dh.id)" class="dh-check"><AppIcon name="check" :size="11" /> 已入阵容</span>
               <span class="dh-edit-badge"><AppIcon :name="dh.readOnly ? 'user' : 'edit'" :size="11" /> {{ dh.readOnly ? '查看' : '编辑' }}</span>
@@ -1193,5 +1206,15 @@ const removeDh = async () => {
 .edit-save:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+.cast-chip .character-portrait {
+  width: 22px;
+  height: 28px;
+  border-radius: 6px;
+}
+.dh-portrait .character-portrait {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
 }
 </style>

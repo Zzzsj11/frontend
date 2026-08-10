@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
+import CharacterPortrait from './CharacterPortrait.vue'
 import type { ShotGenOptions } from '../types'
 import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, loadGenerationModels } from '../generationModels'
 
@@ -86,7 +87,7 @@ const cancel = () => {
     <div v-if="store.magicOpen" class="modal-mask" @click.self="cancel">
       <div class="modal">
         <header class="modal-header">
-          <h3><AppIcon name="sparkles" :size="17" /> ASS 分镜</h3>
+          <h3><AppIcon name="sparkles" :size="17" /> ASS 视频</h3>
           <button class="close-btn" @click="cancel"><AppIcon name="close" :size="13" /> 关闭</button>
         </header>
 
@@ -124,7 +125,7 @@ const cancel = () => {
                 :title="`${human.name} · ${human.style}`"
                 @click="toggleHuman(human.id)"
               >
-                <img :src="human.avatar" :alt="human.name" />
+                <CharacterPortrait :src="human.avatar" :alt="human.name" />
                 <span>{{ human.name }}</span>
                 <span v-if="selectedHumanIds.includes(human.id)" class="role-check">
                   <AppIcon name="check" :size="10" />
@@ -153,7 +154,7 @@ const cancel = () => {
                 <template v-else>
                   <span class="file-icon"><AppIcon name="file" :size="28" /></span>
                   <span class="drop-text">点击选择或拖入 .ass 文件</span>
-                  <span class="file-tip">解析歌词与时间轴生成分镜</span>
+                  <span class="file-tip">解析歌词与时间轴生成视频脚本</span>
                 </template>
               </div>
               <input ref="assInputRef" type="file" accept=".ass" hidden @change="onAssChange" />
@@ -179,7 +180,7 @@ const cancel = () => {
           >
             <span v-if="store.magicLoading" class="spinner light" />
             <AppIcon v-else name="sparkles" :size="16" />
-            {{ store.magicLoading ? '正在生成分镜…' : '生成' }}
+            {{ store.magicLoading ? '正在生成视频脚本…' : '生成' }}
           </button>
         </footer>
       </div>
@@ -463,5 +464,10 @@ const cancel = () => {
   background: #fff0f0;
   color: #c33;
   font-size: 13px;
+}
+.role-card .character-portrait {
+  width: 100%;
+  height: 70px;
+  border-radius: 6px;
 }
 </style>

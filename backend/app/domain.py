@@ -7,6 +7,8 @@ import tempfile
 import uuid
 import zipfile
 from pathlib import Path
+from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -384,7 +386,7 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
     if len({item.id for item in visible}) != len(set(payload.digital_human_ids)):
         raise HTTPException(422, "包含不可用角色")
     config = payload.model_dump(mode="json")
-    title = f"通用分镜 · {payload.tertiary_category or payload.secondary_category}"
+    title = f"通用分镜-{utcnow().astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d-%H-%M-%S')}"
     task = ProjectTaskModel(
         id=uid("task"),
         project_id=project_id,
@@ -414,7 +416,7 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
                 if partner not in roles:
                     roles.append(partner)
             definitions.append(("character", CHARACTER_SCENES[index % len(CHARACTER_SCENES)], roles))
-    config["storyBible"] = build_general_story_bible(config=config, definitions=definitions)
+    config["storyBible"] = build_general_story_bible(config=config, definitions=definitions, durations=durations)
     task.storyboard_config = config
     output = []
     for index, (shot_type, (scene, shot), roles) in enumerate(definitions):
@@ -444,7 +446,16 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
         for role_index, human_id in enumerate(roles):
             db.add(StoryboardLineCastModel(id=uid("linecast"), storyboard_line_id=line.id, digital_human_id=human_id, sort_order=role_index))
         output.append(
-            {"id": line.id, "shotType": shot_type, "plannedDuration": duration, "scenePrompt": "", "shotPrompt": "", "digitalHumanIds": roles, "generationStatus": "pending"}
+            {
+                "id": line.id,
+                "shotType": shot_type,
+                "plannedDuration": duration,
+                "scenePrompt": "",
+                "shotPrompt": "",
+                "digitalHumanIds": roles,
+                "shotOptions": line.shot_options,
+                "generationStatus": "pending",
+            }
         )
     await db.commit()
     return {
@@ -538,7 +549,17 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
         for human_id in role_ids
         if (item := human_by_id.get(human_id))
     ]
-    segments = [{"index": line.sort_order, "start": line.start_time, "end": line.end_time, "lyrics": line.lyrics} for line in lines]
+    segments = [
+        {
+            "index": line.sort_order,
+            "start": line.start_time,
+            "end": line.end_time,
+            "lyrics": line.lyrics,
+            "segmentType": (line.shot_options or {}).get("segmentType", "lyric"),
+            "timelineLabel": (line.shot_options or {}).get("timelineLabel") or line.lyrics,
+        }
+        for line in lines
+    ]
     await consume_daily_quota(db, user_id=user.id, category="chat", limit=settings.daily_chat_limit)
     outline = await generate_ass_story_outline(
         segments=segments,
@@ -564,8 +585,15 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
     )
     for line, plan in zip(lines, story_bible["shots"], strict=True):
         line.shot_type = plan["shotType"]
+        line.planned_duration = float(plan["generationDuration"])
         line.shot_options = {
             **(line.shot_options or {}),
+            "duration": normalize_video_duration(line.planned_duration),
+            "sourceDuration": plan["sourceDuration"],
+            "gapBefore": plan["gapBefore"],
+            "gapAfter": plan["gapAfter"],
+            "gapAfterAllocation": plan["gapAfterAllocation"],
+            "materialDuration": plan["materialDuration"],
             "outlineIntent": plan["intent"],
             "locationId": plan["locationId"],
             "locationChange": plan["locationChange"],
@@ -598,7 +626,14 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
         "storyboardType": task.storyboard_type,
         "storyBible": story_bible,
         "lines": [
-            {"id": line.id, "shotType": plan["shotType"], "digitalHumanIds": plan["requiredCharacterIds"], "generationStatus": "pending"}
+            {
+                "id": line.id,
+                "shotType": plan["shotType"],
+                "plannedDuration": line.planned_duration,
+                "shotOptions": line.shot_options,
+                "digitalHumanIds": plan["requiredCharacterIds"],
+                "generationStatus": "pending",
+            }
             for line, plan in zip(lines, story_bible["shots"], strict=True)
         ],
     }
@@ -690,6 +725,7 @@ async def list_humans(user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
 async def create_human(payload: DigitalHumanCreate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     if not is_tos_url(payload.avatar_url) or (payload.avatar_thumbnail_url and not is_tos_url(payload.avatar_thumbnail_url)):
         raise HTTPException(422, "角色图片必须先上传到配置的 TOS")
+    style = None
     if payload.style_id:
         style = await db.get(DigitalHumanStyleModel, payload.style_id)
         if not style or style.deleted_at is not None or (style.scope != "system" and style.user_id != user.id):
@@ -697,7 +733,7 @@ async def create_human(payload: DigitalHumanCreate, user: CurrentUser, db: Async
     item = DigitalHumanModel(id=uid("dh"), user_id=user.id, scope="private", **payload.model_dump())
     db.add(item)
     await db.commit()
-    return human_json(item)
+    return human_json(item, style.name if style else None)
 
 
 @router.patch("/digital-humans/{human_id}")
@@ -1196,16 +1232,63 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
                     .scalars()
                     .all()
                 )
+                task_cast_ids = list(
+                    (
+                        await session.execute(
+                            select(ProjectCastModel.digital_human_id)
+                            .where(ProjectCastModel.project_task_id == task.id, ProjectCastModel.deleted_at.is_(None))
+                            .order_by(ProjectCastModel.sort_order)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                line_cast_ids = list(
+                    (
+                        await session.execute(
+                            select(StoryboardLineCastModel.digital_human_id)
+                            .where(
+                                StoryboardLineCastModel.storyboard_line_id.in_([line.id for line in lines]) if lines else False,
+                                StoryboardLineCastModel.deleted_at.is_(None),
+                            )
+                            .order_by(StoryboardLineCastModel.sort_order)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                human_ids = list(dict.fromkeys([*task_cast_ids, *line_cast_ids]))
+                humans_by_id = {
+                    human.id: human
+                    for human in (
+                        (
+                            await session.execute(
+                                select(DigitalHumanModel).where(
+                                    DigitalHumanModel.id.in_(human_ids) if human_ids else False,
+                                    DigitalHumanModel.deleted_at.is_(None),
+                                    or_(DigitalHumanModel.scope == "system", DigitalHumanModel.user_id == project.user_id),
+                                )
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+                }
                 project_name, task_title, overall_prompt = project.name, task.title, task.overall_prompt
                 line_values = [
                     {"id": line.id, "lyrics": line.lyrics, "shot_type": line.shot_type, "scene_prompt": line.scene_prompt, "shot_prompt": line.shot_prompt} for line in lines
                 ]
                 asset_values = [{"id": asset.id, "line_id": asset.storyboard_line_id, "video_url": asset.video_url} for asset in shot_assets]
+                human_values = [
+                    {"id": human.id, "name": human.name, "asset_code": human.asset_code, "avatar_url": human.avatar_url}
+                    for human_id in human_ids
+                    if (human := humans_by_id.get(human_id)) and human.avatar_url
+                ]
             by_line: dict[str, list[dict]] = {}
             for asset in asset_values:
                 by_line.setdefault(asset["line_id"], []).append(asset)
-            total_assets = len(shot_assets)
-            await _set_export_progress(export_id, job, 5, "正在整理分镜与素材", total_assets=total_assets)
+            total_assets = len(asset_values) + len(human_values)
+            await _set_export_progress(export_id, job, 5, "正在整理视频脚本与素材", total_assets=total_assets)
             markdown = [f"# {project_name} · {task_title}", "", "## 整体提示词", "", overall_prompt or "（未填写）", "", "## 分镜提示词", ""]
             processed_assets = processed_bytes = known_total_bytes = 0
             last_progress = 5
@@ -1259,6 +1342,48 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
                                 processed_bytes=processed_bytes,
                                 total_bytes=known_total_bytes,
                             )
+                    if human_values:
+                        markdown.extend(["## 人物素材", ""])
+                    for index, human in enumerate(human_values, start=1):
+                        source_suffix = Path(urlsplit(human["avatar_url"]).path).suffix.lower()
+                        suffix = source_suffix if source_suffix in {".jpg", ".jpeg", ".png", ".webp"} else ".jpg"
+                        filename = f"{index:02d}-{human['asset_code'] or human['id']}{suffix}"
+                        human_path = temporary_path / filename
+
+                        async def on_human_download(current: int, declared: int | None) -> None:
+                            nonlocal last_progress
+                            fraction = current / declared if declared else 0
+                            progress = 5 + int(75 * (processed_assets + fraction) / max(1, total_assets))
+                            if progress > last_progress:
+                                last_progress = progress
+                                await _set_export_progress(
+                                    export_id,
+                                    job,
+                                    progress,
+                                    f"正在下载第 {processed_assets + 1}/{total_assets} 个人物素材",
+                                    processed_assets=processed_assets,
+                                    processed_bytes=processed_bytes + current,
+                                    total_bytes=known_total_bytes + (declared or 0),
+                                )
+
+                        _, _, size = await download_public_url_to_path(human["avatar_url"], human_path, progress_callback=on_human_download)
+                        bundle.write(human_path, f"characters/{filename}")
+                        human_path.unlink(missing_ok=True)
+                        markdown.extend([f"- {human['name']}：`characters/{filename}`", ""])
+                        processed_assets += 1
+                        processed_bytes += size
+                        known_total_bytes += size
+                        progress = 5 + int(75 * processed_assets / max(1, total_assets))
+                        last_progress = max(last_progress, progress)
+                        await _set_export_progress(
+                            export_id,
+                            job,
+                            progress,
+                            f"已处理 {processed_assets}/{total_assets} 个素材",
+                            processed_assets=processed_assets,
+                            processed_bytes=processed_bytes,
+                            total_bytes=known_total_bytes,
+                        )
                     bundle.writestr("prompts.md", "\n".join(markdown).encode("utf-8"), compress_type=zipfile.ZIP_DEFLATED)
                 archive_size = archive_path.stat().st_size
                 await _set_export_progress(export_id, job, 90, "正在上传压缩包到 TOS", archive_size=archive_size)

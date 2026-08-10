@@ -6,6 +6,8 @@ import zipfile
 
 from PIL import Image
 
+from app.media_constraints import normalize_video_duration
+
 ASS_CONTENT = b"""[Script Info]
 Script Type: v4.00+
 [V4+ Styles]
@@ -42,6 +44,9 @@ def outline_result(segments, role_ids):
                 "emotionalFocus": "克制",
                 "cameraPurpose": "推进叙事",
                 "motifIds": ["rain"],
+                "gapAfterAllocation": "current"
+                if index + 1 < len(segments) and 0 < float(segments[index + 1].get("start") or 0) - float(_segment.get("end") or 0) <= 2
+                else "none",
             }
             for index, _segment in enumerate(segments)
         ],
@@ -82,8 +87,8 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(domain, "get_storage", lambda: storage)
 
     async def fake_storyboard_line(**kwargs):
-        assert kwargs["current"]["lyrics"] == "First line Second line"
-        assert len(kwargs["full_context"]["allLyrics"]) == 1
+        assert kwargs["current"]["lyrics"] == "First line"
+        assert len(kwargs["full_context"]["allLyrics"]) == 2
         assert "图片ID：020" in kwargs["allowed_humans"][0]["systemPrompt"]
         return {
             "scenePrompt": "sunlit room",
@@ -146,9 +151,12 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
         files={"ass_file": ("10012204-journey.ass", ASS_CONTENT, "text/plain")},
     )
     assert storyboard.status_code == 200
+    assert storyboard.json()["title"] == "10012204"
     line = storyboard.json()["lines"][0]
     assert line["generationStatus"] == "pending"
     assert line["plannedDuration"] > 0
+    assert line["shotOptions"]["duration"] == normalize_video_duration(line["plannedDuration"])
+    assert line["shotOptions"]["gapAfterAllocation"] in {"current", "next", "none"}
     generated_line = client.post(f"/api/tasks/{storyboard.json()['taskId']}/storyboard-lines/{line['id']}/generate", json={})
     assert generated_line.status_code == 200, generated_line.text
     assert generated_line.json()["usage"] == {"inputTokens": 120, "outputTokens": 40, "cachedInputTokens": 0, "totalTokens": 160}
@@ -200,12 +208,15 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     export_status = client.get(f"/api/material-exports/{exported.json()['id']}").json()
     assert export_status["progress"] == 100
     assert export_status["stage"] == "导出完成"
+    assert export_status["totalAssets"] == 2
     assert client.get(f"/api/tasks/{storyboard.json()['taskId']}/material-exports").json()[0]["id"] == exported.json()["id"]
     archive = next(value for key, value in storage.objects.items() if key.endswith(".zip"))
     with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
         assert "prompts.md" in bundle.namelist()
         assert any(name.startswith("videos/") for name in bundle.namelist())
+        assert any(name.startswith("characters/") for name in bundle.namelist())
         assert "sunlit room" in bundle.read("prompts.md").decode()
+        assert "人物素材" in bundle.read("prompts.md").decode()
 
     regenerated_outline = client.post(f"/api/tasks/{storyboard.json()['taskId']}/storyboard-outline/regenerate")
     assert regenerated_outline.status_code == 200, regenerated_outline.text
@@ -266,7 +277,7 @@ def test_user_journey_rejects_invalid_inputs(client) -> None:
     assert unsupported_image_model.status_code == 422
 
 
-def test_ass_storyboard_generates_one_line_with_full_lyrics_context(client, monkeypatch) -> None:
+def test_ass_storyboard_generates_each_lyric_and_long_gap_with_full_context(client, monkeypatch) -> None:
     from app import domain, main
 
     class MemoryStorage:
@@ -294,15 +305,15 @@ def test_ass_storyboard_generates_one_line_with_full_lyrics_context(client, monk
     )
     assert prepared.status_code == 200
     body = prepared.json()
-    assert [line["generationStatus"] for line in body["lines"]] == ["pending", "pending"]
+    assert [line["generationStatus"] for line in body["lines"]] == ["pending", "pending", "pending"]
     for index, line in enumerate(body["lines"]):
         response = client.post(f"/api/tasks/{body['taskId']}/storyboard-lines/{line['id']}/generate", json={})
         assert response.status_code == 200
         if index == 0:
             repeated = client.post(f"/api/tasks/{body['taskId']}/storyboard-lines/{line['id']}/generate", json={})
             assert repeated.status_code == 200
-    assert [call["current"]["lyrics"] for call in received] == ["First", "Second"]
+    assert [call["current"]["lyrics"] for call in received] == ["First", "", "Second"]
     assert received[0]["full_context"]["songEmotion"]["songName"] == "他不爱我"
-    assert [[item["lyrics"] for item in call["full_context"]["allLyrics"]] for call in received] == [["First", "Second"], ["First", "Second"]]
+    assert [[item["lyrics"] for item in call["full_context"]["allLyrics"]] for call in received] == [["First", "", "Second"]] * 3
     task = client.get(f"/api/tasks/{body['taskId']}").json()
     assert task["status"] == "ready"

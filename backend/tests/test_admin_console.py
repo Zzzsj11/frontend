@@ -5,7 +5,7 @@ def bearer(token: str) -> dict[str, str]:
 def test_admin_dashboard_models_and_audit(client):
     dashboard = client.get("/api/admin/dashboard")
     assert dashboard.status_code == 200
-    assert dashboard.json()["systemHumans"] == 30
+    assert dashboard.json()["systemHumans"] == 32
     models = client.get("/api/admin/models").json()
     assert {m["modality"] for m in models} >= {"chat", "image", "video"}
     image = next(m for m in models if m["modality"] == "image")

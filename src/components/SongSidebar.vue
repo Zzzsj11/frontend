@@ -228,10 +228,10 @@ onMounted(() => {
             </template>
           </div>
           <div v-if="!song.tasks.length" class="task-empty">
-            <span>暂无分镜任务</span>
+            <span>暂无视频任务</span>
             <div class="empty-actions">
-              <button @click="startStoryboard(song.id, 'ass')">ASS 分镜</button>
-              <button @click="startStoryboard(song.id, 'general')">通用分镜</button>
+              <button @click="startStoryboard(song.id, 'ass')">ASS 视频</button>
+              <button @click="startStoryboard(song.id, 'general')">通用 MV 视频</button>
             </div>
           </div>
         </template>

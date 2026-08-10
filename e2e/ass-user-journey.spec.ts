@@ -16,7 +16,7 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
       contentType: 'application/json',
       body: JSON.stringify({
         taskId: 'task-e2e',
-        title: 'E2E storyboard',
+        title: '10012204',
         cast: ['dh-luoli'],
         lines: [
           {
@@ -43,14 +43,14 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await page.getByLabel('用户名').fill('admin')
   await page.getByLabel('密码').fill('123456')
   await page.getByRole('button', { name: '登录' }).click()
-  await expect(page.getByRole('heading', { name: '分镜编辑器' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '视频编辑器' })).toBeVisible()
   await expect(page.locator('.balance-value')).toHaveText('287.39')
   await expect(page.getByRole('link', { name: '返回镜序 MV 工作台' })).toBeVisible()
   await expect(page.getByRole('button', { name: /287\.39/ })).toBeVisible()
   await page.getByRole('button', { name: /管理员/ }).click()
   await expect(page.getByRole('menuitem', { name: '用户管理' })).toBeVisible()
   await page.getByRole('button', { name: /管理员/ }).click()
-  await page.getByRole('button', { name: 'ASS 分镜' }).first().click()
+  await page.getByRole('button', { name: 'ASS 视频' }).first().click()
   await page.locator('input[type="file"][accept=".ass"]').setInputFiles({
     name: '10012204-journey.ass',
     mimeType: 'text/plain',
@@ -68,10 +68,10 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
 
   await expect(page.getByText('自动化测试歌词').first()).toBeVisible()
   await expect(page.getByText('镜头缓慢推进').first()).toBeVisible()
-  await expect(page.getByText('MV 分镜制作').last()).toBeVisible()
+  await expect(page.getByText('10012204').last()).toBeVisible()
 
-  await page.locator('.script-editor .header-actions').getByRole('button', { name: '通用分镜', exact: true }).click()
-  const general = page.locator('.modal').filter({ hasText: '通用分镜' })
+  await page.locator('.script-editor .header-actions').getByRole('button', { name: '通用 MV 视频', exact: true }).click()
+  const general = page.locator('.modal').filter({ hasText: '通用 MV 视频' })
   await expect(general.getByLabel('视频模型 *')).toHaveValue('doubao-seedance-2.0')
   await expect(general.getByLabel('视频模型 *')).toBeDisabled()
   await expect(general.getByLabel('图片模型 *')).toHaveValue('gpt-image-2')

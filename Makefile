@@ -25,7 +25,7 @@ migration-check:
 build:
 	npm run build
 docker-build:
-	docker compose build
+	docker compose -f docker-compose.yml -f docker-compose.local-build.yml build
 preflight: lint migration-check test build docker-build
 remote-test:
 	npm run test:admin && npm run test:remote:all

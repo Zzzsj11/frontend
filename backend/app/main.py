@@ -318,7 +318,7 @@ async def create_ass_storyboard(
         await db.commit()
         raise HTTPException(502, f"ASS 全局分镜大纲生成失败：{exc}") from exc
     ass_url = await get_storage().put_bytes(safe_key(f"users/{user.id}/ass", ass_file.filename), content, ass_file.content_type)
-    title = f"ASS 分镜 · {emotion.song_code} · {emotion.song_name}"
+    title = emotion.song_code
     story_bible = build_ass_story_bible(
         segments=segments,
         emotion=emotion_context,
@@ -366,7 +366,28 @@ async def create_ass_storyboard(
     for index, value in enumerate(segments):
         shot_plan = story_bible["shots"][index]
         assigned_roles = list(shot_plan["requiredCharacterIds"])
-        planned_duration = round(float(value.get("end") or 0) - float(value.get("start") or 0), 1)
+        planned_duration = float(shot_plan["generationDuration"])
+        shot_options = {
+            "ratio": ratio,
+            "resolution": resolution,
+            "imageModel": image_model,
+            "videoModel": video_model,
+            "duration": normalize_video_duration(planned_duration),
+            "materialDuration": shot_plan["materialDuration"],
+            "segmentType": value.get("segmentType", "lyric"),
+            "timelineLabel": value.get("timelineLabel") or value.get("lyrics", ""),
+            "sourceDuration": shot_plan["sourceDuration"],
+            "gapBefore": shot_plan["gapBefore"],
+            "gapAfter": shot_plan["gapAfter"],
+            "gapAfterAllocation": shot_plan["gapAfterAllocation"],
+            "outlineIntent": shot_plan["intent"],
+            "locationId": shot_plan["locationId"],
+            "locationChange": shot_plan["locationChange"],
+            "characterAction": shot_plan["characterAction"],
+            "emotionalFocus": shot_plan["emotionalFocus"],
+            "cameraPurpose": shot_plan["cameraPurpose"],
+            "motifIds": shot_plan["motifIds"],
+        }
         line = StoryboardLineModel(
             id=uid("line"),
             project_task_id=task.id,
@@ -379,20 +400,7 @@ async def create_ass_storyboard(
             planned_duration=planned_duration,
             scene_prompt="",
             shot_prompt="",
-            shot_options={
-                "ratio": ratio,
-                "resolution": resolution,
-                "imageModel": image_model,
-                "videoModel": video_model,
-                "duration": normalize_video_duration(planned_duration),
-                "outlineIntent": shot_plan["intent"],
-                "locationId": shot_plan["locationId"],
-                "locationChange": shot_plan["locationChange"],
-                "characterAction": shot_plan["characterAction"],
-                "emotionalFocus": shot_plan["emotionalFocus"],
-                "cameraPurpose": shot_plan["cameraPurpose"],
-                "motifIds": shot_plan["motifIds"],
-            },
+            shot_options=shot_options,
             generation_status="pending",
         )
         db.add(line)
@@ -405,6 +413,7 @@ async def create_ass_storyboard(
                 "id": line.id,
                 "shotType": shot_plan["shotType"],
                 "plannedDuration": planned_duration,
+                "shotOptions": shot_options,
                 "scenePrompt": "",
                 "shotPrompt": "",
                 "digitalHumanIds": assigned_roles,

@@ -8,6 +8,11 @@ describe('project user journey state', () => {
     setActivePinia(createPinia())
   })
 
+  it('plays the full MV by default instead of limiting playback to one video', () => {
+    const store = useProjectStore()
+    expect(store.playMode.single).toBe(false)
+  })
+
   it('persists digital-human style changes through the API, not localStorage', async () => {
     const store = useProjectStore()
     const request = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({id:'style-private-1',name:'测试风格'}),{status:200,headers:{'Content-Type':'application/json'}}))

@@ -54,7 +54,7 @@ const onDrop = (index: number) => {
   <section class="panel script-editor">
     <header class="panel-header">
       <div class="title-group">
-        <h2>分镜编辑器</h2>
+        <h2>视频编辑器</h2>
         <span v-if="store.storyboardProgress.total" class="generation-progress">
           已生成 {{ store.storyboardProgress.completed }}/{{ store.storyboardProgress.total }}
           <button v-if="store.storyboardProgress.failed" class="retry-all" @click="store.retryFailedStoryboardLines()">
@@ -75,7 +75,7 @@ const onDrop = (index: number) => {
         <button class="btn-primary" :disabled="store.magicLoading || store.songSwitching" @click="store.openMagic()">
           <span v-if="store.magicLoading" class="spinner light" />
           <AppIcon v-else name="sparkles" :size="15" />
-          ASS 分镜
+          ASS 视频
         </button>
         <button
           class="btn-primary"
@@ -84,7 +84,7 @@ const onDrop = (index: number) => {
         >
           <span v-if="store.generalStoryboardLoading" class="spinner light" />
           <AppIcon v-else name="movie" :size="15" />
-          通用分镜
+          通用 MV 视频
         </button>
       </div>
     </header>
@@ -106,14 +106,14 @@ const onDrop = (index: number) => {
       </div>
 
       <p v-if="store.lines.length === 0" class="empty-tip">
-        暂无分镜，您可以点击下方【单个分镜】按钮或顶部「ASS 分镜」/【通用分镜】开始创作
+        暂无视频，您可以点击下方【单个视频】按钮或顶部「ASS 视频」/【通用 MV 视频】开始创作
       </p>
     </div>
 
     <footer class="editor-footer">
       <button class="btn-add" @click="store.addLine()">
         <AppIcon name="plus" :size="14" />
-        单个分镜
+        单个视频
       </button>
     </footer>
 

@@ -67,7 +67,7 @@ export const useProjectStore = defineStore('project', {
     activeStoryboardType: null as string | null,
     currentTime: 0,
     isPlaying: false,
-    playMode: { single: true, loop: false },
+    playMode: { single: false, loop: false },
     volume: 1,
     muted: false,
     batchVoicing: false,
@@ -298,7 +298,7 @@ export const useProjectStore = defineStore('project', {
             const current = this.lines.find((line) => line.id === lineId)
             if (current && this.activeTaskId === taskId) {
               current.generationStatus = 'failed'
-              current.generationError = error instanceof Error ? error.message : '单条分镜生成失败'
+              current.generationError = error instanceof Error ? error.message : '单条视频提示词生成失败'
             }
           }
         }
@@ -591,11 +591,20 @@ export const useProjectStore = defineStore('project', {
     }): Promise<DigitalHuman> {
       this.dhGenerating = true
       try {
+        let styleId = this.dhStyleIds[input.style]
+        if (!styleId) {
+          const style = await api.createDigitalHumanStyle(input.style)
+          styleId = style.id
+          this.dhStyleIds[input.style] = style.id
+          if (!this.dhStyles.includes(input.style)) this.dhStyles.push(input.style)
+        }
         const prompt = imageGen.buildPortraitPrompt(input.description || input.name, input.style)
         const reference = await api.uploadDataUrl(input.avatar, `${nextId('reference')}.jpg`)
         const generated = await imageGen.generateImageAsset(prompt, { size:'1344x768', quality:'medium', image:reference.url })
-        const dh = await api.createDigitalHuman({ name:input.name, styleId:this.dhStyleIds[input.style], description:input.description ?? '', avatar:generated.url, thumbnail:generated.thumbnailUrl, avatarPrompt:prompt, source:'uploaded' })
-        this.digitalHumans.push(dh)
+        const dh = await api.createDigitalHuman({ name:input.name, styleId, description:input.description ?? '', avatar:generated.url, thumbnail:generated.thumbnailUrl, avatarPrompt:prompt, source:'uploaded' })
+        const existing = this.digitalHumans.findIndex((item) => item.id === dh.id)
+        if (existing >= 0) this.digitalHumans.splice(existing, 1, dh)
+        else this.digitalHumans.push(dh)
         this.ensureDhStyle(dh.style)
         return dh
       } finally {
@@ -761,7 +770,7 @@ export const useProjectStore = defineStore('project', {
           voice: { status: 'none' },
           scene: { status: 'none' },
           shot: { status: 'none', assets: [] },
-          shotOptions: { ...DEFAULT_SHOT_OPTIONS, ratio: req.ratio, resolution: req.resolution, imageModel: req.imageModel, videoModel: req.videoModel },
+          shotOptions: normalizeShotOptions(item.shotOptions ?? { ...DEFAULT_SHOT_OPTIONS, duration: item.plannedDuration ?? DEFAULT_SHOT_OPTIONS.duration, ratio: req.ratio, resolution: req.resolution, imageModel: req.imageModel, videoModel: req.videoModel }),
           generationStatus: item.generationStatus || 'pending',
         }))
         this._cacheCurrentTask()
@@ -786,7 +795,7 @@ export const useProjectStore = defineStore('project', {
         this.generalStoryboardOpen = false
         void this._generateStoryboardQueue(task.id, lines.map((line) => line.id))
       } catch (err) {
-        this.generalStoryboardError = err instanceof Error ? err.message : '通用分镜生成失败'
+        this.generalStoryboardError = err instanceof Error ? err.message : '通用 MV 视频生成失败'
       } finally {
         this.generalStoryboardLoading = false
       }
@@ -813,7 +822,7 @@ export const useProjectStore = defineStore('project', {
           voice: { status: 'none' },
           scene: { status: 'none' },
           shot: { status: 'none', assets: [] },
-          shotOptions: { ...DEFAULT_SHOT_OPTIONS, ratio: req.ratio, resolution: req.resolution, imageModel: req.imageModel, videoModel: req.videoModel },
+          shotOptions: normalizeShotOptions(item.shotOptions ?? { ...DEFAULT_SHOT_OPTIONS, duration: item.plannedDuration ?? DEFAULT_SHOT_OPTIONS.duration, ratio: req.ratio, resolution: req.resolution, imageModel: req.imageModel, videoModel: req.videoModel }),
           generationStatus: (item as typeof item & { generationStatus?: ScriptLine['generationStatus'] }).generationStatus || 'pending',
         }))
         // 先缓存当前子项目编辑现场，避免被新脚本覆盖丢失
@@ -825,7 +834,7 @@ export const useProjectStore = defineStore('project', {
           this.songProjects.push(song)
           this.activeSongId = song.id
         }
-        const task = { id: script.taskId, title: 'MV 分镜制作', updatedAt: '刚刚' }
+        const task = { id: script.taskId, title: script.title, updatedAt: '刚刚' }
         song.tasks.push(task)
         // 载入生成结果到新子项目
         this.stop()
@@ -841,7 +850,7 @@ export const useProjectStore = defineStore('project', {
         this.magicOpen = false
         void this._generateStoryboardQueue(task.id, lines.map((line) => line.id))
       } catch (err) {
-        this.magicError = err instanceof Error ? err.message : 'ASS 分镜生成失败'
+        this.magicError = err instanceof Error ? err.message : 'ASS 视频生成失败'
       } finally {
         this.magicLoading = false
       }
@@ -858,17 +867,27 @@ export const useProjectStore = defineStore('project', {
     },
 
     /** 生成/重新生成场景底图（仅由场景提示词决定） */
-    async generateSceneFor(lineId: string, scenePrompt?: string) {
+    async generateSceneFor(lineId: string, scenePrompt?: string, selectedOptions?: ShotGenOptions) {
       const idx = this.lines.findIndex((l) => l.id === lineId)
       if (idx < 0 || this.lines[idx].scene.status === 'generating') return
       const line = this.lines[idx]
       if (scenePrompt !== undefined) line.scenePrompt = scenePrompt
+      if (selectedOptions) line.shotOptions = normalizeShotOptions(selectedOptions)
       line.scene.status = 'generating'
       const variant = sceneVariants[lineId] ?? 0
       sceneVariants[lineId] = variant + 1
       try {
         const options = normalizeShotOptions(line.shotOptions ?? DEFAULT_SHOT_OPTIONS)
-        const { imageUrl, thumbnailUrl } = await api.generateSceneImage(line.scenePrompt, idx, variant, this.activeTaskId ?? undefined, lineId, options.ratio, options.imageModel)
+        const { imageUrl, thumbnailUrl } = await api.generateSceneImage(
+          line.scenePrompt,
+          idx,
+          variant,
+          this.activeTaskId ?? undefined,
+          lineId,
+          options.ratio,
+          options.imageModel,
+          options.resolution,
+        )
         const still = this.lines.find((l) => l.id === lineId)
         if (still) still.scene = { status: 'done', imageUrl: thumbnailUrl || imageUrl, originalImageUrl: imageUrl }
       } catch (error) {
@@ -919,7 +938,7 @@ export const useProjectStore = defineStore('project', {
       } catch (error) {
         const still = this.lines.find((l) => l.id === lineId)
         if (still) still.shot.status = 'none'
-        throw reportApiError(error, '分镜视频生成失败')
+        throw reportApiError(error, '视频生成失败')
       }
     },
 

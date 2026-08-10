@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import type { GeneralStoryboardRequest, ShotGenOptions } from '../types'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
+import CharacterPortrait from './CharacterPortrait.vue'
 import { MAX_VIDEO_DURATION, MIN_VIDEO_DURATION } from '../mediaConstraints'
 import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, loadGenerationModels } from '../generationModels'
 
@@ -103,7 +104,7 @@ const submit = () => {
     <div v-if="store.generalStoryboardOpen" class="modal-mask" @click.self="store.closeGeneralStoryboard()">
       <div class="modal">
         <header class="modal-header">
-          <h3><AppIcon name="movie" :size="18" />通用分镜</h3>
+          <h3><AppIcon name="movie" :size="18" />通用 MV 视频</h3>
           <button class="close-btn" :disabled="store.generalStoryboardLoading" @click="store.closeGeneralStoryboard()">
             <AppIcon name="close" :size="13" />关闭
           </button>
@@ -122,7 +123,7 @@ const submit = () => {
                 <p class="field-label">从已有角色库选择 <span>（可多选，人物镜轮流使用）</span></p>
                 <div class="cast-list">
                   <button v-for="human in store.digitalHumans" :key="human.id" class="cast-item" :class="{ active: selectedHumanIds.includes(human.id) }" @click="toggleHuman(human.id)">
-                    <img :src="human.avatar" :alt="human.name" /><span>{{ human.name }}</span>
+                    <CharacterPortrait :src="human.avatar" :alt="human.name" /><span>{{ human.name }}</span>
                     <AppIcon v-if="selectedHumanIds.includes(human.id)" name="check" :size="12" />
                   </button>
                   <span v-if="!store.digitalHumans.length" class="empty-cast">角色库暂无可选人物，请先到角色阵容中添加数字人</span>
@@ -157,7 +158,7 @@ const submit = () => {
                 <label><span>人物镜数量</span><input v-model.number="characterShotCount" type="number" min="0" max="50" /></label>
                 <label><span>总时长（秒）</span><input v-model.number="totalDuration" type="number" :min="minimumTotalDuration" :max="maximumTotalDuration" /></label>
               </div>
-              <p class="estimate" :class="{ invalid: totalShots > 0 && !durationIsValid }">将生成 <strong>{{ totalShots }}</strong> 个分镜：{{ emptyShotCount }} 个空镜、{{ characterShotCount }} 个人物镜，平均每镜约 <strong>{{ averageDuration }} 秒</strong>；允许总时长 <strong>{{ minimumTotalDuration }}–{{ maximumTotalDuration }} 秒</strong>（每镜 4–15 秒）</p>
+              <p class="estimate" :class="{ invalid: totalShots > 0 && !durationIsValid }">将生成 <strong>{{ totalShots }}</strong> 个视频：{{ emptyShotCount }} 个空镜、{{ characterShotCount }} 个人物镜，平均每镜约 <strong>{{ averageDuration }} 秒</strong>；允许总时长 <strong>{{ minimumTotalDuration }}–{{ maximumTotalDuration }} 秒</strong>（每镜 4–15 秒）</p>
               <div class="field-grid three model-grid">
                 <label><span>清晰度 *</span><select v-model="resolution"><option value="480p">480p</option><option value="720p">720p</option><option value="1080p">1080p</option></select></label>
                 <label><span>视频模型 *</span><select v-model="videoModel" disabled><option v-for="item in VIDEO_MODEL_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
@@ -174,7 +175,7 @@ const submit = () => {
           <button class="btn-primary" :disabled="!canSubmit || store.generalStoryboardLoading || !store.generalStoryboardOptions" @click="submit">
             <span v-if="store.generalStoryboardLoading" class="spinner light" />
             <AppIcon v-else name="sparkles" :size="15" />
-            {{ store.generalStoryboardLoading ? '正在生成分镜脚本…' : '批量生成' }}
+            {{ store.generalStoryboardLoading ? '正在生成视频脚本…' : '批量生成' }}
           </button>
         </footer>
       </div>
@@ -187,5 +188,5 @@ const submit = () => {
 .cast-list{max-height:210px;overflow-y:auto;align-content:flex-start}
 .estimate.invalid{background:#fff0f0;color:#c33}.estimate.invalid strong{color:#c33}
 .model-grid{margin:12px 0 6px}.model-grid select:disabled{background:#f5f5f6;color:#777;cursor:not-allowed}.model-hint{margin:0 0 12px;color:var(--text-secondary);font-size:12px}
-.cast-list{max-height:240px;overflow-x:hidden;overflow-y:auto;flex-wrap:wrap}.cast-item{flex:1 1 124px;width:124px;max-width:160px}.cast-item img{height:68px;object-fit:contain;background:#f2f2f2}
+.cast-list{max-height:240px;overflow-x:hidden;overflow-y:auto;flex-wrap:wrap}.cast-item{flex:1 1 124px;width:124px;max-width:160px}.cast-item img{height:68px;object-fit:contain;background:#f2f2f2}.cast-item .character-portrait{width:100%;height:68px;border-radius:6px}
 </style>

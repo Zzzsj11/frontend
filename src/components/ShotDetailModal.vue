@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { DEFAULT_SHOT_OPTIONS, useProjectStore } from '../stores/project'
 import type { ShotAsset, ShotGenOptions } from '../types'
 import AppIcon from './AppIcon.vue'
+import CharacterPortrait from './CharacterPortrait.vue'
 import ImageZoom from './ImageZoom.vue'
 import { confirmDialog } from '../composables/useConfirmDialog'
 import { normalizeShotOptions, VIDEO_DURATION_CHOICES } from '../mediaConstraints'
@@ -101,14 +102,14 @@ const regenScene = async () => {
   const line = store.editingLine
   if (!line) return
   if (line.scene.imageUrl && !await confirmDialog({ title: '重新生成场景', message: '确定重新生成场景？当前场景图将被覆盖。', confirmText: '重新生成' })) return
-  store.generateSceneFor(line.id, scenePromptDraft.value)
+  store.generateSceneFor(line.id, scenePromptDraft.value, { ...optionsDraft.value })
 }
 
 /** 生成 / 重新生成分镜视频片段（场景 × 分镜提示词 × 出演角色 × 生成参数）；已有片段时二次确认 */
 const regenShot = async () => {
   const line = store.editingLine
   if (!line) return
-  if (line.shot.assets.length && !await confirmDialog({ title: '重新生成分镜', message: '确定重新生成分镜视频片段？将新增一个视频版本。', confirmText: '重新生成' })) return
+  if (line.shot.assets.length && !await confirmDialog({ title: '重新生成视频', message: '确定重新生成视频片段？将新增一个视频版本。', confirmText: '重新生成' })) return
   // 重新生成前先持久化当前编辑中的场景提示词
   store.updateScenePrompt(line.id, scenePromptDraft.value)
   store.generateShotFor(line.id, shotPromptDraft.value, { ...optionsDraft.value })
@@ -133,7 +134,7 @@ const cancel = () => store.closeEditor()
     <div v-if="store.editingLine" class="modal-mask" @click.self="cancel">
       <div class="modal">
         <header class="modal-header">
-          <h3>编辑分镜内容</h3>
+          <h3>编辑视频内容</h3>
           <button class="close-btn" title="关闭" @click="cancel"><AppIcon name="close" :size="14" /></button>
         </header>
 
@@ -146,7 +147,7 @@ const cancel = () => store.closeEditor()
             <div class="pcard" :class="{ open: activeTab === 'cast' }">
               <div class="pcard-media" title="点击展开人物调整" @click="activeTab = 'cast'">
                 <div v-if="castOfLine.length" class="pcard-avatars">
-                  <img
+                  <CharacterPortrait
                     v-for="dh in castOfLine"
                     :key="dh.id"
                     :src="dh.avatar"
@@ -163,14 +164,14 @@ const cancel = () => store.closeEditor()
               </button>
             </div>
 
-            <!-- 分镜预览 -->
+            <!-- 视频预览 -->
             <div class="pcard" :class="{ open: activeTab === 'shot' }">
               <div class="pcard-media" title="点击播放当前片段" @click="onShotPreviewClick">
-                <img v-if="shotCover" :src="shotCover" alt="分镜预览" />
+                <img v-if="shotCover" :src="shotCover" alt="视频预览" />
                 <video v-else-if="shotVideo" :src="shotVideo" preload="metadata" muted />
-                <span v-else class="pcard-empty"><AppIcon name="movie" :size="24" />暂无分镜</span>
+                <span v-else class="pcard-empty"><AppIcon name="movie" :size="24" />暂无视频</span>
                 <span v-if="shotVideo || shotCover" class="pcard-play"><AppIcon name="play" :size="16" /></span>
-                <ImageZoom :src="shotOriginalCover" alt="分镜原图预览" />
+                <ImageZoom :src="shotOriginalCover" alt="视频封面原图预览" />
                 <span v-if="store.editingLine.shot.assets.length > 1" class="pcard-badge">
                   {{ store.editingLine.shot.assets.length }} 版
                 </span>
@@ -180,7 +181,7 @@ const cancel = () => store.closeEditor()
               </div>
               <button class="pcard-tab" :class="{ active: activeTab === 'shot' }" @click="activeTab = 'shot'">
                 <AppIcon name="movie" :size="13" />
-                分镜
+                视频
               </button>
             </div>
 
@@ -223,7 +224,7 @@ const cancel = () => store.closeEditor()
                   :class="{ active: store.editingLine.digitalHumanIds.includes(dh.id) }"
                   @click="store.toggleLineHuman(store.editingLine.id, dh.id)"
                 >
-                  <img :src="dh.avatar" :alt="dh.name" />
+                  <CharacterPortrait :src="dh.avatar" :alt="dh.name" />
                   <span>{{ dh.name }}</span>
                   <span v-if="store.editingLine.digitalHumanIds.includes(dh.id)" class="pick-mark"><AppIcon name="check" :size="12" /></span>
                 </button>
@@ -235,8 +236,8 @@ const cancel = () => store.closeEditor()
           <!-- 分镜调整面板 -->
           <div v-if="activeTab === 'shot'" class="tab-panel">
             <template v-if="!isGeneral">
-              <p class="panel-title">歌词（当前分镜）</p>
-              <input v-model="lyricsDraft" class="lyrics-input" placeholder="输入这句分镜对应的歌词…" />
+              <p class="panel-title">歌词（当前视频）</p>
+              <input v-model="lyricsDraft" class="lyrics-input" placeholder="输入这段视频对应的歌词…" />
               <p v-if="lyricsTranslation" class="lyrics-zh-hint">中文翻译：{{ lyricsTranslation }}</p>
             </template>
             <p v-else class="general-shot-tip">
@@ -299,7 +300,7 @@ const cancel = () => store.closeEditor()
               </label>
             </div>
 
-            <p class="panel-title mt">分镜提示词</p>
+            <p class="panel-title mt">视频提示词</p>
             <div class="prompt-editor">
               <textarea
                 v-model="shotPromptDraft"
@@ -314,20 +315,41 @@ const cancel = () => store.closeEditor()
               >
                 <span v-if="store.editingLine.shot.status === 'generating'" class="spinner" />
                 <AppIcon v-else name="movie" :size="14" />
-                {{ store.editingLine.shot.assets.length ? '重新生成分镜' : '生成分镜' }}
+                {{ store.editingLine.shot.assets.length ? '重新生成视频' : '生成视频' }}
               </button>
             </div>
           </div>
 
           <!-- 场景调整面板 -->
           <div v-if="activeTab === 'scene'" class="tab-panel">
+            <p class="panel-title">生成参数</p>
+            <div class="gen-options scene-gen-options">
+              <label class="opt-item">
+                <span class="opt-label">清晰度</span>
+                <select v-model="optionsDraft.resolution" class="opt-select">
+                  <option v-for="r in resolutionChoices" :key="r" :value="r">{{ r }}</option>
+                </select>
+              </label>
+              <label class="opt-item">
+                <span class="opt-label">画幅</span>
+                <select v-model="optionsDraft.ratio" class="opt-select">
+                  <option v-for="r in ratioChoices" :key="r" :value="r">{{ r }}</option>
+                </select>
+              </label>
+              <label class="opt-item">
+                <span class="opt-label">图片模型</span>
+                <select v-model="optionsDraft.imageModel" class="opt-select" disabled>
+                  <option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
+                </select>
+              </label>
+            </div>
             <p class="panel-title">场景提示词</p>
             <div class="prompt-editor">
               <textarea
                 v-model="scenePromptDraft"
                 class="prompt-input"
                 rows="3"
-                placeholder="描述这个分镜的背景场景：环境、光线、色调、氛围…"
+                placeholder="描述这段视频的背景场景：环境、光线、色调、氛围…"
               />
               <button
                 class="btn-outline prompt-action"
@@ -910,5 +932,21 @@ img.preview-media {
   margin: 4px 0 0;
   font-size: 13px;
   opacity: 0.85;
+}
+.pcard-avatars .character-portrait {
+  width: 96px;
+  height: 54px;
+  margin-left: -12px;
+  border: 2px solid #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+.pcard-avatars .character-portrait:first-child {
+  margin-left: 0;
+}
+.cast-pick .character-portrait {
+  width: 24px;
+  height: 32px;
+  border-radius: 6px;
 }
 </style>

@@ -27,7 +27,7 @@ async function createProject(page: Page, name: string) {
   await page.locator('.create-form').getByRole('button', { name: '创建' }).click()
   await expect(page.getByText(name, { exact: true })).toBeVisible()
   await expect(page.locator('.song-folder.current').filter({ hasText: name })).toBeVisible({ timeout: 30_000 })
-  await expect(page.locator('.script-editor .header-actions').getByRole('button', { name: '通用分镜', exact: true })).toBeEnabled()
+  await expect(page.locator('.script-editor .header-actions').getByRole('button', { name: '通用 MV 视频', exact: true })).toBeEnabled()
   await capture(page, `${name}-project-created`)
 }
 
@@ -42,7 +42,7 @@ async function generateAllMedia(page: Page, count: number, prefix: string) {
   for (let index = 0; index < count; index++) {
     const line = page.locator('.line-wrapper').nth(index)
     await line.locator('.shot-thumb').click({ position: { x: 6, y: 6 } })
-    const dialog = page.locator('.modal').filter({ hasText: '编辑分镜内容' })
+    const dialog = page.locator('.modal').filter({ hasText: '编辑视频内容' })
     await expect(dialog).toBeVisible()
     await dialog.getByRole('button', { name: '生成场景', exact: true }).click()
     await capture(page, `${prefix}-line-${index + 1}-scene-started`)
@@ -53,7 +53,7 @@ async function generateAllMedia(page: Page, count: number, prefix: string) {
 
   for (let index = 0; index < count; index++) {
     const line = page.locator('.line-wrapper').nth(index)
-    await line.getByRole('button', { name: '生成视频片段（场景 × 分镜 × 角色）' }).click()
+    await line.getByRole('button', { name: '生成视频片段（场景 × 视频提示词 × 角色）' }).click()
     await capture(page, `${prefix}-line-${index + 1}-video-started`)
     await expect(line.locator('.shot-thumb video')).toHaveCount(1, { timeout: 25 * 60_000 })
   }
@@ -61,7 +61,7 @@ async function generateAllMedia(page: Page, count: number, prefix: string) {
   await capture(page, `${prefix}-all-videos-complete`)
 
   await page.locator('.line-wrapper').first().click()
-  const reopenedEditor = page.locator('.modal').filter({ hasText: '编辑分镜内容' })
+  const reopenedEditor = page.locator('.modal').filter({ hasText: '编辑视频内容' })
   if (await reopenedEditor.isVisible()) await reopenedEditor.getByTitle('关闭').click()
   await expect(page.locator('.player-panel video')).toBeVisible()
   await capture(page, `${prefix}-video-player-ready`)
@@ -75,13 +75,13 @@ test('ASS and general storyboard complete real frontend journeys through generat
   await page.getByLabel('用户名').fill(username)
   await page.getByLabel('密码').fill(password)
   await page.getByRole('button', { name: '登录' }).click()
-  await expect(page.getByRole('heading', { name: '分镜编辑器' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '视频编辑器' })).toBeVisible()
   if (exportOnly) {
-    const task = page.getByRole('button', { name: /通用分镜 ·/ }).last()
+    const task = page.getByRole('button', { name: /通用 MV 视频 ·/ }).last()
     await task.click()
     await expect(page.locator('.line-wrapper .shot-thumb video')).toHaveCount(2, { timeout: 30_000 })
     await page.locator('.line-wrapper').first().click()
-    const editor = page.locator('.modal').filter({ hasText: '编辑分镜内容' })
+    const editor = page.locator('.modal').filter({ hasText: '编辑视频内容' })
     if (await editor.isVisible()) await editor.getByTitle('关闭').click()
     await expect(page.locator('.player-panel video')).toBeVisible()
     await capture(page, 'general-video-player-ready')
@@ -96,7 +96,7 @@ test('ASS and general storyboard complete real frontend journeys through generat
 
   if (!generalOnly) {
     await createProject(page, `ASS 全链路真实验收${projectSuffix}`)
-    await page.locator('.script-editor .header-actions').getByRole('button', { name: 'ASS 分镜', exact: true }).click()
+    await page.locator('.script-editor .header-actions').getByRole('button', { name: 'ASS 视频', exact: true }).click()
     await page.locator('input[type="file"][accept=".ass"]').setInputFiles(assFixture)
     await page.locator('.role-card').nth(0).click()
     await page.locator('.role-card').nth(16).click()
@@ -106,9 +106,9 @@ test('ASS and general storyboard complete real frontend journeys through generat
     await generateAllMedia(page, 2, 'ass')
   }
 
-  await createProject(page, `通用分镜全链路真实验收${projectSuffix}`)
-  await page.locator('.script-editor .header-actions').getByRole('button', { name: '通用分镜', exact: true }).click()
-  const general = page.locator('.modal').filter({ hasText: '通用分镜' })
+  await createProject(page, `通用 MV 视频全链路真实验收${projectSuffix}`)
+  await page.locator('.script-editor .header-actions').getByRole('button', { name: '通用 MV 视频', exact: true }).click()
+  const general = page.locator('.modal').filter({ hasText: '通用 MV 视频' })
   await general.locator('.cast-item').nth(17).click()
   await general.getByLabel('空镜数量').fill('1')
   await general.getByLabel('人物镜数量').fill('1')

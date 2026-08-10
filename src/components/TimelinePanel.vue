@@ -93,7 +93,7 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
   <section class="panel timeline-panel">
     <header class="panel-header">
       <div class="title-group">
-        <h2>分镜时间轴</h2>
+        <h2>视频时间轴</h2>
         <span class="badge-success">已同步</span>
       </div>
     </header>
@@ -104,7 +104,7 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
         <div class="track-label-spacer" />
         <div class="track-label">
           <span class="track-icon"><AppIcon name="movie" :size="15" /></span>
-          <span>分镜轨道</span>
+          <span>视频轨道</span>
         </div>
       </div>
 

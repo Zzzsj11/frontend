@@ -1,0 +1,6 @@
+services:
+  frontend:
+    build:
+      args:
+        NODE_BASE_IMAGE: ${LOCAL_NODE_BASE_IMAGE:-docker.1ms.run/library/node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32}
+        NGINX_BASE_IMAGE: ${LOCAL_NGINX_BASE_IMAGE:-docker.1ms.run/library/nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10}

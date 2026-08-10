@@ -79,7 +79,7 @@ export interface MagicScriptRequest {
 
 /** POST /api/script/magic — 根据歌曲编号 + ass 字幕 + 已选角色生成一套 MV 脚本 */
 export async function generateMagicScript(req?: MagicScriptRequest): Promise<MagicScript & { taskId: string }> {
-  if (!req) throw new Error('缺少 ASS 分镜参数')
+  if (!req) throw new Error('缺少 ASS 视频参数')
   if (!req.projectId) throw new Error('请先选择歌曲项目')
   const form = new FormData()
   form.append('song_id', req.songId)
@@ -204,8 +204,9 @@ export async function generateSceneImage(
   storyboardLineId?: string,
   ratio: ShotGenOptions['ratio'] = '16:9',
   imageModel?: ShotGenOptions['imageModel'],
+  resolution: ShotGenOptions['resolution'] = '720p',
 ): Promise<{ imageUrl: string; thumbnailUrl?: string }> {
-  return mediaGen.generateScene(scenePrompt, projectTaskId, storyboardLineId, ratio, imageModel)
+  return mediaGen.generateScene(scenePrompt, projectTaskId, storyboardLineId, ratio, imageModel, resolution)
 }
 
 /** POST /api/shot/generate-video — 根据场景 + 分镜提示词 + 出演角色（可空/可多人）+ 生成参数（清晰度/时长/画幅）生成分镜视频片段 */

@@ -59,22 +59,43 @@ def parse_ass(content: bytes) -> tuple[list[AssCue], str]:
     return cues, encoding
 
 
-def group_cues(cues: list[AssCue], max_duration: float = 10.0) -> list[dict[str, Any]]:
-    groups: list[list[AssCue]] = []
-    current: list[AssCue] = []
-    for cue in cues:
-        if current and (cue.start - current[-1].end > 1.5 or cue.end - current[0].start > max_duration):
-            groups.append(current)
-            current = []
-        current.append(cue)
-    if current:
-        groups.append(current)
-    return [
-        {
-            "index": index,
-            "start": round(group[0].start, 2),
-            "end": round(group[-1].end, 2),
-            "lyrics": " ".join(item.text for item in group),
-        }
-        for index, group in enumerate(groups)
-    ]
+def group_cues(cues: list[AssCue], max_duration: float = 15.0) -> list[dict[str, Any]]:
+    """每句歌词独立成镜，并把超过 2 秒的前奏、间奏拆成结构性空镜。"""
+    max_duration = min(15.0, max(4.0, max_duration or 15.0))
+    segments: list[dict[str, Any]] = []
+
+    def append_gap(start: float, end: float, segment_type: str) -> None:
+        duration = round(end - start, 2)
+        if duration <= 2:
+            return
+        count = max(1, int((duration + max_duration - 0.001) // max_duration))
+        for part in range(count):
+            part_start = start + duration * part / count
+            part_end = start + duration * (part + 1) / count
+            label = "前奏" if segment_type == "intro" else "间奏"
+            if count > 1:
+                label = f"{label} {part + 1}/{count}"
+            segments.append(
+                {
+                    "start": round(part_start, 2),
+                    "end": round(part_end, 2),
+                    "lyrics": "",
+                    "segmentType": segment_type,
+                    "timelineLabel": label,
+                }
+            )
+
+    append_gap(0.0, cues[0].start, "intro")
+    for index, cue in enumerate(cues):
+        segments.append(
+            {
+                "start": round(cue.start, 2),
+                "end": round(cue.end, 2),
+                "lyrics": cue.text,
+                "segmentType": "lyric",
+                "timelineLabel": cue.text,
+            }
+        )
+        if index + 1 < len(cues):
+            append_gap(cue.end, cues[index + 1].start, "interlude")
+    return [{"index": index, **segment} for index, segment in enumerate(segments)]

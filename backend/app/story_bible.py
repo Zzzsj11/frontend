@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from .media_constraints import MAX_VIDEO_DURATION, MIN_VIDEO_DURATION
+from .media_constraints import MAX_VIDEO_DURATION, MIN_VIDEO_DURATION, normalize_video_duration
 
-STORY_BIBLE_VERSION = "story-bible-v3"
+STORY_BIBLE_VERSION = "story-bible-v4"
 
 
 def _stage(index: int, total: int) -> str:
@@ -32,7 +32,18 @@ def build_ass_story_bible(*, segments: list[dict[str, Any]], emotion: dict[str, 
             "index": index,
             "stage": _stage(index, total),
             "lyrics": segment.get("lyrics", ""),
+            "segmentType": segment.get("segmentType", "lyric"),
+            "timelineLabel": segment.get("timelineLabel") or segment.get("lyrics", ""),
             "requiredCharacterIds": list(plan["requiredCharacterIds"]),
+            "sourceDuration": plan.get("sourceDuration", round(max(0.0, float(segment.get("end") or 0) - float(segment.get("start") or 0)), 2)),
+            "gapBefore": plan.get("gapBefore", 0.0),
+            "gapAfter": plan.get("gapAfter", 0.0),
+            "gapAfterAllocation": plan.get("gapAfterAllocation", "none"),
+            "materialDuration": plan.get("materialDuration", round(max(0.0, float(segment.get("end") or 0) - float(segment.get("start") or 0)), 2)),
+            "generationDuration": plan.get(
+                "generationDuration",
+                normalize_video_duration(plan.get("materialDuration", float(segment.get("end") or 0) - float(segment.get("start") or 0))),
+            ),
         }
         for index, (segment, plan) in enumerate(zip(segments, outline["shots"], strict=True))
     ]
@@ -56,7 +67,7 @@ def build_ass_story_bible(*, segments: list[dict[str, Any]], emotion: dict[str, 
     }
 
 
-def build_general_story_bible(*, config: dict[str, Any], definitions: list[tuple[str, tuple[str, str], list[str]]]) -> dict[str, Any]:
+def build_general_story_bible(*, config: dict[str, Any], definitions: list[tuple[str, tuple[str, str], list[str]]], durations: list[float]) -> dict[str, Any]:
     total = len(definitions)
     return {
         "version": STORY_BIBLE_VERSION,
@@ -69,7 +80,16 @@ def build_general_story_bible(*, config: dict[str, Any], definitions: list[tuple
         },
         "characterPolicy": "空镜严禁人物；人物镜必须完整使用本镜预分配角色，角色顺序不得改变。",
         "shots": [
-            {"index": index, "shotType": shot_type, "stage": _stage(index, total), "outlineScene": outline[0], "outlineShot": outline[1], "requiredCharacterIds": roles}
+            {
+                "index": index,
+                "shotType": shot_type,
+                "stage": _stage(index, total),
+                "outlineScene": outline[0],
+                "outlineShot": outline[1],
+                "requiredCharacterIds": roles,
+                "materialDuration": durations[index],
+                "generationDuration": normalize_video_duration(durations[index]),
+            }
             for index, (shot_type, outline, roles) in enumerate(definitions)
         ],
     }

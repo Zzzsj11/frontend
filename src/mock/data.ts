@@ -2,6 +2,7 @@ let idSeed = 0
 export const nextId = (prefix = 'line') => `${prefix}-${Date.now()}-${idSeed++}`
 
 export interface MagicScript {
+  title: string
   cast: string[]
   lines: Array<{
     id?: string
@@ -9,6 +10,8 @@ export interface MagicScript {
     scenePrompt: string
     shotPrompt: string
     digitalHumanIds: string[]
+    plannedDuration?: number
+    shotOptions?: import('../types').ShotGenOptions
   }>
 }
 

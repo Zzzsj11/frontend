@@ -194,8 +194,8 @@ const toggleFullscreen = () => {
         playsinline
         @loadeddata="syncVideo"
       />
-      <img v-else-if="currentImage" :src="currentImage" alt="分镜预览" class="preview-img" />
-      <p v-else class="preview-placeholder">生成分镜后在此查看预览</p>
+      <img v-else-if="currentImage" :src="currentImage" alt="视频预览" class="preview-img" />
+      <p v-else class="preview-placeholder">生成视频后在此查看预览</p>
       <!-- MV 歌词字幕（非中文歌词附中文翻译） -->
       <div v-if="store.currentLine?.lyrics" class="preview-lyrics" :class="{ 'fs-lift': isFullscreen }">
         <p class="lyric-line">{{ store.currentLine.lyrics }}</p>
@@ -252,8 +252,8 @@ const toggleFullscreen = () => {
           @change="store.setPlayMode('single', ($event.target as HTMLInputElement).checked)"
         />
         <span class="check-text">
-          <strong>单个分镜</strong>
-          <small>仅播放当前选中的分镜</small>
+          <strong>单个视频</strong>
+          <small>仅播放当前选中的视频</small>
         </span>
       </label>
       <label class="check-item">

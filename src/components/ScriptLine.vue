@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { ScriptLine } from '../types'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
+import CharacterPortrait from './CharacterPortrait.vue'
 import ImageZoom from './ImageZoom.vue'
 import { confirmDialog } from '../composables/useConfirmDialog'
 
@@ -39,8 +40,8 @@ const openThumbnailEditor = () => {
 // 生成 / 重新生成分镜视频片段：已有片段时二次确认，避免误触
 const onGenerateShot = async () => {
   if (props.line.shot.status === 'done' && !await confirmDialog({
-    title: '重新生成分镜',
-    message: '确定重新生成该分镜视频片段？将新增一个视频版本。',
+    title: '重新生成视频',
+    message: '确定重新生成该视频片段？将新增一个视频版本。',
     confirmText: '重新生成',
   })) return
   store.generateShotFor(props.line.id)
@@ -55,16 +56,16 @@ const onGenerateShot = async () => {
     <!-- 分镜缩略图 -->
     <div
       class="shot-thumb"
-      :title="!line.scene.imageUrl && line.shot.assets.length ? '编辑分镜' : '编辑场景'"
+      :title="!line.scene.imageUrl && line.shot.assets.length ? '编辑视频' : '编辑场景'"
       @click.stop="openThumbnailEditor"
     >
       <video v-if="video" :src="video" preload="metadata" muted />
-      <img v-else-if="cover" :src="cover" alt="分镜缩略图" />
+      <img v-else-if="cover" :src="cover" alt="视频缩略图" />
       <span v-else class="thumb-placeholder"><AppIcon name="image" :size="18" /></span>
       <div v-if="line.shot.status === 'generating' || line.scene.status === 'generating'" class="thumb-loading">
         <span class="spinner light" />
       </div>
-      <ImageZoom :src="originalCover" alt="分镜原图预览" />
+      <ImageZoom :src="originalCover" alt="视频封面原图预览" />
     </div>
 
     <!-- 出演角色（叠放展示，空 = 空镜头） -->
@@ -74,7 +75,7 @@ const onGenerateShot = async () => {
       :title="`编辑人物 · 出演：${humans.map((h) => h.name).join(' / ')}`"
       @click.stop="store.openEditor(line.id, 'cast')"
     >
-      <img v-for="dh in humans" :key="dh.id" class="dh-chip" :src="dh.avatar" :alt="dh.name" />
+      <CharacterPortrait v-for="dh in humans" :key="dh.id" class="dh-chip" :src="dh.avatar" :alt="dh.name" />
     </div>
 
     <!-- 歌词 + 提示词摘要 -->
@@ -90,10 +91,10 @@ const onGenerateShot = async () => {
         <span class="shot-type" :class="line.shotType">{{ line.shotType === 'empty' ? '空镜' : '人物镜' }}</span>
         <span v-if="line.plannedDuration" class="planned-duration">预计 {{ line.plannedDuration }} 秒</span>
       </div>
-      <p v-else class="lyrics editable-text" @click.stop="openShotDetail">{{ line.lyrics || '（未填写歌词）' }}</p>
+      <p v-else class="lyrics editable-text" @click.stop="openShotDetail">{{ line.lyrics || line.shotOptions?.timelineLabel || '（未填写歌词）' }}</p>
       <p v-if="!isGeneral && translation" class="lyrics-zh editable-text" @click.stop="openShotDetail"><span class="zh-tag">译</span>{{ translation }}</p>
       <p v-if="isGeneral" class="scene-summary editable-text" @click.stop="openSceneDetail">{{ line.scenePrompt || '暂无场景提示词' }}</p>
-      <p class="prompt editable-text" @click.stop="openShotDetail">{{ line.shotPrompt || line.scenePrompt || '暂无提示词，点击编辑场景与分镜' }}</p>
+      <p class="prompt editable-text" @click.stop="openShotDetail">{{ line.shotPrompt || line.scenePrompt || '暂无提示词，点击编辑场景与视频' }}</p>
     </div>
 
     <div class="line-actions" @click.stop>
@@ -102,7 +103,7 @@ const onGenerateShot = async () => {
         class="icon-btn"
         :class="{ active: line.shot.status === 'done' }"
         :disabled="line.shot.status === 'generating'"
-        :title="line.shot.status === 'done' ? '重新生成视频片段' : '生成视频片段（场景 × 分镜 × 角色）'"
+        :title="line.shot.status === 'done' ? '重新生成视频片段' : '生成视频片段（场景 × 视频提示词 × 角色）'"
         @click="onGenerateShot"
       >
         <span v-if="line.shot.status === 'generating'" class="spinner" />

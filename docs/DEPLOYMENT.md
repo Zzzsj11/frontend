@@ -1,24 +1,403 @@
-# 发布与环境
+# 部署指南（v1.0.0 前）
 
-Local、Staging、Production 使用同一镜像，不同数据库、Redis、TOS 前缀和 Secret。镜像使用不可变标签 `git-<full-sha>`，存放腾讯云 TCR。
+本文给维护人员和 Code Agent 提供可直接照做的部署手册。当前只维护两个环境：
 
-GitHub Secrets：`TCR_NAMESPACE`、`TCR_USERNAME`、`TCR_PASSWORD`、`DEPLOY_SSH_KEY`、`DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_PATH`、`PUBLIC_URL`、`E2E_USERNAME`、`E2E_PASSWORD`。
+| 环境 | 用途 | 入口 | 数据 |
+| --- | --- | --- | --- |
+| 本地开发环境 | 开发、单元测试、完整预检 | `http://127.0.0.1:5173` | 本地 Docker 卷 |
+| 服务器测试环境 | 业务方手工验收、远程 API/Playwright 回归 | `http://124.222.219.76:5173` | 服务器 Docker 卷 |
 
-发布：PR 通过 CI；合并 main 后 images 工作流构建镜像；先手动运行 Deploy workflow 选择 staging；远程测试通过后用同一镜像标签发布 production。服务器 `.env.production` 至少设置 `REGISTRY`、`JWT_SECRET` 和供应商/TOS 配置。
+v1.0.0 完成前不建设预发布或正式生产环境，也不通过域名执行业务回归。远程测试固定使用服务器 IP 和 `5173` 端口。当前发布方式是在服务器从 Git 获取指定提交，并在服务器本地构建带 Git SHA 的版本化镜像。
 
-没有 TCR 时，可在生产服务器从干净且已推送的 Git 提交构建带完整 SHA 的本地不可变镜像。将 `.env.production` 中 `REGISTRY=mvagent-local`，然后执行：
+## 1. 部署原则
+
+- 只部署已经提交并推送到 Git 远端的代码，服务器工作区必须干净。
+- 禁止直接在服务器修改源码；修复必须在本地完成、测试、提交、推送后重新部署。
+- 镜像标签固定为 `git-<完整 commit SHA>`，便于定位和回滚。
+- `.env`、供应商 Token、TOS 密钥、数据库密码和 JWT 密钥只保存在服务器，不提交 Git。
+- 数据库结构只通过 Alembic 更新；发布时后端入口会自动执行迁移。
+- PostgreSQL 和 Redis 不开放公网，维护时使用 SSH 隧道。
+- 发布前在本地执行 `make preflight`；发布后执行服务器健康检查和远程自动化测试。
+
+## 2. 本地部署与验证
+
+### 2.1 首次准备
 
 ```bash
-git fetch origin main
-git merge --ff-only origin/main
-chmod +x scripts/deploy-local-images.sh
+git clone <仓库地址> mv-agent-frontend
+cd mv-agent-frontend
+cp backend/.env.example backend/.env
+```
+
+填写 `backend/.env`，并按项目现有供应商配置准备 `backend/.provider_config.py`。这两个文件均被 Git 忽略。然后运行：
+
+```bash
+docker compose up -d --build
+docker compose ps
+curl -fsS http://127.0.0.1:5173/api/health
+```
+
+浏览器访问 `http://127.0.0.1:5173`。首次管理员默认为 `admin / 123456`，仅限本地首次启动，登录后立即修改。
+
+### 2.2 发布前验证
+
+```bash
+make preflight
+git status --short
+git rev-parse HEAD
+```
+
+`make preflight` 必须通过，`git status --short` 应无输出。涉及用户旅程、API、权限或部署时，继续按 [`TESTING.md`](TESTING.md) 运行对应 Playwright。确认后提交并推送：
+
+```bash
+git push origin <当前分支>
+```
+
+记录准备部署的完整 SHA；服务器必须检出同一个 SHA，不能仅凭本地文件内容判断版本。
+
+## 3. 登录服务器
+
+当前服务器：
+
+```text
+主机：124.222.219.76
+用户：ubuntu
+项目目录：/opt/mv-agent-frontend
+Web 端口：5173
+```
+
+### 3.1 配置 SSH 公钥（首次执行）
+
+在开发机检查已有公钥：
+
+```bash
+ls -l ~/.ssh/*.pub
+```
+
+如没有，创建专用密钥。不要把私钥发给任何人，也不要提交仓库：
+
+```bash
+ssh-keygen -t ed25519 -C "mv-agent-deploy" -f ~/.ssh/mv_agent_deploy
+```
+
+将公钥安装到服务器（该步骤可能需要输入服务器登录密码）：
+
+```bash
+ssh-copy-id -i ~/.ssh/mv_agent_deploy.pub ubuntu@124.222.219.76
+```
+
+如果开发机没有 `ssh-copy-id`，显示公钥并由服务器管理员把这一整行追加到 `/home/ubuntu/.ssh/authorized_keys`：
+
+```bash
+cat ~/.ssh/mv_agent_deploy.pub
+```
+
+服务器端权限应为：
+
+```bash
+chmod 700 /home/ubuntu/.ssh
+chmod 600 /home/ubuntu/.ssh/authorized_keys
+chown -R ubuntu:ubuntu /home/ubuntu/.ssh
+```
+
+### 3.2 建议的本机 SSH 配置
+
+在 `~/.ssh/config` 添加以下内容，并执行 `chmod 600 ~/.ssh/config`：
+
+```sshconfig
+Host mv-agent-test
+  HostName 124.222.219.76
+  User ubuntu
+  IdentityFile ~/.ssh/mv_agent_deploy
+  IdentitiesOnly yes
+  ServerAliveInterval 30
+  ServerAliveCountMax 3
+```
+
+之后直接登录：
+
+```bash
+ssh mv-agent-test
+```
+
+未配置别名时使用：
+
+```bash
+ssh -i ~/.ssh/mv_agent_deploy ubuntu@124.222.219.76
+```
+
+首次连接要核对服务器指纹；不要在不确认主机身份时盲目接受变更后的指纹。登录后先确认身份和主机：
+
+```bash
+whoami
+hostname
+sudo -n true && echo "sudo 可用"
+```
+
+## 4. 服务器首次初始化
+
+以下操作只在新服务器首次部署时执行。服务器当前为 Ubuntu，使用 `sudo`，不要假设存在 `root` 登录或 `sudo` 用户组。
+
+### 4.1 安装基础工具和 Docker
+
+优先按照 Docker 官方 Ubuntu 仓库安装 Docker Engine 与 Compose v2。安装后验证：
+
+```bash
+docker --version
+docker compose version
+git --version
+curl --version
+```
+
+将 `ubuntu` 加入 Docker 用户组，然后重新登录使组权限生效：
+
+```bash
+sudo usermod -aG docker ubuntu
+exit
+```
+
+重新 SSH 登录后：
+
+```bash
+docker info >/dev/null && echo "Docker 可用"
+```
+
+### 4.2 创建项目目录并克隆
+
+```bash
+sudo mkdir -p /opt/mv-agent-frontend
+sudo chown ubuntu:ubuntu /opt/mv-agent-frontend
+git clone <仓库 SSH 或 HTTPS 地址> /opt/mv-agent-frontend
+cd /opt/mv-agent-frontend
+```
+
+私有仓库需要给服务器单独配置只读 deploy key 或其他受控 Git 凭证；不要复制个人 Git 私钥到服务器。
+
+### 4.3 创建服务器配置
+
+当前脚本内部沿用 `.env.production` 这个历史文件名，但它在 v1.0.0 前仅代表“服务器测试环境”，不代表正式生产环境：
+
+```bash
+cd /opt/mv-agent-frontend
+cp .env.deploy.example .env.production
+cp backend/.env.example backend/.env
+chmod 600 .env.production backend/.env
+```
+
+编辑 `.env.production`，至少替换：
+
+```dotenv
+REGISTRY=mvagent-local
+JWT_SECRET=<至少 32 字节的随机值>
+POSTGRES_DB=mvagent
+POSTGRES_USER=mvagent
+POSTGRES_PASSWORD=<强随机密码>
+FRONTEND_PORT=5173
+BACKEND_PORT=8000
+```
+
+可用以下命令分别生成 JWT 和数据库密码，输出只写入服务器配置，不发到聊天或日志：
+
+```bash
+openssl rand -hex 32
+openssl rand -base64 36
+```
+
+继续填写 `backend/.env` 与 `backend/.provider_config.py` 中的模型、TOS、余额查询等配置：
+
+```bash
+chmod 600 backend/.provider_config.py
+```
+
+统一供应商配置启用 `AIGC_TOKEN` 时，聊天地址和默认文本模型必须来自同一配置组；不要保留指向其他厂商的旧 `LLM_BASE_URL`、`LLM_API_KEY` 或 `LLM_MODEL`。任何核验命令都不得打印 Token。
+
+服务器安全组/防火墙只需对验收人员开放 SSH `22/tcp` 和 Web `5173/tcp`。后端 `8000` 只绑定回环地址，PostgreSQL/Redis 在服务器部署覆盖中不映射宿主机端口。
+
+## 5. 每次发布的标准流程
+
+### 5.1 本地侧
+
+```bash
+cd <本机仓库目录>/mv-agent-frontend
+make preflight
+git status --short
+git rev-parse HEAD
+git push origin <当前分支>
+```
+
+只有目标提交已进入服务器跟踪的分支后才继续。如果采用 `main`，应先通过正常合并流程进入 `main`。
+
+### 5.2 服务器获取精确版本
+
+```bash
+ssh mv-agent-test
+cd /opt/mv-agent-frontend
+git status --short
+git fetch --prune origin
+git switch main
+git pull --ff-only origin main
+git rev-parse HEAD
+```
+
+若 `git status --short` 有输出，立即停止。不要 stash、覆盖或删除未知文件；先查明服务器为何存在源码改动。确认 `git rev-parse HEAD` 与待发布 SHA 完全一致。
+
+### 5.3 构建版本化镜像并部署
+
+```bash
+cd /opt/mv-agent-frontend
+chmod +x scripts/deploy-local-images.sh scripts/deploy.sh
 DEPLOY_ENV=production ./scripts/deploy-local-images.sh
 ```
 
-脚本拒绝脏工作区，镜像标签固定为 `git-<full-sha>`，构建成功后仍通过 `scripts/deploy.sh` 完成健康检查和版本记录。该方式不依赖远程镜像仓库，但服务器需要保留足够的 Docker 构建磁盘空间；后续恢复 TCR 时无需改业务编排。
+这个命令会：
 
-服务器将 `.env.deploy.example` 复制为 `.env.staging` 或 `.env.production` 并替换所有占位值。手动命令：`DEPLOY_ENV=production ./scripts/deploy.sh git-<sha>`。脚本拉取镜像、启动服务、等待健康，并记录当前及上一版本。生产 PostgreSQL/Redis 不映射公网端口。
+1. 拒绝脏工作区；
+2. 读取当前完整 Git SHA；
+3. 构建 `mvagent-local/mv-agent-frontend:git-<sha>` 和后端镜像；
+4. 使用 Compose 更新容器，而不从远程镜像仓库拉取；
+5. 等待后端健康检查；
+6. 将当前和上一版本写入 `.deployed-version`、`.previous-version`。
 
-若使用 `backend/.provider_config.py` 中的统一供应商 `AIGC_TOKEN`，聊天地址和默认文本模型也必须由该配置组统一决定；不要在生产 `.env` 中保留指向其他厂商的旧 `LLM_BASE_URL`、`LLM_API_KEY` 或 `LLM_MODEL`。发布后可在容器内仅打印地址与模型（不得打印 Token）核对运行时配置。
+构建期间另开一个 SSH 会话观察资源，避免误以为进程卡死：
 
-首次部署后执行 `scripts/install-maintenance-cron.sh`，安装每 5 分钟健康检查和每日 03:15 数据库备份；Cron 日志写入项目 `logs/`。本地备份仍需按 `BACKUP-RESTORE.md` 同步到独立对象存储。
+```bash
+docker stats
+df -h
+docker system df
+```
+
+不要在构建未结束时重复启动第二次构建。失败时先保留完整日志，根据“8. 排障”处理。
+
+## 6. 发布后验证
+
+### 6.1 服务器内检查
+
+```bash
+cd /opt/mv-agent-frontend
+cat .deployed-version
+docker compose --env-file .env.production \
+  -f docker-compose.yml -f docker-compose.production.yml ps
+curl -fsS http://127.0.0.1:8000/api/health
+curl -fsS http://127.0.0.1:5173/api/health
+./scripts/online-health-check.sh
+```
+
+检查迁移和最近日志：
+
+```bash
+docker compose --env-file .env.production \
+  -f docker-compose.yml -f docker-compose.production.yml exec backend alembic current
+docker compose --env-file .env.production \
+  -f docker-compose.yml -f docker-compose.production.yml logs --tail=200 backend frontend
+```
+
+日志中不得出现持续重启、迁移失败、数据库认证失败或供应商密钥缺失。
+
+### 6.2 开发机远程验收
+
+```bash
+curl -fsS http://124.222.219.76:5173/api/health
+PLAYWRIGHT_BASE_URL=http://124.222.219.76:5173 \
+REMOTE_API_BASE_URL=http://124.222.219.76:5173 \
+npm run test:e2e
+```
+
+真实模型与媒体生成会产生费用，仅在明确需要全链路验收时按 [`REAL_FRONTEND_E2E_GUIDE.md`](REAL_FRONTEND_E2E_GUIDE.md) 显式开启。完整服务器验收顺序见 [`REMOTE_ACCEPTANCE_TEST_GUIDE.md`](REMOTE_ACCEPTANCE_TEST_GUIDE.md) 和 [`ONLINE_ACCEPTANCE_CHECKLIST.md`](ONLINE_ACCEPTANCE_CHECKLIST.md)。
+
+### 6.3 安装维护任务（首次成功部署后）
+
+```bash
+cd /opt/mv-agent-frontend
+./scripts/install-maintenance-cron.sh
+crontab -l
+```
+
+该脚本安装每 5 分钟健康检查和每日 03:15 PostgreSQL 备份，日志在项目 `logs/`。备份还需按 [`BACKUP-RESTORE.md`](BACKUP-RESTORE.md) 同步到独立对象存储。
+
+## 7. 数据库和 Redis 安全访问
+
+默认不开放数据库端口。需要从开发机维护 PostgreSQL 时建立 SSH 隧道：
+
+```bash
+ssh -N -L 15433:127.0.0.1:5433 mv-agent-test
+```
+
+但服务器部署覆盖默认移除了宿主机 PostgreSQL 端口；更稳妥的日常检查是在服务器容器内执行：
+
+```bash
+cd /opt/mv-agent-frontend
+set -a
+source .env.production
+set +a
+docker compose --env-file .env.production \
+  -f docker-compose.yml -f docker-compose.production.yml \
+  exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+```
+
+若确需 GUI 隧道访问，应创建只绑定 `127.0.0.1` 的运维覆盖文件，部署后立即移除；禁止将 `5432/5433` 或 `6379/6380` 暴露到 `0.0.0.0`。Redis 检查优先使用：
+
+```bash
+docker compose --env-file .env.production \
+  -f docker-compose.yml -f docker-compose.production.yml exec redis redis-cli ping
+```
+
+## 8. 常见故障排查
+
+### SSH 连接失败
+
+```bash
+ssh -vvv mv-agent-test
+```
+
+依次检查云安全组 `22/tcp`、用户名是否为 `ubuntu`、IdentityFile 是否正确、服务器 `authorized_keys` 权限和磁盘是否已满。`REMOTE HOST IDENTIFICATION HAS CHANGED` 必须先人工核对服务器指纹，不要直接删除 known_hosts 记录后重试。
+
+### Git 更新失败
+
+- `git status --short` 非空：停止部署，确认改动来源。
+- `git pull --ff-only` 失败：说明服务器分支发生分叉，禁止强制 reset；在本地整理分支后再部署。
+- 私有仓库认证失败：检查服务器 deploy key 是否仍有仓库只读权限。
+
+### Docker 构建慢或失败
+
+```bash
+docker system df
+df -h
+free -h
+journalctl -u docker --since "30 min ago" --no-pager
+```
+
+不要同时运行多个构建。只清理确认不再用于回滚的旧镜像；不要执行会删除卷的命令。依赖源变更必须先在本地验证并提交到 Git，禁止只改服务器 Dockerfile。
+
+### 服务不健康
+
+```bash
+docker compose --env-file .env.production \
+  -f docker-compose.yml -f docker-compose.production.yml ps
+docker compose --env-file .env.production \
+  -f docker-compose.yml -f docker-compose.production.yml logs --tail=300 backend
+curl -v http://127.0.0.1:8000/api/health
+```
+
+优先定位迁移、配置、数据库、Redis、磁盘和上游供应商错误，不要反复重启掩盖首个异常。
+
+## 9. 回滚
+
+先读取版本记录：
+
+```bash
+cd /opt/mv-agent-frontend
+cat .deployed-version
+cat .previous-version
+```
+
+服务器本地仍保留上一版本镜像时执行：
+
+```bash
+DEPLOY_ENV=production ./scripts/rollback.sh
+```
+
+回滚后重复第 6 节全部健康检查和核心远程测试。数据库迁移一般不自动 downgrade；涉及不兼容数据或破坏性迁移时，立即停止写入并按 [`ROLLBACK.md`](ROLLBACK.md) 与 [`INCIDENT-RUNBOOK.md`](INCIDENT-RUNBOOK.md) 处理。
+
+## 10. v1.0.0 后再评估的事项
+
+预发布、正式生产环境、域名/HTTPS、远程镜像仓库、自动发布审批、蓝绿或滚动发布均不属于当前部署路径。v1.0.0 功能与验收稳定后，再单独设计环境隔离、Secret 管理、容量、安全和发布治理；在此之前不要让未来方案干扰服务器测试环境的可重复部署。

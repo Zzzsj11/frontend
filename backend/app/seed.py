@@ -72,13 +72,20 @@ async def seed_system_data() -> None:
                         is_default=True,
                     )
                 )
-        style_id = "style-system-library"
-        style = await session.get(DigitalHumanStyleModel, style_id)
-        if not style:
-            style = DigitalHumanStyleModel(id=style_id, user_id=None, name="系统人物库", scope="system", sort_order=0)
-            session.add(style)
-        else:
-            style.deleted_at = None
+        system_style_specs = [
+            ("style-system-male", "男", 0),
+            ("style-system-female", "女", 1),
+            ("style-system-child", "儿童", 2),
+        ]
+        system_styles = {}
+        for style_id, style_name, sort_order in system_style_specs:
+            style = await session.get(DigitalHumanStyleModel, style_id)
+            if not style:
+                style = DigitalHumanStyleModel(id=style_id, user_id=None, name=style_name, scope="system", sort_order=sort_order)
+                session.add(style)
+            else:
+                style.name, style.scope, style.sort_order, style.deleted_at = style_name, "system", sort_order, None
+            system_styles[style_name] = style
         await session.flush()
 
         desired_ids = {f"dh-system-{item['asset_code']}" for item in SYSTEM_HUMANS}
@@ -90,7 +97,9 @@ async def seed_system_data() -> None:
             (
                 await session.execute(
                     select(DigitalHumanStyleModel).where(
-                        DigitalHumanStyleModel.scope == "system", DigitalHumanStyleModel.id != style_id, DigitalHumanStyleModel.deleted_at.is_(None)
+                        DigitalHumanStyleModel.scope == "system",
+                        DigitalHumanStyleModel.id.not_in([item[0] for item in system_style_specs]),
+                        DigitalHumanStyleModel.deleted_at.is_(None),
                     )
                 )
             )
@@ -103,6 +112,7 @@ async def seed_system_data() -> None:
         for data in SYSTEM_HUMANS:
             human_id = f"dh-system-{data['asset_code']}"
             human = await session.get(DigitalHumanModel, human_id)
+            style = system_styles[data["category"]]
             bucket, object_key = TosStorage._bucket_for(f"system/digital-humans/{data['asset_code']}.jpg")
             avatar_url = TosStorage._public_url(bucket, object_key)
             thumbnail_bucket, thumbnail_key = TosStorage._bucket_for(f"system/digital-humans/thumbnails/{data['asset_code']}.jpg")
@@ -119,7 +129,7 @@ async def seed_system_data() -> None:
                     description=data["appearance_style"],
                     avatar_url=avatar_url,
                     avatar_thumbnail_url=thumbnail_url,
-                    **data,
+                    **{key: value for key, value in data.items() if key != "category"},
                 )
                 session.add(human)
             else:
@@ -127,6 +137,8 @@ async def seed_system_data() -> None:
                 human.avatar_url, human.avatar_thumbnail_url = avatar_url, thumbnail_url
                 human.avatar_prompt, human.description = data["system_prompt"], data["appearance_style"]
                 for key, value in data.items():
+                    if key == "category":
+                        continue
                     setattr(human, key, value)
 
         for song_code, payload in SONG_EMOTIONS.items():

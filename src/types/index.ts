@@ -95,6 +95,8 @@ export interface ShotGenOptions {
   ratio: '16:9' | '9:16' | '4:3' | '1:1'
   imageModel: ImageModelId
   videoModel: VideoModelId
+  segmentType?: 'lyric' | 'intro' | 'interlude' | 'outro'
+  timelineLabel?: string
 }
 
 /** 脚本行（每一条 = 一个分镜） */
@@ -144,6 +146,14 @@ export interface StoryOutlineShot {
   emotionalFocus?: string
   cameraPurpose?: string
   motifIds?: string[]
+  sourceDuration?: number
+  gapBefore?: number
+  gapAfter?: number
+  gapAfterAllocation?: 'current' | 'next' | 'none'
+  materialDuration?: number
+  generationDuration?: number
+  segmentType?: 'lyric' | 'intro' | 'interlude' | 'outro'
+  timelineLabel?: string
 }
 
 export interface StoryBible {
@@ -202,6 +212,7 @@ export interface GeneralStoryboardResult {
     scenePrompt: string
     shotPrompt: string
     digitalHumanIds: string[]
+    shotOptions?: ShotGenOptions
     generationStatus?: ScriptLine['generationStatus']
   }>
 }

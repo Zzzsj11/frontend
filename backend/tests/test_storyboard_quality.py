@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from app.ass_storyboard import AssCue, group_cues
 from app.media_constraints import normalize_video_duration
 from app.schemas import VideoGenerationCreate
 from app.story_bible import build_ass_story_bible, exact_durations
@@ -35,6 +36,9 @@ def make_outline(segments, empty_indexes=(), role_ids=("a",)):
                 "emotionalFocus": "克制",
                 "cameraPurpose": "推进叙事",
                 "motifIds": ["rain"] if index < max(2, (len(segments) + 4) // 5) else [],
+                "gapAfterAllocation": "current"
+                if index + 1 < len(segments) and 0 < float(segments[index + 1].get("start") or 0) - float(_segment.get("end") or 0) <= 2
+                else "none",
             }
             for index, _segment in enumerate(segments)
         ],
@@ -47,6 +51,22 @@ def test_exact_durations_preserve_total_and_provider_limits() -> None:
     assert all(4 <= value <= 15 for value in durations)
     with pytest.raises(ValueError, match="28–105"):
         exact_durations(10, 7)
+
+
+def test_ass_timeline_adds_intro_and_splits_long_interludes() -> None:
+    segments = group_cues([AssCue(5, 8, "第一句"), AssCue(39, 42, "第二句")])
+    assert [item["segmentType"] for item in segments] == ["intro", "lyric", "interlude", "interlude", "interlude", "lyric"]
+    assert [item["timelineLabel"] for item in segments[2:5]] == ["间奏 1/3", "间奏 2/3", "间奏 3/3"]
+    assert all(item["end"] - item["start"] <= 15 for item in segments)
+    assert [item["index"] for item in segments] == list(range(6))
+    structural_indexes = {index for index, item in enumerate(segments) if item["segmentType"] != "lyric"}
+    outline = make_outline(segments, structural_indexes, ("a",))
+    normalized = _validate_ass_outline(outline, segments=segments, role_ids=["a"])
+    assert all(normalized["shots"][index]["shotType"] == "empty" for index in structural_indexes)
+    invalid = {**outline, "shots": [dict(item) for item in outline["shots"]]}
+    invalid["shots"][0] = {**invalid["shots"][0], "shotType": "character", "requiredCharacterIds": ["a"]}
+    with pytest.raises(ValueError, match="前奏、间奏和尾奏"):
+        _validate_ass_outline(invalid, segments=segments, role_ids=["a"])
 
 
 def test_video_duration_accepts_full_provider_range_and_normalizes_plans() -> None:
@@ -91,6 +111,23 @@ def test_ass_outline_rejects_too_many_or_consecutive_empty_shots() -> None:
     invalid["shots"][2] = {**invalid["shots"][2], "shotType": "empty", "requiredCharacterIds": [], "characterAction": "无人环境变化"}
     with pytest.raises(ValueError, match="人物镜不能少于|连续空镜"):
         _validate_ass_outline(invalid, segments=segments, role_ids=["a"])
+
+
+def test_ass_outline_allocates_short_lyric_gaps_to_material_duration() -> None:
+    segments = [
+        {"start": 1.0, "end": 3.0, "lyrics": "first"},
+        {"start": 4.0, "end": 6.0, "lyrics": "second"},
+        {"start": 9.0, "end": 11.0, "lyrics": "third"},
+    ]
+    outline = make_outline(segments, role_ids=("a",))
+    outline["shots"][0]["gapAfterAllocation"] = "next"
+    normalized = _validate_ass_outline(outline, segments=segments, role_ids=["a"])
+    assert normalized["shots"][0]["materialDuration"] == 2.0
+    assert normalized["shots"][0]["generationDuration"] == 4
+    assert normalized["shots"][1]["materialDuration"] == 3.0
+    assert normalized["shots"][1]["generationDuration"] == 4
+    assert normalized["shots"][1]["gapAfter"] == 3.0
+    assert normalized["shots"][1]["gapAfterAllocation"] == "none"
 
 
 def test_ass_outline_requires_character_actions_and_location_variety() -> None:
