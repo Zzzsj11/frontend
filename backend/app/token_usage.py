@@ -42,12 +42,21 @@ def add_token_usage(
 ) -> tuple[TokenUsageModel, dict[str, Any]]:
     normalized = normalize_usage(usage)
     item = TokenUsageModel(
-        id=f"usage-{uuid.uuid4().hex}", user_id=user_id, project_id=project_id,
-        project_task_id=project_task_id, storyboard_line_id=storyboard_line_id,
-        generation_job_id=generation_job_id, chat_session_id=chat_session_id,
-        operation=operation, provider=provider, model=model, request_id=request_id,
-        input_tokens=normalized["inputTokens"], output_tokens=normalized["outputTokens"],
-        cached_input_tokens=normalized["cachedInputTokens"], total_tokens=normalized["totalTokens"],
+        id=f"usage-{uuid.uuid4().hex}",
+        user_id=user_id,
+        project_id=project_id,
+        project_task_id=project_task_id,
+        storyboard_line_id=storyboard_line_id,
+        generation_job_id=generation_job_id,
+        chat_session_id=chat_session_id,
+        operation=operation,
+        provider=provider,
+        model=model,
+        request_id=request_id,
+        input_tokens=normalized["inputTokens"],
+        output_tokens=normalized["outputTokens"],
+        cached_input_tokens=normalized["cachedInputTokens"],
+        total_tokens=normalized["totalTokens"],
         raw_usage=normalized["raw"],
     )
     db.add(item)

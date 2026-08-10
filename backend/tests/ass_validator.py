@@ -5,7 +5,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-
 TIME_RE = re.compile(r"^(\d+):(\d{2}):(\d{2})[.](\d{2})$")
 
 
@@ -80,10 +79,7 @@ if __name__ == "__main__":
         target = Path(argument)
         try:
             result = validate(target)
-            print(
-                f"PASS {target.name}: encoding={result.encoding}, "
-                f"dialogues={result.dialogues}, range={result.first_start:.2f}s-{result.last_end:.2f}s"
-            )
+            print(f"PASS {target.name}: encoding={result.encoding}, dialogues={result.dialogues}, range={result.first_start:.2f}s-{result.last_end:.2f}s")
         except ValueError as exc:
             failed = True
             print(f"FAIL {target.name}: {exc}", file=sys.stderr)

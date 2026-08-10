@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import uuid
 import asyncio
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -80,7 +80,15 @@ async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, 
         raise ProviderError("生图成功但未返回图片地址")
     owner_prefix = f"users/{job.user_id}/generated/images"
     stored_assets = [await import_remote_image(url, owner_prefix) for url in urls]
-    return {"provider": "yinghe", "providerTaskId": task_id, "model": request.model or settings.image_model, "urls": [item[0] for item in stored_assets], "thumbnailUrls": [item[1] for item in stored_assets], "sourceUrls": urls, "usage": _usage(data) or _usage(created)}
+    return {
+        "provider": "yinghe",
+        "providerTaskId": task_id,
+        "model": request.model or settings.image_model,
+        "urls": [item[0] for item in stored_assets],
+        "thumbnailUrls": [item[1] for item in stored_assets],
+        "sourceUrls": urls,
+        "usage": _usage(data) or _usage(created),
+    }
 
 
 async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
@@ -89,10 +97,7 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
     base = settings.video_api_base_url.rstrip("/")
     headers = _headers(settings.video_api_key)
     content: list[dict[str, Any]] = [{"type": "text", "text": request.prompt}]
-    content.extend(
-        {"type": "image_url", "image_url": {"url": url}, "role": "reference_image"}
-        for url in request.image_urls
-    )
+    content.extend({"type": "image_url", "image_url": {"url": url}, "role": "reference_image"} for url in request.image_urls)
     payload = {
         "model": request.model or settings.video_model,
         "content": content,
@@ -116,7 +121,9 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
     owner_prefix = f"users/{job.user_id}/generated"
     stored_url = await import_remote(source_url, f"{owner_prefix}/videos", f"{task_id}.mp4")
     cover_url = data.get("coverUrl") or data.get("firstFrameUrl")
-    stored_cover, stored_cover_thumbnail = await import_remote_image(cover_url, f"{owner_prefix}/covers") if cover_url else await _video_first_frame(source_url, task_id, job.user_id)
+    stored_cover, stored_cover_thumbnail = (
+        await import_remote_image(cover_url, f"{owner_prefix}/covers") if cover_url else await _video_first_frame(source_url, task_id, job.user_id)
+    )
     return {
         "provider": "yinghe",
         "providerTaskId": task_id,
@@ -141,10 +148,24 @@ async def _video_first_frame(video_url: str, task_id: str, user_id: str | None) 
         cover_path = Path(temp_dir) / "cover.jpg"
         video_path.write_bytes(response.content)
         from imageio_ffmpeg import get_ffmpeg_exe
+
         process = await asyncio.create_subprocess_exec(
-            get_ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-y", "-ss", "0", "-i", str(video_path),
-            "-frames:v", "1", "-q:v", "2", str(cover_path),
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+            get_ffmpeg_exe(),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-ss",
+            "0",
+            "-i",
+            str(video_path),
+            "-frames:v",
+            "1",
+            "-q:v",
+            "2",
+            str(cover_path),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
         _, stderr = await process.communicate()
         if process.returncode or not cover_path.is_file():

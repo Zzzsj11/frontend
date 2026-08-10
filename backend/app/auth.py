@@ -18,7 +18,6 @@ from .config import settings
 from .database import database_session, session_factory
 from .models import RefreshTokenModel, UserModel, utcnow
 
-
 password_hasher = PasswordHasher()
 bearer = HTTPBearer(auto_error=False)
 REFRESH_COOKIE = "mv_refresh_token"
@@ -114,9 +113,7 @@ CurrentUser = Annotated[UserModel, Depends(require_user)]
 
 async def login(username: str, password: str) -> UserModel | None:
     async with session_factory() as session:
-        result = await session.execute(
-            select(UserModel).where(UserModel.username == username.strip().lower(), UserModel.deleted_at.is_(None))
-        )
+        result = await session.execute(select(UserModel).where(UserModel.username == username.strip().lower(), UserModel.deleted_at.is_(None)))
         user = result.scalar_one_or_none()
         if not user or user.status != "active" or not verify_password(user.password_hash, password):
             return None
@@ -155,11 +152,7 @@ async def revoke_refresh(raw_token: str | None) -> None:
         return
     now = utcnow()
     async with session_factory() as session:
-        result = await session.execute(
-            select(RefreshTokenModel).where(
-                RefreshTokenModel.token_hash == _token_hash(raw_token), RefreshTokenModel.deleted_at.is_(None)
-            )
-        )
+        result = await session.execute(select(RefreshTokenModel).where(RefreshTokenModel.token_hash == _token_hash(raw_token), RefreshTokenModel.deleted_at.is_(None)))
         token = result.scalar_one_or_none()
         if token:
             token.revoked_at = now

@@ -10,7 +10,6 @@ from fastapi import Request
 from .database import session_factory
 from .models import ApiErrorLogModel
 
-
 SENSITIVE_KEYS = {"password", "current_password", "new_password", "access_token", "refresh_token", "token", "authorization", "cookie"}
 
 
@@ -40,14 +39,23 @@ async def record_api_error(request: Request, *, status_code: int, error_type: st
     trace = "" if exc is None else "".join(traceback_module.format_exception(type(exc), exc, exc.__traceback__))[-12000:]
     try:
         async with session_factory() as db:
-            db.add(ApiErrorLogModel(
-                id=f"apierr-{uuid.uuid4().hex}", error_code=error_code,
-                user_id=getattr(request.state, "user_id", None), method=request.method,
-                path=request.url.path, query_string=request.url.query[:4000], status_code=status_code,
-                error_type=error_type[:160], message=message[:4000], request_payload=payload if payload is not None else await request_payload(request),
-                traceback=trace, client_ip=request.client.host if request.client else None,
-                user_agent=(request.headers.get("user-agent") or "")[:512] or None,
-            ))
+            db.add(
+                ApiErrorLogModel(
+                    id=f"apierr-{uuid.uuid4().hex}",
+                    error_code=error_code,
+                    user_id=getattr(request.state, "user_id", None),
+                    method=request.method,
+                    path=request.url.path,
+                    query_string=request.url.query[:4000],
+                    status_code=status_code,
+                    error_type=error_type[:160],
+                    message=message[:4000],
+                    request_payload=payload if payload is not None else await request_payload(request),
+                    traceback=trace,
+                    client_ip=request.client.host if request.client else None,
+                    user_agent=(request.headers.get("user-agent") or "")[:512] or None,
+                )
+            )
             await db.commit()
     except Exception:
         pass

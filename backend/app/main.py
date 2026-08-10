@@ -4,23 +4,23 @@ import asyncio
 import json
 import re
 import time
-import uuid
 from contextlib import asynccontextmanager
 from typing import Annotated, Literal
-from PIL import UnidentifiedImageError
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from starlette.exceptions import HTTPException as StarletteHTTPException
+from PIL import UnidentifiedImageError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from .admin import public_router as model_options_router
+from .admin import router as admin_router
 from .ass_storyboard import group_cues, parse_ass
 from .auth import (
     CurrentUser,
-    REFRESH_COOKIE,
     clear_refresh_cookie,
     hash_password,
     issue_tokens,
@@ -32,22 +32,22 @@ from .auth import (
     user_public,
     verify_password,
 )
-from .chat import chat_manager
 from .balance import query_business_balance
+from .chat import chat_manager
 from .config import settings
 from .database import close_database, database_ok, database_session, init_database
-from .domain import owned_line, owned_project, owned_task, router as domain_router, uid, visible_humans
+from .domain import owned_line, owned_project, owned_task, uid, visible_humans
+from .domain import router as domain_router
+from .error_logging import record_api_error, request_payload
 from .jobs import jobs
 from .media_constraints import normalize_video_duration
 from .models import AiModelModel, ProjectCastModel, ProjectTaskModel, SongEmotionProfileModel, StoryboardLineCastModel, StoryboardLineModel, UserModel
 from .providers import generate_image, generate_video
 from .redis_store import close_redis, redis_ok
 from .schemas import ChatMessageCreate, ChatSessionCreate, ImageGenerationCreate, LoginCreate, PasswordChange, RemoteImportCreate, VideoGenerationCreate
-from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
 from .seed import recover_stale_storyboard_generation, seed_system_data
+from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
 from .story_bible import build_ass_story_bible
-from .error_logging import record_api_error, request_payload
-from .admin import router as admin_router, public_router as model_options_router
 
 
 @asynccontextmanager
@@ -91,9 +91,15 @@ async def unhandled_error_handler(request: Request, exc: Exception) -> JSONRespo
 def sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
+
 async def require_active_model(db: AsyncSession, code: str, modality: str) -> None:
-    model=(await db.execute(select(AiModelModel).where(AiModelModel.code==code,AiModelModel.modality==modality,AiModelModel.status=="active",AiModelModel.deleted_at.is_(None)))).scalar_one_or_none()
-    if not model: raise HTTPException(422,f"不支持或已停用的{modality}模型：{code}")
+    model = (
+        await db.execute(
+            select(AiModelModel).where(AiModelModel.code == code, AiModelModel.modality == modality, AiModelModel.status == "active", AiModelModel.deleted_at.is_(None))
+        )
+    ).scalar_one_or_none()
+    if not model:
+        raise HTTPException(422, f"不支持或已停用的{modality}模型：{code}")
 
 
 @app.get("/api/health")
@@ -101,7 +107,15 @@ async def health(response: Response) -> dict:
     postgres, redis = await database_ok(), await redis_ok()
     if not postgres or not redis:
         response.status_code = 503
-    return {"ok": postgres and redis, "postgres": postgres, "redis": redis, "storage": settings.storage_backend, "chatConfigured": bool(settings.llm_api_key), "imageConfigured": bool(settings.image_api_key), "videoConfigured": bool(settings.video_api_key)}
+    return {
+        "ok": postgres and redis,
+        "postgres": postgres,
+        "redis": redis,
+        "storage": settings.storage_backend,
+        "chatConfigured": bool(settings.llm_api_key),
+        "imageConfigured": bool(settings.image_api_key),
+        "videoConfigured": bool(settings.video_api_key),
+    }
 
 
 @app.get("/api/account/balance")
@@ -194,13 +208,18 @@ async def create_ass_storyboard(
     db: AsyncSession = Depends(database_session),
 ) -> dict:
     await owned_project(db, user.id, project_id)
-    await require_active_model(db,image_model,"image"); await require_active_model(db,video_model,"video")
+    await require_active_model(db, image_model, "image")
+    await require_active_model(db, video_model, "video")
     if not ass_file.filename or not ass_file.filename.lower().endswith(".ass"):
         raise HTTPException(422, "仅支持 .ass 文件")
     number_candidates = list(dict.fromkeys(re.findall(r"(?<!\d)\d{5,}(?!\d)", ass_file.filename)))
     if not number_candidates:
         raise HTTPException(422, "ASS 文件名中未找到歌曲数字编号，请使用包含歌曲编号的文件名")
-    profiles = list((await db.execute(select(SongEmotionProfileModel).where(SongEmotionProfileModel.song_code.in_(number_candidates), SongEmotionProfileModel.deleted_at.is_(None)))).scalars().all())
+    profiles = list(
+        (await db.execute(select(SongEmotionProfileModel).where(SongEmotionProfileModel.song_code.in_(number_candidates), SongEmotionProfileModel.deleted_at.is_(None))))
+        .scalars()
+        .all()
+    )
     if not profiles:
         raise HTTPException(422, f"ASS 文件名中的编号 {', '.join(number_candidates)} 未匹配到歌曲情感标注数据")
     if len(profiles) > 1:
@@ -209,10 +228,15 @@ async def create_ass_storyboard(
     if song_id.strip() and song_id.strip() != emotion.song_code:
         raise HTTPException(422, f"输入的歌曲编号 {song_id.strip()} 与 ASS 文件名编号 {emotion.song_code} 不一致")
     emotion_context = {
-        "songCode": emotion.song_code, "songName": emotion.song_name, "artists": emotion.artists,
-        "primaryCategory": emotion.primary_category, "secondaryCategory": emotion.secondary_category,
-        "tertiaryCategory": emotion.tertiary_category, "materialCategory": emotion.material_category,
-        "seasons": emotion.seasons, "atmosphere": emotion.atmosphere,
+        "songCode": emotion.song_code,
+        "songName": emotion.song_name,
+        "artists": emotion.artists,
+        "primaryCategory": emotion.primary_category,
+        "secondaryCategory": emotion.secondary_category,
+        "tertiaryCategory": emotion.tertiary_category,
+        "materialCategory": emotion.material_category,
+        "seasons": emotion.seasons,
+        "atmosphere": emotion.atmosphere,
     }
     content = await ass_file.read(5 * 1024 * 1024 + 1)
     if not content or len(content) > 5 * 1024 * 1024:
@@ -234,7 +258,26 @@ async def create_ass_storyboard(
     ass_url = await get_storage().put_bytes(safe_key(f"users/{user.id}/ass", ass_file.filename), content, ass_file.content_type)
     title = f"ASS 分镜 · {emotion.song_code} · {emotion.song_name}"
     story_bible = build_ass_story_bible(segments=segments, emotion=emotion_context, role_ids=role_ids, extra_requirement=extra_requirement.strip())
-    task = ProjectTaskModel(id=uid("task"), project_id=project_id, title=title, storyboard_type="ass", status="generating", source_ass_url=ass_url, extra_requirement=extra_requirement.strip(), overall_prompt=extra_requirement.strip(), storyboard_config={"songId": emotion.song_code, "songEmotion": emotion_context, "ratio": ratio, "resolution": resolution, "imageModel": image_model, "videoModel": video_model, "storyBible": story_bible, "meta": {"encoding": encoding, "dialogues": len(cues), "segments": len(segments)}})
+    task = ProjectTaskModel(
+        id=uid("task"),
+        project_id=project_id,
+        title=title,
+        storyboard_type="ass",
+        status="generating",
+        source_ass_url=ass_url,
+        extra_requirement=extra_requirement.strip(),
+        overall_prompt=extra_requirement.strip(),
+        storyboard_config={
+            "songId": emotion.song_code,
+            "songEmotion": emotion_context,
+            "ratio": ratio,
+            "resolution": resolution,
+            "imageModel": image_model,
+            "videoModel": video_model,
+            "storyBible": story_bible,
+            "meta": {"encoding": encoding, "dialogues": len(cues), "segments": len(segments)},
+        },
+    )
     db.add(task)
     await db.flush()
     for index, human_id in enumerate(role_ids):
@@ -243,14 +286,38 @@ async def create_ass_storyboard(
     for index, value in enumerate(segments):
         assigned_roles = list(story_bible["shots"][index]["preferredCharacterIds"])
         planned_duration = round(float(value.get("end") or 0) - float(value.get("start") or 0), 1)
-        line = StoryboardLineModel(id=uid("line"), project_task_id=task.id, sort_order=index, source="ass", lyrics=value.get("lyrics", ""), start_time=value.get("start"), end_time=value.get("end"), planned_duration=planned_duration, scene_prompt="", shot_prompt="", shot_options={"ratio": ratio, "resolution": resolution, "imageModel": image_model, "videoModel": video_model, "duration": normalize_video_duration(planned_duration)}, generation_status="pending")
+        line = StoryboardLineModel(
+            id=uid("line"),
+            project_task_id=task.id,
+            sort_order=index,
+            source="ass",
+            lyrics=value.get("lyrics", ""),
+            start_time=value.get("start"),
+            end_time=value.get("end"),
+            planned_duration=planned_duration,
+            scene_prompt="",
+            shot_prompt="",
+            shot_options={"ratio": ratio, "resolution": resolution, "imageModel": image_model, "videoModel": video_model, "duration": normalize_video_duration(planned_duration)},
+            generation_status="pending",
+        )
         db.add(line)
         await db.flush()
         for role_index, human_id in enumerate(assigned_roles):
             db.add(StoryboardLineCastModel(id=uid("linecast"), storyboard_line_id=line.id, digital_human_id=human_id, sort_order=role_index))
-        result_lines.append({**value, "id": line.id, "plannedDuration": planned_duration, "scenePrompt": "", "shotPrompt": "", "digitalHumanIds": assigned_roles, "generationStatus": "pending"})
+        result_lines.append(
+            {**value, "id": line.id, "plannedDuration": planned_duration, "scenePrompt": "", "shotPrompt": "", "digitalHumanIds": assigned_roles, "generationStatus": "pending"}
+        )
     await db.commit()
-    return {"title": title, "cast": role_ids, "taskId": task.id, "projectId": project_id, "sourceAssUrl": ass_url, "status": "generating", "songEmotion": emotion_context, "lines": result_lines}
+    return {
+        "title": title,
+        "cast": role_ids,
+        "taskId": task.id,
+        "projectId": project_id,
+        "sourceAssUrl": ass_url,
+        "status": "generating",
+        "songEmotion": emotion_context,
+        "lines": result_lines,
+    }
 
 
 async def generation_context(user: UserModel, task_id: str | None, line_id: str | None, db: AsyncSession) -> tuple[str | None, str | None, str | None]:
@@ -268,17 +335,33 @@ async def generation_context(user: UserModel, task_id: str | None, line_id: str 
 
 @app.post("/api/generations/images", status_code=202)
 async def create_image_generation(payload: ImageGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
-    await require_active_model(db,payload.model or settings.image_model,"image")
+    await require_active_model(db, payload.model or settings.image_model, "image")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
-    job = await jobs.create("image", payload.model_dump(mode="json"), lambda item: generate_image(payload, item), user_id=user.id, project_id=project_id, project_task_id=task_id, storyboard_line_id=line_id)
+    job = await jobs.create(
+        "image",
+        payload.model_dump(mode="json"),
+        lambda item: generate_image(payload, item),
+        user_id=user.id,
+        project_id=project_id,
+        project_task_id=task_id,
+        storyboard_line_id=line_id,
+    )
     return job.public()
 
 
 @app.post("/api/generations/videos", status_code=202)
 async def create_video_generation(payload: VideoGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
-    await require_active_model(db,payload.model or settings.video_model,"video")
+    await require_active_model(db, payload.model or settings.video_model, "video")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
-    job = await jobs.create("video", payload.model_dump(mode="json"), lambda item: generate_video(payload, item), user_id=user.id, project_id=project_id, project_task_id=task_id, storyboard_line_id=line_id)
+    job = await jobs.create(
+        "video",
+        payload.model_dump(mode="json"),
+        lambda item: generate_video(payload, item),
+        user_id=user.id,
+        project_id=project_id,
+        project_task_id=task_id,
+        storyboard_line_id=line_id,
+    )
     return job.public()
 
 
@@ -294,6 +377,7 @@ async def get_generation(job_id: str, user: CurrentUser) -> dict:
 async def generation_events(job_id: str, request: Request, user: CurrentUser) -> StreamingResponse:
     if not await jobs.get(job_id, user.id):
         raise HTTPException(404, "生成任务不存在")
+
     async def stream():
         last = None
         while not await request.is_disconnected():
@@ -307,6 +391,7 @@ async def generation_events(job_id: str, request: Request, user: CurrentUser) ->
             if job.status in {"succeeded", "failed", "cancelled"}:
                 return
             await asyncio.sleep(1)
+
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
@@ -360,6 +445,7 @@ async def delete_chat(session_id: str, user: CurrentUser) -> dict:
 @app.get("/api/chat/{session_id}/events")
 async def chat_events(session_id: str, request: Request, user: CurrentUser, after: int = 0) -> StreamingResponse:
     session = await chat_or_404(user.id, session_id)
+
     async def stream():
         cursor = after
         yield sse({"type": "hello", "session": session.summary()})
@@ -372,4 +458,5 @@ async def chat_events(session_id: str, request: Request, user: CurrentUser, afte
             else:
                 yield sse({"type": "heartbeat", "ts": time.time()})
             await asyncio.sleep(1)
+
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})

@@ -3,8 +3,9 @@
 Revision ID: f49c2a7e8d61
 Revises: c3f1a29e6b40
 """
-from alembic import op
+
 import sqlalchemy as sa
+from alembic import op
 
 revision = "f49c2a7e8d61"
 down_revision = "c3f1a29e6b40"

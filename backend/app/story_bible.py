@@ -4,7 +4,6 @@ from typing import Any
 
 from .media_constraints import MAX_VIDEO_DURATION, MIN_VIDEO_DURATION
 
-
 STORY_BIBLE_VERSION = "story-bible-v1"
 
 
@@ -50,18 +49,23 @@ def build_general_story_bible(*, config: dict[str, Any], definitions: list[tuple
     return {
         "version": STORY_BIBLE_VERSION,
         "logline": f"{config.get('genre')} / {config.get('secondary_category')} 风格的完整 MV 视觉弧光。",
-        "visualContinuity": {"season": config.get("season"), "visualStyle": config.get("visual_style"), "ratio": config.get("ratio"), "overallPrompt": config.get("overall_prompt")},
+        "visualContinuity": {
+            "season": config.get("season"),
+            "visualStyle": config.get("visual_style"),
+            "ratio": config.get("ratio"),
+            "overallPrompt": config.get("overall_prompt"),
+        },
         "characterPolicy": "空镜严禁人物；人物镜必须完整使用本镜预分配角色，角色顺序不得改变。",
-        "shots": [{"index": index, "shotType": shot_type, "stage": _stage(index, total), "outlineScene": outline[0], "outlineShot": outline[1], "requiredCharacterIds": roles} for index, (shot_type, outline, roles) in enumerate(definitions)],
+        "shots": [
+            {"index": index, "shotType": shot_type, "stage": _stage(index, total), "outlineScene": outline[0], "outlineShot": outline[1], "requiredCharacterIds": roles}
+            for index, (shot_type, outline, roles) in enumerate(definitions)
+        ],
     }
 
 
 def exact_durations(total_duration: float, count: int) -> list[float]:
     if count < 1 or total_duration < count * MIN_VIDEO_DURATION or total_duration > count * MAX_VIDEO_DURATION:
-        raise ValueError(
-            f"总时长必须在 {count * MIN_VIDEO_DURATION}–{count * MAX_VIDEO_DURATION} 秒之间，"
-            f"才能保证每镜 {MIN_VIDEO_DURATION}–{MAX_VIDEO_DURATION} 秒"
-        )
+        raise ValueError(f"总时长必须在 {count * MIN_VIDEO_DURATION}–{count * MAX_VIDEO_DURATION} 秒之间，才能保证每镜 {MIN_VIDEO_DURATION}–{MAX_VIDEO_DURATION} 秒")
     units = round(total_duration * 10)
     base, remainder = divmod(units, count)
     values = [base + (1 if index < remainder else 0) for index in range(count)]

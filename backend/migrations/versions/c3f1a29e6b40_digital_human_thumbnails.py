@@ -4,10 +4,11 @@ Revision ID: c3f1a29e6b40
 Revises: b7d02d13a9f4
 Create Date: 2026-08-09
 """
+
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision: str = "c3f1a29e6b40"
 down_revision: Union[str, None] = "b7d02d13a9f4"

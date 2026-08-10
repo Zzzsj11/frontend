@@ -27,8 +27,10 @@ def test_auth_me_and_refresh(client) -> None:
 
 def test_account_balance_endpoint(client, monkeypatch) -> None:
     from app import main
+
     async def fake_balance(force=False):
         return {"available": True, "balance": "287.391936", "balanceDisplay": "287.39", "currency": "credits", "updatedAt": "2026-08-07T00:00:00Z", "message": None}
+
     monkeypatch.setattr(main, "query_business_balance", fake_balance)
     response = client.get("/api/account/balance?force=true")
     assert response.status_code == 200

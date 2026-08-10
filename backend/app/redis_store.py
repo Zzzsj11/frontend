@@ -5,7 +5,6 @@ from typing import Any
 
 from .config import settings
 
-
 if settings.redis_url.startswith("fakeredis://"):
     import fakeredis.aioredis
 
@@ -51,4 +50,3 @@ async def append_chat_event(session_id: str, event_type: str, data: dict[str, An
 async def chat_events_after(session_id: str, after: int) -> list[dict[str, Any]]:
     rows = await redis.lrange(f"chat:{session_id}:events", 0, -1)
     return [event for raw in rows if (event := json.loads(raw))["seq"] > after]
-

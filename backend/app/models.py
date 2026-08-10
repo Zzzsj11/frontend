@@ -118,7 +118,11 @@ class DigitalHumanModel(LifecycleMixin, Base):
 
 class ProjectCastModel(LifecycleMixin, Base):
     __tablename__ = "project_cast"
-    __table_args__ = (Index("uq_task_cast_human_active", "project_task_id", "digital_human_id", unique=True, postgresql_where=text("deleted_at IS NULL"), sqlite_where=text("deleted_at IS NULL")),)
+    __table_args__ = (
+        Index(
+            "uq_task_cast_human_active", "project_task_id", "digital_human_id", unique=True, postgresql_where=text("deleted_at IS NULL"), sqlite_where=text("deleted_at IS NULL")
+        ),
+    )
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     project_task_id: Mapped[str] = mapped_column(ForeignKey("project_tasks.id"), index=True)
     digital_human_id: Mapped[str] = mapped_column(ForeignKey("digital_humans.id"), index=True)
@@ -149,7 +153,11 @@ class StoryboardLineModel(LifecycleMixin, Base):
 
 class StoryboardLineCastModel(LifecycleMixin, Base):
     __tablename__ = "storyboard_line_cast"
-    __table_args__ = (Index("uq_line_cast_human_active", "storyboard_line_id", "digital_human_id", unique=True, postgresql_where=text("deleted_at IS NULL"), sqlite_where=text("deleted_at IS NULL")),)
+    __table_args__ = (
+        Index(
+            "uq_line_cast_human_active", "storyboard_line_id", "digital_human_id", unique=True, postgresql_where=text("deleted_at IS NULL"), sqlite_where=text("deleted_at IS NULL")
+        ),
+    )
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     storyboard_line_id: Mapped[str] = mapped_column(ForeignKey("storyboard_lines.id"), index=True)
     digital_human_id: Mapped[str] = mapped_column(ForeignKey("digital_humans.id"), index=True)

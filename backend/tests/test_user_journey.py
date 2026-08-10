@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import time
 import io
+import time
 import zipfile
-from PIL import Image
 
+from PIL import Image
 
 ASS_CONTENT = b"""[Script Info]
 Script Type: v4.00+
@@ -31,13 +31,15 @@ def wait_for_job(client, job_id: str) -> dict:
 
 
 def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
-    from app import main
-    from app import domain
+    from app import domain, main
+
     class MemoryStorage:
         objects = {}
+
         async def put_bytes(self, key, content, content_type=None):
             self.objects[key] = content
             return f"https://tos.test/{key}"
+
     storage = MemoryStorage()
     monkeypatch.setattr(main, "get_storage", lambda: storage)
     monkeypatch.setattr(domain, "get_storage", lambda: storage)
@@ -46,7 +48,13 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
         assert kwargs["current"]["lyrics"] == "First line Second line"
         assert len(kwargs["full_context"]["allLyrics"]) == 1
         assert "图片ID：020" in kwargs["allowed_humans"][0]["systemPrompt"]
-        return {"scenePrompt": "sunlit room", "shotPrompt": "slow push in", "digitalHumanIds": ["dh-system-020"], "usage": {"prompt_tokens": 120, "completion_tokens": 40, "total_tokens": 160}, "requestId": "req-test"}
+        return {
+            "scenePrompt": "sunlit room",
+            "shotPrompt": "slow push in",
+            "digitalHumanIds": ["dh-system-020"],
+            "usage": {"prompt_tokens": 120, "completion_tokens": 40, "total_tokens": 160},
+            "requestId": "req-test",
+        }
 
     async def fake_image(payload, job):
         assert payload.prompt == "sunlit room"
@@ -108,7 +116,9 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     assert line["shotOptions"]["imageModel"] == "gpt-image-2"
     assert line["shotOptions"]["videoModel"] == "doubao-seedance-2.0"
 
-    image_created = client.post("/api/generations/images", json={"prompt": line["scenePrompt"], "project_task_id": storyboard.json()["taskId"], "storyboard_line_id": line["id"], "purpose": "scene"})
+    image_created = client.post(
+        "/api/generations/images", json={"prompt": line["scenePrompt"], "project_task_id": storyboard.json()["taskId"], "storyboard_line_id": line["id"], "purpose": "scene"}
+    )
     assert image_created.status_code == 202
     image_job = wait_for_job(client, image_created.json()["id"])
     assert image_job["status"] == "succeeded"
@@ -117,7 +127,7 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     video_created = client.post(
         "/api/generations/videos",
         json={
-            "prompt": f'{line["scenePrompt"]}. {line["shotPrompt"]}',
+            "prompt": f"{line['scenePrompt']}. {line['shotPrompt']}",
             "duration": 5,
             "ratio": "16:9",
             "image_urls": [scene_url],
@@ -136,12 +146,23 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
 
     class FakeResponse:
         content = b"video-bytes"
-        def raise_for_status(self): pass
+
+        def raise_for_status(self):
+            pass
+
     class FakeClient:
-        def __init__(self, *args, **kwargs): pass
-        async def __aenter__(self): return self
-        async def __aexit__(self, *args): pass
-        async def get(self, url): return FakeResponse()
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url):
+            return FakeResponse()
+
     monkeypatch.setattr(domain.httpx, "AsyncClient", FakeClient)
     exported = client.post(f"/api/tasks/{storyboard.json()['taskId']}/material-export")
     assert exported.status_code == 201, exported.text
@@ -219,7 +240,11 @@ def test_ass_storyboard_generates_one_line_with_full_lyrics_context(client, monk
     monkeypatch.setattr(domain, "generate_storyboard_line", fake_line)
     project_id = client.post("/api/projects", json={"name": "Progressive ASS"}).json()["id"]
     content = b"""[Script Info]\nScript Type: v4.00+\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Arial,20\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,First\nDialogue: 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,Second\n"""
-    prepared = client.post("/api/storyboards/ass", data={"project_id": project_id, "song_id": "10012204", "digital_human_ids": "[]"}, files={"ass_file": ("10012204-progressive.ass", content, "text/plain")})
+    prepared = client.post(
+        "/api/storyboards/ass",
+        data={"project_id": project_id, "song_id": "10012204", "digital_human_ids": "[]"},
+        files={"ass_file": ("10012204-progressive.ass", content, "text/plain")},
+    )
     assert prepared.status_code == 200
     body = prepared.json()
     assert [line["generationStatus"] for line in body["lines"]] == ["pending", "pending"]

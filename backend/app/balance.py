@@ -10,7 +10,6 @@ import httpx
 
 from .config import settings
 
-
 _cache: dict[str, Any] | None = None
 _cache_expires_at = 0.0
 _lock = asyncio.Lock()
@@ -48,7 +47,15 @@ async def query_business_balance(*, force: bool = False) -> dict[str, Any]:
                 raise ValueError(body.get("msg") or "余额服务返回错误")
             data = body.get("data") or {}
             raw_balance = data.get("balance")
-            result = {"available": True, "userId": str(data.get("userId") or user_id), "balance": str(raw_balance), "balanceDisplay": f"{float(raw_balance):.2f}", "currency": "credits", "updatedAt": datetime.now(UTC).isoformat(), "message": None}
+            result = {
+                "available": True,
+                "userId": str(data.get("userId") or user_id),
+                "balance": str(raw_balance),
+                "balanceDisplay": f"{float(raw_balance):.2f}",
+                "currency": "credits",
+                "updatedAt": datetime.now(UTC).isoformat(),
+                "message": None,
+            }
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             result = unavailable_balance(str(exc) or "余额服务请求失败")
         _cache = result

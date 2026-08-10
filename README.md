@@ -4,6 +4,8 @@
 
 当前版本：`v0.9.1 web 内测版初版`。
 
+维护入口：[`AGENTS.md`](AGENTS.md)（Code Agent 约定）、[`ARCHITECTURE.md`](docs/ARCHITECTURE.md)、[`LOCAL-DEVELOPMENT.md`](docs/LOCAL-DEVELOPMENT.md)、[`TESTING.md`](docs/TESTING.md)、[`DEPLOYMENT.md`](docs/DEPLOYMENT.md)、[`ROLLBACK.md`](docs/ROLLBACK.md)、[`BACKUP-RESTORE.md`](docs/BACKUP-RESTORE.md) 和 [`SECURITY.md`](docs/SECURITY.md)。
+
 ## 核心能力
 
 - ASS 分镜：解析 ASS 时间轴和歌词，通过文件名中的歌曲编号匹配歌曲情感配置。
@@ -11,7 +13,7 @@
 - 渐进式生成：单次 API 只生成一条分镜提示词，前端以受控并发完成全量任务，减少首条结果等待时间。
 - 角色库：内置 30 个系统角色，所有用户可见；用户上传或生成的私有角色及媒体彼此隔离。
 - 媒体生成：场景图与视频异步生成，视频时长支持 4–15 秒整数，画幅支持 16:9、9:16、4:3、1:1。
-- 生成配置：ASS 与通用分镜均保存画幅、清晰度、图片模型和视频模型；当前固定为 Img2 与 sd2.0，扩展事项见 [`TODO-LIST.md`](TODO-LIST.md)。
+- 生成配置：ASS 与通用分镜均保存画幅、清晰度、图片模型和视频模型；可用模型由管理后台注册中心动态下发。
 - 素材导出：将子项目内的视频片段与整体提示词 Markdown 打包成 ZIP 并提供下载。
 - 多用户与鉴权：短期 Access Token + Refresh Token，管理员和普通用户的数据按所有权隔离。
 - 数据审计：所有业务删除均为软删除；模型调用记录输入、输出及缓存 Token；后端 API 错误脱敏后入库。

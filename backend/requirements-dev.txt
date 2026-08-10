@@ -2,4 +2,5 @@
 pytest>=8,<10
 pytest-asyncio>=0.25,<2
 fakeredis>=2.28,<3
-
+ruff>=0.12,<1
+pytest-cov>=6,<8

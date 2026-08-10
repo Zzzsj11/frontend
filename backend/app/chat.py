@@ -88,7 +88,9 @@ class ChatManager:
 
     async def list(self, user_id: str) -> list[dict[str, Any]]:
         async with session_factory() as session:
-            result = await session.execute(select(ChatSessionModel).where(ChatSessionModel.user_id == user_id, ChatSessionModel.deleted_at.is_(None)).order_by(ChatSessionModel.created_at.desc()))
+            result = await session.execute(
+                select(ChatSessionModel).where(ChatSessionModel.user_id == user_id, ChatSessionModel.deleted_at.is_(None)).order_by(ChatSessionModel.created_at.desc())
+            )
             models = result.scalars().all()
         return [
             {
@@ -110,7 +112,9 @@ class ChatManager:
             if not model or model.user_id != user_id or model.deleted_at is not None:
                 return False
             model.deleted_at = datetime.now().astimezone()
-            await session.execute(update(ChatMessageModel).where(ChatMessageModel.session_id == session_id, ChatMessageModel.deleted_at.is_(None)).values(deleted_at=model.deleted_at))
+            await session.execute(
+                update(ChatMessageModel).where(ChatMessageModel.session_id == session_id, ChatMessageModel.deleted_at.is_(None)).values(deleted_at=model.deleted_at)
+            )
             await session.commit()
         await redis.delete(f"chat:{session_id}:seq", f"chat:{session_id}:events")
         return True
@@ -162,11 +166,7 @@ class ChatManager:
                     body = response.json()
                     usage = body.get("usage") or {}
                     request_id = body.get("id")
-                text = "".join(
-                    block.get("text", "")
-                    for block in body.get("content", [])
-                    if block.get("type") == "text"
-                )
+                text = "".join(block.get("text", "") for block in body.get("content", []) if block.get("type") == "text")
                 if text:
                     chunks.append(text)
                     await append_chat_event(session.id, "assistant_delta", {"text": text})
@@ -189,20 +189,47 @@ class ChatManager:
             answer = "".join(chunks)
             async with session_factory() as db:
                 db.add(ChatMessageModel(session_id=session.id, role="assistant", content=answer))
-                _, normalized_usage = add_token_usage(db, operation="chat", provider=settings.llm_api_mode, model=settings.llm_model, usage=usage, user_id=session.user_id, chat_session_id=session.id, request_id=request_id)
+                _, normalized_usage = add_token_usage(
+                    db,
+                    operation="chat",
+                    provider=settings.llm_api_mode,
+                    model=settings.llm_model,
+                    usage=usage,
+                    user_id=session.user_id,
+                    chat_session_id=session.id,
+                    request_id=request_id,
+                )
                 await db.commit()
                 usage_recorded = True
             await append_chat_event(session.id, "assistant_done", {"text": answer, "usage": normalized_usage})
         except asyncio.CancelledError:
             if not usage_recorded:
                 async with session_factory() as db:
-                    add_token_usage(db, operation="chat_cancelled", provider=settings.llm_api_mode, model=settings.llm_model, usage=usage, user_id=session.user_id, chat_session_id=session.id, request_id=request_id)
+                    add_token_usage(
+                        db,
+                        operation="chat_cancelled",
+                        provider=settings.llm_api_mode,
+                        model=settings.llm_model,
+                        usage=usage,
+                        user_id=session.user_id,
+                        chat_session_id=session.id,
+                        request_id=request_id,
+                    )
                     await db.commit()
             await append_chat_event(session.id, "interrupted", {})
         except Exception as exc:
             if not usage_recorded:
                 async with session_factory() as db:
-                    add_token_usage(db, operation="chat_failed", provider=settings.llm_api_mode, model=settings.llm_model, usage=usage, user_id=session.user_id, chat_session_id=session.id, request_id=request_id)
+                    add_token_usage(
+                        db,
+                        operation="chat_failed",
+                        provider=settings.llm_api_mode,
+                        model=settings.llm_model,
+                        usage=usage,
+                        user_id=session.user_id,
+                        chat_session_id=session.id,
+                        request_id=request_id,
+                    )
                     await db.commit()
             await append_chat_event(session.id, "error", {"text": str(exc)})
         finally:

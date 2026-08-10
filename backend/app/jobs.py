@@ -14,7 +14,6 @@ from .models import GenerationJobModel, SceneAssetModel, ShotAssetModel, utcnow
 from .redis_store import cache_job, get_cached_job
 from .token_usage import add_token_usage
 
-
 JobRunner = Callable[["Job"], Awaitable[dict[str, Any]]]
 
 
@@ -39,15 +38,48 @@ class Job:
     request: dict[str, Any] | None = None
 
     def public(self) -> dict[str, Any]:
-        return {"id": self.id, "kind": self.kind, "status": self.status, "progress": self.progress, "result": self.result, "error": self.error, "created_at": self.created_at, "updated_at": self.updated_at}
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "status": self.status,
+            "progress": self.progress,
+            "result": self.result,
+            "error": self.error,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
 
 
 class JobManager:
-    async def create(self, kind: str, request: dict[str, Any], runner: JobRunner, *, user_id: str, project_id: str | None = None, project_task_id: str | None = None, storyboard_line_id: str | None = None) -> Job:
+    async def create(
+        self,
+        kind: str,
+        request: dict[str, Any],
+        runner: JobRunner,
+        *,
+        user_id: str,
+        project_id: str | None = None,
+        project_task_id: str | None = None,
+        storyboard_line_id: str | None = None,
+    ) -> Job:
         now = time.time()
-        job = Job(id=f"job-{uuid.uuid4().hex}", kind=kind, created_at=now, updated_at=now, user_id=user_id, project_id=project_id, project_task_id=project_task_id, storyboard_line_id=storyboard_line_id, request=request)
+        job = Job(
+            id=f"job-{uuid.uuid4().hex}",
+            kind=kind,
+            created_at=now,
+            updated_at=now,
+            user_id=user_id,
+            project_id=project_id,
+            project_task_id=project_task_id,
+            storyboard_line_id=storyboard_line_id,
+            request=request,
+        )
         async with session_factory() as session:
-            session.add(GenerationJobModel(id=job.id, kind=kind, request=request, user_id=user_id, project_id=project_id, project_task_id=project_task_id, storyboard_line_id=storyboard_line_id))
+            session.add(
+                GenerationJobModel(
+                    id=job.id, kind=kind, request=request, user_id=user_id, project_id=project_id, project_task_id=project_task_id, storyboard_line_id=storyboard_line_id
+                )
+            )
             await session.commit()
         await cache_job(job.id, job.public())
         asyncio.create_task(self._run(job, runner))
@@ -84,7 +116,19 @@ class JobManager:
         except Exception as exc:
             job.status, job.error = "failed", str(exc)
             async with session_factory() as session:
-                add_token_usage(session, operation=f"generation_{job.kind}_failed", provider=str(getattr(exc, "provider", "")), model=str((job.request or {}).get("model") or ""), usage=getattr(exc, "usage", {}), user_id=job.user_id, project_id=job.project_id, project_task_id=job.project_task_id, storyboard_line_id=job.storyboard_line_id, generation_job_id=job.id, request_id=getattr(exc, "request_id", None))
+                add_token_usage(
+                    session,
+                    operation=f"generation_{job.kind}_failed",
+                    provider=str(getattr(exc, "provider", "")),
+                    model=str((job.request or {}).get("model") or ""),
+                    usage=getattr(exc, "usage", {}),
+                    user_id=job.user_id,
+                    project_id=job.project_id,
+                    project_task_id=job.project_task_id,
+                    storyboard_line_id=job.storyboard_line_id,
+                    generation_job_id=job.id,
+                    request_id=getattr(exc, "request_id", None),
+                )
                 await session.commit()
         finally:
             await self._persist(job)
@@ -93,19 +137,75 @@ class JobManager:
         if not job.result:
             return
         async with session_factory() as session:
-            add_token_usage(session, operation=f"generation_{job.kind}", provider=str(job.result.get("provider") or ""), model=str(job.result.get("model") or (job.request or {}).get("model") or ""), usage=job.result.get("usage"), user_id=job.user_id, project_id=job.project_id, project_task_id=job.project_task_id, storyboard_line_id=job.storyboard_line_id, generation_job_id=job.id, request_id=job.result.get("providerTaskId"))
+            add_token_usage(
+                session,
+                operation=f"generation_{job.kind}",
+                provider=str(job.result.get("provider") or ""),
+                model=str(job.result.get("model") or (job.request or {}).get("model") or ""),
+                usage=job.result.get("usage"),
+                user_id=job.user_id,
+                project_id=job.project_id,
+                project_task_id=job.project_task_id,
+                storyboard_line_id=job.storyboard_line_id,
+                generation_job_id=job.id,
+                request_id=job.result.get("providerTaskId"),
+            )
             if job.storyboard_line_id and job.kind == "image" and job.result.get("urls"):
-                current = (await session.execute(select(SceneAssetModel).where(SceneAssetModel.storyboard_line_id == job.storyboard_line_id, SceneAssetModel.deleted_at.is_(None), SceneAssetModel.is_current.is_(True)))).scalars().all()
+                current = (
+                    (
+                        await session.execute(
+                            select(SceneAssetModel).where(
+                                SceneAssetModel.storyboard_line_id == job.storyboard_line_id, SceneAssetModel.deleted_at.is_(None), SceneAssetModel.is_current.is_(True)
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
                 for item in current:
                     item.is_current = False
                 thumbnails = job.result.get("thumbnailUrls") or []
-                session.add(SceneAssetModel(id=f"scene-{uuid.uuid4().hex}", storyboard_line_id=job.storyboard_line_id, generation_job_id=job.id, image_url=job.result["urls"][0], image_thumbnail_url=thumbnails[0] if thumbnails else None, prompt=str((job.request or {}).get("prompt") or ""), is_current=True))
+                session.add(
+                    SceneAssetModel(
+                        id=f"scene-{uuid.uuid4().hex}",
+                        storyboard_line_id=job.storyboard_line_id,
+                        generation_job_id=job.id,
+                        image_url=job.result["urls"][0],
+                        image_thumbnail_url=thumbnails[0] if thumbnails else None,
+                        prompt=str((job.request or {}).get("prompt") or ""),
+                        is_current=True,
+                    )
+                )
             elif job.storyboard_line_id and job.kind == "video" and job.result.get("videoUrl"):
-                current = (await session.execute(select(ShotAssetModel).where(ShotAssetModel.storyboard_line_id == job.storyboard_line_id, ShotAssetModel.deleted_at.is_(None), ShotAssetModel.is_current.is_(True)))).scalars().all()
+                current = (
+                    (
+                        await session.execute(
+                            select(ShotAssetModel).where(
+                                ShotAssetModel.storyboard_line_id == job.storyboard_line_id, ShotAssetModel.deleted_at.is_(None), ShotAssetModel.is_current.is_(True)
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
                 for item in current:
                     item.is_current = False
                 request = job.request or {}
-                session.add(ShotAssetModel(id=f"shot-{uuid.uuid4().hex}", storyboard_line_id=job.storyboard_line_id, generation_job_id=job.id, cover_url=job.result["coverUrl"], cover_thumbnail_url=job.result.get("coverThumbnailUrl"), video_url=job.result["videoUrl"], duration=float(job.result.get("duration") or 0), resolution=str(request.get("resolution") or "720p"), ratio=str(job.result.get("ratio") or request.get("ratio") or "16:9"), prompt=str(request.get("prompt") or ""), is_current=True))
+                session.add(
+                    ShotAssetModel(
+                        id=f"shot-{uuid.uuid4().hex}",
+                        storyboard_line_id=job.storyboard_line_id,
+                        generation_job_id=job.id,
+                        cover_url=job.result["coverUrl"],
+                        cover_thumbnail_url=job.result.get("coverThumbnailUrl"),
+                        video_url=job.result["videoUrl"],
+                        duration=float(job.result.get("duration") or 0),
+                        resolution=str(request.get("resolution") or "720p"),
+                        ratio=str(job.result.get("ratio") or request.get("ratio") or "16:9"),
+                        prompt=str(request.get("prompt") or ""),
+                        is_current=True,
+                    )
+                )
             await session.commit()
 
     async def get(self, job_id: str, user_id: str | None = None) -> Job | None:
@@ -115,12 +215,33 @@ class JobManager:
                 model = await session.get(GenerationJobModel, job_id)
                 if not model or model.deleted_at is not None or (user_id is not None and model.user_id != user_id):
                     return None
-            return Job(**cached, user_id=model.user_id, project_id=model.project_id, project_task_id=model.project_task_id, storyboard_line_id=model.storyboard_line_id, request=model.request)
+            return Job(
+                **cached,
+                user_id=model.user_id,
+                project_id=model.project_id,
+                project_task_id=model.project_task_id,
+                storyboard_line_id=model.storyboard_line_id,
+                request=model.request,
+            )
         async with session_factory() as session:
             model = await session.get(GenerationJobModel, job_id)
             if not model or model.deleted_at is not None or (user_id is not None and model.user_id != user_id):
                 return None
-            job = Job(id=model.id, kind=model.kind, status=model.status, progress=model.progress, result=model.result, error=model.error, created_at=_timestamp(model.created_at), updated_at=_timestamp(model.updated_at), user_id=model.user_id, project_id=model.project_id, project_task_id=model.project_task_id, storyboard_line_id=model.storyboard_line_id, request=model.request)
+            job = Job(
+                id=model.id,
+                kind=model.kind,
+                status=model.status,
+                progress=model.progress,
+                result=model.result,
+                error=model.error,
+                created_at=_timestamp(model.created_at),
+                updated_at=_timestamp(model.updated_at),
+                user_id=model.user_id,
+                project_id=model.project_id,
+                project_task_id=model.project_task_id,
+                storyboard_line_id=model.storyboard_line_id,
+                request=model.request,
+            )
         await cache_job(job.id, job.public())
         return job
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import io
-import hashlib
 import asyncio
+import hashlib
+import io
 import json
 import uuid
 import zipfile
@@ -12,11 +12,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .auth import CurrentUser
+from .auth import CurrentUser, hash_password, user_public
+from .config import settings
 from .database import database_session
+from .media_constraints import normalize_video_duration
 from .models import (
-    ApiErrorLogModel,
     AiModelModel,
+    ApiErrorLogModel,
+    ChatMessageModel,
+    ChatSessionModel,
     DigitalHumanModel,
     DigitalHumanStyleModel,
     GenerationJobModel,
@@ -24,19 +28,16 @@ from .models import (
     ProjectCastModel,
     ProjectModel,
     ProjectTaskModel,
+    RefreshTokenModel,
     SceneAssetModel,
     ShotAssetModel,
     StoryboardLineCastModel,
     StoryboardLineModel,
     TokenUsageModel,
+    UserModel,
     VoiceAssetModel,
     utcnow,
-    UserModel,
-    RefreshTokenModel,
-    ChatSessionModel,
-    ChatMessageModel,
 )
-from .media_constraints import normalize_video_duration
 from .schemas import (
     CastUpdate,
     DigitalHumanCreate,
@@ -54,14 +55,10 @@ from .schemas import (
     UserCreate,
     UserUpdate,
 )
-from .auth import hash_password, user_public
 from .storage import get_storage, is_tos_url, safe_key
-from .storyboard_prompt import generate_storyboard_line
-from .config import settings
-from .token_usage import add_token_usage, normalize_usage
 from .story_bible import STORY_BIBLE_VERSION, build_general_story_bible, exact_durations
-from .storyboard_prompt import PROMPT_VERSION, SCHEMA_VERSION
-
+from .storyboard_prompt import PROMPT_VERSION, SCHEMA_VERSION, generate_storyboard_line
+from .token_usage import add_token_usage, normalize_usage
 
 router = APIRouter(prefix="/api")
 Db = Depends(database_session)
@@ -72,8 +69,30 @@ storyboard_generation_slots = asyncio.Semaphore(settings.storyboard_generation_c
 async def list_api_errors(user: CurrentUser, limit: int = 100, db: AsyncSession = Db) -> dict:
     require_admin(user)
     limit = min(500, max(1, limit))
-    items = list((await db.execute(select(ApiErrorLogModel).where(ApiErrorLogModel.deleted_at.is_(None)).order_by(ApiErrorLogModel.created_at.desc()).limit(limit))).scalars().all())
-    return {"items": [{"id": item.id, "errorCode": item.error_code, "userId": item.user_id, "method": item.method, "path": item.path, "queryString": item.query_string, "statusCode": item.status_code, "errorType": item.error_type, "message": item.message, "requestPayload": item.request_payload, "traceback": item.traceback, "clientIp": item.client_ip, "userAgent": item.user_agent, "createdAt": item.created_at.isoformat()} for item in items]}
+    items = list(
+        (await db.execute(select(ApiErrorLogModel).where(ApiErrorLogModel.deleted_at.is_(None)).order_by(ApiErrorLogModel.created_at.desc()).limit(limit))).scalars().all()
+    )
+    return {
+        "items": [
+            {
+                "id": item.id,
+                "errorCode": item.error_code,
+                "userId": item.user_id,
+                "method": item.method,
+                "path": item.path,
+                "queryString": item.query_string,
+                "statusCode": item.status_code,
+                "errorType": item.error_type,
+                "message": item.message,
+                "requestPayload": item.request_payload,
+                "traceback": item.traceback,
+                "clientIp": item.client_ip,
+                "userAgent": item.user_agent,
+                "createdAt": item.created_at.isoformat(),
+            }
+            for item in items
+        ]
+    }
 
 
 @router.delete("/admin/api-errors/{error_id}")
@@ -110,35 +129,57 @@ async def create_user(payload: UserCreate, user: CurrentUser, db: AsyncSession =
     exists = (await db.execute(select(UserModel).where(UserModel.username == username, UserModel.deleted_at.is_(None)))).scalar_one_or_none()
     if exists:
         raise HTTPException(409, "用户名已存在")
-    item = UserModel(id=uid("user"), username=username, password_hash=hash_password(payload.password), display_name=payload.display_name, role=payload.role, must_change_password=True)
-    db.add(item); await db.commit(); return user_public(item)
+    item = UserModel(
+        id=uid("user"), username=username, password_hash=hash_password(payload.password), display_name=payload.display_name, role=payload.role, must_change_password=True
+    )
+    db.add(item)
+    await db.commit()
+    return user_public(item)
 
 
 @router.patch("/admin/users/{user_id}")
 async def update_user(user_id: str, payload: UserUpdate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     require_admin(user)
     item = await db.get(UserModel, user_id)
-    if not item or item.deleted_at is not None: raise HTTPException(404, "用户不存在")
-    for key, value in payload.model_dump(exclude_unset=True).items(): setattr(item, key, value)
-    await db.commit(); return user_public(item)
+    if not item or item.deleted_at is not None:
+        raise HTTPException(404, "用户不存在")
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(item, key, value)
+    await db.commit()
+    return user_public(item)
 
 
 @router.delete("/admin/users/{user_id}")
 async def delete_user(user_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
     require_admin(user)
-    if user_id == user.id: raise HTTPException(422, "不能删除当前登录用户")
+    if user_id == user.id:
+        raise HTTPException(422, "不能删除当前登录用户")
     item = await db.get(UserModel, user_id)
-    if not item or item.deleted_at is not None: raise HTTPException(404, "用户不存在")
-    now = utcnow(); item.deleted_at = now; item.status = "disabled"
+    if not item or item.deleted_at is not None:
+        raise HTTPException(404, "用户不存在")
+    now = utcnow()
+    item.deleted_at = now
+    item.status = "disabled"
     projects = list((await db.execute(select(ProjectModel).where(ProjectModel.user_id == user_id, ProjectModel.deleted_at.is_(None)))).scalars().all())
-    task_ids = list((await db.execute(select(ProjectTaskModel.id).where(ProjectTaskModel.project_id.in_([p.id for p in projects]) if projects else False, ProjectTaskModel.deleted_at.is_(None)))).scalars().all())
-    for project in projects: project.deleted_at = now
+    task_ids = list(
+        (
+            await db.execute(
+                select(ProjectTaskModel.id).where(ProjectTaskModel.project_id.in_([p.id for p in projects]) if projects else False, ProjectTaskModel.deleted_at.is_(None))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for project in projects:
+        project.deleted_at = now
     await soft_delete_task_tree(db, task_ids, now)
     for model in (RefreshTokenModel, DigitalHumanStyleModel, DigitalHumanModel, ChatSessionModel, GenerationJobModel, MaterialExportModel):
         await db.execute(update(model).where(model.user_id == user_id, model.deleted_at.is_(None)).values(deleted_at=now))
     session_ids = list((await db.execute(select(ChatSessionModel.id).where(ChatSessionModel.user_id == user_id))).scalars().all())
-    if session_ids: await db.execute(update(ChatMessageModel).where(ChatMessageModel.session_id.in_(session_ids), ChatMessageModel.deleted_at.is_(None)).values(deleted_at=now))
-    await db.commit(); return {"ok": True}
+    if session_ids:
+        await db.execute(update(ChatMessageModel).where(ChatMessageModel.session_id.in_(session_ids), ChatMessageModel.deleted_at.is_(None)).values(deleted_at=now))
+    await db.commit()
+    return {"ok": True}
 
 
 EMPTY_SCENES = [
@@ -154,11 +195,7 @@ CHARACTER_SCENES = [
 
 
 async def owned_project(db: AsyncSession, user_id: str, project_id: str) -> ProjectModel:
-    result = await db.execute(
-        select(ProjectModel).where(
-            ProjectModel.id == project_id, ProjectModel.user_id == user_id, ProjectModel.deleted_at.is_(None)
-        )
-    )
+    result = await db.execute(select(ProjectModel).where(ProjectModel.id == project_id, ProjectModel.user_id == user_id, ProjectModel.deleted_at.is_(None)))
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "项目不存在")
@@ -215,7 +252,9 @@ async def visible_humans(db: AsyncSession, user_id: str, ids: list[str] | None =
 async def soft_delete_task_tree(db: AsyncSession, task_ids: list[str], now) -> None:
     if not task_ids:
         return
-    line_ids = list((await db.execute(select(StoryboardLineModel.id).where(StoryboardLineModel.project_task_id.in_(task_ids), StoryboardLineModel.deleted_at.is_(None)))).scalars().all())
+    line_ids = list(
+        (await db.execute(select(StoryboardLineModel.id).where(StoryboardLineModel.project_task_id.in_(task_ids), StoryboardLineModel.deleted_at.is_(None)))).scalars().all()
+    )
     await db.execute(update(ProjectTaskModel).where(ProjectTaskModel.id.in_(task_ids), ProjectTaskModel.deleted_at.is_(None)).values(deleted_at=now))
     await db.execute(update(ProjectCastModel).where(ProjectCastModel.project_task_id.in_(task_ids), ProjectCastModel.deleted_at.is_(None)).values(deleted_at=now))
     await db.execute(update(MaterialExportModel).where(MaterialExportModel.project_task_id.in_(task_ids), MaterialExportModel.deleted_at.is_(None)).values(deleted_at=now))
@@ -264,7 +303,15 @@ async def list_projects(user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
     if not projects:
         return []
     tasks = list(
-        (await db.execute(select(ProjectTaskModel).where(ProjectTaskModel.project_id.in_([p.id for p in projects]), ProjectTaskModel.deleted_at.is_(None)).order_by(ProjectTaskModel.created_at))).scalars().all()
+        (
+            await db.execute(
+                select(ProjectTaskModel)
+                .where(ProjectTaskModel.project_id.in_([p.id for p in projects]), ProjectTaskModel.deleted_at.is_(None))
+                .order_by(ProjectTaskModel.created_at)
+            )
+        )
+        .scalars()
+        .all()
     )
     by_project: dict[str, list[ProjectTaskModel]] = {}
     for task in tasks:
@@ -294,7 +341,8 @@ async def update_project(project_id: str, payload: ProjectUpdate, user: CurrentU
 @router.delete("/projects/{project_id}")
 async def delete_project(project_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
     item = await owned_project(db, user.id, project_id)
-    now = utcnow(); item.deleted_at = now
+    now = utcnow()
+    item.deleted_at = now
     task_ids = list((await db.execute(select(ProjectTaskModel.id).where(ProjectTaskModel.project_id == item.id, ProjectTaskModel.deleted_at.is_(None)))).scalars().all())
     await soft_delete_task_tree(db, task_ids, now)
     await db.commit()
@@ -314,9 +362,14 @@ async def create_task(project_id: str, payload: TaskCreate, user: CurrentUser, d
 @router.post("/projects/{project_id}/storyboards/general", status_code=201)
 async def create_general_storyboard(project_id: str, payload: GeneralStoryboardCreate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     await owned_project(db, user.id, project_id)
-    for code,modality in [(payload.image_model,"image"),(payload.video_model,"video")]:
-        model=(await db.execute(select(AiModelModel).where(AiModelModel.code==code,AiModelModel.modality==modality,AiModelModel.status=="active",AiModelModel.deleted_at.is_(None)))).scalar_one_or_none()
-        if not model: raise HTTPException(422,f"不支持或已停用的{modality}模型：{code}")
+    for code, modality in [(payload.image_model, "image"), (payload.video_model, "video")]:
+        model = (
+            await db.execute(
+                select(AiModelModel).where(AiModelModel.code == code, AiModelModel.modality == modality, AiModelModel.status == "active", AiModelModel.deleted_at.is_(None))
+            )
+        ).scalar_one_or_none()
+        if not model:
+            raise HTTPException(422, f"不支持或已停用的{modality}模型：{code}")
     total = payload.empty_shot_count + payload.character_shot_count
     if total < 1:
         raise HTTPException(422, "至少需要一个分镜")
@@ -327,7 +380,16 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
         raise HTTPException(422, "包含不可用角色")
     config = payload.model_dump(mode="json")
     title = f"通用分镜 · {payload.tertiary_category or payload.secondary_category}"
-    task = ProjectTaskModel(id=uid("task"), project_id=project_id, title=title, storyboard_type="general", status="generating", extra_requirement=payload.extra_requirement, overall_prompt=payload.overall_prompt, storyboard_config=config)
+    task = ProjectTaskModel(
+        id=uid("task"),
+        project_id=project_id,
+        title=title,
+        storyboard_type="general",
+        status="generating",
+        extra_requirement=payload.extra_requirement,
+        overall_prompt=payload.overall_prompt,
+        storyboard_config=config,
+    )
     db.add(task)
     await db.flush()
     for index, human_id in enumerate(payload.digital_human_ids):
@@ -352,22 +414,74 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
     output = []
     for index, (shot_type, (scene, shot), roles) in enumerate(definitions):
         duration = durations[index]
-        line = StoryboardLineModel(id=uid("line"), project_task_id=task.id, sort_order=index, source="general", shot_type=shot_type, planned_duration=duration, scene_prompt="", shot_prompt="", shot_options={"ratio": payload.ratio, "resolution": payload.resolution, "imageModel": payload.image_model, "videoModel": payload.video_model, "duration": normalize_video_duration(duration), "outlineScene": scene, "outlineShot": shot}, generation_status="pending")
+        line = StoryboardLineModel(
+            id=uid("line"),
+            project_task_id=task.id,
+            sort_order=index,
+            source="general",
+            shot_type=shot_type,
+            planned_duration=duration,
+            scene_prompt="",
+            shot_prompt="",
+            shot_options={
+                "ratio": payload.ratio,
+                "resolution": payload.resolution,
+                "imageModel": payload.image_model,
+                "videoModel": payload.video_model,
+                "duration": normalize_video_duration(duration),
+                "outlineScene": scene,
+                "outlineShot": shot,
+            },
+            generation_status="pending",
+        )
         db.add(line)
         await db.flush()
         for role_index, human_id in enumerate(roles):
             db.add(StoryboardLineCastModel(id=uid("linecast"), storyboard_line_id=line.id, digital_human_id=human_id, sort_order=role_index))
-        output.append({"id": line.id, "shotType": shot_type, "plannedDuration": duration, "scenePrompt": "", "shotPrompt": "", "digitalHumanIds": roles, "generationStatus": "pending"})
+        output.append(
+            {"id": line.id, "shotType": shot_type, "plannedDuration": duration, "scenePrompt": "", "shotPrompt": "", "digitalHumanIds": roles, "generationStatus": "pending"}
+        )
     await db.commit()
-    return {"taskId": task.id, "projectId": project_id, "title": title, "status": "generating", "cast": payload.digital_human_ids, "totalDuration": payload.total_duration, "storyboardConfig": config, "lines": output}
+    return {
+        "taskId": task.id,
+        "projectId": project_id,
+        "title": title,
+        "status": "generating",
+        "cast": payload.digital_human_ids,
+        "totalDuration": payload.total_duration,
+        "storyboardConfig": config,
+        "lines": output,
+    }
 
 
 @router.get("/tasks/{task_id}")
 async def get_task(task_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
     task = await owned_task(db, user.id, task_id)
-    lines = list((await db.execute(select(StoryboardLineModel).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None)).order_by(StoryboardLineModel.sort_order))).scalars().all())
-    cast = list((await db.execute(select(ProjectCastModel).where(ProjectCastModel.project_task_id == task.id, ProjectCastModel.deleted_at.is_(None)).order_by(ProjectCastModel.sort_order))).scalars().all())
-    line_cast = list((await db.execute(select(StoryboardLineCastModel).where(StoryboardLineCastModel.storyboard_line_id.in_([line.id for line in lines]) if lines else False, StoryboardLineCastModel.deleted_at.is_(None)))).scalars().all())
+    lines = list(
+        (
+            await db.execute(
+                select(StoryboardLineModel).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None)).order_by(StoryboardLineModel.sort_order)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    cast = list(
+        (await db.execute(select(ProjectCastModel).where(ProjectCastModel.project_task_id == task.id, ProjectCastModel.deleted_at.is_(None)).order_by(ProjectCastModel.sort_order)))
+        .scalars()
+        .all()
+    )
+    line_cast = list(
+        (
+            await db.execute(
+                select(StoryboardLineCastModel).where(
+                    StoryboardLineCastModel.storyboard_line_id.in_([line.id for line in lines]) if lines else False, StoryboardLineCastModel.deleted_at.is_(None)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     casts: dict[str, list[str]] = {}
     for link in line_cast:
         casts.setdefault(link.storyboard_line_id, []).append(link.digital_human_id)
@@ -394,7 +508,17 @@ async def delete_task(task_id: str, user: CurrentUser, db: AsyncSession = Db) ->
 
 @router.get("/digital-human-styles")
 async def list_styles(user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
-    items = list((await db.execute(select(DigitalHumanStyleModel).where(DigitalHumanStyleModel.deleted_at.is_(None), or_(DigitalHumanStyleModel.scope == "system", DigitalHumanStyleModel.user_id == user.id)).order_by(DigitalHumanStyleModel.sort_order))).scalars().all())
+    items = list(
+        (
+            await db.execute(
+                select(DigitalHumanStyleModel)
+                .where(DigitalHumanStyleModel.deleted_at.is_(None), or_(DigitalHumanStyleModel.scope == "system", DigitalHumanStyleModel.user_id == user.id))
+                .order_by(DigitalHumanStyleModel.sort_order)
+            )
+        )
+        .scalars()
+        .all()
+    )
     return [{"id": item.id, "name": item.name, "scope": item.scope, "readOnly": item.scope == "system"} for item in items]
 
 
@@ -408,25 +532,51 @@ async def create_style(payload: StyleCreate, user: CurrentUser, db: AsyncSession
 
 @router.delete("/digital-human-styles/{style_id}")
 async def delete_style(style_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
-    result = await db.execute(select(DigitalHumanStyleModel).where(DigitalHumanStyleModel.id == style_id, DigitalHumanStyleModel.user_id == user.id, DigitalHumanStyleModel.scope == "private", DigitalHumanStyleModel.deleted_at.is_(None)))
+    result = await db.execute(
+        select(DigitalHumanStyleModel).where(
+            DigitalHumanStyleModel.id == style_id, DigitalHumanStyleModel.user_id == user.id, DigitalHumanStyleModel.scope == "private", DigitalHumanStyleModel.deleted_at.is_(None)
+        )
+    )
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "分类不存在")
     item.deleted_at = utcnow()
-    await db.execute(update(DigitalHumanModel).where(DigitalHumanModel.style_id == style_id, DigitalHumanModel.user_id == user.id, DigitalHumanModel.deleted_at.is_(None)).values(style_id=None))
+    await db.execute(
+        update(DigitalHumanModel).where(DigitalHumanModel.style_id == style_id, DigitalHumanModel.user_id == user.id, DigitalHumanModel.deleted_at.is_(None)).values(style_id=None)
+    )
     await db.commit()
     return {"ok": True}
 
 
 def human_json(item: DigitalHumanModel, style_name: str | None = None) -> dict:
-    return {"id": item.id, "name": item.name, "styleId": item.style_id, "style": style_name or "未分类", "avatar": item.avatar_thumbnail_url or item.avatar_url, "originalAvatar": item.avatar_url, "description": item.description, "avatarPrompt": item.avatar_prompt, "assetCode": item.asset_code, "gender": item.gender, "ageDescription": item.age_description, "appearanceStyle": item.appearance_style, "clothingDescription": item.clothing_description, "suitableMusicStyles": item.suitable_music_styles, "systemPrompt": item.system_prompt, "scope": item.scope, "readOnly": item.scope == "system"}
+    return {
+        "id": item.id,
+        "name": item.name,
+        "styleId": item.style_id,
+        "style": style_name or "未分类",
+        "avatar": item.avatar_thumbnail_url or item.avatar_url,
+        "originalAvatar": item.avatar_url,
+        "description": item.description,
+        "avatarPrompt": item.avatar_prompt,
+        "assetCode": item.asset_code,
+        "gender": item.gender,
+        "ageDescription": item.age_description,
+        "appearanceStyle": item.appearance_style,
+        "clothingDescription": item.clothing_description,
+        "suitableMusicStyles": item.suitable_music_styles,
+        "systemPrompt": item.system_prompt,
+        "scope": item.scope,
+        "readOnly": item.scope == "system",
+    }
 
 
 @router.get("/digital-humans")
 async def list_humans(user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
     items = await visible_humans(db, user.id)
     style_ids = [item.style_id for item in items if item.style_id]
-    styles = {item.id: item.name for item in (await db.execute(select(DigitalHumanStyleModel).where(DigitalHumanStyleModel.id.in_(style_ids) if style_ids else False))).scalars().all()}
+    styles = {
+        item.id: item.name for item in (await db.execute(select(DigitalHumanStyleModel).where(DigitalHumanStyleModel.id.in_(style_ids) if style_ids else False))).scalars().all()
+    }
     return [human_json(item, styles.get(item.style_id)) for item in items]
 
 
@@ -446,7 +596,11 @@ async def create_human(payload: DigitalHumanCreate, user: CurrentUser, db: Async
 
 @router.patch("/digital-humans/{human_id}")
 async def update_human(human_id: str, payload: DigitalHumanUpdate, user: CurrentUser, db: AsyncSession = Db) -> dict:
-    result = await db.execute(select(DigitalHumanModel).where(DigitalHumanModel.id == human_id, DigitalHumanModel.user_id == user.id, DigitalHumanModel.scope == "private", DigitalHumanModel.deleted_at.is_(None)))
+    result = await db.execute(
+        select(DigitalHumanModel).where(
+            DigitalHumanModel.id == human_id, DigitalHumanModel.user_id == user.id, DigitalHumanModel.scope == "private", DigitalHumanModel.deleted_at.is_(None)
+        )
+    )
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "私有角色不存在")
@@ -460,14 +614,20 @@ async def update_human(human_id: str, payload: DigitalHumanUpdate, user: Current
 
 @router.delete("/digital-humans/{human_id}")
 async def delete_human(human_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
-    result = await db.execute(select(DigitalHumanModel).where(DigitalHumanModel.id == human_id, DigitalHumanModel.user_id == user.id, DigitalHumanModel.scope == "private", DigitalHumanModel.deleted_at.is_(None)))
+    result = await db.execute(
+        select(DigitalHumanModel).where(
+            DigitalHumanModel.id == human_id, DigitalHumanModel.user_id == user.id, DigitalHumanModel.scope == "private", DigitalHumanModel.deleted_at.is_(None)
+        )
+    )
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "私有角色不存在")
     item.deleted_at = utcnow()
     now = item.deleted_at
     await db.execute(update(ProjectCastModel).where(ProjectCastModel.digital_human_id == human_id, ProjectCastModel.deleted_at.is_(None)).values(deleted_at=now))
-    await db.execute(update(StoryboardLineCastModel).where(StoryboardLineCastModel.digital_human_id == human_id, StoryboardLineCastModel.deleted_at.is_(None)).values(deleted_at=now))
+    await db.execute(
+        update(StoryboardLineCastModel).where(StoryboardLineCastModel.digital_human_id == human_id, StoryboardLineCastModel.deleted_at.is_(None)).values(deleted_at=now)
+    )
     await db.commit()
     return {"ok": True}
 
@@ -515,7 +675,11 @@ async def update_line(line_id: str, payload: StoryboardLineUpdate, user: Current
         visible = await visible_humans(db, user.id, payload.digital_human_ids)
         if len({item.id for item in visible}) != len(set(payload.digital_human_ids)):
             raise HTTPException(422, "包含不可用角色")
-        old = list((await db.execute(select(StoryboardLineCastModel).where(StoryboardLineCastModel.storyboard_line_id == line.id, StoryboardLineCastModel.deleted_at.is_(None)))).scalars().all())
+        old = list(
+            (await db.execute(select(StoryboardLineCastModel).where(StoryboardLineCastModel.storyboard_line_id == line.id, StoryboardLineCastModel.deleted_at.is_(None))))
+            .scalars()
+            .all()
+        )
         for item in old:
             item.deleted_at = utcnow()
         for index, human_id in enumerate(payload.digital_human_ids):
@@ -527,7 +691,8 @@ async def update_line(line_id: str, payload: StoryboardLineUpdate, user: Current
 @router.delete("/storyboard-lines/{line_id}")
 async def delete_line(line_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
     line = await owned_line(db, user.id, line_id)
-    now = utcnow(); line.deleted_at = now
+    now = utcnow()
+    line.deleted_at = now
     for model in (StoryboardLineCastModel, SceneAssetModel, ShotAssetModel, VoiceAssetModel):
         await db.execute(update(model).where(model.storyboard_line_id == line.id, model.deleted_at.is_(None)).values(deleted_at=now))
     await db.execute(update(GenerationJobModel).where(GenerationJobModel.storyboard_line_id == line.id, GenerationJobModel.deleted_at.is_(None)).values(deleted_at=now))
@@ -549,24 +714,62 @@ async def reorder_lines(task_id: str, payload: ReorderLines, user: CurrentUser, 
 
 
 async def line_json(db: AsyncSession, line: StoryboardLineModel, cast: list[str]) -> dict:
-    scenes = list((await db.execute(select(SceneAssetModel).where(SceneAssetModel.storyboard_line_id == line.id, SceneAssetModel.deleted_at.is_(None)).order_by(SceneAssetModel.created_at))).scalars().all())
-    shots = list((await db.execute(select(ShotAssetModel).where(ShotAssetModel.storyboard_line_id == line.id, ShotAssetModel.deleted_at.is_(None)).order_by(ShotAssetModel.created_at))).scalars().all())
-    voices = list((await db.execute(select(VoiceAssetModel).where(VoiceAssetModel.storyboard_line_id == line.id, VoiceAssetModel.deleted_at.is_(None)).order_by(VoiceAssetModel.created_at))).scalars().all())
+    scenes = list(
+        (await db.execute(select(SceneAssetModel).where(SceneAssetModel.storyboard_line_id == line.id, SceneAssetModel.deleted_at.is_(None)).order_by(SceneAssetModel.created_at)))
+        .scalars()
+        .all()
+    )
+    shots = list(
+        (await db.execute(select(ShotAssetModel).where(ShotAssetModel.storyboard_line_id == line.id, ShotAssetModel.deleted_at.is_(None)).order_by(ShotAssetModel.created_at)))
+        .scalars()
+        .all()
+    )
+    voices = list(
+        (await db.execute(select(VoiceAssetModel).where(VoiceAssetModel.storyboard_line_id == line.id, VoiceAssetModel.deleted_at.is_(None)).order_by(VoiceAssetModel.created_at)))
+        .scalars()
+        .all()
+    )
     return {
-        "id": line.id, "source": line.source, "shotType": line.shot_type, "plannedDuration": line.planned_duration,
-        "lyrics": line.lyrics, "lyricsZh": line.lyrics_zh, "start": line.start_time, "end": line.end_time,
-        "scenePrompt": line.scene_prompt, "shotPrompt": line.shot_prompt, "shotOptions": line.shot_options,
-        "generationStatus": line.generation_status, "generationError": line.generation_error,
-        "generationAttempt": line.generation_attempt, "generatedAt": line.generated_at.isoformat() if line.generated_at else None,
+        "id": line.id,
+        "source": line.source,
+        "shotType": line.shot_type,
+        "plannedDuration": line.planned_duration,
+        "lyrics": line.lyrics,
+        "lyricsZh": line.lyrics_zh,
+        "start": line.start_time,
+        "end": line.end_time,
+        "scenePrompt": line.scene_prompt,
+        "shotPrompt": line.shot_prompt,
+        "shotOptions": line.shot_options,
+        "generationStatus": line.generation_status,
+        "generationError": line.generation_error,
+        "generationAttempt": line.generation_attempt,
+        "generatedAt": line.generated_at.isoformat() if line.generated_at else None,
         "digitalHumanIds": cast,
         "sceneAssets": [{"id": a.id, "imageUrl": a.image_thumbnail_url or a.image_url, "originalImageUrl": a.image_url, "isCurrent": a.is_current} for a in scenes],
-        "shotAssets": [{"id": a.id, "coverUrl": a.cover_thumbnail_url or a.cover_url, "originalCoverUrl": a.cover_url, "videoUrl": a.video_url, "duration": a.duration, "resolution": a.resolution, "ratio": a.ratio, "isCurrent": a.is_current} for a in shots],
+        "shotAssets": [
+            {
+                "id": a.id,
+                "coverUrl": a.cover_thumbnail_url or a.cover_url,
+                "originalCoverUrl": a.cover_url,
+                "videoUrl": a.video_url,
+                "duration": a.duration,
+                "resolution": a.resolution,
+                "ratio": a.ratio,
+                "isCurrent": a.is_current,
+            }
+            for a in shots
+        ],
         "voiceAssets": [{"id": a.id, "url": a.audio_url, "duration": a.duration, "isCurrent": a.is_current} for a in voices],
     }
 
 
 async def _refresh_storyboard_status(db: AsyncSession, task: ProjectTaskModel) -> None:
-    statuses = list((await db.execute(select(StoryboardLineModel.generation_status).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None)))).scalars().all())
+    statuses = list(
+        (await db.execute(select(StoryboardLineModel.generation_status).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None))))
+        .scalars()
+        .all()
+    )
     if statuses and all(value == "succeeded" for value in statuses):
         task.status = "ready"
     elif any(value == "succeeded" for value in statuses) and any(value == "failed" for value in statuses):
@@ -585,36 +788,112 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
         raise HTTPException(422, "分镜不属于指定子项目")
     if line.generation_status == "running":
         raise HTTPException(409, "该分镜正在生成")
-    lines = list((await db.execute(select(StoryboardLineModel).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None)).order_by(StoryboardLineModel.sort_order))).scalars().all())
-    cast_links = list((await db.execute(select(ProjectCastModel).where(ProjectCastModel.project_task_id == task.id, ProjectCastModel.deleted_at.is_(None)).order_by(ProjectCastModel.sort_order))).scalars().all())
+    lines = list(
+        (
+            await db.execute(
+                select(StoryboardLineModel).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None)).order_by(StoryboardLineModel.sort_order)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    cast_links = list(
+        (await db.execute(select(ProjectCastModel).where(ProjectCastModel.project_task_id == task.id, ProjectCastModel.deleted_at.is_(None)).order_by(ProjectCastModel.sort_order)))
+        .scalars()
+        .all()
+    )
     task_cast_ids = [item.digital_human_id for item in cast_links]
-    line_cast = list((await db.execute(select(StoryboardLineCastModel).where(StoryboardLineCastModel.storyboard_line_id == line.id, StoryboardLineCastModel.deleted_at.is_(None)).order_by(StoryboardLineCastModel.sort_order))).scalars().all())
+    line_cast = list(
+        (
+            await db.execute(
+                select(StoryboardLineCastModel)
+                .where(StoryboardLineCastModel.storyboard_line_id == line.id, StoryboardLineCastModel.deleted_at.is_(None))
+                .order_by(StoryboardLineCastModel.sort_order)
+            )
+        )
+        .scalars()
+        .all()
+    )
     planned_role_ids = [item.digital_human_id for item in line_cast]
     allowed_ids = planned_role_ids if task.storyboard_type == "general" else task_cast_ids
-    human_models = list((await db.execute(select(DigitalHumanModel).where(DigitalHumanModel.id.in_(allowed_ids) if allowed_ids else False, DigitalHumanModel.deleted_at.is_(None)))).scalars().all())
+    human_models = list(
+        (await db.execute(select(DigitalHumanModel).where(DigitalHumanModel.id.in_(allowed_ids) if allowed_ids else False, DigitalHumanModel.deleted_at.is_(None)))).scalars().all()
+    )
     human_by_id = {item.id: item for item in human_models}
     allowed_humans = [
         {
-            "id": human.id, "name": human.name, "gender": human.gender,
-            "ageDescription": human.age_description, "appearanceStyle": human.appearance_style,
+            "id": human.id,
+            "name": human.name,
+            "gender": human.gender,
+            "ageDescription": human.age_description,
+            "appearanceStyle": human.appearance_style,
             "clothingDescription": human.clothing_description,
             "suitableMusicStyles": human.suitable_music_styles,
             "systemPrompt": human.system_prompt or human.avatar_prompt or human.description,
         }
-        for human_id in allowed_ids if (human := human_by_id.get(human_id))
+        for human_id in allowed_ids
+        if (human := human_by_id.get(human_id))
     ]
-    current = {"id": line.id, "index": line.sort_order, "lyrics": line.lyrics, "start": line.start_time, "end": line.end_time, "shotType": line.shot_type, "plannedDuration": line.planned_duration, "plannedDigitalHumanIds": planned_role_ids, "outline": line.shot_options}
+    current = {
+        "id": line.id,
+        "index": line.sort_order,
+        "lyrics": line.lyrics,
+        "start": line.start_time,
+        "end": line.end_time,
+        "shotType": line.shot_type,
+        "plannedDuration": line.planned_duration,
+        "plannedDigitalHumanIds": planned_role_ids,
+        "outline": line.shot_options,
+    }
     if task.storyboard_type == "ass":
-        full_context = {"songId": task.storyboard_config.get("songId"), "songEmotion": task.storyboard_config.get("songEmotion"), "storyBible": task.storyboard_config.get("storyBible"), "allLyrics": [{"index": item.sort_order, "lyrics": item.lyrics, "start": item.start_time, "end": item.end_time} for item in lines], "overallRequirement": task.extra_requirement}
+        full_context = {
+            "songId": task.storyboard_config.get("songId"),
+            "songEmotion": task.storyboard_config.get("songEmotion"),
+            "storyBible": task.storyboard_config.get("storyBible"),
+            "allLyrics": [{"index": item.sort_order, "lyrics": item.lyrics, "start": item.start_time, "end": item.end_time} for item in lines],
+            "overallRequirement": task.extra_requirement,
+        }
     else:
-        full_context = {"storyboardConfig": task.storyboard_config, "shotOutline": [{"index": item.sort_order, "shotType": item.shot_type, "plannedDuration": item.planned_duration, "outline": item.shot_options} for item in lines], "overallRequirement": task.extra_requirement}
-    context_hash = hashlib.sha256(json.dumps({"promptVersion": PROMPT_VERSION, "schemaVersion": SCHEMA_VERSION, "storyBibleVersion": STORY_BIBLE_VERSION, "model": settings.llm_model, "temperature": 0.2, "current": current, "full": full_context, "cast": allowed_humans}, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        full_context = {
+            "storyboardConfig": task.storyboard_config,
+            "shotOutline": [{"index": item.sort_order, "shotType": item.shot_type, "plannedDuration": item.planned_duration, "outline": item.shot_options} for item in lines],
+            "overallRequirement": task.extra_requirement,
+        }
+    context_hash = hashlib.sha256(
+        json.dumps(
+            {
+                "promptVersion": PROMPT_VERSION,
+                "schemaVersion": SCHEMA_VERSION,
+                "storyBibleVersion": STORY_BIBLE_VERSION,
+                "model": settings.llm_model,
+                "temperature": 0.2,
+                "current": current,
+                "full": full_context,
+                "cast": allowed_humans,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
     if not payload.force and line.generation_status == "succeeded" and line.prompt_context_hash == context_hash:
         return await line_json(db, line, [item.digital_human_id for item in line_cast])
     now = utcnow()
     line.generation_status, line.generation_error = "running", None
     line.generation_attempt += 1
-    job = GenerationJobModel(id=uid("job"), user_id=user.id, project_id=task.project_id, project_task_id=task.id, storyboard_line_id=line.id, kind="storyboard_line", status="running", progress=10, request={"current": current, "fullContext": full_context}, attempt=line.generation_attempt, idempotency_key=f"storyboard:{line.id}:{context_hash}", started_at=now)
+    job = GenerationJobModel(
+        id=uid("job"),
+        user_id=user.id,
+        project_id=task.project_id,
+        project_task_id=task.id,
+        storyboard_line_id=line.id,
+        kind="storyboard_line",
+        status="running",
+        progress=10,
+        request={"current": current, "fullContext": full_context},
+        attempt=line.generation_attempt,
+        idempotency_key=f"storyboard:{line.id}:{context_hash}",
+        started_at=now,
+    )
     db.add(job)
     await db.commit()
     try:
@@ -630,7 +909,19 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
         job.status, job.progress, job.result, job.finished_at = "succeeded", 100, result, utcnow()
         usage_records = result.get("usageRecords") or [{"operation": "storyboard_line", "usage": result.get("usage"), "requestId": result.get("requestId")}]
         for call in usage_records:
-            add_token_usage(db, operation=call.get("operation") or "storyboard_line", provider="openai-compatible", model=settings.llm_model, usage=call.get("usage"), user_id=user.id, project_id=task.project_id, project_task_id=task.id, storyboard_line_id=line.id, generation_job_id=job.id, request_id=call.get("requestId"))
+            add_token_usage(
+                db,
+                operation=call.get("operation") or "storyboard_line",
+                provider="openai-compatible",
+                model=settings.llm_model,
+                usage=call.get("usage"),
+                user_id=user.id,
+                project_id=task.project_id,
+                project_task_id=task.id,
+                storyboard_line_id=line.id,
+                generation_job_id=job.id,
+                request_id=call.get("requestId"),
+            )
         await _refresh_storyboard_status(db, task)
         await db.commit()
         response = await line_json(db, line, result["digitalHumanIds"])
@@ -640,10 +931,24 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
     except Exception as exc:
         line.generation_status, line.generation_error = "failed", str(exc)[:2000]
         job.status, job.error, job.finished_at = "failed", str(exc)[:2000], utcnow()
-        failed_calls = getattr(exc, "usage_records", None) or [{"operation": "storyboard_line_failed", "usage": getattr(exc, "usage", {}), "requestId": getattr(exc, "request_id", None)}]
+        failed_calls = getattr(exc, "usage_records", None) or [
+            {"operation": "storyboard_line_failed", "usage": getattr(exc, "usage", {}), "requestId": getattr(exc, "request_id", None)}
+        ]
         for call in failed_calls:
             operation = call.get("operation") or "storyboard_line_failed"
-            add_token_usage(db, operation=f"{operation}_failed", provider="openai-compatible", model=settings.llm_model, usage=call.get("usage"), user_id=user.id, project_id=task.project_id, project_task_id=task.id, storyboard_line_id=line.id, generation_job_id=job.id, request_id=call.get("requestId"))
+            add_token_usage(
+                db,
+                operation=f"{operation}_failed",
+                provider="openai-compatible",
+                model=settings.llm_model,
+                usage=call.get("usage"),
+                user_id=user.id,
+                project_id=task.project_id,
+                project_task_id=task.id,
+                storyboard_line_id=line.id,
+                generation_job_id=job.id,
+                request_id=call.get("requestId"),
+            )
         await _refresh_storyboard_status(db, task)
         await db.commit()
         raise HTTPException(502, f"单条分镜生成失败：{exc}") from exc
@@ -652,7 +957,17 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
 @router.post("/tasks/{task_id}/storyboard/retry-failed")
 async def reset_failed_storyboard_lines(task_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
     task = await owned_task(db, user.id, task_id)
-    failed = list((await db.execute(select(StoryboardLineModel).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.generation_status == "failed", StoryboardLineModel.deleted_at.is_(None)))).scalars().all())
+    failed = list(
+        (
+            await db.execute(
+                select(StoryboardLineModel).where(
+                    StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.generation_status == "failed", StoryboardLineModel.deleted_at.is_(None)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     for line in failed:
         line.generation_status, line.generation_error = "pending", None
     task.status = "generating"
@@ -676,12 +991,23 @@ async def list_token_usage(user: CurrentUser, project_task_id: str | None = None
             "calls": len(items),
         },
         "records": [
-            {"id": item.id, "operation": item.operation, "provider": item.provider, "model": item.model,
-             "requestId": item.request_id, "projectId": item.project_id, "projectTaskId": item.project_task_id,
-             "storyboardLineId": item.storyboard_line_id, "generationJobId": item.generation_job_id,
-             "chatSessionId": item.chat_session_id, "inputTokens": item.input_tokens,
-             "outputTokens": item.output_tokens, "cachedInputTokens": item.cached_input_tokens,
-             "totalTokens": item.total_tokens, "createdAt": item.created_at.isoformat()}
+            {
+                "id": item.id,
+                "operation": item.operation,
+                "provider": item.provider,
+                "model": item.model,
+                "requestId": item.request_id,
+                "projectId": item.project_id,
+                "projectTaskId": item.project_task_id,
+                "storyboardLineId": item.storyboard_line_id,
+                "generationJobId": item.generation_job_id,
+                "chatSessionId": item.chat_session_id,
+                "inputTokens": item.input_tokens,
+                "outputTokens": item.output_tokens,
+                "cachedInputTokens": item.cached_input_tokens,
+                "totalTokens": item.total_tokens,
+                "createdAt": item.created_at.isoformat(),
+            }
             for item in items
         ],
     }
@@ -691,8 +1017,26 @@ async def list_token_usage(user: CurrentUser, project_task_id: str | None = None
 async def export_materials(task_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
     task = await owned_task(db, user.id, task_id)
     project = await owned_project(db, user.id, task.project_id)
-    lines = list((await db.execute(select(StoryboardLineModel).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None)).order_by(StoryboardLineModel.sort_order))).scalars().all())
-    shot_assets = list((await db.execute(select(ShotAssetModel).where(ShotAssetModel.storyboard_line_id.in_([line.id for line in lines]) if lines else False, ShotAssetModel.deleted_at.is_(None)).order_by(ShotAssetModel.created_at))).scalars().all())
+    lines = list(
+        (
+            await db.execute(
+                select(StoryboardLineModel).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None)).order_by(StoryboardLineModel.sort_order)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    shot_assets = list(
+        (
+            await db.execute(
+                select(ShotAssetModel)
+                .where(ShotAssetModel.storyboard_line_id.in_([line.id for line in lines]) if lines else False, ShotAssetModel.deleted_at.is_(None))
+                .order_by(ShotAssetModel.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
     by_line: dict[str, list[ShotAssetModel]] = {}
     for asset in shot_assets:
         by_line.setdefault(asset.storyboard_line_id, []).append(asset)

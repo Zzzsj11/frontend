@@ -4,11 +4,11 @@ Revision ID: c712f803fb7a
 Revises: fb942da7380f
 Create Date: 2026-08-07
 """
+
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision: str = "c712f803fb7a"
 down_revision: Union[str, None] = "fb942da7380f"

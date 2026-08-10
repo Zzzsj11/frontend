@@ -40,8 +40,10 @@ def test_ass_story_bible_has_shared_arc_and_character_plan() -> None:
     assert bible["visualContinuity"]["season"] == "冬"
 
     single = build_ass_story_bible(
-        segments=[{"lyrics": "single"}], emotion={"songCode": "1"},
-        role_ids=["a", "b"], extra_requirement="",
+        segments=[{"lyrics": "single"}],
+        emotion={"songCode": "1"},
+        role_ids=["a", "b"],
+        extra_requirement="",
     )
     assert single["shots"][0]["preferredCharacterIds"] == ["a", "b"]
 
@@ -51,7 +53,12 @@ def test_storyboard_output_schema_is_strict() -> None:
     valid = _validate({"scenePrompt": "scene", "shotPrompt": "shot", "digitalHumanIds": ["a"]}, source="general", current={"plannedDigitalHumanIds": ["a"]}, allowed_humans=humans)
     assert valid["digitalHumanIds"] == ["a"]
     with pytest.raises(ValueError, match="字段必须严格"):
-        _validate({"scenePrompt": "scene", "shotPrompt": "shot", "digitalHumanIds": ["a"], "extra": True}, source="general", current={"plannedDigitalHumanIds": ["a"]}, allowed_humans=humans)
+        _validate(
+            {"scenePrompt": "scene", "shotPrompt": "shot", "digitalHumanIds": ["a"], "extra": True},
+            source="general",
+            current={"plannedDigitalHumanIds": ["a"]},
+            allowed_humans=humans,
+        )
     with pytest.raises(ValueError, match="不可用角色"):
         _validate({"scenePrompt": "scene", "shotPrompt": "shot", "digitalHumanIds": ["x"]}, source="ass", current={}, allowed_humans=humans)
     with pytest.raises(ValueError, match="预分配人物不一致"):
@@ -62,11 +69,20 @@ def test_storyboard_output_schema_is_strict() -> None:
 
 def test_general_storyboard_rejects_character_shots_without_cast(client) -> None:
     project = client.post("/api/projects", json={"name": "General validation"}).json()
-    response = client.post(f"/api/projects/{project['id']}/storyboards/general", json={
-        "genre": "pop", "secondary_category": "positive", "season": "summer",
-        "age_group": "young", "visual_style": "cinematic", "empty_shot_count": 0,
-        "character_shot_count": 2, "total_duration": 10, "digital_human_ids": [],
-    })
+    response = client.post(
+        f"/api/projects/{project['id']}/storyboards/general",
+        json={
+            "genre": "pop",
+            "secondary_category": "positive",
+            "season": "summer",
+            "age_group": "young",
+            "visual_style": "cinematic",
+            "empty_shot_count": 0,
+            "character_shot_count": 2,
+            "total_duration": 10,
+            "digital_human_ids": [],
+        },
+    )
     assert response.status_code == 422
     assert "至少需要选择一个角色" in response.json()["detail"]
 
@@ -74,9 +90,14 @@ def test_general_storyboard_rejects_character_shots_without_cast(client) -> None
 def test_general_storyboard_enforces_four_to_fifteen_seconds_per_shot(client) -> None:
     project = client.post("/api/projects", json={"name": "Duration validation"}).json()
     base = {
-        "genre": "pop", "secondary_category": "positive", "season": "summer",
-        "age_group": "young", "visual_style": "cinematic", "empty_shot_count": 2,
-        "character_shot_count": 0, "digital_human_ids": [],
+        "genre": "pop",
+        "secondary_category": "positive",
+        "season": "summer",
+        "age_group": "young",
+        "visual_style": "cinematic",
+        "empty_shot_count": 2,
+        "character_shot_count": 0,
+        "digital_human_ids": [],
     }
     too_short = client.post(
         f"/api/projects/{project['id']}/storyboards/general",

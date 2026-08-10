@@ -24,11 +24,12 @@ for service in postgres redis backend frontend; do
   fi
 done
 
-curl -fsS --max-time 10 http://127.0.0.1:8000/api/health >/dev/null \
-  && pass 'backend API on 127.0.0.1:8000' \
-  || fail 'backend API on 127.0.0.1:8000'
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+curl -fsS --max-time 10 "http://127.0.0.1:$BACKEND_PORT/api/health" >/dev/null \
+  && pass "backend API on 127.0.0.1:$BACKEND_PORT" \
+  || fail "backend API on 127.0.0.1:$BACKEND_PORT"
 
-docker compose exec -T postgres pg_isready -U mvagent -d mvagent >/dev/null 2>&1 \
+docker compose exec -T postgres sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1 \
   && pass 'PostgreSQL accepts connections' \
   || fail 'PostgreSQL connection'
 

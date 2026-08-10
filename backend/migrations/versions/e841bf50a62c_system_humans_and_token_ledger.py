@@ -4,11 +4,11 @@ Revision ID: e841bf50a62c
 Revises: c712f803fb7a
 Create Date: 2026-08-07
 """
+
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision: str = "e841bf50a62c"
 down_revision: Union[str, None] = "c712f803fb7a"
@@ -25,7 +25,14 @@ def upgrade() -> None:
     op.add_column("digital_humans", sa.Column("suitable_music_styles", sa.Text(), server_default="", nullable=False))
     op.add_column("digital_humans", sa.Column("system_prompt", sa.Text(), server_default="", nullable=False))
     op.create_index(op.f("ix_digital_humans_asset_code"), "digital_humans", ["asset_code"], unique=False)
-    op.create_index("uq_digital_human_asset_code_active", "digital_humans", ["asset_code"], unique=True, postgresql_where=sa.text("deleted_at IS NULL"), sqlite_where=sa.text("deleted_at IS NULL"))
+    op.create_index(
+        "uq_digital_human_asset_code_active",
+        "digital_humans",
+        ["asset_code"],
+        unique=True,
+        postgresql_where=sa.text("deleted_at IS NULL"),
+        sqlite_where=sa.text("deleted_at IS NULL"),
+    )
     op.create_table(
         "token_usage_records",
         sa.Column("id", sa.String(length=80), nullable=False),

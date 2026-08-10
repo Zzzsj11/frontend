@@ -41,6 +41,7 @@ def test_all_deletes_are_soft_deletes(client) -> None:
     assert client.get("/api/projects", headers=headers).json() == []
 
     import sqlite3
+
     with sqlite3.connect("/tmp/mv-agent-backend-test.sqlite3") as connection:
         owner, deleted_at = connection.execute("SELECT user_id, deleted_at FROM projects WHERE id = ?", (project["id"],)).fetchone()
     assert owner == user_id
@@ -50,12 +51,24 @@ def test_all_deletes_are_soft_deletes(client) -> None:
 def test_general_storyboard_persists_type_specific_configuration(client) -> None:
     _, headers = create_and_login_user(client, "general-user")
     project = client.post("/api/projects", headers=headers, json={"name": "General MV"}).json()
-    response = client.post(f"/api/projects/{project['id']}/storyboards/general", headers=headers, json={
-        "genre": "pop", "secondary_category": "positive-love", "tertiary_category": "young-crush",
-        "season": "春", "age_group": "青年", "visual_style": "电影写实", "ratio": "16:9",
-        "empty_shot_count": 1, "character_shot_count": 1, "total_duration": 10,
-        "digital_human_ids": ["dh-system-020"], "overall_prompt": "统一暖色电影质感",
-    })
+    response = client.post(
+        f"/api/projects/{project['id']}/storyboards/general",
+        headers=headers,
+        json={
+            "genre": "pop",
+            "secondary_category": "positive-love",
+            "tertiary_category": "young-crush",
+            "season": "春",
+            "age_group": "青年",
+            "visual_style": "电影写实",
+            "ratio": "16:9",
+            "empty_shot_count": 1,
+            "character_shot_count": 1,
+            "total_duration": 10,
+            "digital_human_ids": ["dh-system-020"],
+            "overall_prompt": "统一暖色电影质感",
+        },
+    )
     assert response.status_code == 201
     result = response.json()
     assert result["storyboardConfig"]["genre"] == "pop"

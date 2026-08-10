@@ -1,0 +1,5 @@
+node_modules
+dist
+test-artifacts
+test-results
+backend/app/data/song_emotions.json

@@ -5,7 +5,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BACKEND_DIR / "data"
 
@@ -45,24 +44,14 @@ SHARED_PROVIDER_KEY = _read_shared_provider_key()
 class Settings:
     host: str = os.getenv("APP_HOST", "127.0.0.1")
     port: int = int(os.getenv("APP_PORT", "8000"))
-    cors_origins: tuple[str, ...] = tuple(
-        value.strip()
-        for value in os.getenv("APP_CORS_ORIGINS", "http://localhost:5173").split(",")
-        if value.strip()
-    )
-    database_url: str = os.getenv(
-        "DATABASE_URL", "postgresql+asyncpg://mvagent:mvagent@127.0.0.1:5433/mvagent"
-    )
+    cors_origins: tuple[str, ...] = tuple(value.strip() for value in os.getenv("APP_CORS_ORIGINS", "http://localhost:5173").split(",") if value.strip())
+    database_url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://mvagent:mvagent@127.0.0.1:5433/mvagent")
     redis_url: str = os.getenv("REDIS_URL", "redis://127.0.0.1:6380/0")
     jwt_secret: str = os.getenv("JWT_SECRET", "development-only-change-me-at-least-32-bytes")
     access_token_minutes: int = int(os.getenv("ACCESS_TOKEN_MINUTES", "15"))
     refresh_token_days: int = int(os.getenv("REFRESH_TOKEN_DAYS", "14"))
     refresh_cookie_secure: bool = os.getenv("REFRESH_COOKIE_SECURE", "false").lower() == "true"
-    llm_base_url: str = os.getenv("LLM_BASE_URL") or (
-        "https://ai-aigc.fzyinghe.com/v1"
-        if SHARED_PROVIDER_KEY
-        else os.getenv("ANTHROPIC_BASE_URL", "https://api.openai.com/v1")
-    )
+    llm_base_url: str = os.getenv("LLM_BASE_URL") or ("https://ai-aigc.fzyinghe.com/v1" if SHARED_PROVIDER_KEY else os.getenv("ANTHROPIC_BASE_URL", "https://api.openai.com/v1"))
     llm_api_key: str = os.getenv("LLM_API_KEY") or SHARED_PROVIDER_KEY or os.getenv("ANTHROPIC_AUTH_TOKEN", "")
     llm_model: str = os.getenv("LLM_MODEL") or os.getenv("AIGC_CHAT_MODEL") or os.getenv("MODEL_ID", "gpt-4o-mini")
     llm_api_mode: str = os.getenv("LLM_API_MODE", "openai").lower()

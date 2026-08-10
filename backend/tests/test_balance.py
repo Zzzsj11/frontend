@@ -16,18 +16,33 @@ async def test_balance_query_formats_and_caches_response(monkeypatch) -> None:
     calls = []
 
     class FakeResponse:
-        def raise_for_status(self): pass
-        def json(self): return {"code": 200, "data": {"userId": 123, "balance": "287.391936"}}
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"code": 200, "data": {"userId": 123, "balance": "287.391936"}}
 
     class FakeClient:
-        def __init__(self, *args, **kwargs): pass
-        async def __aenter__(self): return self
-        async def __aexit__(self, *args): pass
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
         async def post(self, url, **kwargs):
             calls.append((url, kwargs["json"]))
             return FakeResponse()
 
-    monkeypatch.setattr(balance, "settings", SimpleNamespace(business_api_key="secret", business_user_id="123", business_balance_url="https://balance.test", business_balance_timeout=10, business_balance_cache_seconds=30))
+    monkeypatch.setattr(
+        balance,
+        "settings",
+        SimpleNamespace(
+            business_api_key="secret", business_user_id="123", business_balance_url="https://balance.test", business_balance_timeout=10, business_balance_cache_seconds=30
+        ),
+    )
     monkeypatch.setattr(balance.httpx, "AsyncClient", FakeClient)
     monkeypatch.setattr(balance, "_cache", None)
     monkeypatch.setattr(balance, "_cache_expires_at", 0.0)

@@ -25,10 +25,17 @@ playwright-report/
 test-artifacts/full-journey/runs/
 test-artifacts/remote/runs/
 coverage/
+.coverage
+backend/.coverage
 dist
 dist-ssr
 *.zip
 *.local
+.env.production
+.env.staging
+.deployed-version
+.previous-version
+backups/
 
 # Editor directories and files
 .vscode/*

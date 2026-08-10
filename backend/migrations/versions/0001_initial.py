@@ -1,8 +1,7 @@
 """Initial PostgreSQL schema."""
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0001_initial"
 down_revision = None
@@ -50,4 +49,3 @@ def downgrade() -> None:
     op.drop_table("generation_jobs")
     op.drop_table("chat_messages")
     op.drop_table("chat_sessions")
-

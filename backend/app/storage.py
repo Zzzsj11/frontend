@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import mimetypes
-import io
-import re
-import uuid
 import asyncio
+import io
 import ipaddress
+import mimetypes
+import re
 import socket
+import uuid
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote, urljoin, urlparse
@@ -49,9 +49,7 @@ class TosStorage:
         import tos
 
         try:
-            self.client = tos.TosClientV2(
-                settings.tos_access_key, settings.tos_secret_key, settings.tos_endpoint, settings.tos_region
-            )
+            self.client = tos.TosClientV2(settings.tos_access_key, settings.tos_secret_key, settings.tos_endpoint, settings.tos_region)
         except TypeError:
             self.client = tos.TosClientV2(settings.tos_access_key, settings.tos_secret_key, settings.tos_endpoint)
 
@@ -89,9 +87,7 @@ class TosStorage:
                 )
             except TypeError:
                 stream.seek(0)
-                self.client.put_object(
-                    bucket, object_key, len(content), content_type or "application/octet-stream", content=stream
-                )
+                self.client.put_object(bucket, object_key, len(content), content_type or "application/octet-stream", content=stream)
 
         await asyncio.to_thread(upload)
         return self._public_url(bucket, object_key)
