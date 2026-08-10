@@ -157,7 +157,18 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
       expect((await user.get(`/api/generations/missing-${runId}/events`)).status()).toBe(404)
 
       await json(await user.get(`/api/token-usage?project_task_id=${ass.taskId}`))
-      await json(await user.post(`/api/tasks/${taskId}/material-export`), [201, 422])
+      const materialExport = await json(await user.post(`/api/tasks/${taskId}/material-exports`), 202)
+      expect(materialExport.id).toBeTruthy()
+      const exportStatus = await json(await user.get(`/api/material-exports/${materialExport.id}`))
+      expect(['queued', 'running', 'ready']).toContain(exportStatus.status)
+      const exportHistory = await json<any[]>(await user.get(`/api/tasks/${taskId}/material-exports`))
+      expect(exportHistory.some((item) => item.id === materialExport.id)).toBeTruthy()
+      const exportEvents = await user.get(`/api/material-exports/${materialExport.id}/events`, { timeout: 30_000 })
+      expect(exportEvents.status()).toBe(200)
+      const exportEventBody = await exportEvents.text()
+      expect(exportEventBody).toContain('data: ')
+      expect(exportEventBody).toContain('"type": "export"')
+      expect(exportEventBody).toContain('"progress": 100')
 
       const chat = await json(await user.post('/api/chat/sessions', { data: { system_prompt: 'remote acceptance assistant' } }), 201)
       chatId = chat.id

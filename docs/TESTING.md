@@ -11,11 +11,13 @@ make preflight
 远程验收：
 
 ```bash
-PLAYWRIGHT_BASE_URL=http://SERVER:5173 \
-REMOTE_API_BASE_URL=http://SERVER:5173 \
+PLAYWRIGHT_BASE_URL=http://124.222.219.76:5173 \
+REMOTE_API_BASE_URL=http://124.222.219.76:5173 \
 REMOTE_E2E_USERNAME=admin REMOTE_E2E_PASSWORD='***' \
 make remote-test
 ```
+
+远程自动化固定使用 `http://124.222.219.76:5173`，不使用业务域名。域名可能受 DNS、备案、证书链路或本地网络策略影响；域名可用性由线上健康检查脚本单独验证，避免将网络问题误判为应用回归失败。
 
 失败产物在 `test-results`，远程截图在 `test-artifacts/remote/runs`。新增功能必须优先补后端集成测试；关键页面再补 Playwright，避免只依靠脆弱的端到端测试。
 

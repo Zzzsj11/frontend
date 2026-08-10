@@ -20,6 +20,8 @@ export REMOTE_E2E_RUN_ID="$(date +%Y%m%d-%H%M%S)"
 
 不要把真实密码、Token 或供应商密钥写入仓库。
 
+远程 Playwright 与 API 自动化必须使用上述服务器 IP 和端口，不使用业务域名。域名只由 `scripts/online-health-check.sh` 验证 HTTPS、证书和反向代理，避免 DNS、备案或证书链路波动干扰业务回归。
+
 ## 默认远程验收（不消耗生成 Token）
 
 ```bash
