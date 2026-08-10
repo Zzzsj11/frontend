@@ -41,7 +41,7 @@ async function waitForPrompts(page: Page, expected: number, prefix: string) {
 async function generateAllMedia(page: Page, count: number, prefix: string) {
   for (let index = 0; index < count; index++) {
     const line = page.locator('.line-wrapper').nth(index)
-    await line.locator('.shot-thumb').click()
+    await line.locator('.shot-thumb').click({ position: { x: 6, y: 6 } })
     const dialog = page.locator('.modal').filter({ hasText: '编辑分镜内容' })
     await expect(dialog).toBeVisible()
     await dialog.getByRole('button', { name: '生成场景', exact: true }).click()
@@ -53,7 +53,7 @@ async function generateAllMedia(page: Page, count: number, prefix: string) {
 
   for (let index = 0; index < count; index++) {
     const line = page.locator('.line-wrapper').nth(index)
-    await line.locator('.shot-thumb').click()
+    await line.locator('.shot-thumb').click({ position: { x: 6, y: 6 } })
     const dialog = page.locator('.modal').filter({ hasText: '编辑分镜内容' })
     await dialog.getByRole('button', { name: '分镜', exact: true }).click()
     await dialog.locator('.gen-options select').nth(0).selectOption('480p')
