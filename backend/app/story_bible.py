@@ -60,7 +60,7 @@ def build_ass_story_bible(*, segments: list[dict[str, Any]], emotion: dict[str, 
             "atmosphere": emotion.get("atmosphere"),
             "stylePriority": extra_requirement or "统一时间、天气、色彩与人物服装，通过合理空间移动形成场景变化",
         },
-        "characterPolicy": "逐镜类型、人物、地点与动作均由全局大纲确定。单条生成必须严格沿用 requiredCharacterIds、shotType、locationId 和 characterAction；不得临时改为空镜、替换人物、引入其他人物或改变人物身份服装。",
+        "characterPolicy": "逐镜类型、人物、地点与动作均由全局大纲确定。单条生成必须严格沿用预分配角色、镜头类型、地点与人物动作；不得临时改为空镜、替换人物、引入其他人物或改变人物身份服装。",
         "technicalPolicy": {
             "negativeConstraints": ["无字幕", "无水印", "无 Logo", "不得出现未指定人物", "不得改变人物服装与身份"],
             "locationRule": "同一故事世界允许跨多个关联地点推进；一致性来自时间、天气、色彩、服装和空间衔接，而非所有镜头固定在同一地点。",
@@ -73,9 +73,10 @@ def build_general_story_bible(*, config: dict[str, Any], definitions: list[tuple
     total = len(definitions)
     return {
         "version": STORY_BIBLE_VERSION,
-        "logline": f"{config.get('genre')} / {config.get('secondary_category')} 风格的完整 MV 视觉弧光。",
+        "logline": f"{config.get('genre')} / {config.get('secondary_category')} 风格的完整 MV 视觉弧光，出镜人物性别构成：{config.get('gender') or '女'}。",
         "visualContinuity": {
             "season": config.get("season"),
+            "singerGender": config.get("gender"),
             "visualStyle": config.get("visual_style"),
             "ratio": config.get("ratio"),
             "overallPrompt": config.get("overall_prompt"),

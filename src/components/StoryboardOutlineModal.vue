@@ -17,6 +17,18 @@ const motifNames = (ids: string[] = []) =>
   ids
     .map((id) => store.activeStoryBible?.motifs?.find((item) => item.id === id)?.name || id)
     .join('、')
+/** 历史任务的约束文案混入了内部字段名，展示时替换为中文（新建任务后端已直接输出中文） */
+const POLICY_TERM_ZH: Record<string, string> = {
+  requiredCharacterIds: '预分配角色',
+  shotType: '镜头类型',
+  locationId: '地点',
+  characterAction: '人物动作',
+}
+const displayPolicy = (text: string) =>
+  text.replace(
+    /requiredCharacterIds|shotType|locationId|characterAction/g,
+    (term) => POLICY_TERM_ZH[term] ?? term,
+  )
 const regenerate = async () => {
   if (
     !(await confirmDialog({
@@ -43,7 +55,7 @@ const regenerate = async () => {
     <template #title> <AppIcon name="file" :size="17" /> MV 大纲总览 </template>
     <template v-if="store.activeStoryBible">
       <p class="outline-sub">{{ store.activeStoryBible.logline }}</p>
-      <div class="policy">{{ store.activeStoryBible.characterPolicy }}</div>
+      <div class="policy">{{ displayPolicy(store.activeStoryBible.characterPolicy) }}</div>
       <div v-if="store.failedOutlineSegments.length" class="failed-segments">
         <div
           v-for="seg in store.failedOutlineSegments"

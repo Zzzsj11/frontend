@@ -133,7 +133,7 @@ class GeneralStoryboardCreate(BaseModel):
     secondary_category: str
     tertiary_category: str | None = None
     season: str
-    singer: str | None = None
+    gender: Literal["女", "男", "男女", "女女", "男男", "多女（三人以上）", "多男（三人以上）", "多人有男有女（三人以上）"]
     age_group: str
     visual_style: str
     ratio: Literal["16:9", "9:16", "1:1", "4:3"] = "16:9"

@@ -40,6 +40,46 @@ let lastTick = 0
 /** 每行场景图重新生成次数（仅用于 mock 占位图换款） */
 const sceneVariants: Record<string, number> = {}
 const exportStreams = new Map<string, AbortController>()
+/** 刷新恢复后正在续跑的媒体生成任务（防止重复恢复同一任务） */
+const resumedGenerationJobs = new Set<string>()
+/** 正在轮询「逐句提示词生成」孤儿任务的任务 ID */
+const storyboardRunningWatchers = new Set<string>()
+/** 本地逐句生成队列正在处理的行（刷新恢复轮询需跳过，避免用旧数据覆盖） */
+const localGeneratingLines = new Set<string>()
+/** 未完成的数字人生成草稿（localStorage）：刷新/重开后恢复等待态并补建 */
+const PENDING_DH_KEY = 'mv:pending-dh'
+
+interface PendingDhDraft {
+  mode: 'generated' | 'uploaded'
+  jobId: string
+  name: string
+  style: string
+  description: string
+  styleId?: string
+}
+
+const savePendingDhDraft = (draft: PendingDhDraft) => {
+  try {
+    localStorage.setItem(PENDING_DH_KEY, JSON.stringify(draft))
+  } catch {
+    /* 存储不可用时仅放弃恢复能力 */
+  }
+}
+const clearPendingDhDraft = () => {
+  try {
+    localStorage.removeItem(PENDING_DH_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+const readPendingDhDraft = (): PendingDhDraft | null => {
+  try {
+    const raw = localStorage.getItem(PENDING_DH_KEY)
+    return raw ? (JSON.parse(raw) as PendingDhDraft) : null
+  } catch {
+    return null
+  }
+}
 
 /** 数字人资产库本地持久化 key */
 /** 删除分类后，该分类下数字人的归属分类 */
@@ -288,6 +328,7 @@ export const useProjectStore = defineStore('project', {
         this.dhStyles = styles.map((item) => item.name)
         this.dhStyleIds = Object.fromEntries(styles.map((item) => [item.name, item.id]))
         this.systemDhStyles = styles.filter((item) => item.readOnly).map((item) => item.name)
+        void this.resumePendingDigitalHuman()
         if (!this.activeSongId && projects[0]) {
           this.activeSongId = projects[0].id
           const taskId = projects[0].tasks[0]?.id
@@ -349,6 +390,7 @@ export const useProjectStore = defineStore('project', {
       this.currentTime = 0
       if (taskId) {
         void this.restoreMaterialExports(taskId)
+        void this.resumeActiveGenerations(taskId)
         if (
           script.storyboardType === 'ass' &&
           (script.status === 'parsed' || script.status === 'outlining')
@@ -361,6 +403,9 @@ export const useProjectStore = defineStore('project', {
             .map((line) => line.id)
           if (pending.length) void this._generateStoryboardQueue(taskId, pending)
         }
+        // 刷新前仍在逐句生成的行：后端孤儿请求仍会跑完，轮询待其落定后合并
+        if (this.lines.some((line) => line.generationStatus === 'running'))
+          void this._watchRunningStoryboardLines(taskId)
       }
     },
 
@@ -383,6 +428,7 @@ export const useProjectStore = defineStore('project', {
             local.generationStatus = 'running'
             local.generationError = undefined
           }
+          localGeneratingLines.add(lineId)
           try {
             const item = await api.generateStoryboardLine(taskId, lineId, force)
             const current = this.lines.find((line) => line.id === lineId)
@@ -403,6 +449,8 @@ export const useProjectStore = defineStore('project', {
               current.generationError =
                 error instanceof Error ? error.message : '单条视频提示词生成失败'
             }
+          } finally {
+            localGeneratingLines.delete(lineId)
           }
         }
       }
@@ -419,6 +467,90 @@ export const useProjectStore = defineStore('project', {
       if (!this.activeTaskId) return
       const { lineIds } = await api.resetFailedStoryboardLines(this.activeTaskId)
       await this._generateStoryboardQueue(this.activeTaskId, lineIds, true)
+    },
+
+    /** 刷新/切任务后恢复仍在排队或执行中的媒体生成（场景图/视频）等待态；结果由后端落库，落定后重新拉取合并 */
+    async resumeActiveGenerations(taskId: string) {
+      const jobs = await api.fetchActiveGenerations(taskId).catch(() => [])
+      for (const job of jobs) {
+        if (!job.storyboardLineId || resumedGenerationJobs.has(job.id)) continue
+        const line = this.lines.find((item) => item.id === job.storyboardLineId)
+        if (!line) continue
+        const slot = job.kind === 'video' ? line.shot : line.scene
+        if (slot.status === 'generating') continue
+        slot.status = 'generating'
+        slot.error = undefined
+        resumedGenerationJobs.add(job.id)
+        void this._watchGenerationJob(taskId, job.id, job.storyboardLineId, job.kind)
+      }
+    },
+
+    async _watchGenerationJob(
+      taskId: string,
+      jobId: string,
+      lineId: string,
+      kind: 'image' | 'video',
+    ) {
+      let failed: string | undefined
+      try {
+        await api.waitGenerationJob(jobId)
+      } catch (error) {
+        failed =
+          error instanceof Error
+            ? error.message
+            : kind === 'video'
+              ? '视频生成失败'
+              : '场景图生成失败'
+      } finally {
+        resumedGenerationJobs.delete(jobId)
+      }
+      if (this.activeTaskId !== taskId) return
+      // 后端在任务成功时已把资产落库，重新拉取后只合并媒体子状态，不覆盖用户正在编辑的提示词
+      const fresh = await api.fetchSongScript(taskId).catch(() => null)
+      if (!fresh || this.activeTaskId !== taskId) return
+      const freshLine = fresh.lines.find((item) => item.id === lineId)
+      const current = this.lines.find((item) => item.id === lineId)
+      if (!freshLine || !current) return
+      if (kind === 'video') current.shot = freshLine.shot
+      else current.scene = freshLine.scene
+      if (failed) {
+        const slot = kind === 'video' ? current.shot : current.scene
+        slot.status = 'failed'
+        slot.error = failed
+      }
+    },
+
+    /** 刷新前被中断的逐句提示词生成：后端孤儿请求仍会跑完并落库，轮询任务直至行状态落定后合并 */
+    async _watchRunningStoryboardLines(taskId: string) {
+      if (storyboardRunningWatchers.has(taskId)) return
+      storyboardRunningWatchers.add(taskId)
+      try {
+        for (let attempt = 0; attempt < 60; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 5000))
+          if (this.activeTaskId !== taskId) return
+          const fresh = await api.fetchSongScript(taskId).catch(() => null)
+          if (!fresh || this.activeTaskId !== taskId) return
+          for (const freshLine of fresh.lines) {
+            const current = this.lines.find((item) => item.id === freshLine.id)
+            if (
+              current &&
+              current.generationStatus === 'running' &&
+              !localGeneratingLines.has(current.id) &&
+              freshLine.generationStatus !== 'running'
+            ) {
+              current.scenePrompt = freshLine.scenePrompt
+              current.shotPrompt = freshLine.shotPrompt
+              current.digitalHumanIds = freshLine.digitalHumanIds
+              current.generationStatus = freshLine.generationStatus
+              current.generationError = freshLine.generationError
+              current.generationAttempt = freshLine.generationAttempt
+            }
+          }
+          if (!fresh.lines.some((line) => line.generationStatus === 'running')) return
+        }
+      } finally {
+        storyboardRunningWatchers.delete(taskId)
+      }
     },
 
     openOutline() {
@@ -811,6 +943,65 @@ export const useProjectStore = defineStore('project', {
       )
     },
 
+    /** 数字人落库：确保风格存在 → 创建记录 → 更新本地列表（AI 生成 / 自定义上传 / 刷新恢复共用） */
+    async _finalizeDigitalHuman(input: {
+      name: string
+      style: string
+      description: string
+      avatar: string
+      thumbnail?: string
+      avatarPrompt: string
+      source: 'uploaded' | 'generated'
+      styleId?: string
+    }): Promise<DigitalHuman> {
+      let styleId = input.styleId ?? this.dhStyleIds[input.style]
+      if (!styleId) {
+        const style = await api.createDigitalHumanStyle(input.style)
+        styleId = style.id
+        this.dhStyleIds[input.style] = style.id
+        if (!this.dhStyles.includes(input.style)) this.dhStyles.push(input.style)
+      }
+      const dh = await api.createDigitalHuman({
+        name: input.name,
+        styleId,
+        description: input.description,
+        avatar: input.avatar,
+        thumbnail: input.thumbnail,
+        avatarPrompt: input.avatarPrompt,
+        source: input.source,
+      })
+      const existing = this.digitalHumans.findIndex((item) => item.id === dh.id)
+      if (existing >= 0) this.digitalHumans.splice(existing, 1, dh)
+      else this.digitalHumans.push(dh)
+      this.ensureDhStyle(dh.style)
+      return dh
+    },
+
+    /** 刷新/重开后恢复上次未完成的数字人生成：任务还在跑则恢复等待态续跑，已跑完则直接补建落库 */
+    async resumePendingDigitalHuman() {
+      const draft = readPendingDhDraft()
+      if (!draft) return
+      this.dhGenerating = true
+      try {
+        const generated = await imageGen.waitForImageAsset(draft.jobId)
+        await this._finalizeDigitalHuman({
+          name: draft.name,
+          style: draft.style,
+          description: draft.description,
+          avatar: generated.url,
+          thumbnail: generated.thumbnailUrl,
+          avatarPrompt: imageGen.buildPortraitPrompt(draft.description || draft.name, draft.style),
+          source: draft.mode,
+          styleId: draft.styleId,
+        })
+      } catch (error) {
+        reportApiError(error, '数字人生成失败')
+      } finally {
+        clearPendingDhDraft()
+        this.dhGenerating = false
+      }
+    },
+
     /** 调用真实异步生图接口生成数字人形象，图片本地化存储后加入资产库 */
     async generateDigitalHuman(input: {
       name: string
@@ -824,38 +1015,40 @@ export const useProjectStore = defineStore('project', {
         const id = nextId('dh')
         const referenceImage =
           input.referenceImage || this.digitalHumans.find((human) => human.readOnly)?.originalAvatar
-        const generated = await imageGen.generateImageAsset(prompt, {
-          size: '1344x768',
-          quality: 'medium',
-          ...(referenceImage ? { image: referenceImage } : {}),
-        })
+        const generated = await imageGen.generateImageAsset(
+          prompt,
+          {
+            size: '1344x768',
+            quality: 'medium',
+            ...(referenceImage ? { image: referenceImage } : {}),
+          },
+          // 任务创建后先留草稿：页面刷新后可据此恢复等待态并补建数字人
+          (jobId) =>
+            savePendingDhDraft({
+              mode: 'generated',
+              jobId,
+              name: input.name,
+              style: input.style,
+              description: input.description,
+            }),
+        )
         const avatar = await imageGen.localizeImage(id, generated.url)
-        const draft: DigitalHuman = {
-          id,
+        return await this._finalizeDigitalHuman({
           name: input.name,
           style: input.style,
-          avatar,
           description: input.description,
-          avatarPrompt: prompt,
-        }
-        const dh = await api.createDigitalHuman({
-          name: draft.name,
-          styleId: this.dhStyleIds[draft.style],
-          description: draft.description,
-          avatar: draft.avatar,
+          avatar,
           thumbnail: generated.thumbnailUrl,
-          avatarPrompt: draft.avatarPrompt,
+          avatarPrompt: prompt,
           source: 'generated',
         })
-        this.digitalHumans.push(dh)
-        this.ensureDhStyle(dh.style)
-        return dh
       } finally {
+        clearPendingDhDraft()
         this.dhGenerating = false
       }
     },
 
-    /** 上传自定义数字人：用户自备头像与信息直接加入资产库（名称、风格必填，不调用生图接口） */
+    /** 上传自定义数字人：以用户自备头像为参考图生成三视图定妆照后加入资产库（名称、风格必填） */
     async addCustomDigitalHuman(input: {
       name: string
       style: string
@@ -873,26 +1066,31 @@ export const useProjectStore = defineStore('project', {
         }
         const prompt = imageGen.buildPortraitPrompt(input.description || input.name, input.style)
         const reference = await api.uploadDataUrl(input.avatar, `${nextId('reference')}.jpg`)
-        const generated = await imageGen.generateImageAsset(prompt, {
-          size: '1344x768',
-          quality: 'medium',
-          image: reference.url,
-        })
-        const dh = await api.createDigitalHuman({
+        const generated = await imageGen.generateImageAsset(
+          prompt,
+          { size: '1344x768', quality: 'medium', image: reference.url },
+          (jobId) =>
+            savePendingDhDraft({
+              mode: 'uploaded',
+              jobId,
+              name: input.name,
+              style: input.style,
+              description: input.description ?? '',
+              styleId,
+            }),
+        )
+        return await this._finalizeDigitalHuman({
           name: input.name,
-          styleId,
+          style: input.style,
           description: input.description ?? '',
           avatar: generated.url,
           thumbnail: generated.thumbnailUrl,
           avatarPrompt: prompt,
           source: 'uploaded',
+          styleId,
         })
-        const existing = this.digitalHumans.findIndex((item) => item.id === dh.id)
-        if (existing >= 0) this.digitalHumans.splice(existing, 1, dh)
-        else this.digitalHumans.push(dh)
-        this.ensureDhStyle(dh.style)
-        return dh
       } finally {
+        clearPendingDhDraft()
         this.dhGenerating = false
       }
     },
@@ -1084,7 +1282,11 @@ export const useProjectStore = defineStore('project', {
         this._cacheCurrentTask()
         let song = this.songProjects.find((s) => s.id === this.activeSongId)
         if (!song) {
-          song = { id: nextId('song'), name: req.singer?.trim() || '未命名歌曲', tasks: [] }
+          song = {
+            id: nextId('song'),
+            name: [req.genre, req.secondaryCategory].filter(Boolean).join('·') || '未命名歌曲',
+            tasks: [],
+          }
           this.songProjects.push(song)
           this.activeSongId = song.id
         }
@@ -1214,6 +1416,7 @@ export const useProjectStore = defineStore('project', {
       if (scenePrompt !== undefined) line.scenePrompt = scenePrompt
       if (selectedOptions) line.shotOptions = normalizeShotOptions(selectedOptions)
       line.scene.status = 'generating'
+      line.scene.error = undefined
       const variant = sceneVariants[lineId] ?? 0
       sceneVariants[lineId] = variant + 1
       try {
@@ -1236,9 +1439,14 @@ export const useProjectStore = defineStore('project', {
             originalImageUrl: imageUrl,
           }
       } catch (error) {
+        // 失败状态与原因留在行内（可重试），全局弹窗只做即时反馈；不再 throw，
+        // 避免 fire-and-forget 调用产生 unhandled rejection、批量生成被单行失败中断
+        const reported = reportApiError(error, '场景图生成失败')
         const still = this.lines.find((l) => l.id === lineId)
-        if (still) still.scene.status = 'none'
-        throw reportApiError(error, '场景图生成失败')
+        if (still) {
+          still.scene.status = 'failed'
+          still.scene.error = reported.message
+        }
       }
     },
 
@@ -1251,6 +1459,7 @@ export const useProjectStore = defineStore('project', {
       if (options) line.shotOptions = normalizeShotOptions(options)
       const genOptions = normalizeShotOptions(line.shotOptions ?? DEFAULT_SHOT_OPTIONS)
       line.shot.status = 'generating'
+      line.shot.error = undefined
       const variant = line.shot.assets.length
       try {
         const { coverUrl, coverThumbnailUrl, videoUrl, duration } = await api.generateShotVideo(
@@ -1279,11 +1488,16 @@ export const useProjectStore = defineStore('project', {
           asset.coverUrl = coverThumbnailUrl || coverUrl
           still.shot.imageUrl = asset.coverUrl
           still.shot.status = 'done'
+          still.shot.error = undefined
         }
       } catch (error) {
+        // 同场景图：失败原因入行内状态，不 throw（保留已有资产封面，重试由行内/详情弹窗发起）
+        const reported = reportApiError(error, '视频生成失败')
         const still = this.lines.find((l) => l.id === lineId)
-        if (still) still.shot.status = 'none'
-        throw reportApiError(error, '视频生成失败')
+        if (still) {
+          still.shot.status = 'failed'
+          still.shot.error = reported.message
+        }
       }
     },
 

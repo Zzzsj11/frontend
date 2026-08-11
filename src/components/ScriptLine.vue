@@ -47,9 +47,26 @@ const timeRange = computed(() =>
 const openShotDetail = () => store.openEditor(props.line.id, 'shot')
 const openSceneDetail = () => store.openEditor(props.line.id, 'scene')
 
-/** 缩略图可能来自场景图，也可能是在无场景图时由视频首帧/封面占位 */
+/** 场景图/视频生成失败摘要（缩略图角标与按钮的 hover 提示共用） */
+const mediaError = computed(() => {
+  const errors: string[] = []
+  if (props.line.scene.status === 'failed')
+    errors.push(`场景图生成失败：${props.line.scene.error || '未知原因'}`)
+  if (props.line.shot.status === 'failed')
+    errors.push(`视频生成失败：${props.line.shot.error || '未知原因'}`)
+  return errors.join('\n')
+})
+
+/** 缩略图可能来自场景图，也可能是在无场景图时由视频首帧/封面占位；失败时直达对应编辑页重试 */
 const openThumbnailEditor = () => {
-  const tab = !props.line.scene.imageUrl && props.line.shot.assets.length ? 'shot' : 'scene'
+  const tab =
+    props.line.shot.status === 'failed'
+      ? 'shot'
+      : props.line.scene.status === 'failed'
+        ? 'scene'
+        : !props.line.scene.imageUrl && props.line.shot.assets.length
+          ? 'shot'
+          : 'scene'
   store.openEditor(props.line.id, tab)
 }
 
@@ -88,6 +105,12 @@ const onGenerateShot = async () => {
       >
         <span class="spinner light" />
       </div>
+      <span
+        v-else-if="mediaError"
+        class="thumb-failed"
+        :title="`${mediaError}\n点击查看原因并重新生成`"
+        ><AppIcon name="alert" :size="11"
+      /></span>
       <ImageZoom :src="originalCover" alt="视频封面原图预览" />
     </div>
 
@@ -168,12 +191,15 @@ const onGenerateShot = async () => {
       <BaseIconButton
         name="movie"
         :size="15"
+        :class="{ 'gen-failed': line.shot.status === 'failed' }"
         :active="line.shot.status === 'done'"
         :loading="line.shot.status === 'generating'"
         :title="
-          line.shot.status === 'done'
-            ? '重新生成视频片段'
-            : '生成视频片段（场景 × 视频提示词 × 角色）'
+          line.shot.status === 'failed'
+            ? `视频生成失败：${line.shot.error || '未知原因'}，点击重新生成`
+            : line.shot.status === 'done'
+              ? '重新生成视频片段'
+              : '生成视频片段（场景 × 视频提示词 × 角色）'
         "
         @click="onGenerateShot"
       />
@@ -279,6 +305,24 @@ const onGenerateShot = async () => {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+.thumb-failed {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--danger-active);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+.line-actions .gen-failed {
+  border-color: var(--danger);
+  color: var(--danger);
 }
 .dh-chips {
   display: flex;

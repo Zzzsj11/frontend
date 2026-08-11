@@ -95,6 +95,7 @@ def test_general_storyboard_persists_type_specific_configuration(client) -> None
             "secondary_category": "positive-love",
             "tertiary_category": "young-crush",
             "season": "春",
+            "gender": "女",
             "age_group": "青年",
             "visual_style": "电影写实",
             "ratio": "16:9",
@@ -110,6 +111,8 @@ def test_general_storyboard_persists_type_specific_configuration(client) -> None
     assert result["title"].startswith("通用分镜-")
     assert len(result["title"]) == len("通用分镜-20260810-01-23-38")
     assert result["storyboardConfig"]["genre"] == "pop"
+    assert result["storyboardConfig"]["gender"] == "女"
+    assert result["storyboardConfig"]["storyBible"]["visualContinuity"]["singerGender"] == "女"
     assert {line["shotType"] for line in result["lines"]} == {"empty", "character"}
     assert all(line["shotOptions"]["duration"] == round(line["plannedDuration"]) for line in result["lines"])
     assert [shot["materialDuration"] for shot in result["storyboardConfig"]["storyBible"]["shots"]] == [line["plannedDuration"] for line in result["lines"]]
@@ -136,6 +139,7 @@ def test_material_exports_are_isolated_between_users(client, monkeypatch) -> Non
             "genre": "pop",
             "secondary_category": "positive",
             "season": "春",
+            "gender": "女",
             "age_group": "青年",
             "visual_style": "电影写实",
             "empty_shot_count": 1,
@@ -149,3 +153,60 @@ def test_material_exports_are_isolated_between_users(client, monkeypatch) -> Non
     assert client.get(f"/api/material-exports/{export_id}", headers=user_a).status_code == 200
     assert client.get(f"/api/material-exports/{export_id}", headers=user_b).status_code == 404
     assert client.get(f"/api/tasks/{storyboard['taskId']}/material-exports", headers=user_b).status_code == 404
+
+
+def test_active_generations_reflect_running_jobs_only(client) -> None:
+    import sqlite3
+    from datetime import datetime, timezone
+
+    from conftest import TEST_DB
+
+    user_id, headers = create_and_login_user(client, "active-gen-user")
+    other_id, other = create_and_login_user(client, "active-gen-other")
+    project = client.post("/api/projects", headers=headers, json={"name": "Active gen"}).json()
+    storyboard = client.post(
+        f"/api/projects/{project['id']}/storyboards/general",
+        headers=headers,
+        json={
+            "genre": "pop",
+            "secondary_category": "positive",
+            "season": "春",
+            "gender": "女",
+            "age_group": "青年",
+            "visual_style": "电影写实",
+            "empty_shot_count": 1,
+            "character_shot_count": 1,
+            "total_duration": 10,
+            "digital_human_ids": ["dh-system-020"],
+        },
+    )
+    assert storyboard.status_code == 201
+    task_id = storyboard.json()["taskId"]
+    line_id = storyboard.json()["lines"][0]["id"]
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+
+    def insert_job(job_id: str, kind: str, status: str, task: str | None, line: str | None, owner: str) -> None:
+        connection = sqlite3.connect(TEST_DB, timeout=10)
+        try:
+            connection.execute(
+                "INSERT INTO generation_jobs (id, kind, status, progress, request, attempt, user_id, project_id, project_task_id, storyboard_line_id, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (job_id, kind, status, 10, "{}", 1, owner, project["id"], task, line, now, now),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    insert_job("job-active-v", "video", "running", task_id, line_id, user_id)
+    insert_job("job-done-i", "image", "succeeded", task_id, line_id, user_id)
+    insert_job("job-no-task", "image", "queued", None, None, user_id)
+    insert_job("job-other-user", "video", "queued", task_id, line_id, other_id)
+
+    listed = client.get(f"/api/tasks/{task_id}/generations/active", headers=headers)
+    assert listed.status_code == 200
+    active = listed.json()
+    assert [job["id"] for job in active] == ["job-active-v"]
+    assert active[0]["storyboardLineId"] == line_id
+    assert active[0]["kind"] == "video"
+    assert client.get(f"/api/tasks/{task_id}/generations/active", headers=other).status_code == 404

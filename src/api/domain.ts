@@ -20,6 +20,7 @@ import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL } from '../generationModels'
  * 领域 API 门面 —— 镜像后端 domain 路由（backend/app/domain.py）：
  *  GET  /api/projects              -> fetchSongProjects
  *  GET  /api/tasks/{id}            -> fetchSongScript
+ *  GET  /api/tasks/{id}/generations/active -> fetchActiveGenerations
  *  POST /api/projects              -> createSongProject
  *  GET  /api/digital-humans        -> fetchDigitalHumans
  *  POST /api/storyboards/ass       -> generateMagicScript
@@ -107,6 +108,15 @@ export async function fetchSongScript(taskId: string): Promise<{
     }),
   }
 }
+
+/** GET /api/tasks/{id}/generations/active — 任务下仍在排队/执行中的媒体生成任务（刷新后恢复等待态） */
+export const fetchActiveGenerations = (taskId: string) =>
+  apiRequest<Array<{ id: string; kind: 'image' | 'video'; storyboardLineId: string | null }>>(
+    `/tasks/${taskId}/generations/active`,
+  )
+
+/** 按任务 ID 恢复媒体生成任务的轮询等待（页面刷新后续跑；成功时资产已由后端落库） */
+export const waitGenerationJob = (id: string) => mediaGen.waitForJob(id)
 
 /** POST /api/songs — 新建空歌曲项目，用户随后选择 ASS 分镜或通用分镜 */
 export async function createSongProject(name: string): Promise<SongProject> {
@@ -428,7 +438,7 @@ export async function generateGeneralStoryboard(
       secondary_category: req.secondaryCategory,
       tertiary_category: req.tertiaryCategory,
       season: req.season,
-      singer: req.singer,
+      gender: req.gender,
       age_group: req.ageGroup,
       visual_style: req.visualStyle,
       ratio: req.ratio,

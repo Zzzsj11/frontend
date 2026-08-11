@@ -199,6 +199,14 @@ const cancel = () => store.closeEditor()
               <div v-if="store.editingLine.shot.status === 'generating'" class="pcard-loading">
                 <span class="spinner light" />
               </div>
+              <div
+                v-else-if="store.editingLine.shot.status === 'failed'"
+                class="pcard-failed"
+                :title="store.editingLine.shot.error || '未知原因'"
+              >
+                <AppIcon name="alert" :size="18" />
+                <span>视频生成失败</span>
+              </div>
             </div>
             <button
               class="pcard-tab"
@@ -222,6 +230,14 @@ const cancel = () => store.closeEditor()
               <ImageZoom :src="store.editingLine.scene.originalImageUrl" alt="场景原图预览" />
               <div v-if="store.editingLine.scene.status === 'generating'" class="pcard-loading">
                 <span class="spinner light" />
+              </div>
+              <div
+                v-else-if="store.editingLine.scene.status === 'failed'"
+                class="pcard-failed"
+                :title="store.editingLine.scene.error || '未知原因'"
+              >
+                <AppIcon name="alert" :size="18" />
+                <span>场景图生成失败</span>
               </div>
             </div>
             <button
@@ -352,6 +368,13 @@ const cancel = () => store.closeEditor()
               rows="6"
               placeholder="描述镜头运动与角色表演，将与场景、出演角色一起生成视频片段…"
             />
+            <p
+              v-if="store.editingLine.shot.status === 'failed'"
+              class="gen-error"
+              :title="store.editingLine.shot.error"
+            >
+              上次生成失败：{{ store.editingLine.shot.error || '未知原因' }}
+            </p>
             <button
               class="btn-outline prompt-action"
               :disabled="store.editingLine.shot.status === 'generating' || !shotPromptDraft.trim()"
@@ -397,6 +420,13 @@ const cancel = () => store.closeEditor()
               rows="3"
               placeholder="描述这段视频的背景场景：环境、光线、色调、氛围…"
             />
+            <p
+              v-if="store.editingLine.scene.status === 'failed'"
+              class="gen-error"
+              :title="store.editingLine.scene.error"
+            >
+              上次生成失败：{{ store.editingLine.scene.error || '未知原因' }}
+            </p>
             <button
               class="btn-outline prompt-action"
               :disabled="
@@ -566,6 +596,28 @@ const cancel = () => store.closeEditor()
   display: flex;
   align-items: center;
   justify-content: center;
+}
+.pcard-failed {
+  position: absolute;
+  inset: 0;
+  background: rgba(198, 40, 40, 0.62);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
+.gen-error {
+  margin: 0;
+  padding: 8px 12px 0;
+  color: var(--danger-active);
+  font-size: var(--font-sm);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 /* 每张卡片下方的 tab 标签，点击展开对应参数 */
 .pcard-tab {

@@ -1,7 +1,7 @@
 /** 生成状态 */
 import type { ImageModelId, VideoModelId } from '../generationModels'
 
-export type GenStatus = 'none' | 'generating' | 'done'
+export type GenStatus = 'none' | 'generating' | 'done' | 'failed'
 
 /** 歌曲目录下的处理任务（一个任务 = 一次 MV 制作会话） */
 export interface SongTask {
@@ -77,6 +77,8 @@ export interface SceneInfo {
   imageUrl?: string
   /** 场景原图，仅在放大预览时加载 */
   originalImageUrl?: string
+  /** 最近一次生成失败的原因（status === 'failed' 时展示） */
+  error?: string
 }
 
 /** 分镜信息 */
@@ -88,6 +90,8 @@ export interface ShotInfo {
   currentAssetId?: string
   /** 历史生成的视频片段资产 */
   assets: ShotAsset[]
+  /** 最近一次生成失败的原因（status === 'failed' 时展示） */
+  error?: string
 }
 
 /** 分镜视频生成参数（清晰度 / 时长 / 画幅） */
@@ -244,13 +248,26 @@ export interface GeneralStoryboardOptions {
   ratios: ShotGenOptions['ratio'][]
 }
 
+/** 通用分镜：出镜人物性别构成选项（与后端 GeneralStoryboardCreate.gender 保持一致） */
+export const GENERAL_GENDER_OPTIONS = [
+  '女',
+  '男',
+  '男女',
+  '女女',
+  '男男',
+  '多女（三人以上）',
+  '多男（三人以上）',
+  '多人有男有女（三人以上）',
+] as const
+export type GeneralGender = (typeof GENERAL_GENDER_OPTIONS)[number]
+
 export interface GeneralStoryboardRequest {
   projectId?: string
   genre: string
   secondaryCategory: string
   tertiaryCategory?: string
   season: string
-  singer?: string
+  gender: GeneralGender
   ageGroup: string
   visualStyle: string
   ratio: ShotGenOptions['ratio']

@@ -79,8 +79,10 @@ export async function generateImage(prompt: string, options?: ImageTaskOptions):
 export async function generateImageAsset(
   prompt: string,
   options?: ImageTaskOptions,
+  onTaskCreated?: (taskId: string) => void,
 ): Promise<{ url: string; thumbnailUrl?: string }> {
   const taskId = await createImageTask(prompt, options)
+  onTaskCreated?.(taskId)
   return waitForImageAsset(taskId)
 }
 

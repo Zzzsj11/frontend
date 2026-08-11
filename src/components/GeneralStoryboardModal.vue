@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { GeneralStoryboardRequest, ShotGenOptions } from '../types'
+import type { GeneralGender, GeneralStoryboardRequest, ShotGenOptions } from '../types'
+import { GENERAL_GENDER_OPTIONS } from '../types'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
 import BaseModal from './base/BaseModal.vue'
@@ -20,7 +21,7 @@ const genre = ref('')
 const secondary = ref('')
 const tertiary = ref('')
 const season = ref('秋')
-const singer = ref('')
+const gender = ref<GeneralGender>('女')
 const ageGroup = ref('青年')
 const visualStyle = ref('电影写实')
 const ratio = ref<ShotGenOptions['ratio']>('16:9')
@@ -72,7 +73,7 @@ const reset = () => {
   resolution.value = '720p'
   imageModel.value = DEFAULT_IMAGE_MODEL
   videoModel.value = DEFAULT_VIDEO_MODEL
-  singer.value = ''
+  gender.value = '女'
   emptyShotCount.value = 5
   characterShotCount.value = 5
   totalDuration.value = 100
@@ -115,7 +116,7 @@ const submit = () => {
     secondaryCategory: labelOf(secondary.value, secondaryOptions.value),
     tertiaryCategory: tertiary.value ? labelOf(tertiary.value, tertiaryOptions.value) : undefined,
     season: season.value,
-    singer: singer.value.trim() || undefined,
+    gender: gender.value,
     ageGroup: ageGroup.value,
     visualStyle: visualStyle.value,
     ratio: ratio.value,
@@ -224,7 +225,14 @@ const submit = () => {
                 </option>
               </select></label
             >
-            <label><span>歌手</span><input v-model="singer" placeholder="如：阿杜" /></label>
+            <label
+              ><span>性别</span
+              ><select v-model="gender">
+                <option v-for="item in GENERAL_GENDER_OPTIONS" :key="item" :value="item">
+                  {{ item }}
+                </option>
+              </select></label
+            >
             <label
               ><span>年龄段</span
               ><select v-model="ageGroup">

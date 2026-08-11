@@ -14,7 +14,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return apiRequest<T>(path, init)
 }
 
-async function waitForJob<T>(id: string, timeoutMs = 660_000): Promise<T> {
+export async function waitForJob<T>(id: string, timeoutMs = 660_000): Promise<T> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
     const job = await request<GenerationJob<T>>(`/generations/${id}`)

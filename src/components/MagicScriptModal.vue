@@ -102,15 +102,17 @@ const cancel = () => {
   >
     <template #title><AppIcon name="sparkles" :size="17" /> ASS 视频</template>
     <div class="modal-body">
-      <!-- 歌曲编号 -->
-      <p class="field-label">歌曲编号 <span class="required">*</span></p>
-      <input
-        v-model="songId"
-        class="song-input"
-        placeholder="上传 ASS 文件后自动提取歌曲编号"
-        disabled
-      />
-      <p class="song-id-hint">歌曲编号仅从 ASS 文件名提取，不支持手动修改。</p>
+      <!-- 歌曲编号：单行弱化展示，上传 ASS 后自动提取 -->
+      <div class="song-id-row">
+        <span class="song-id-label">歌曲编号 <span class="required">*</span></span>
+        <input
+          v-model="songId"
+          class="song-input"
+          placeholder="上传 ASS 文件后自动提取歌曲编号"
+          disabled
+        />
+        <span class="song-id-hint">仅从 ASS 文件名提取，不可手动修改</span>
+      </div>
 
       <section class="generation-config">
         <p class="field-label">生成配置 <span class="required">*</span></p>
@@ -246,13 +248,25 @@ const cancel = () => {
   font-weight: 400;
 }
 
-/* 歌曲编号 */
+/* 歌曲编号：单行弱化展示 */
+.song-id-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.song-id-label {
+  flex: none;
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  white-space: nowrap;
+}
 .song-input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   border: 1px solid var(--border-dark);
   border-radius: var(--radius-sm);
-  padding: 10px 12px;
-  font-size: var(--font-md);
+  padding: 6px 10px;
+  font-size: var(--font-sm);
   outline: none;
   transition: border-color 0.15s;
 }
@@ -265,9 +279,10 @@ const cancel = () => {
   cursor: not-allowed;
 }
 .song-id-hint {
-  margin: 6px 0 0;
+  flex: none;
   color: var(--text-secondary);
   font-size: var(--font-sm);
+  white-space: nowrap;
 }
 .generation-config {
   margin-top: 16px;

@@ -48,3 +48,6 @@ backups/
 *.njsproj
 *.sln
 *.sw?
+
+# 一次性本地实测脚本（可能含线上凭据，不随仓库发布）
+scripts/local/

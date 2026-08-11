@@ -41,7 +41,7 @@ from .domain import router as domain_router
 from .error_logging import record_api_error, request_payload
 from .jobs import jobs
 from .media_constraints import normalize_video_duration
-from .models import AiModelModel, ProjectCastModel, ProjectTaskModel, SongEmotionProfileModel, StoryboardLineModel, UserModel
+from .models import AiModelModel, GenerationJobModel, ProjectCastModel, ProjectTaskModel, SongEmotionProfileModel, StoryboardLineModel, UserModel
 from .providers import generate_image, generate_video
 from .redis_store import close_redis, redis_ok
 from .request_logging import api_request_log_middleware
@@ -423,6 +423,27 @@ async def get_generation(job_id: str, user: CurrentUser) -> dict:
     if not job:
         raise HTTPException(404, "生成任务不存在")
     return job.public()
+
+
+@app.get("/api/tasks/{task_id}/generations/active")
+async def list_active_task_generations(task_id: str, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> list[dict]:
+    """任务下仍在排队/执行中的媒体生成任务（页面刷新后前端据此恢复等待态）"""
+    await owned_task(db, user.id, task_id)
+    rows = (
+        (
+            await db.execute(
+                select(GenerationJobModel).where(
+                    GenerationJobModel.project_task_id == task_id,
+                    GenerationJobModel.user_id == user.id,
+                    GenerationJobModel.deleted_at.is_(None),
+                    GenerationJobModel.status.in_(("queued", "running")),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [{"id": row.id, "kind": row.kind, "storyboardLineId": row.storyboard_line_id, "progress": row.progress} for row in rows]
 
 
 @app.get("/api/generations/{job_id}/events")
