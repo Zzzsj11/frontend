@@ -13,6 +13,7 @@ from .models import (
     AiProviderModel,
     DigitalHumanModel,
     DigitalHumanStyleModel,
+    GenerationJobModel,
     SongEmotionProfileModel,
     StoryboardLineModel,
     UserAdminRoleModel,
@@ -175,5 +176,16 @@ async def recover_stale_storyboard_generation() -> None:
                 StoryboardLineModel.updated_at < cutoff,
             )
             .values(generation_status="pending", generation_error="上次生成中断，已恢复等待队列")
+        )
+        # 同步收编 generation_jobs 里的分镜行僵尸任务（行表恢复后，任务表不能永远停 running）
+        await session.execute(
+            update(GenerationJobModel)
+            .where(
+                GenerationJobModel.kind == "storyboard_line",
+                GenerationJobModel.status.in_(("queued", "running")),
+                GenerationJobModel.deleted_at.is_(None),
+                GenerationJobModel.updated_at < cutoff,
+            )
+            .values(status="failed", error="上次生成中断，可重新生成", finished_at=utcnow())
         )
         await session.commit()

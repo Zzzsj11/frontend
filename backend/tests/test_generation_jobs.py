@@ -17,8 +17,9 @@ def _insert_job(
     status: str = "queued",
     provider_task_id: str | None = None,
     created_at: datetime | None = None,
+    updated_at: datetime | None = None,
 ) -> None:
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+    now = (updated_at or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S.%f")
     created = (created_at or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S.%f")
     connection = sqlite3.connect(TEST_DB, timeout=10)
     try:
@@ -128,6 +129,21 @@ async def test_recover_stale_jobs_resumes_recent_and_fails_orphans(client) -> No
     assert _job_row("job-resumable")["status"] == "succeeded"
     assert "中断" in _job_row("job-orphan")["error"]
     assert "过期" in _job_row("job-expired")["error"]
+
+
+async def test_recover_stale_storyboard_jobs_marked_failed(client) -> None:
+    from app.seed import recover_stale_storyboard_generation
+
+    stale_time = datetime.now(timezone.utc) - timedelta(minutes=15)
+    _insert_job("job-sb-stale", kind="storyboard_line", status="running", created_at=stale_time, updated_at=stale_time)
+    _insert_job("job-sb-fresh", kind="storyboard_line", status="running")
+
+    await recover_stale_storyboard_generation()
+
+    stale_row = _job_row("job-sb-stale")
+    assert stale_row["status"] == "failed"
+    assert "中断" in stale_row["error"]
+    assert _job_row("job-sb-fresh")["status"] == "running"
 
 
 def test_admin_jobs_collects_tasks_with_filters_and_pagination(client) -> None:
