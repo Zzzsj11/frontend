@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -59,8 +60,24 @@ def parse_ass(content: bytes) -> tuple[list[AssCue], str]:
     return cues, encoding
 
 
+CN_NUMERALS = ("一", "二", "三", "四", "五", "六", "七", "八", "九", "十")
+OUTRO_PLACEHOLDER_DURATION = 10.0
+
+
+def _gap_durations(duration: float, max_duration: float) -> list[float]:
+    """结构空档拆分：不超过 max_duration 一段；两倍以内拆两段（前段取整到秒、拿余数）；更长则按不超过 max_duration 均分多段。"""
+    if duration <= max_duration:
+        return [duration]
+    if duration <= max_duration * 2:
+        front = float(math.ceil(duration / 2))
+        return [front, round(duration - front, 2)]
+    count = math.ceil(duration / max_duration)
+    span = duration / count
+    return [round(span, 2)] * (count - 1) + [round(duration - span * (count - 1), 2)]
+
+
 def group_cues(cues: list[AssCue], max_duration: float = 15.0) -> list[dict[str, Any]]:
-    """每句歌词独立成镜，并把超过 2 秒的前奏、间奏拆成结构性空镜。"""
+    """每句歌词独立成镜；超过 2 秒的前奏、间奏拆成结构性空镜，末尾追加一个尾奏占位段。"""
     max_duration = min(15.0, max(4.0, max_duration or 15.0))
     segments: list[dict[str, Any]] = []
 
@@ -68,22 +85,25 @@ def group_cues(cues: list[AssCue], max_duration: float = 15.0) -> list[dict[str,
         duration = round(end - start, 2)
         if duration <= 2:
             return
-        count = max(1, int((duration + max_duration - 0.001) // max_duration))
-        for part in range(count):
-            part_start = start + duration * part / count
-            part_end = start + duration * (part + 1) / count
-            label = "前奏" if segment_type == "intro" else "间奏"
-            if count > 1:
-                label = f"{label} {part + 1}/{count}"
+        parts = _gap_durations(duration, max_duration)
+        label = {"intro": "前奏", "interlude": "间奏", "outro": "尾奏"}[segment_type]
+        cursor = start
+        for part_index, part_duration in enumerate(parts):
+            part_end = round(end, 2) if part_index == len(parts) - 1 else round(cursor + part_duration, 2)
+            part_label = label
+            if len(parts) > 1:
+                numeral = CN_NUMERALS[part_index] if part_index < len(CN_NUMERALS) else str(part_index + 1)
+                part_label = f"{label}{numeral}"
             segments.append(
                 {
-                    "start": round(part_start, 2),
-                    "end": round(part_end, 2),
+                    "start": round(cursor, 2),
+                    "end": part_end,
                     "lyrics": "",
                     "segmentType": segment_type,
-                    "timelineLabel": label,
+                    "timelineLabel": part_label,
                 }
             )
+            cursor = part_end
 
     append_gap(0.0, cues[0].start, "intro")
     for index, cue in enumerate(cues):
@@ -98,4 +118,14 @@ def group_cues(cues: list[AssCue], max_duration: float = 15.0) -> list[dict[str,
         )
         if index + 1 < len(cues):
             append_gap(cue.end, cues[index + 1].start, "interlude")
+    outro_start = round(cues[-1].end, 2)
+    segments.append(
+        {
+            "start": outro_start,
+            "end": round(outro_start + OUTRO_PLACEHOLDER_DURATION, 2),
+            "lyrics": "",
+            "segmentType": "outro",
+            "timelineLabel": "尾奏",
+        }
+    )
     return [{"index": index, **segment} for index, segment in enumerate(segments)]

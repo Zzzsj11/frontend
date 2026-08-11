@@ -61,7 +61,7 @@ from .schemas import (
 )
 from .storage import download_public_url_to_path, get_storage, is_tos_url, safe_key
 from .story_bible import STORY_BIBLE_VERSION, build_ass_story_bible, build_general_story_bible, exact_durations
-from .storyboard_prompt import PROMPT_VERSION, SCHEMA_VERSION, generate_ass_story_outline, generate_storyboard_line
+from .storyboard_prompt import PROMPT_VERSION, SCHEMA_VERSION, finalize_shot_durations, generate_ass_story_outline, generate_storyboard_line, regenerate_ass_scene_segment
 from .token_usage import add_token_usage, normalize_usage
 from .usage_quota import consume_daily_quota
 
@@ -514,6 +514,41 @@ async def update_task(task_id: str, payload: TaskUpdate, user: CurrentUser, db: 
     return task_json(item)
 
 
+async def _apply_story_bible_to_lines(db: AsyncSession, lines: list[StoryboardLineModel], plans: list[dict], *, now) -> None:
+    line_ids = [line.id for line in lines]
+    await db.execute(
+        update(StoryboardLineCastModel).where(StoryboardLineCastModel.storyboard_line_id.in_(line_ids), StoryboardLineCastModel.deleted_at.is_(None)).values(deleted_at=now)
+    )
+    for line, plan in zip(lines, plans, strict=True):
+        line.shot_type = plan["shotType"]
+        line.planned_duration = float(plan["generationDuration"])
+        line.shot_options = {
+            **(line.shot_options or {}),
+            "duration": normalize_video_duration(line.planned_duration),
+            "sourceDuration": plan["sourceDuration"],
+            "gapBefore": plan["gapBefore"],
+            "gapAfter": plan["gapAfter"],
+            "gapAfterAllocation": plan["gapAfterAllocation"],
+            "materialDuration": plan["materialDuration"],
+            "outlineIntent": plan["intent"],
+            "locationId": plan["locationId"],
+            "locationChange": plan["locationChange"],
+            "characterAction": plan["characterAction"],
+            "emotionalFocus": plan["emotionalFocus"],
+            "cameraPurpose": plan["cameraPurpose"],
+            "motifIds": plan["motifIds"],
+            "outlineStatus": plan.get("outlineStatus", "ready"),
+            "sceneIndex": plan.get("sceneIndex"),
+        }
+        line.scene_prompt = ""
+        line.shot_prompt = ""
+        line.generation_status = "pending"
+        line.generation_error = None
+        line.prompt_context_hash = None
+        for index, human_id in enumerate(plan["requiredCharacterIds"]):
+            db.add(StoryboardLineCastModel(id=uid("linecast"), storyboard_line_id=line.id, digital_human_id=human_id, sort_order=index))
+
+
 @router.post("/tasks/{task_id}/storyboard-outline/regenerate")
 async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
     task = await owned_task(db, user.id, task_id)
@@ -561,12 +596,31 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
         for line in lines
     ]
     await consume_daily_quota(db, user_id=user.id, category="chat", limit=settings.daily_chat_limit)
-    outline = await generate_ass_story_outline(
-        segments=segments,
-        emotion=task.storyboard_config.get("songEmotion") or {},
-        selected_humans=selected_humans,
-        extra_requirement=task.extra_requirement,
-    )
+    task.status = "outlining"
+    await db.commit()
+    try:
+        outline = await generate_ass_story_outline(
+            segments=segments,
+            emotion=task.storyboard_config.get("songEmotion") or {},
+            selected_humans=selected_humans,
+            extra_requirement=task.extra_requirement,
+        )
+    except Exception as exc:
+        for call in getattr(exc, "usage_records", None) or []:
+            add_token_usage(
+                db,
+                operation=f"{call.get('operation') or 'ass_scene_plan'}_failed",
+                provider="openai-compatible",
+                model=settings.llm_model,
+                usage=call.get("usage"),
+                user_id=user.id,
+                project_id=task.project_id,
+                project_task_id=task.id,
+                request_id=call.get("requestId"),
+            )
+        task.status = "outline_failed"
+        await db.commit()
+        raise HTTPException(502, f"ASS 分镜大纲生成失败：{exc}") from exc
     story_bible = build_ass_story_bible(
         segments=segments,
         emotion=task.storyboard_config.get("songEmotion") or {},
@@ -578,37 +632,7 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
     config["storyBible"] = story_bible
     task.storyboard_config = config
     task.status = "generating"
-    now = utcnow()
-    line_ids = [line.id for line in lines]
-    await db.execute(
-        update(StoryboardLineCastModel).where(StoryboardLineCastModel.storyboard_line_id.in_(line_ids), StoryboardLineCastModel.deleted_at.is_(None)).values(deleted_at=now)
-    )
-    for line, plan in zip(lines, story_bible["shots"], strict=True):
-        line.shot_type = plan["shotType"]
-        line.planned_duration = float(plan["generationDuration"])
-        line.shot_options = {
-            **(line.shot_options or {}),
-            "duration": normalize_video_duration(line.planned_duration),
-            "sourceDuration": plan["sourceDuration"],
-            "gapBefore": plan["gapBefore"],
-            "gapAfter": plan["gapAfter"],
-            "gapAfterAllocation": plan["gapAfterAllocation"],
-            "materialDuration": plan["materialDuration"],
-            "outlineIntent": plan["intent"],
-            "locationId": plan["locationId"],
-            "locationChange": plan["locationChange"],
-            "characterAction": plan["characterAction"],
-            "emotionalFocus": plan["emotionalFocus"],
-            "cameraPurpose": plan["cameraPurpose"],
-            "motifIds": plan["motifIds"],
-        }
-        line.scene_prompt = ""
-        line.shot_prompt = ""
-        line.generation_status = "pending"
-        line.generation_error = None
-        line.prompt_context_hash = None
-        for index, human_id in enumerate(plan["requiredCharacterIds"]):
-            db.add(StoryboardLineCastModel(id=uid("linecast"), storyboard_line_id=line.id, digital_human_id=human_id, sort_order=index))
+    await _apply_story_bible_to_lines(db, lines, story_bible["shots"], now=utcnow())
     for call in outline["usageRecords"]:
         add_token_usage(
             db,
@@ -625,6 +649,7 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
     return {
         "storyboardType": task.storyboard_type,
         "storyBible": story_bible,
+        "failedSegments": outline.get("failedSegments") or [],
         "lines": [
             {
                 "id": line.id,
@@ -635,6 +660,142 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
                 "generationStatus": "pending",
             }
             for line, plan in zip(lines, story_bible["shots"], strict=True)
+        ],
+    }
+
+
+@router.post("/tasks/{task_id}/storyboard-outline/segments/{scene_index}/regenerate")
+async def regenerate_storyboard_outline_segment(task_id: str, scene_index: int, user: CurrentUser, db: AsyncSession = Db) -> dict:
+    task = await owned_task(db, user.id, task_id)
+    if task.storyboard_type != "ass":
+        raise HTTPException(422, "只有 ASS 分镜支持场景段重试")
+    story_bible = dict((task.storyboard_config or {}).get("storyBible") or {})
+    scene_plan = story_bible.get("scenePlan") or []
+    if not 0 <= scene_index < len(scene_plan):
+        raise HTTPException(422, "场景段序号超出范围")
+    lines = list(
+        (
+            await db.execute(
+                select(StoryboardLineModel).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None)).order_by(StoryboardLineModel.sort_order)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    cast_links = list(
+        (await db.execute(select(ProjectCastModel).where(ProjectCastModel.project_task_id == task.id, ProjectCastModel.deleted_at.is_(None)).order_by(ProjectCastModel.sort_order)))
+        .scalars()
+        .all()
+    )
+    role_ids = [item.digital_human_id for item in cast_links]
+    humans = await visible_humans(db, user.id, role_ids)
+    human_by_id = {item.id: item for item in humans}
+    selected_humans = [
+        {
+            "id": item.id,
+            "name": item.name,
+            "gender": item.gender,
+            "ageDescription": item.age_description,
+            "appearanceStyle": item.appearance_style,
+            "clothingDescription": item.clothing_description,
+            "systemPrompt": item.system_prompt or item.avatar_prompt or item.description,
+        }
+        for human_id in role_ids
+        if (item := human_by_id.get(human_id))
+    ]
+    segments = [
+        {
+            "index": line.sort_order,
+            "start": line.start_time,
+            "end": line.end_time,
+            "lyrics": line.lyrics,
+            "segmentType": (line.shot_options or {}).get("segmentType", "lyric"),
+            "timelineLabel": (line.shot_options or {}).get("timelineLabel") or line.lyrics,
+        }
+        for line in lines
+    ]
+    old_shots = list(story_bible.get("shots") or [])
+    if len(old_shots) != len(segments):
+        raise HTTPException(422, "分镜数据与时间轴不一致，请重新生成全局大纲")
+    await consume_daily_quota(db, user_id=user.id, category="chat", limit=settings.daily_chat_limit)
+    try:
+        result = await regenerate_ass_scene_segment(
+            segments=segments,
+            scene_plan=scene_plan,
+            scene_index=scene_index,
+            global_visual=story_bible.get("globalVisual") or {},
+            emotion=(task.storyboard_config or {}).get("songEmotion") or {},
+            selected_humans=selected_humans,
+            extra_requirement=task.extra_requirement or "",
+        )
+    except Exception as exc:
+        for call in getattr(exc, "usage_records", None) or []:
+            add_token_usage(
+                db,
+                operation=call.get("operation") or "ass_scene_segment",
+                provider="openai-compatible",
+                model=settings.llm_model,
+                usage=call.get("usage"),
+                user_id=user.id,
+                project_id=task.project_id,
+                project_task_id=task.id,
+                request_id=call.get("requestId"),
+            )
+        await db.commit()
+        raise HTTPException(502, f"场景段大纲生成失败：{exc}") from exc
+    shot_start, shot_count = result["shotStart"], result["shotCount"]
+    updated_shots = old_shots[:shot_start] + result["shots"] + old_shots[shot_start + shot_count :]
+    for position, shot in enumerate(updated_shots):
+        shot["index"] = position
+    finalize_shot_durations(updated_shots, segments)
+    prefix = f"s{scene_index + 1}."
+    merged_outline = {
+        "globalVisual": story_bible.get("globalVisual"),
+        "locations": story_bible.get("locations") or [],
+        "motifs": [motif for motif in (story_bible.get("motifs") or []) if not str(motif.get("id") or "").startswith(prefix)] + result["motifs"],
+        "scenePlan": scene_plan,
+        "failedSegments": [item for item in (story_bible.get("failedSegments") or []) if item.get("sceneIndex") != scene_index],
+        "shots": updated_shots,
+    }
+    story_bible = build_ass_story_bible(
+        segments=segments,
+        emotion=(task.storyboard_config or {}).get("songEmotion") or {},
+        role_ids=role_ids,
+        extra_requirement=task.extra_requirement or "",
+        outline=merged_outline,
+    )
+    config = dict(task.storyboard_config)
+    config["storyBible"] = story_bible
+    task.storyboard_config = config
+    target_lines = lines[shot_start : shot_start + shot_count]
+    segment_plans = story_bible["shots"][shot_start : shot_start + shot_count]
+    await _apply_story_bible_to_lines(db, target_lines, segment_plans, now=utcnow())
+    for call in result["usageRecords"]:
+        add_token_usage(
+            db,
+            operation=call.get("operation") or "ass_scene_segment",
+            provider="openai-compatible",
+            model=settings.llm_model,
+            usage=call.get("usage"),
+            user_id=user.id,
+            project_id=task.project_id,
+            project_task_id=task.id,
+            request_id=call.get("requestId"),
+        )
+    await db.commit()
+    return {
+        "sceneIndex": scene_index,
+        "failedSegments": story_bible.get("failedSegments") or [],
+        "lines": [
+            {
+                "id": line.id,
+                "shotType": plan["shotType"],
+                "plannedDuration": line.planned_duration,
+                "shotOptions": line.shot_options,
+                "digitalHumanIds": plan["requiredCharacterIds"],
+                "generationStatus": "pending",
+            }
+            for line, plan in zip(target_lines, segment_plans, strict=True)
         ],
     }
 
@@ -928,6 +1089,8 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
     line = await owned_line(db, user.id, line_id)
     if line.project_task_id != task.id:
         raise HTTPException(422, "分镜不属于指定子项目")
+    if task.storyboard_type == "ass" and (line.shot_options or {}).get("outlineStatus") in {"pending", "failed"}:
+        raise HTTPException(422, "该分镜所在场景段尚未生成大纲，请先生成分镜大纲")
     if line.generation_status == "running":
         raise HTTPException(409, "该分镜正在生成")
     lines = list(

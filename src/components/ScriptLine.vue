@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ScriptLine } from '../types'
-import { useProjectStore } from '../stores/project'
+import { formatTime, useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
 import ImageZoom from './ImageZoom.vue'
@@ -26,6 +26,17 @@ const originalCover = computed(() => {
 /** 歌词非中文时的中文翻译 */
 const translation = computed(() => store.translationOf(props.line))
 const isGeneral = computed(() => props.line.source === 'general')
+
+/** ASS 大纲状态：pending=待生成 / failed=所在场景段生成失败 */
+const outlineStatus = computed(() => props.line.shotOptions?.outlineStatus)
+const outlining = computed(() => store.outlinePhase === 'outlining')
+/** 结构段（前奏/间奏/尾奏）徽章文案，歌词句不展示 */
+const segmentBadge = computed(() => {
+  const type = props.line.shotOptions?.segmentType
+  return type && type !== 'lyric' ? props.line.shotOptions?.timelineLabel || '' : ''
+})
+/** ASS 时间轴起止时间（mm:ss–mm:ss） */
+const timeRange = computed(() => (props.line.start != null && props.line.end != null ? `${formatTime(props.line.start)}–${formatTime(props.line.end)}` : ''))
 
 // 点击不同文字内容时，直接展开对应的编辑选项
 const openShotDetail = () => store.openEditor(props.line.id, 'shot')
@@ -80,18 +91,29 @@ const onGenerateShot = async () => {
 
     <!-- 歌词 + 提示词摘要 -->
     <div class="line-info">
-      <div v-if="line.generationStatus === 'pending' || line.generationStatus === 'running'" class="prompt-generation-state">
+      <div v-if="outlineStatus === 'pending'" class="prompt-generation-state">
+        <span v-if="outlining" class="spinner" />{{ outlining ? '正在生成大纲' : '待生成大纲' }}
+      </div>
+      <div v-else-if="outlineStatus === 'failed'" class="prompt-generation-state failed">所在场景段大纲未生成，可在上方横幅中重试</div>
+      <div v-else-if="line.generationStatus === 'pending' || line.generationStatus === 'running'" class="prompt-generation-state">
         <span class="spinner" /> {{ line.generationStatus === 'pending' ? '等待生成提示词' : '正在生成提示词' }}
       </div>
       <div v-else-if="line.generationStatus === 'failed'" class="prompt-generation-state failed">
-        生成失败
+        <span class="error-text" :title="line.generationError">生成失败{{ line.generationError ? `：${line.generationError}` : '' }}</span>
         <button @click.stop="store.retryStoryboardLine(line.id)">重新生成</button>
       </div>
       <div v-if="isGeneral" class="general-meta">
         <span class="shot-type" :class="line.shotType">{{ line.shotType === 'empty' ? '空镜' : '人物镜' }}</span>
         <span v-if="line.plannedDuration" class="planned-duration">预计 {{ line.plannedDuration }} 秒</span>
       </div>
-      <p v-else class="lyrics editable-text" @click.stop="openShotDetail">{{ line.lyrics || line.shotOptions?.timelineLabel || '（未填写歌词）' }}</p>
+      <template v-else>
+        <div v-if="segmentBadge || timeRange" class="ass-meta">
+          <span v-if="segmentBadge" class="segment-tag">{{ segmentBadge }}</span>
+          <span v-if="timeRange" class="time-range">{{ timeRange }}</span>
+          <span v-if="line.plannedDuration" class="planned-duration">预计 {{ line.plannedDuration }} 秒</span>
+        </div>
+        <p class="lyrics editable-text" @click.stop="openShotDetail">{{ line.lyrics || line.shotOptions?.timelineLabel || '（未填写歌词）' }}</p>
+      </template>
       <p v-if="!isGeneral && translation" class="lyrics-zh editable-text" @click.stop="openShotDetail"><span class="zh-tag">译</span>{{ translation }}</p>
       <p v-if="isGeneral" class="scene-summary editable-text" @click.stop="openSceneDetail">{{ line.scenePrompt || '暂无场景提示词' }}</p>
       <p class="prompt editable-text" @click.stop="openShotDetail">{{ line.shotPrompt || line.scenePrompt || '暂无提示词，点击编辑场景与视频' }}</p>
@@ -251,6 +273,30 @@ const onGenerateShot = async () => {
 .planned-duration {
   color: var(--text-secondary);
   font-size: 11px;
+}
+.prompt-generation-state .error-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ass-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+.segment-tag {
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: #f4ecff;
+  color: #7b5ac8;
+  font-size: 11px;
+  font-weight: 600;
+}
+.time-range {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 .scene-summary {
   margin: 0;

@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { DigitalHuman, GeneralStoryboardOptions, GeneralStoryboardRequest, MaterialExport, ScriptLine, ShotAsset, ShotGenOptions, SongProject, StoryBible, SynthesisState, TimelineClip } from '../types'
+import type { DigitalHuman, GeneralStoryboardOptions, GeneralStoryboardRequest, MaterialExport, OutlineFailedSegment, OutlinePlannedLine, ScriptLine, ShotAsset, ShotGenOptions, SongProject, StoryBible, SynthesisState, TimelineClip } from '../types'
 import * as api from '../mock/api'
 import * as imageGen from '../api/imageGen'
 import { nextId } from '../mock/data'
@@ -65,6 +65,10 @@ export const useProjectStore = defineStore('project', {
     outlineError: null as string | null,
     activeStoryBible: null as StoryBible | null,
     activeStoryboardType: null as string | null,
+    /** 当前任务状态（parsed/outlining/outline_failed/generating/ready/partial/failed） */
+    activeTaskStatus: null as string | null,
+    /** 正在重试的场景段序号（段级大纲重新生成） */
+    segmentRetrying: {} as Record<number, boolean>,
     currentTime: 0,
     isPlaying: false,
     playMode: { single: false, loop: false },
@@ -184,13 +188,29 @@ export const useProjectStore = defineStore('project', {
     },
 
     storyboardProgress(state): { total: number; completed: number; failed: number; active: boolean } {
-      const generated = state.lines.filter((line) => line.generationStatus)
+      // 大纲未就绪（pending/failed）的行不参与逐句生成进度统计
+      const generated = state.lines.filter((line) => line.generationStatus && line.shotOptions?.outlineStatus !== 'pending' && line.shotOptions?.outlineStatus !== 'failed')
       return {
         total: generated.length,
         completed: generated.filter((line) => line.generationStatus === 'succeeded').length,
         failed: generated.filter((line) => line.generationStatus === 'failed').length,
         active: generated.some((line) => line.generationStatus === 'pending' || line.generationStatus === 'running'),
       }
+    },
+
+    /** ASS 大纲阶段：pending=拆分完成待生成 / outlining=生成中 / failed=生成失败 */
+    outlinePhase(state): 'none' | 'pending' | 'outlining' | 'failed' {
+      if (state.activeStoryboardType !== 'ass') return 'none'
+      if (state.outlineLoading || state.activeTaskStatus === 'outlining') return 'outlining'
+      if (state.activeTaskStatus === 'outline_failed') return 'failed'
+      if (state.activeTaskStatus === 'parsed') return 'pending'
+      return 'none'
+    },
+
+    /** 大纲生成失败的场景段（段级重试入口） */
+    failedOutlineSegments(state): OutlineFailedSegment[] {
+      if (state.activeStoryboardType !== 'ass') return []
+      return state.activeStoryBible?.failedSegments ?? []
     },
 
     /** 播放范围（单个分镜模式只播选中片段） */
@@ -254,7 +274,7 @@ export const useProjectStore = defineStore('project', {
 
     /** 载入指定子项目(任务)的脚本到编辑区（不负责缓存当前，调用方自行处理） */
     async _loadTask(songId: string, taskId: string | null) {
-      const script = taskId ? await api.fetchSongScript(taskId) : { cast: [], lines: [], storyboardType: '', storyBible: undefined }
+      const script = taskId ? await api.fetchSongScript(taskId) : { cast: [], lines: [] as ScriptLine[], storyboardType: '', storyBible: undefined, status: '' }
       if (taskId) this.taskScripts[taskId] = script
       this.stop()
       this.editingLineId = null
@@ -264,13 +284,24 @@ export const useProjectStore = defineStore('project', {
       this.activeTaskId = taskId
       this.activeStoryBible = script.storyBible ?? null
       this.activeStoryboardType = script.storyboardType || null
+      this.activeTaskStatus = script.status || null
       this.selectedLineId = this.lines[0]?.id ?? null
       this.currentTime = 0
       if (taskId) {
         void this.restoreMaterialExports(taskId)
-        const pending = this.lines.filter((line) => line.generationStatus === 'pending').map((line) => line.id)
-        if (pending.length) void this._generateStoryboardQueue(taskId, pending)
+        if (script.storyboardType === 'ass' && (script.status === 'parsed' || script.status === 'outlining')) {
+          // parsed：上传仅完成拆分，自动接续大纲生成；outlining：上次大纲中断遗留，重新生成
+          void this.runOutlineGeneration(taskId)
+        } else {
+          const pending = this.lines.filter((line) => line.generationStatus === 'pending' && this._outlineReady(line)).map((line) => line.id)
+          if (pending.length) void this._generateStoryboardQueue(taskId, pending)
+        }
       }
+    },
+
+    /** 行的大纲是否已就绪（未就绪的行不能进入逐句生成，后端会 422） */
+    _outlineReady(line: ScriptLine): boolean {
+      return line.shotOptions?.outlineStatus !== 'pending' && line.shotOptions?.outlineStatus !== 'failed'
     },
 
     async _generateStoryboardQueue(taskId: string, lineIds: string[], force = false) {
@@ -279,6 +310,7 @@ export const useProjectStore = defineStore('project', {
         while (cursor < lineIds.length) {
           const lineId = lineIds[cursor++]
           const local = this.lines.find((line) => line.id === lineId)
+          if (local && this.activeTaskId === taskId && !this._outlineReady(local)) continue
           if (local && this.activeTaskId === taskId) {
             local.generationStatus = 'running'
             local.generationError = undefined
@@ -320,28 +352,78 @@ export const useProjectStore = defineStore('project', {
 
     openOutline() { if (this.activeTaskId && this.activeStoryBible) this.outlineOpen = true },
     closeOutline() { if (!this.outlineLoading) this.outlineOpen = false },
-    async regenerateOutline() {
-      if (!this.activeTaskId || this.activeStoryboardType !== 'ass' || this.outlineLoading) return
+
+    /** 同步任务状态到当前编辑区与侧边栏任务列表 */
+    _setTaskStatus(taskId: string, status: string) {
+      if (this.activeTaskId === taskId) this.activeTaskStatus = status
+      for (const song of this.songProjects) {
+        const task = song.tasks.find((item) => item.id === taskId)
+        if (task) {
+          task.status = status
+          break
+        }
+      }
+    },
+
+    /** 把大纲规划结果回填到行：镜头类型/人物/时长/参数，清空旧提示词等待逐句生成 */
+    _applyOutlineLines(plannedLines: OutlinePlannedLine[]) {
+      for (const planned of plannedLines) {
+        const line = this.lines.find((item) => item.id === planned.id)
+        if (!line) continue
+        line.shotType = planned.shotType
+        if (planned.plannedDuration) line.plannedDuration = planned.plannedDuration
+        if (planned.shotOptions) line.shotOptions = normalizeShotOptions({ ...line.shotOptions, ...planned.shotOptions } as ShotGenOptions)
+        line.digitalHumanIds = [...planned.digitalHumanIds]
+        line.scenePrompt = ''
+        line.shotPrompt = ''
+        line.generationStatus = 'pending'
+        line.generationError = undefined
+      }
+    },
+
+    /** ASS 大纲生成（上传后自动调用 / 失败后手动重试）：成功后自动接续逐句提示词生成，失败保留已拆分列表 */
+    async runOutlineGeneration(taskId?: string) {
+      const id = taskId ?? this.activeTaskId
+      if (!id || this.activeTaskId !== id || this.activeStoryboardType !== 'ass' || this.outlineLoading) return
       this.outlineLoading = true
       this.outlineError = null
+      this._setTaskStatus(id, 'outlining')
       try {
-        const result = await api.regenerateStoryboardOutline(this.activeTaskId)
+        const result = await api.regenerateStoryboardOutline(id)
         this.activeStoryBible = result.storyBible
-        for (const planned of result.lines) {
-          const line = this.lines.find((item) => item.id === planned.id)
-          if (!line) continue
-          line.shotType = planned.shotType
-          line.digitalHumanIds = [...planned.digitalHumanIds]
-          line.scenePrompt = ''
-          line.shotPrompt = ''
-          line.generationStatus = 'pending'
-          line.generationError = undefined
-        }
-        void this._generateStoryboardQueue(this.activeTaskId, result.lines.map((line) => line.id))
+        this._applyOutlineLines(result.lines)
+        this._setTaskStatus(id, 'generating')
+        // 段级失败的行保持占位标注，不进入逐句生成队列（由段级重试恢复）
+        const readyIds = result.lines.filter((line) => line.shotOptions?.outlineStatus !== 'failed').map((line) => line.id)
+        void this._generateStoryboardQueue(id, readyIds)
       } catch (error) {
-        this.outlineError = error instanceof Error ? error.message : '大纲重新生成失败'
+        this._setTaskStatus(id, 'outline_failed')
+        this.outlineError = error instanceof Error ? error.message : '大纲生成失败'
       } finally {
         this.outlineLoading = false
+      }
+    },
+
+    async regenerateOutline() {
+      await this.runOutlineGeneration()
+    },
+
+    /** 段级大纲重试：仅重跑指定场景段的第二轮生成，保留其他段成果 */
+    async retryOutlineSegment(sceneIndex: number) {
+      const taskId = this.activeTaskId
+      if (!taskId || this.activeStoryboardType !== 'ass' || this.segmentRetrying[sceneIndex]) return
+      this.segmentRetrying = { ...this.segmentRetrying, [sceneIndex]: true }
+      try {
+        const result = await api.regenerateStoryboardOutlineSegment(taskId, sceneIndex)
+        this._applyOutlineLines(result.lines)
+        // 段级端点只返回该段的行，重新拉取一次大纲保证弹窗与段级失败标注一致
+        const fresh = await api.fetchSongScript(taskId)
+        if (this.activeTaskId === taskId && fresh.storyBible) this.activeStoryBible = fresh.storyBible
+        void this._generateStoryboardQueue(taskId, result.lines.map((line) => line.id))
+      } catch (error) {
+        reportApiError(error, '场景段大纲重新生成失败')
+      } finally {
+        this.segmentRetrying = { ...this.segmentRetrying, [sceneIndex]: false }
       }
     },
 
@@ -780,7 +862,7 @@ export const useProjectStore = defineStore('project', {
           this.songProjects.push(song)
           this.activeSongId = song.id
         }
-        const task = { id: result.taskId, title: result.title, updatedAt: '刚刚' }
+        const task = { id: result.taskId, title: result.title, updatedAt: '刚刚', status: 'generating', storyboardType: 'general' }
         song.tasks.push(task)
         this.stop()
         this.editingLineId = null
@@ -790,6 +872,7 @@ export const useProjectStore = defineStore('project', {
         this.activeTaskId = task.id
         this.activeStoryBible = (result as typeof result & { storyboardConfig?: { storyBible?: StoryBible } }).storyboardConfig?.storyBible ?? null
         this.activeStoryboardType = 'general'
+        this.activeTaskStatus = 'generating'
         this.selectedLineId = this.lines[0]?.id ?? null
         this.currentTime = 0
         this.generalStoryboardOpen = false
@@ -811,10 +894,12 @@ export const useProjectStore = defineStore('project', {
         const script = await api.generateMagicScript({ ...req, projectId: this.activeSongId })
         // 脚本自带统一的角色阵容
         const lines: ScriptLine[] = script.lines.map((item) => ({
-          id: (item as typeof item & { id?: string }).id || nextId(),
+          id: item.id || nextId(),
           source: 'ass',
-          shotType: (item as typeof item & { shotType?: ScriptLine['shotType'] }).shotType,
-          plannedDuration: (item as typeof item & { plannedDuration?: number }).plannedDuration,
+          shotType: item.shotType,
+          plannedDuration: item.plannedDuration,
+          start: item.start,
+          end: item.end,
           lyrics: item.lyrics,
           scenePrompt: item.scenePrompt,
           shotPrompt: item.shotPrompt,
@@ -823,7 +908,7 @@ export const useProjectStore = defineStore('project', {
           scene: { status: 'none' },
           shot: { status: 'none', assets: [] },
           shotOptions: normalizeShotOptions(item.shotOptions ?? { ...DEFAULT_SHOT_OPTIONS, duration: item.plannedDuration ?? DEFAULT_SHOT_OPTIONS.duration, ratio: req.ratio, resolution: req.resolution, imageModel: req.imageModel, videoModel: req.videoModel }),
-          generationStatus: (item as typeof item & { generationStatus?: ScriptLine['generationStatus'] }).generationStatus || 'pending',
+          generationStatus: item.generationStatus || 'pending',
         }))
         // 先缓存当前子项目编辑现场，避免被新脚本覆盖丢失
         this._cacheCurrentTask()
@@ -834,7 +919,7 @@ export const useProjectStore = defineStore('project', {
           this.songProjects.push(song)
           this.activeSongId = song.id
         }
-        const task = { id: script.taskId, title: script.title, updatedAt: '刚刚' }
+        const task = { id: script.taskId, title: script.title, updatedAt: '刚刚', status: script.status || 'parsed', storyboardType: 'ass' }
         song.tasks.push(task)
         // 载入生成结果到新子项目
         this.stop()
@@ -845,10 +930,12 @@ export const useProjectStore = defineStore('project', {
         this.activeTaskId = task.id
         this.activeStoryBible = (script as typeof script & { storyBible?: StoryBible }).storyBible ?? null
         this.activeStoryboardType = 'ass'
+        this.activeTaskStatus = script.status || 'parsed'
         this.selectedLineId = this.lines[0]?.id ?? null
         this.currentTime = 0
         this.magicOpen = false
-        void this._generateStoryboardQueue(task.id, lines.map((line) => line.id))
+        // 两阶段流程：上传仅完成时间轴拆分（parsed），自动接续大纲生成；大纲成功后再启动逐句提示词生成
+        void this.runOutlineGeneration(task.id)
       } catch (err) {
         this.magicError = err instanceof Error ? err.message : 'ASS 视频生成失败'
       } finally {

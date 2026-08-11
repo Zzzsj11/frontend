@@ -4,6 +4,8 @@ export const nextId = (prefix = 'line') => `${prefix}-${Date.now()}-${idSeed++}`
 export interface MagicScript {
   title: string
   cast: string[]
+  /** 两阶段流程：上传仅完成时间轴拆分（parsed），大纲由独立端点生成 */
+  status?: string
   lines: Array<{
     id?: string
     lyrics: string
@@ -12,6 +14,11 @@ export interface MagicScript {
     digitalHumanIds: string[]
     plannedDuration?: number
     shotOptions?: import('../types').ShotGenOptions
+    shotType?: 'empty' | 'character'
+    generationStatus?: 'pending' | 'running' | 'succeeded' | 'failed'
+    /** ASS 时间轴起止时间（秒） */
+    start?: number
+    end?: number
   }>
 }
 

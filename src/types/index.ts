@@ -9,6 +9,9 @@ export interface SongTask {
   title: string
   /** 相对时间标注，如「刚刚」「3天」 */
   updatedAt: string
+  /** 任务状态：parsed/outlining/outline_failed/generating/ready/partial/failed */
+  status?: string
+  storyboardType?: string
 }
 
 /** 歌曲项目（侧边栏一个目录处理一首歌曲） */
@@ -97,6 +100,17 @@ export interface ShotGenOptions {
   videoModel: VideoModelId
   segmentType?: 'lyric' | 'intro' | 'interlude' | 'outro'
   timelineLabel?: string
+  /** 时间轴原始时长（秒，未归一化） */
+  sourceDuration?: number
+  gapBefore?: number
+  gapAfter?: number
+  gapAfterAllocation?: 'current' | 'next' | 'none'
+  /** 时间轴素材时长（秒） */
+  materialDuration?: number
+  /** ASS 大纲状态：pending=待生成 / ready=已生成 / failed=所在场景段生成失败 */
+  outlineStatus?: 'pending' | 'ready' | 'failed'
+  /** 所属场景段序号（第一轮场景规划结果） */
+  sceneIndex?: number
 }
 
 /** 脚本行（每一条 = 一个分镜） */
@@ -108,6 +122,9 @@ export interface ScriptLine {
   shotType?: 'empty' | 'character'
   /** 脚本规划时长（秒），不等同于单次视频生成时长 */
   plannedDuration?: number
+  /** ASS 时间轴起止时间（秒） */
+  start?: number
+  end?: number
   /** 当前分镜歌词 */
   lyrics: string
   /** 歌词中文翻译（歌词非中文时展示在歌词下方） */
@@ -135,6 +152,10 @@ export interface StoryOutlineShot {
   stage: string
   lyrics?: string
   shotType: 'empty' | 'character'
+  /** 大纲生成状态：failed = 所在场景段生成失败的占位镜头 */
+  outlineStatus?: 'pending' | 'ready' | 'failed'
+  /** 所属场景段序号 */
+  sceneIndex?: number
   intent?: string
   outlineScene?: string
   outlineShot?: string
@@ -163,7 +184,41 @@ export interface StoryBible {
   globalVisual?: Record<string, unknown>
   locations?: Array<{ id: string; name: string; purpose: string }>
   motifs?: Array<{ id: string; name: string; meaning: string; maxAppearances: number }>
+  /** 第一轮场景规划结果（ASS 两轮分段架构） */
+  scenePlan?: StoryScenePlan[]
+  /** 第二轮生成失败的场景段 */
+  failedSegments?: OutlineFailedSegment[]
   shots: StoryOutlineShot[]
+}
+
+/** ASS 第一轮场景规划的一个大场景 */
+export interface StoryScenePlan {
+  sceneIndex: number
+  locationId?: string
+  lineStart?: number
+  lineEnd?: number
+  locationName: string
+  mood?: string
+  emotion?: string
+  visualTone?: string
+  narrativePurpose?: string
+}
+
+/** 大纲生成失败的场景段（段级重试入口） */
+export interface OutlineFailedSegment {
+  sceneIndex: number
+  locationName: string
+  error: string
+}
+
+/** 大纲回填到分镜行的规划结果（全局/段级重试端点共用） */
+export interface OutlinePlannedLine {
+  id: string
+  shotType: 'empty' | 'character'
+  plannedDuration?: number
+  shotOptions?: ShotGenOptions
+  digitalHumanIds: string[]
+  generationStatus: 'pending'
 }
 
 export interface StoryboardCategoryOption {

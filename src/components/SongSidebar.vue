@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useProjectStore } from '../stores/project'
 import type { SongProject, SongTask } from '../types'
+import { taskStatusAlert, taskStatusLabel } from '../taskStatus'
 import AppIcon from './AppIcon.vue'
 import { confirmDialog } from '../composables/useConfirmDialog'
 
@@ -215,6 +216,7 @@ onMounted(() => {
               >
                 <span class="task-dot" />
                 <span class="task-title">{{ task.title }}</span>
+                <span v-if="taskStatusLabel(task.status)" class="task-status" :class="{ alert: taskStatusAlert(task.status) }">{{ taskStatusLabel(task.status) }}</span>
                 <span class="task-time">{{ task.updatedAt }}</span>
               </button>
               <span class="row-actions">
@@ -461,6 +463,19 @@ onMounted(() => {
   font-size: 11px;
   color: var(--text-secondary);
   white-space: nowrap;
+}
+.task-status {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: #eef3ff;
+  color: #4776c8;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.task-status.alert {
+  background: #fdeceb;
+  color: #c0392b;
 }
 .task-item.active .task-time {
   color: var(--primary);

@@ -142,13 +142,18 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
           ass_file: { name: '10012204-remote-e2e.ass', mimeType: 'text/plain', buffer: readFileSync(assFile) },
         },
       }))
+      expect(ass.status).toBe('parsed')
       expect(ass.lines.length).toBeGreaterThan(0)
 
       if (realGeneration) {
+        // 两阶段流程：上传仅完成拆分，需先生成大纲再逐句生成
+        await json(await user.post(`/api/tasks/${ass.taskId}/storyboard-outline/regenerate`))
         await json(await user.post(`/api/tasks/${ass.taskId}/storyboard-lines/${ass.lines[0].id}/generate`, { data: { force: false } }))
         const imageJob = await json(await user.post('/api/generations/images', { data: { prompt: 'minimal remote API acceptance image', n: 1, purpose: 'other' } }), 202)
         await json(await user.get(`/api/generations/${imageJob.id}`))
       } else {
+        // 大纲未生成时逐句生成被结构守卫拒绝
+        expect((await user.post(`/api/tasks/${ass.taskId}/storyboard-lines/${ass.lines[0].id}/generate`, { data: {} })).status()).toBe(422)
         expect((await user.post(`/api/tasks/${ass.taskId}/storyboard-lines/missing-${runId}/generate`, { data: {} })).status()).toBe(404)
         expect((await user.post('/api/generations/images', { data: { prompt: '', n: 1 } })).status()).toBe(422)
         expect((await user.post('/api/generations/videos', { data: { prompt: 'validation only', duration: 3 } })).status()).toBe(422)

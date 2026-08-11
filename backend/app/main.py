@@ -41,15 +41,12 @@ from .domain import router as domain_router
 from .error_logging import record_api_error, request_payload
 from .jobs import jobs
 from .media_constraints import normalize_video_duration
-from .models import AiModelModel, ProjectCastModel, ProjectTaskModel, SongEmotionProfileModel, StoryboardLineCastModel, StoryboardLineModel, UserModel
+from .models import AiModelModel, ProjectCastModel, ProjectTaskModel, SongEmotionProfileModel, StoryboardLineModel, UserModel
 from .providers import generate_image, generate_video
 from .redis_store import close_redis, redis_ok
 from .schemas import ChatMessageCreate, ChatSessionCreate, ImageGenerationCreate, LoginCreate, PasswordChange, RemoteImportCreate, VideoGenerationCreate
 from .seed import recover_stale_storyboard_generation, seed_system_data
 from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
-from .story_bible import build_ass_story_bible
-from .storyboard_prompt import generate_ass_story_outline
-from .token_usage import add_token_usage
 from .usage_quota import consume_daily_quota
 
 
@@ -281,57 +278,14 @@ async def create_ass_storyboard(
         segments = group_cues(cues)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    selected_humans = [
-        {
-            "id": item.id,
-            "name": item.name,
-            "gender": item.gender,
-            "ageDescription": item.age_description,
-            "appearanceStyle": item.appearance_style,
-            "clothingDescription": item.clothing_description,
-            "systemPrompt": item.system_prompt or item.avatar_prompt or item.description,
-        }
-        for human_id in role_ids
-        for item in visible
-        if item.id == human_id
-    ]
-    await consume_daily_quota(db, user_id=user.id, category="chat", limit=settings.daily_chat_limit)
-    try:
-        outline = await generate_ass_story_outline(
-            segments=segments,
-            emotion=emotion_context,
-            selected_humans=selected_humans,
-            extra_requirement=extra_requirement.strip(),
-        )
-    except Exception as exc:
-        for call in getattr(exc, "usage_records", None) or []:
-            add_token_usage(
-                db,
-                operation=f"{call.get('operation') or 'ass_story_outline'}_failed",
-                provider="openai-compatible",
-                model=settings.llm_model,
-                usage=call.get("usage"),
-                user_id=user.id,
-                project_id=project_id,
-                request_id=call.get("requestId"),
-            )
-        await db.commit()
-        raise HTTPException(502, f"ASS 全局分镜大纲生成失败：{exc}") from exc
     ass_url = await get_storage().put_bytes(safe_key(f"users/{user.id}/ass", ass_file.filename), content, ass_file.content_type)
     title = emotion.song_code
-    story_bible = build_ass_story_bible(
-        segments=segments,
-        emotion=emotion_context,
-        role_ids=role_ids,
-        extra_requirement=extra_requirement.strip(),
-        outline=outline,
-    )
     task = ProjectTaskModel(
         id=uid("task"),
         project_id=project_id,
         title=title,
         storyboard_type="ass",
-        status="generating",
+        status="parsed",
         source_ass_url=ass_url,
         extra_requirement=extra_requirement.strip(),
         overall_prompt=extra_requirement.strip(),
@@ -342,58 +296,40 @@ async def create_ass_storyboard(
             "resolution": resolution,
             "imageModel": image_model,
             "videoModel": video_model,
-            "storyBible": story_bible,
             "meta": {"encoding": encoding, "dialogues": len(cues), "segments": len(segments)},
         },
     )
     db.add(task)
     await db.flush()
-    for call in outline["usageRecords"]:
-        add_token_usage(
-            db,
-            operation=call.get("operation") or "ass_story_outline",
-            provider="openai-compatible",
-            model=settings.llm_model,
-            usage=call.get("usage"),
-            user_id=user.id,
-            project_id=project_id,
-            project_task_id=task.id,
-            request_id=call.get("requestId"),
-        )
     for index, human_id in enumerate(role_ids):
         db.add(ProjectCastModel(id=uid("cast"), project_task_id=task.id, digital_human_id=human_id, sort_order=index))
     result_lines = []
     for index, value in enumerate(segments):
-        shot_plan = story_bible["shots"][index]
-        assigned_roles = list(shot_plan["requiredCharacterIds"])
-        planned_duration = float(shot_plan["generationDuration"])
+        source_duration = round(max(0.0, float(value.get("end") or 0) - float(value.get("start") or 0)), 2)
+        gap_before = round(max(0.0, float(value.get("start") or 0) - float(segments[index - 1].get("end") or value.get("start") or 0)), 2) if index else 0.0
+        gap_after = round(max(0.0, float(segments[index + 1].get("start") or value.get("end") or 0) - float(value.get("end") or 0)), 2) if index + 1 < len(segments) else 0.0
+        planned_duration = float(normalize_video_duration(source_duration))
         shot_options = {
             "ratio": ratio,
             "resolution": resolution,
             "imageModel": image_model,
             "videoModel": video_model,
-            "duration": normalize_video_duration(planned_duration),
-            "materialDuration": shot_plan["materialDuration"],
+            "duration": normalize_video_duration(source_duration),
+            "materialDuration": source_duration,
             "segmentType": value.get("segmentType", "lyric"),
             "timelineLabel": value.get("timelineLabel") or value.get("lyrics", ""),
-            "sourceDuration": shot_plan["sourceDuration"],
-            "gapBefore": shot_plan["gapBefore"],
-            "gapAfter": shot_plan["gapAfter"],
-            "gapAfterAllocation": shot_plan["gapAfterAllocation"],
-            "outlineIntent": shot_plan["intent"],
-            "locationId": shot_plan["locationId"],
-            "locationChange": shot_plan["locationChange"],
-            "characterAction": shot_plan["characterAction"],
-            "emotionalFocus": shot_plan["emotionalFocus"],
-            "cameraPurpose": shot_plan["cameraPurpose"],
-            "motifIds": shot_plan["motifIds"],
+            "sourceDuration": source_duration,
+            "gapBefore": gap_before,
+            "gapAfter": gap_after,
+            "gapAfterAllocation": "none",
+            "outlineStatus": "pending",
         }
         line = StoryboardLineModel(
             id=uid("line"),
             project_task_id=task.id,
             sort_order=index,
             source="ass",
-            shot_type=shot_plan["shotType"],
+            shot_type="empty",
             lyrics=value.get("lyrics", ""),
             start_time=value.get("start"),
             end_time=value.get("end"),
@@ -405,18 +341,16 @@ async def create_ass_storyboard(
         )
         db.add(line)
         await db.flush()
-        for role_index, human_id in enumerate(assigned_roles):
-            db.add(StoryboardLineCastModel(id=uid("linecast"), storyboard_line_id=line.id, digital_human_id=human_id, sort_order=role_index))
         result_lines.append(
             {
                 **value,
                 "id": line.id,
-                "shotType": shot_plan["shotType"],
+                "shotType": "empty",
                 "plannedDuration": planned_duration,
                 "shotOptions": shot_options,
                 "scenePrompt": "",
                 "shotPrompt": "",
-                "digitalHumanIds": assigned_roles,
+                "digitalHumanIds": [],
                 "generationStatus": "pending",
             }
         )
@@ -427,9 +361,8 @@ async def create_ass_storyboard(
         "taskId": task.id,
         "projectId": project_id,
         "sourceAssUrl": ass_url,
-        "status": "generating",
+        "status": "parsed",
         "songEmotion": emotion_context,
-        "storyBible": story_bible,
         "lines": result_lines,
     }
 

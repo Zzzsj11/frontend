@@ -17,6 +17,7 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
       body: JSON.stringify({
         taskId: 'task-e2e',
         title: '10012204',
+        status: 'parsed',
         cast: ['dh-luoli'],
         lines: [
           {
@@ -24,16 +25,37 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
             start: 1,
             end: 5,
             id: 'line-e2e',
+            shotType: 'empty',
+            plannedDuration: 4,
             scenePrompt: '',
             shotPrompt: '',
-            digitalHumanIds: ['dh-luoli'],
+            digitalHumanIds: [],
             generationStatus: 'pending',
+            shotOptions: { resolution: '720p', duration: 4, ratio: '16:9', imageModel: 'gpt-image-2', videoModel: 'doubao-seedance-2.0', segmentType: 'lyric', timelineLabel: '自动化测试歌词', outlineStatus: 'pending' },
           },
         ],
         meta: { encoding: 'utf-8', dialogues: 1, segments: 1 },
       }),
     })
   })
+  await page.route('**/api/tasks/task-e2e/storyboard-outline/regenerate', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      storyboardType: 'ass',
+      storyBible: { version: '1', logline: '测试大纲', characterPolicy: '', failedSegments: [], shots: [{ index: 0, stage: '场景一', shotType: 'character', outlineStatus: 'ready' }] },
+      failedSegments: [],
+      lines: [
+        {
+          id: 'line-e2e',
+          shotType: 'character',
+          plannedDuration: 4,
+          shotOptions: { resolution: '720p', duration: 4, ratio: '16:9', imageModel: 'gpt-image-2', videoModel: 'doubao-seedance-2.0', segmentType: 'lyric', timelineLabel: '自动化测试歌词', outlineStatus: 'ready' },
+          digitalHumanIds: ['dh-luoli'],
+          generationStatus: 'pending',
+        },
+      ],
+    }),
+  }))
   await page.route('**/api/tasks/task-e2e/storyboard-lines/line-e2e/generate', (route) => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ id:'line-e2e', scenePrompt:'清晨的房间', shotPrompt:'镜头缓慢推进', digitalHumanIds:['dh-luoli'], generationStatus:'succeeded', generationAttempt:1 }),

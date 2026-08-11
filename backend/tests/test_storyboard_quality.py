@@ -7,12 +7,43 @@ from app.ass_storyboard import AssCue, group_cues
 from app.media_constraints import normalize_video_duration
 from app.schemas import VideoGenerationCreate
 from app.story_bible import build_ass_story_bible, exact_durations
-from app.storyboard_prompt import _extract_json, _validate, _validate_ass_outline
+from app.storyboard_prompt import (
+    _assign_scene_segments,
+    _check_scene_plan,
+    _check_segment_body,
+    _extract_json,
+    _placeholder_shot,
+    _validate,
+    finalize_shot_durations,
+)
 
 
 def make_outline(segments, empty_indexes=(), role_ids=("a",)):
     location_count = max(1, (len(segments) + 1) // 2)
     locations = [{"id": f"place-{index}", "name": f"场景 {index}", "purpose": "推进叙事"} for index in range(location_count)]
+    shots = []
+    for index, segment in enumerate(segments):
+        is_empty = index in empty_indexes
+        gap_after = 0.0
+        if index + 1 < len(segments):
+            gap_after = round(max(0.0, float(segments[index + 1].get("start") or 0) - float(segment.get("end") or 0)), 2)
+        shots.append(
+            {
+                "index": index,
+                "shotType": "empty" if is_empty else "character",
+                "intent": f"intent {index}",
+                "requiredCharacterIds": [] if is_empty else list(role_ids),
+                "locationId": locations[min(index // 2, location_count - 1)]["id"],
+                "locationChange": index % 2 == 0,
+                "characterAction": "无人环境变化" if is_empty else "人物回应歌词",
+                "emotionalFocus": "克制",
+                "cameraPurpose": "推进叙事",
+                "motifIds": ["s1.rain"] if index < 2 else [],
+                "gapAfterAllocation": "current" if 0 < gap_after <= 2 else "none",
+                "sceneIndex": min(index // 2, location_count - 1),
+                "outlineStatus": "ready",
+            }
+        )
     return {
         "globalVisual": {
             "visualStyle": "电影写实",
@@ -23,26 +54,51 @@ def make_outline(segments, empty_indexes=(), role_ids=("a",)):
             "continuityRules": ["服装不变"],
         },
         "locations": locations,
-        "motifs": [{"id": "rain", "name": "雨", "meaning": "克制", "maxAppearances": max(2, (len(segments) + 4) // 5)}],
-        "shots": [
+        "motifs": [{"id": "s1.rain", "name": "雨", "meaning": "克制", "maxAppearances": 3}],
+        "scenePlan": [
             {
-                "index": index,
-                "shotType": "empty" if index in empty_indexes else "character",
-                "intent": f"intent {index}",
-                "requiredCharacterIds": [] if index in empty_indexes else list(role_ids),
-                "locationId": locations[min(index // 2, location_count - 1)]["id"],
-                "locationChange": index == 0 or index % 2 == 0,
-                "characterAction": "无人环境变化" if index in empty_indexes else "人物回应歌词",
-                "emotionalFocus": "克制",
-                "cameraPurpose": "推进叙事",
-                "motifIds": ["rain"] if index < max(2, (len(segments) + 4) // 5) else [],
-                "gapAfterAllocation": "current"
-                if index + 1 < len(segments) and 0 < float(segments[index + 1].get("start") or 0) - float(_segment.get("end") or 0) <= 2
-                else "none",
+                "sceneIndex": 0,
+                "locationId": "place-0",
+                "lineStart": 0,
+                "lineEnd": 1,
+                "locationName": "场景 0",
+                "mood": "静",
+                "emotion": "克制",
+                "visualTone": "冷",
+                "narrativePurpose": "铺垫",
             }
-            for index, _segment in enumerate(segments)
         ],
+        "failedSegments": [],
+        "shots": shots,
     }
+
+
+def make_scene(line_start, line_end, name="雨夜街道"):
+    return {
+        "lineStart": line_start,
+        "lineEnd": line_end,
+        "locationName": name,
+        "mood": "潮湿安静",
+        "emotion": "克制",
+        "visualTone": "冷蓝夜景",
+        "narrativePurpose": "推进叙事",
+    }
+
+
+def make_segment_shot(index, shot_type="character", role_ids=("a",), **overrides):
+    shot = {
+        "index": index,
+        "shotType": shot_type,
+        "intent": f"意图 {index}",
+        "requiredCharacterIds": list(role_ids) if shot_type == "character" else [],
+        "characterAction": "人物回应歌词" if shot_type == "character" else "无人环境变化",
+        "emotionalFocus": "克制",
+        "cameraPurpose": "推进叙事",
+        "motifIds": [],
+        "gapAfterAllocation": "none",
+    }
+    shot.update(overrides)
+    return shot
 
 
 def test_exact_durations_preserve_total_and_provider_limits() -> None:
@@ -53,20 +109,117 @@ def test_exact_durations_preserve_total_and_provider_limits() -> None:
         exact_durations(10, 7)
 
 
-def test_ass_timeline_adds_intro_and_splits_long_interludes() -> None:
-    segments = group_cues([AssCue(5, 8, "第一句"), AssCue(39, 42, "第二句")])
-    assert [item["segmentType"] for item in segments] == ["intro", "lyric", "interlude", "interlude", "interlude", "lyric"]
-    assert [item["timelineLabel"] for item in segments[2:5]] == ["间奏 1/3", "间奏 2/3", "间奏 3/3"]
-    assert all(item["end"] - item["start"] <= 15 for item in segments)
-    assert [item["index"] for item in segments] == list(range(6))
-    structural_indexes = {index for index, item in enumerate(segments) if item["segmentType"] != "lyric"}
-    outline = make_outline(segments, structural_indexes, ("a",))
-    normalized = _validate_ass_outline(outline, segments=segments, role_ids=["a"])
-    assert all(normalized["shots"][index]["shotType"] == "empty" for index in structural_indexes)
-    invalid = {**outline, "shots": [dict(item) for item in outline["shots"]]}
-    invalid["shots"][0] = {**invalid["shots"][0], "shotType": "character", "requiredCharacterIds": ["a"]}
-    with pytest.raises(ValueError, match="前奏、间奏和尾奏"):
-        _validate_ass_outline(invalid, segments=segments, role_ids=["a"])
+def test_ass_timeline_splits_gaps_with_two_part_rule_and_chinese_labels() -> None:
+    segments = group_cues([AssCue(21.88, 25.0, "第一句"), AssCue(50.0, 53.0, "第二句")])
+    assert [item["segmentType"] for item in segments] == ["intro", "intro", "lyric", "interlude", "interlude", "lyric", "outro"]
+    assert [item["timelineLabel"] for item in segments] == ["前奏一", "前奏二", "第一句", "间奏一", "间奏二", "第二句", "尾奏"]
+    assert (segments[0]["start"], segments[0]["end"]) == (0.0, 11.0)
+    assert (segments[1]["start"], segments[1]["end"]) == (11.0, 21.88)
+    assert (segments[3]["start"], segments[3]["end"]) == (25.0, 38.0)
+    assert (segments[4]["start"], segments[4]["end"]) == (38.0, 50.0)
+    assert segments[-1]["start"] == 53.0 and segments[-1]["end"] == 63.0
+    assert [item["index"] for item in segments] == list(range(7))
+
+
+def test_ass_timeline_keeps_short_gaps_single_and_splits_beyond_thirty_seconds() -> None:
+    segments = group_cues([AssCue(5.0, 8.0, "A"), AssCue(48.0, 51.0, "B"), AssCue(60.0, 62.0, "C")])
+    labels = [item["timelineLabel"] for item in segments]
+    assert labels == ["前奏", "A", "间奏一", "间奏二", "间奏三", "B", "间奏", "C", "尾奏"]
+    structural = [item for item in segments if item["segmentType"] != "lyric"]
+    assert all(item["end"] - item["start"] <= 15 for item in structural)
+    middle = [item for item in segments if item["timelineLabel"].startswith("间奏") and item["start"] >= 8.0 and item["end"] <= 48.0]
+    assert len(middle) == 3
+    assert sum(item["end"] - item["start"] for item in middle) == pytest.approx(40.0)
+
+
+def test_scene_plan_requires_exact_count_and_full_coverage() -> None:
+    global_visual = {
+        "visualStyle": "电影写实",
+        "colorPalette": "冷蓝",
+        "lighting": "夜景",
+        "weather": "雨",
+        "timeOfDay": "夜",
+        "continuityRules": ["服装不变"],
+    }
+    scenes = [make_scene(0, 7), make_scene(8, 15, "天台"), make_scene(16, 23, "海边"), make_scene(24, 31, "车站"), make_scene(32, 38, "房间")]
+    assert _check_scene_plan({"globalVisual": global_visual, "scenes": scenes}, lyric_count=39, expected_scenes=5)["scenes"][0]["lineEnd"] == 7
+    with pytest.raises(ValueError, match="必须规划 5 个大场景"):
+        _check_scene_plan({"globalVisual": global_visual, "scenes": scenes[:4]}, lyric_count=39, expected_scenes=5)
+    overlapped = [dict(scene) for scene in scenes]
+    overlapped[1] = {**overlapped[1], "lineStart": 7}
+    with pytest.raises(ValueError, match="连续覆盖"):
+        _check_scene_plan({"globalVisual": global_visual, "scenes": overlapped}, lyric_count=39, expected_scenes=5)
+    missing_tail = [dict(scene) for scene in scenes]
+    missing_tail[-1] = {**missing_tail[-1], "lineEnd": 36}
+    with pytest.raises(ValueError, match="连续覆盖"):
+        _check_scene_plan({"globalVisual": global_visual, "scenes": missing_tail}, lyric_count=39, expected_scenes=5)
+
+
+def test_segment_body_checks_structure_and_repairs_minor_issues() -> None:
+    scene_segments = [
+        {"segmentType": "intro", "start": 0.0, "end": 11.0},
+        {"segmentType": "lyric", "start": 11.0, "end": 14.0},
+        {"segmentType": "lyric", "start": 17.0, "end": 19.0},
+    ]
+    body = {
+        "motifs": [{"id": "rain", "name": "雨", "meaning": "压抑", "maxAppearances": 2}],
+        "shots": [
+            make_segment_shot(0, "empty"),
+            make_segment_shot(1, "character", ("a", "ghost"), motifIds=["rain", "unknown"], gapAfterAllocation="current"),
+            make_segment_shot(2, "character", ("a",), gapAfterAllocation="bogus"),
+        ],
+    }
+    normalized = _check_segment_body(body, segment_count=3, role_ids=["a", "b"], scene_index=0, scene_segments=scene_segments)
+    assert normalized["motifs"][0]["id"] == "s1.rain"
+    assert normalized["shots"][1]["requiredCharacterIds"] == ["a"]
+    assert normalized["shots"][1]["motifIds"] == ["s1.rain"]
+    assert normalized["shots"][1]["gapAfterAllocation"] == "none"
+    assert normalized["shots"][2]["gapAfterAllocation"] == "none"
+    with pytest.raises(ValueError, match="必须包含 3 条"):
+        _check_segment_body({**body, "shots": body["shots"][:2]}, segment_count=3, role_ids=["a"], scene_index=0, scene_segments=scene_segments)
+    with pytest.raises(ValueError, match="无人空镜"):
+        _check_segment_body(
+            {**body, "shots": [make_segment_shot(0, "character", ("a",))] + body["shots"][1:]}, segment_count=3, role_ids=["a"], scene_index=0, scene_segments=scene_segments
+        )
+    with pytest.raises(ValueError, match="至少一个已选人物"):
+        _check_segment_body(
+            {**body, "shots": body["shots"][:1] + [make_segment_shot(1, "character", ("ghost",))] + body["shots"][2:]},
+            segment_count=3,
+            role_ids=["a"],
+            scene_index=0,
+            scene_segments=scene_segments,
+        )
+
+
+def test_assign_scene_segments_attaches_structural_parts_to_neighbors() -> None:
+    segments = group_cues([AssCue(21.88, 25.0, "第一句"), AssCue(50.0, 53.0, "第二句")])
+    scenes = [make_scene(0, 0), make_scene(1, 1, "天台")]
+    groups = _assign_scene_segments(segments, scenes)
+    assert [item.get("timelineLabel") for item in groups[0]] == ["前奏一", "前奏二", "第一句"]
+    assert [item.get("timelineLabel") for item in groups[1]] == ["间奏一", "间奏二", "第二句", "尾奏"]
+
+
+def test_finalize_shot_durations_allocates_short_gaps() -> None:
+    segments = [
+        {"start": 1.0, "end": 3.0, "lyrics": "first"},
+        {"start": 4.0, "end": 6.0, "lyrics": "second"},
+        {"start": 9.0, "end": 11.0, "lyrics": "third"},
+    ]
+    shots = [make_segment_shot(index) for index in range(3)]
+    shots[0]["gapAfterAllocation"] = "next"
+    finalize_shot_durations(shots, segments)
+    assert shots[0]["materialDuration"] == 2.0
+    assert shots[0]["generationDuration"] == 4
+    assert shots[1]["materialDuration"] == 3.0
+    assert shots[1]["gapAfter"] == 3.0
+    assert shots[1]["gapAfterAllocation"] == "none"
+
+
+def test_placeholder_shot_marks_failed_outline() -> None:
+    shot = _placeholder_shot()
+    assert shot["outlineStatus"] == "failed"
+    assert shot["shotType"] == "empty"
+    assert shot["requiredCharacterIds"] == []
 
 
 def test_video_duration_accepts_full_provider_range_and_normalizes_plans() -> None:
@@ -92,6 +245,10 @@ def test_ass_story_bible_has_shared_arc_and_character_plan() -> None:
     assert bible["shots"][-1]["requiredCharacterIds"] == ["a", "b"]
     assert bible["shots"][1]["shotType"] == "character"
     assert bible["visualContinuity"]["season"] == "冬"
+    assert bible["scenePlan"][0]["locationId"] == "place-0"
+    assert bible["failedSegments"] == []
+    assert bible["shots"][2]["sceneIndex"] == 1
+    assert bible["shots"][2]["outlineStatus"] == "ready"
 
     single = build_ass_story_bible(
         segments=[{"lyrics": "single"}],
@@ -101,53 +258,6 @@ def test_ass_story_bible_has_shared_arc_and_character_plan() -> None:
         outline=make_outline([{"lyrics": "single"}], role_ids=("a", "b")),
     )
     assert single["shots"][0]["requiredCharacterIds"] == ["a", "b"]
-
-
-def test_ass_outline_rejects_too_many_or_consecutive_empty_shots() -> None:
-    segments = [{"lyrics": str(index)} for index in range(5)]
-    valid = make_outline(segments, {1, 3})
-    assert len(_validate_ass_outline(valid, segments=segments, role_ids=["a"])["shots"]) == 5
-    invalid = {**valid, "shots": [dict(item) for item in valid["shots"]]}
-    invalid["shots"][2] = {**invalid["shots"][2], "shotType": "empty", "requiredCharacterIds": [], "characterAction": "无人环境变化"}
-    with pytest.raises(ValueError, match="人物镜不能少于|连续空镜"):
-        _validate_ass_outline(invalid, segments=segments, role_ids=["a"])
-
-
-def test_ass_outline_allocates_short_lyric_gaps_to_material_duration() -> None:
-    segments = [
-        {"start": 1.0, "end": 3.0, "lyrics": "first"},
-        {"start": 4.0, "end": 6.0, "lyrics": "second"},
-        {"start": 9.0, "end": 11.0, "lyrics": "third"},
-    ]
-    outline = make_outline(segments, role_ids=("a",))
-    outline["shots"][0]["gapAfterAllocation"] = "next"
-    normalized = _validate_ass_outline(outline, segments=segments, role_ids=["a"])
-    assert normalized["shots"][0]["materialDuration"] == 2.0
-    assert normalized["shots"][0]["generationDuration"] == 4
-    assert normalized["shots"][1]["materialDuration"] == 3.0
-    assert normalized["shots"][1]["generationDuration"] == 4
-    assert normalized["shots"][1]["gapAfter"] == 3.0
-    assert normalized["shots"][1]["gapAfterAllocation"] == "none"
-
-
-def test_ass_outline_requires_character_actions_and_location_variety() -> None:
-    segments = [
-        {"lyrics": "不是说好拥抱过后一起放手"},
-        {"lyrics": "两个人沿着街一直走"},
-        {"lyrics": "但是我们依然牵着手"},
-        {"lyrics": "求求你不要再看着我"},
-        {"lyrics": "我们微笑约定"},
-        {"lyrics": "时间一点点走过"},
-    ]
-    valid = make_outline(segments, {5})
-    assert len(_validate_ass_outline(valid, segments=segments, role_ids=["a"])["locations"]) >= 3
-    wrong_type = {**valid, "shots": [dict(item) for item in valid["shots"]]}
-    wrong_type["shots"][2] = {**wrong_type["shots"][2], "shotType": "empty", "requiredCharacterIds": [], "characterAction": "无人空镜"}
-    with pytest.raises(ValueError, match="必须规划为人物镜"):
-        _validate_ass_outline(wrong_type, segments=segments, role_ids=["a"])
-    repeated_location = {**valid, "shots": [{**item, "locationId": "place-0"} for item in valid["shots"]]}
-    with pytest.raises(ValueError, match="至少需要 3 个有效场景"):
-        _validate_ass_outline(repeated_location, segments=segments, role_ids=["a"])
 
 
 def test_storyboard_output_schema_is_strict() -> None:

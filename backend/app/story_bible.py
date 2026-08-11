@@ -4,7 +4,7 @@ from typing import Any
 
 from .media_constraints import MAX_VIDEO_DURATION, MIN_VIDEO_DURATION, normalize_video_duration
 
-STORY_BIBLE_VERSION = "story-bible-v4"
+STORY_BIBLE_VERSION = "story-bible-v5"
 
 
 def _stage(index: int, total: int) -> str:
@@ -53,6 +53,8 @@ def build_ass_story_bible(*, segments: list[dict[str, Any]], emotion: dict[str, 
         "globalVisual": outline["globalVisual"],
         "locations": outline["locations"],
         "motifs": outline["motifs"],
+        "scenePlan": outline.get("scenePlan") or [],
+        "failedSegments": outline.get("failedSegments") or [],
         "visualContinuity": {
             "season": emotion.get("seasons"),
             "atmosphere": emotion.get("atmosphere"),

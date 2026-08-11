@@ -89,6 +89,25 @@ const onDrop = (index: number) => {
       </div>
     </header>
 
+    <!-- ASS 两阶段流程：大纲阶段状态横幅 -->
+    <div v-if="store.outlinePhase === 'pending' || store.outlinePhase === 'outlining'" class="outline-banner">
+      <span v-if="store.outlinePhase === 'outlining'" class="spinner" />
+      {{ store.outlinePhase === 'outlining' ? '正在生成 MV 大纲（场景规划 → 分段并行生成）…' : '歌词时间轴拆分完成，准备生成大纲' }}
+    </div>
+    <div v-else-if="store.outlinePhase === 'failed'" class="outline-banner error">
+      <span class="banner-text">MV 大纲生成失败{{ store.outlineError ? `：${store.outlineError}` : '' }}，已拆分的分镜列表已保留</span>
+      <button class="banner-btn" :disabled="store.outlineLoading" @click="store.regenerateOutline()">重新生成大纲</button>
+    </div>
+    <div v-if="store.failedOutlineSegments.length" class="outline-banner warning">
+      <span class="banner-text">{{ store.failedOutlineSegments.length }} 个场景段大纲未生成，其余段落不受影响：</span>
+      <span v-for="seg in store.failedOutlineSegments" :key="seg.sceneIndex" class="segment-failure" :title="seg.error">
+        场景{{ seg.sceneIndex + 1 }}·{{ seg.locationName }}
+        <button class="banner-btn" :disabled="!!store.segmentRetrying[seg.sceneIndex]" @click="store.retryOutlineSegment(seg.sceneIndex)">
+          {{ store.segmentRetrying[seg.sceneIndex] ? '生成中…' : '重新生成' }}
+        </button>
+      </span>
+    </div>
+
     <div ref="lineListRef" class="line-list">
       <div
         v-for="(line, index) in store.lines"
@@ -139,6 +158,51 @@ const onDrop = (index: number) => {
 }
 .generation-progress { margin-left: 10px; color: var(--text-muted); font-size: 12px; }
 .retry-all { border: 0; background: transparent; color: var(--primary); cursor: pointer; padding: 0 4px; }
+.outline-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: #f2f7ff;
+  border: 1px solid #d4e3fb;
+  color: #35608f;
+  font-size: 12px;
+}
+.outline-banner.error {
+  background: #fff1f0;
+  border-color: #ffd0cc;
+  color: #b03a2e;
+}
+.outline-banner.warning {
+  background: #fff8ec;
+  border-color: #ffe1ae;
+  color: #96621a;
+}
+.banner-text {
+  min-width: 0;
+  word-break: break-all;
+}
+.banner-btn {
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  padding: 2px 9px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.banner-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.segment-failure {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .title-group {
   display: flex;
   align-items: baseline;

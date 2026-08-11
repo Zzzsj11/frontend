@@ -4,6 +4,8 @@ import type {
   GeneralStoryboardRequest,
   GeneralStoryboardResult,
   MaterialExport,
+  OutlineFailedSegment,
+  OutlinePlannedLine,
   ScriptLine,
   ShotGenOptions,
   SongProject,
@@ -39,14 +41,14 @@ export async function fetchSongProjects(): Promise<SongProject[]> {
 }
 
 /** GET /api/songs/{id}/script — 载入某首歌曲的分镜脚本与角色阵容 */
-export async function fetchSongScript(taskId: string): Promise<{ cast: string[]; lines: ScriptLine[]; storyboardType: string; storyBible?: StoryBible }> {
-  const task = await apiRequest<{ cast: string[]; storyboardType:string; storyboardConfig?:{storyBible?:StoryBible}; lines: Array<Record<string, unknown>> }>(`/tasks/${taskId}`)
-  return { cast: task.cast, storyboardType:task.storyboardType, storyBible:task.storyboardConfig?.storyBible, lines: task.lines.map((item) => {
+export async function fetchSongScript(taskId: string): Promise<{ cast: string[]; lines: ScriptLine[]; storyboardType: string; storyBible?: StoryBible; status: string }> {
+  const task = await apiRequest<{ cast: string[]; storyboardType:string; status:string; storyboardConfig?:{storyBible?:StoryBible}; lines: Array<Record<string, unknown>> }>(`/tasks/${taskId}`)
+  return { cast: task.cast, storyboardType:task.storyboardType, status:task.status, storyBible:task.storyboardConfig?.storyBible, lines: task.lines.map((item) => {
     const sceneAssets = (item.sceneAssets as Array<{ id:string; imageUrl:string; originalImageUrl?:string; isCurrent:boolean }>) || []
     const shotAssets = (item.shotAssets as Array<{ id:string; coverUrl:string; originalCoverUrl?:string; videoUrl:string; duration:number; isCurrent:boolean }>) || []
     const currentScene = sceneAssets.find((a)=>a.isCurrent)
     const currentShot = shotAssets.find((a)=>a.isCurrent)
-    return { id: String(item.id), source: item.source as ScriptLine['source'], shotType: item.shotType as ScriptLine['shotType'], plannedDuration: item.plannedDuration as number | undefined, lyrics: String(item.lyrics || ''), lyricsZh: item.lyricsZh as string | undefined, scenePrompt: String(item.scenePrompt || ''), shotPrompt: String(item.shotPrompt || ''), digitalHumanIds: item.digitalHumanIds as string[], shotOptions: item.shotOptions as ScriptLine['shotOptions'], generationStatus: item.generationStatus as ScriptLine['generationStatus'], generationError: item.generationError as string | undefined, generationAttempt: Number(item.generationAttempt || 0), voice: { status: 'none' }, scene: { status: sceneAssets.length ? 'done' : 'none', imageUrl: currentScene?.imageUrl, originalImageUrl: currentScene?.originalImageUrl }, shot: { status: shotAssets.length ? 'done' : 'none', imageUrl: currentShot?.coverUrl, assets: shotAssets.map((a)=>({ ...a, digitalHumanIds: item.digitalHumanIds as string[] })), currentAssetId: currentShot?.id } }
+    return { id: String(item.id), source: item.source as ScriptLine['source'], shotType: item.shotType as ScriptLine['shotType'], plannedDuration: item.plannedDuration as number | undefined, start: item.start as number | undefined, end: item.end as number | undefined, lyrics: String(item.lyrics || ''), lyricsZh: item.lyricsZh as string | undefined, scenePrompt: String(item.scenePrompt || ''), shotPrompt: String(item.shotPrompt || ''), digitalHumanIds: item.digitalHumanIds as string[], shotOptions: item.shotOptions as ScriptLine['shotOptions'], generationStatus: item.generationStatus as ScriptLine['generationStatus'], generationError: item.generationError as string | undefined, generationAttempt: Number(item.generationAttempt || 0), voice: { status: 'none' }, scene: { status: sceneAssets.length ? 'done' : 'none', imageUrl: currentScene?.imageUrl, originalImageUrl: currentScene?.originalImageUrl }, shot: { status: shotAssets.length ? 'done' : 'none', imageUrl: currentShot?.coverUrl, assets: shotAssets.map((a)=>({ ...a, digitalHumanIds: item.digitalHumanIds as string[] })), currentAssetId: currentShot?.id } }
   }) }
 }
 
@@ -133,7 +135,8 @@ export const reorderStoryboardLines = (taskId:string,lineIds:string[]) => apiReq
 export const updateTaskCast = (taskId:string,ids:string[]) => apiRequest(`/tasks/${taskId}/cast`,{method:'PUT',body:JSON.stringify({digital_human_ids:ids})})
 export const generateStoryboardLine = (taskId:string,lineId:string,force=false) => apiRequest<Record<string,unknown>>(`/tasks/${taskId}/storyboard-lines/${lineId}/generate`,{method:'POST',body:JSON.stringify({force})})
 export const resetFailedStoryboardLines = (taskId:string) => apiRequest<{lineIds:string[]}>(`/tasks/${taskId}/storyboard/retry-failed`,{method:'POST'})
-export const regenerateStoryboardOutline = (taskId:string) => apiRequest<{storyboardType:string;storyBible:StoryBible;lines:Array<{id:string;shotType:'empty'|'character';digitalHumanIds:string[];generationStatus:'pending'}>}>(`/tasks/${taskId}/storyboard-outline/regenerate`,{method:'POST'})
+export const regenerateStoryboardOutline = (taskId:string) => apiRequest<{storyboardType:string;storyBible:StoryBible;failedSegments:OutlineFailedSegment[];lines:OutlinePlannedLine[]}>(`/tasks/${taskId}/storyboard-outline/regenerate`,{method:'POST'})
+export const regenerateStoryboardOutlineSegment = (taskId:string,sceneIndex:number) => apiRequest<{sceneIndex:number;failedSegments:OutlineFailedSegment[];lines:OutlinePlannedLine[]}>(`/tasks/${taskId}/storyboard-outline/segments/${sceneIndex}/regenerate`,{method:'POST'})
 
 const generalStoryboardOptions: GeneralStoryboardOptions = {
   genres: [
