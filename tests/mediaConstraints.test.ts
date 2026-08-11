@@ -17,6 +17,14 @@ describe('video duration constraints', () => {
     expect(normalizeVideoDuration(2)).toBe(MIN_VIDEO_DURATION)
     expect(normalizeVideoDuration(9.6)).toBe(10)
     expect(normalizeVideoDuration(18)).toBe(MAX_VIDEO_DURATION)
-    expect(normalizeShotOptions({ resolution: '1080p', duration: 3, ratio: '16:9', imageModel: DEFAULT_IMAGE_MODEL, videoModel: DEFAULT_VIDEO_MODEL }).duration).toBe(4)
+    expect(
+      normalizeShotOptions({
+        resolution: '1080p',
+        duration: 3,
+        ratio: '16:9',
+        imageModel: DEFAULT_IMAGE_MODEL,
+        videoModel: DEFAULT_VIDEO_MODEL,
+      }).duration,
+    ).toBe(4)
   })
 })

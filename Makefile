@@ -9,6 +9,7 @@ stop:
 	docker compose down
 lint: lint-frontend lint-backend
 lint-frontend:
+	npm run format:check
 	npm run lint
 lint-backend:
 	cd backend && .venv/bin/ruff check app tests migrations

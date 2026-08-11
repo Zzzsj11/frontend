@@ -211,6 +211,15 @@ export interface OutlineFailedSegment {
   error: string
 }
 
+/** ASS 大纲后台生成的进度（SSE 事件与任务快照共用） */
+export interface OutlineProgress {
+  phase?: 'planning' | 'segments' | 'error'
+  segmentsDone?: number
+  segmentsTotal?: number
+  startedAt?: string
+  error?: string
+}
+
 /** 大纲回填到分镜行的规划结果（全局/段级重试端点共用） */
 export interface OutlinePlannedLine {
   id: string

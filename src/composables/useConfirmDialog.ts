@@ -30,7 +30,9 @@ export function confirmDialog(options: ConfirmDialogOptions | string): Promise<b
     cancelText: config.cancelText ?? '取消',
     danger: config.danger ?? false,
   })
-  return new Promise<boolean>((resolve) => { resolver = resolve })
+  return new Promise<boolean>((resolve) => {
+    resolver = resolve
+  })
 }
 
 export function closeConfirmDialog(confirmed: boolean) {

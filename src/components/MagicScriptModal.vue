@@ -2,9 +2,16 @@
 import { computed, ref, watch } from 'vue'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
+import BaseModal from './base/BaseModal.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
 import type { ShotGenOptions } from '../types'
-import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, loadGenerationModels } from '../generationModels'
+import {
+  DEFAULT_IMAGE_MODEL,
+  DEFAULT_VIDEO_MODEL,
+  IMAGE_MODEL_OPTIONS,
+  VIDEO_MODEL_OPTIONS,
+  loadGenerationModels,
+} from '../generationModels'
 
 const store = useProjectStore()
 
@@ -26,7 +33,10 @@ const canSubmit = computed(() => songId.value.trim() !== '' && assFile.value !==
 watch(
   () => store.magicOpen,
   (open) => {
-    if (open) { resetForm(); void loadGenerationModels() }
+    if (open) {
+      resetForm()
+      void loadGenerationModels()
+    }
   },
 )
 
@@ -83,164 +93,141 @@ const cancel = () => {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="store.magicOpen" class="modal-mask" @click.self="cancel">
-      <div class="modal">
-        <header class="modal-header">
-          <h3><AppIcon name="sparkles" :size="17" /> ASS 视频</h3>
-          <button class="close-btn" @click="cancel"><AppIcon name="close" :size="13" /> 关闭</button>
-        </header>
+  <BaseModal
+    :open="store.magicOpen"
+    width="1040px"
+    :loading="store.magicLoading"
+    aria-label="ASS 视频"
+    @close="cancel"
+  >
+    <template #title><AppIcon name="sparkles" :size="17" /> ASS 视频</template>
+    <div class="modal-body">
+      <!-- 歌曲编号 -->
+      <p class="field-label">歌曲编号 <span class="required">*</span></p>
+      <input
+        v-model="songId"
+        class="song-input"
+        placeholder="上传 ASS 文件后自动提取歌曲编号"
+        disabled
+      />
+      <p class="song-id-hint">歌曲编号仅从 ASS 文件名提取，不支持手动修改。</p>
 
-        <div class="modal-body">
-          <!-- 歌曲编号 -->
-          <p class="field-label">歌曲编号 <span class="required">*</span></p>
-          <input
-            v-model="songId"
-            class="song-input"
-            placeholder="上传 ASS 文件后自动提取歌曲编号"
-            disabled
-          />
-          <p class="song-id-hint">歌曲编号仅从 ASS 文件名提取，不支持手动修改。</p>
+      <section class="generation-config">
+        <p class="field-label">生成配置 <span class="required">*</span></p>
+        <div class="config-grid">
+          <label
+            ><span>画幅 *</span
+            ><select v-model="ratio">
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+              <option value="4:3">4:3</option>
+              <option value="1:1">1:1</option>
+            </select></label
+          >
+          <label
+            ><span>清晰度 *</span
+            ><select v-model="resolution">
+              <option value="480p">480p</option>
+              <option value="720p">720p</option>
+              <option value="1080p">1080p</option>
+            </select></label
+          >
+          <label
+            ><span>视频模型 *</span
+            ><select v-model="videoModel" disabled>
+              <option v-for="item in VIDEO_MODEL_OPTIONS" :key="item.value" :value="item.value">
+                {{ item.label }}
+              </option>
+            </select></label
+          >
+          <label
+            ><span>图片模型 *</span
+            ><select v-model="imageModel" disabled>
+              <option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">
+                {{ item.label }}
+              </option>
+            </select></label
+          >
+        </div>
+        <p class="model-hint">当前内测版模型固定，选项已保留用于后续扩展。</p>
+      </section>
 
-          <section class="generation-config">
-            <p class="field-label">生成配置 <span class="required">*</span></p>
-            <div class="config-grid">
-              <label><span>画幅 *</span><select v-model="ratio"><option value="16:9">16:9</option><option value="9:16">9:16</option><option value="4:3">4:3</option><option value="1:1">1:1</option></select></label>
-              <label><span>清晰度 *</span><select v-model="resolution"><option value="480p">480p</option><option value="720p">720p</option><option value="1080p">1080p</option></select></label>
-              <label><span>视频模型 *</span><select v-model="videoModel" disabled><option v-for="item in VIDEO_MODEL_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
-              <label><span>图片模型 *</span><select v-model="imageModel" disabled><option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
-            </div>
-            <p class="model-hint">当前内测版模型固定，选项已保留用于后续扩展。</p>
-          </section>
+      <!-- 完整角色库横向多选 -->
+      <div class="role-section">
+        <p class="field-label">
+          从已有角色库选择 <span class="optional">（可不选；选择后人物镜仅使用所选角色）</span>
+        </p>
+        <div class="role-picker" :class="{ filled: selectedHumanIds.length }">
+          <button
+            v-for="human in store.digitalHumans"
+            :key="human.id"
+            class="role-card"
+            :class="{ selected: selectedHumanIds.includes(human.id) }"
+            :title="`${human.name} · ${human.style}`"
+            @click="toggleHuman(human.id)"
+          >
+            <CharacterPortrait :src="human.avatar" :alt="human.name" />
+            <span>{{ human.name }}</span>
+            <span v-if="selectedHumanIds.includes(human.id)" class="role-check">
+              <AppIcon name="check" :size="10" />
+            </span>
+          </button>
+          <p v-if="!store.digitalHumans.length" class="role-empty">角色库暂无可选人物</p>
+        </div>
+      </div>
 
-          <!-- 完整角色库横向多选 -->
-          <div class="role-section">
-            <p class="field-label">从已有角色库选择 <span class="optional">（可不选；选择后人物镜仅使用所选角色）</span></p>
-            <div class="role-picker" :class="{ filled: selectedHumanIds.length }">
-              <button
-                v-for="human in store.digitalHumans"
-                :key="human.id"
-                class="role-card"
-                :class="{ selected: selectedHumanIds.includes(human.id) }"
-                :title="`${human.name} · ${human.style}`"
-                @click="toggleHuman(human.id)"
-              >
-                <CharacterPortrait :src="human.avatar" :alt="human.name" />
-                <span>{{ human.name }}</span>
-                <span v-if="selectedHumanIds.includes(human.id)" class="role-check">
-                  <AppIcon name="check" :size="10" />
-                </span>
-              </button>
-              <p v-if="!store.digitalHumans.length" class="role-empty">角色库暂无可选人物</p>
-            </div>
+      <!-- 两栏：ass 文件 / 额外要求 -->
+      <div class="upload-grid">
+        <div class="upload-col">
+          <p class="field-label">上传 ass 字幕文件 <span class="required">*</span></p>
+          <div
+            class="dropzone"
+            :class="{ filled: assFile }"
+            @click="assInputRef?.click()"
+            @dragover.prevent
+            @drop.prevent="onAssDrop"
+          >
+            <template v-if="assFile">
+              <span class="file-icon"><AppIcon name="file" :size="28" /></span>
+              <span class="file-name">{{ assFile.name }}</span>
+              <span class="file-tip">点击可重新选择</span>
+            </template>
+            <template v-else>
+              <span class="file-icon"><AppIcon name="file" :size="28" /></span>
+              <span class="drop-text">点击选择或拖入 .ass 文件</span>
+              <span class="file-tip">解析歌词与时间轴生成视频脚本</span>
+            </template>
           </div>
-
-          <!-- 两栏：ass 文件 / 额外要求 -->
-          <div class="upload-grid">
-            <div class="upload-col">
-              <p class="field-label">上传 ass 字幕文件 <span class="required">*</span></p>
-              <div
-                class="dropzone"
-                :class="{ filled: assFile }"
-                @click="assInputRef?.click()"
-                @dragover.prevent
-                @drop.prevent="onAssDrop"
-              >
-                <template v-if="assFile">
-                  <span class="file-icon"><AppIcon name="file" :size="28" /></span>
-                  <span class="file-name">{{ assFile.name }}</span>
-                  <span class="file-tip">点击可重新选择</span>
-                </template>
-                <template v-else>
-                  <span class="file-icon"><AppIcon name="file" :size="28" /></span>
-                  <span class="drop-text">点击选择或拖入 .ass 文件</span>
-                  <span class="file-tip">解析歌词与时间轴生成视频脚本</span>
-                </template>
-              </div>
-              <input ref="assInputRef" type="file" accept=".ass" hidden @change="onAssChange" />
-            </div>
-
-            <div class="upload-col extra-col">
-              <p class="field-label">额外要求 <span class="optional">（可空）</span></p>
-              <textarea
-                v-model="extraRequirement"
-                class="extra-input"
-                placeholder="如：整体氛围偏怀旧、多用空镜头、副歌处切快节奏…"
-              />
-            </div>
-          </div>
-          <p v-if="store.magicError" class="error-tip" role="alert">{{ store.magicError }}</p>
+          <input ref="assInputRef" type="file" accept=".ass" hidden @change="onAssChange" />
         </div>
 
-        <footer class="modal-footer">
-          <button
-            class="btn-primary generate-btn"
-            :disabled="!canSubmit || store.magicLoading"
-            @click="submit"
-          >
-            <span v-if="store.magicLoading" class="spinner light" />
-            <AppIcon v-else name="sparkles" :size="16" />
-            {{ store.magicLoading ? '正在生成视频脚本…' : '生成' }}
-          </button>
-        </footer>
+        <div class="upload-col extra-col">
+          <p class="field-label">额外要求 <span class="optional">（可空）</span></p>
+          <textarea
+            v-model="extraRequirement"
+            class="extra-input"
+            placeholder="如：整体氛围偏怀旧、多用空镜头、副歌处切快节奏…"
+          />
+        </div>
       </div>
+      <p v-if="store.magicError" class="error-tip" role="alert">{{ store.magicError }}</p>
     </div>
-  </Teleport>
+
+    <template #footer>
+      <button
+        class="btn-primary generate-btn"
+        :disabled="!canSubmit || store.magicLoading"
+        @click="submit"
+      >
+        <span v-if="store.magicLoading" class="spinner light" />
+        <AppIcon v-else name="sparkles" :size="16" />
+        {{ store.magicLoading ? '正在生成视频脚本…' : '生成' }}
+      </button>
+    </template>
+  </BaseModal>
 </template>
 
 <style scoped>
-.modal-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-}
-.modal {
-  width: 1040px;
-  max-width: 100%;
-  max-height: 92vh;
-  background: #fff;
-  border-radius: 16px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
-}
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 18px 22px;
-  border-bottom: 1px solid var(--border);
-}
-.modal-header h3 {
-  margin: 0;
-  font-size: 17px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text);
-}
-.modal-header h3 .app-icon {
-  color: var(--primary);
-}
-.close-btn {
-  border: none;
-  background: transparent;
-  font-size: 14px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.close-btn:hover {
-  color: var(--text);
-}
 .modal-body {
   padding: 16px 22px;
   overflow-y: auto;
@@ -263,9 +250,9 @@ const cancel = () => {
 .song-input {
   width: 100%;
   border: 1px solid var(--border-dark);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 10px 12px;
-  font-size: 14px;
+  font-size: var(--font-md);
   outline: none;
   transition: border-color 0.15s;
 }
@@ -273,16 +260,53 @@ const cancel = () => {
   border-color: var(--primary);
 }
 .song-input:disabled {
-  background: #f5f5f6;
+  background: var(--surface-muted);
   color: var(--text-secondary);
   cursor: not-allowed;
 }
 .song-id-hint {
   margin: 6px 0 0;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
-.generation-config{margin-top:16px}.config-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.config-grid label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--text-secondary)}.config-grid select{width:100%;border:1px solid var(--border-dark);border-radius:9px;background:#fff;padding:9px 10px;color:var(--text)}.config-grid select:disabled{background:#f5f5f6;color:#777;cursor:not-allowed}.model-hint{margin:7px 0 0;color:var(--text-secondary);font-size:12px}@media(max-width:760px){.config-grid{grid-template-columns:1fr 1fr}}
+.generation-config {
+  margin-top: 16px;
+}
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.config-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+}
+.config-grid select {
+  width: 100%;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 9px 10px;
+  color: var(--text);
+}
+.config-grid select:disabled {
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+}
+.model-hint {
+  margin: 7px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+}
+@media (max-width: 760px) {
+  .config-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
 
 /* ASS 文件与额外要求 */
 .upload-grid {
@@ -305,8 +329,8 @@ const cancel = () => {
   flex: 1;
   min-height: 170px;
   border: 1.5px dashed var(--border-dark);
-  border-radius: 12px;
-  background: #fafafa;
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -315,7 +339,9 @@ const cancel = () => {
   padding: 12px;
   text-align: center;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 .dropzone:hover {
   border-color: var(--primary);
@@ -344,7 +370,7 @@ const cancel = () => {
   word-break: break-all;
 }
 .file-tip {
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--text-secondary);
 }
 
@@ -355,8 +381,8 @@ const cancel = () => {
   overflow-x: hidden;
   overflow-y: auto;
   border: 1.5px dashed var(--border-dark);
-  border-radius: 12px;
-  background: #fafafa;
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
   padding: 10px;
   display: flex;
   flex-wrap: wrap;
@@ -376,12 +402,15 @@ const cancel = () => {
   width: 124px;
   max-width: 160px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: #fff;
   padding: 3px;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    transform 0.15s;
 }
 .role-card:hover {
   border-color: var(--primary);
@@ -396,7 +425,7 @@ const cancel = () => {
   width: 100%;
   height: 70px;
   object-fit: contain;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   display: block;
 }
 .role-card > span:not(.role-check) {
@@ -425,7 +454,7 @@ const cancel = () => {
   margin: auto 0;
   text-align: center;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 /* 额外要求 */
@@ -433,7 +462,7 @@ const cancel = () => {
   flex: 1;
   min-height: 170px;
   border: 1px solid var(--border-dark);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   padding: 10px 12px;
   font-size: 13px;
   line-height: 1.6;
@@ -447,10 +476,6 @@ const cancel = () => {
 }
 
 /* 底部生成按钮 */
-.modal-footer {
-  padding: 14px 22px 18px;
-  border-top: 1px solid var(--border);
-}
 .generate-btn {
   width: 100%;
   justify-content: center;
@@ -460,14 +485,14 @@ const cancel = () => {
 .error-tip {
   margin: 14px 0 0;
   padding: 10px 12px;
-  border-radius: 8px;
-  background: #fff0f0;
-  color: #c33;
+  border-radius: var(--radius-sm);
+  background: var(--danger-light);
+  color: var(--danger);
   font-size: 13px;
 }
 .role-card .character-portrait {
   width: 100%;
   height: 70px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 </style>

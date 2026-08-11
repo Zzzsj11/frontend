@@ -8,6 +8,7 @@
     "build": "vue-tsc -b && vite build",
     "lint": "eslint src tests e2e vite.config.ts playwright.config.ts",
     "format": "prettier --write src tests e2e '*.{json,ts,js,md}'",
+    "format:check": "prettier --check src tests e2e '*.{json,ts,js,md}'",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

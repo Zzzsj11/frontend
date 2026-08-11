@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { ScriptLine } from '../types'
 import { formatTime, useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
+import BaseIconButton from './base/BaseIconButton.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
 import ImageZoom from './ImageZoom.vue'
 import { confirmDialog } from '../composables/useConfirmDialog'
@@ -36,7 +37,11 @@ const segmentBadge = computed(() => {
   return type && type !== 'lyric' ? props.line.shotOptions?.timelineLabel || '' : ''
 })
 /** ASS 时间轴起止时间（mm:ss–mm:ss） */
-const timeRange = computed(() => (props.line.start != null && props.line.end != null ? `${formatTime(props.line.start)}–${formatTime(props.line.end)}` : ''))
+const timeRange = computed(() =>
+  props.line.start != null && props.line.end != null
+    ? `${formatTime(props.line.start)}–${formatTime(props.line.end)}`
+    : '',
+)
 
 // 点击不同文字内容时，直接展开对应的编辑选项
 const openShotDetail = () => store.openEditor(props.line.id, 'shot')
@@ -50,11 +55,15 @@ const openThumbnailEditor = () => {
 
 // 生成 / 重新生成分镜视频片段：已有片段时二次确认，避免误触
 const onGenerateShot = async () => {
-  if (props.line.shot.status === 'done' && !await confirmDialog({
-    title: '重新生成视频',
-    message: '确定重新生成该视频片段？将新增一个视频版本。',
-    confirmText: '重新生成',
-  })) return
+  if (
+    props.line.shot.status === 'done' &&
+    !(await confirmDialog({
+      title: '重新生成视频',
+      message: '确定重新生成该视频片段？将新增一个视频版本。',
+      confirmText: '重新生成',
+    }))
+  )
+    return
   store.generateShotFor(props.line.id)
 }
 </script>
@@ -73,7 +82,10 @@ const onGenerateShot = async () => {
       <video v-if="video" :src="video" preload="metadata" muted />
       <img v-else-if="cover" :src="cover" alt="视频缩略图" />
       <span v-else class="thumb-placeholder"><AppIcon name="image" :size="18" /></span>
-      <div v-if="line.shot.status === 'generating' || line.scene.status === 'generating'" class="thumb-loading">
+      <div
+        v-if="line.shot.status === 'generating' || line.scene.status === 'generating'"
+        class="thumb-loading"
+      >
         <span class="spinner light" />
       </div>
       <ImageZoom :src="originalCover" alt="视频封面原图预览" />
@@ -86,7 +98,13 @@ const onGenerateShot = async () => {
       :title="`编辑人物 · 出演：${humans.map((h) => h.name).join(' / ')}`"
       @click.stop="store.openEditor(line.id, 'cast')"
     >
-      <CharacterPortrait v-for="dh in humans" :key="dh.id" class="dh-chip" :src="dh.avatar" :alt="dh.name" />
+      <CharacterPortrait
+        v-for="dh in humans"
+        :key="dh.id"
+        class="dh-chip"
+        :src="dh.avatar"
+        :alt="dh.name"
+      />
     </div>
 
     <!-- 歌词 + 提示词摘要 -->
@@ -94,47 +112,80 @@ const onGenerateShot = async () => {
       <div v-if="outlineStatus === 'pending'" class="prompt-generation-state">
         <span v-if="outlining" class="spinner" />{{ outlining ? '正在生成大纲' : '待生成大纲' }}
       </div>
-      <div v-else-if="outlineStatus === 'failed'" class="prompt-generation-state failed">所在场景段大纲未生成，可在上方横幅中重试</div>
-      <div v-else-if="line.generationStatus === 'pending' || line.generationStatus === 'running'" class="prompt-generation-state">
-        <span class="spinner" /> {{ line.generationStatus === 'pending' ? '等待生成提示词' : '正在生成提示词' }}
+      <div v-else-if="outlineStatus === 'failed'" class="prompt-generation-state failed">
+        所在场景段大纲未生成，可在上方横幅中重试
+      </div>
+      <div
+        v-else-if="line.generationStatus === 'pending' || line.generationStatus === 'running'"
+        class="prompt-generation-state"
+      >
+        <span class="spinner" />
+        {{ line.generationStatus === 'pending' ? '等待生成提示词' : '正在生成提示词' }}
       </div>
       <div v-else-if="line.generationStatus === 'failed'" class="prompt-generation-state failed">
-        <span class="error-text" :title="line.generationError">生成失败{{ line.generationError ? `：${line.generationError}` : '' }}</span>
+        <span class="error-text" :title="line.generationError"
+          >生成失败{{ line.generationError ? `：${line.generationError}` : '' }}</span
+        >
         <button @click.stop="store.retryStoryboardLine(line.id)">重新生成</button>
       </div>
       <div v-if="isGeneral" class="general-meta">
-        <span class="shot-type" :class="line.shotType">{{ line.shotType === 'empty' ? '空镜' : '人物镜' }}</span>
-        <span v-if="line.plannedDuration" class="planned-duration">预计 {{ line.plannedDuration }} 秒</span>
+        <span class="shot-type" :class="line.shotType">{{
+          line.shotType === 'empty' ? '空镜' : '人物镜'
+        }}</span>
+        <span v-if="line.plannedDuration" class="planned-duration"
+          >预计 {{ line.plannedDuration }} 秒</span
+        >
       </div>
       <template v-else>
         <div v-if="segmentBadge || timeRange" class="ass-meta">
           <span v-if="segmentBadge" class="segment-tag">{{ segmentBadge }}</span>
           <span v-if="timeRange" class="time-range">{{ timeRange }}</span>
-          <span v-if="line.plannedDuration" class="planned-duration">预计 {{ line.plannedDuration }} 秒</span>
+          <span v-if="line.plannedDuration" class="planned-duration"
+            >预计 {{ line.plannedDuration }} 秒</span
+          >
         </div>
-        <p class="lyrics editable-text" @click.stop="openShotDetail">{{ line.lyrics || line.shotOptions?.timelineLabel || '（未填写歌词）' }}</p>
+        <p class="lyrics editable-text" @click.stop="openShotDetail">
+          {{ line.lyrics || line.shotOptions?.timelineLabel || '（未填写歌词）' }}
+        </p>
       </template>
-      <p v-if="!isGeneral && translation" class="lyrics-zh editable-text" @click.stop="openShotDetail"><span class="zh-tag">译</span>{{ translation }}</p>
-      <p v-if="isGeneral" class="scene-summary editable-text" @click.stop="openSceneDetail">{{ line.scenePrompt || '暂无场景提示词' }}</p>
-      <p class="prompt editable-text" @click.stop="openShotDetail">{{ line.shotPrompt || line.scenePrompt || '暂无提示词，点击编辑场景与视频' }}</p>
+      <p
+        v-if="!isGeneral && translation"
+        class="lyrics-zh editable-text"
+        @click.stop="openShotDetail"
+      >
+        <span class="zh-tag">译</span>{{ translation }}
+      </p>
+      <p v-if="isGeneral" class="scene-summary editable-text" @click.stop="openSceneDetail">
+        {{ line.scenePrompt || '暂无场景提示词' }}
+      </p>
+      <p class="prompt editable-text" @click.stop="openShotDetail">
+        {{ line.shotPrompt || line.scenePrompt || '暂无提示词，点击编辑场景与视频' }}
+      </p>
     </div>
 
     <div class="line-actions" @click.stop>
       <!-- 生成分镜视频片段 -->
-      <button
-        class="icon-btn"
-        :class="{ active: line.shot.status === 'done' }"
-        :disabled="line.shot.status === 'generating'"
-        :title="line.shot.status === 'done' ? '重新生成视频片段' : '生成视频片段（场景 × 视频提示词 × 角色）'"
+      <BaseIconButton
+        name="movie"
+        :size="15"
+        :active="line.shot.status === 'done'"
+        :loading="line.shot.status === 'generating'"
+        :title="
+          line.shot.status === 'done'
+            ? '重新生成视频片段'
+            : '生成视频片段（场景 × 视频提示词 × 角色）'
+        "
         @click="onGenerateShot"
-      >
-        <span v-if="line.shot.status === 'generating'" class="spinner" />
-        <AppIcon v-else name="movie" :size="15" />
-      </button>
+      />
       <!-- 删除（仅手动添加的分镜可删，脚本生成的分镜不显示） -->
-      <button v-if="line.manual" class="icon-btn danger" title="删除" @click="store.removeLine(line.id)">
-        <AppIcon name="trash" :size="15" />
-      </button>
+      <BaseIconButton
+        v-if="line.manual"
+        name="trash"
+        :size="15"
+        danger
+        title="删除"
+        @click="store.removeLine(line.id)"
+      />
     </div>
   </div>
 </template>
@@ -146,14 +197,31 @@ const onGenerateShot = async () => {
   gap: 10px;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: #fff;
   cursor: default;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
-.prompt-generation-state { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; margin-bottom: 4px; }
-.prompt-generation-state.failed { color: #c0392b; }
-.prompt-generation-state button { border: 0; background: transparent; color: var(--primary); cursor: pointer; padding: 0; }
+.prompt-generation-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  margin-bottom: 4px;
+}
+.prompt-generation-state.failed {
+  color: var(--danger-active);
+}
+.prompt-generation-state button {
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  cursor: pointer;
+  padding: 0;
+}
 .script-line.selected {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px rgba(255, 90, 44, 0.12);
@@ -161,20 +229,20 @@ const onGenerateShot = async () => {
 .drag-handle {
   color: #bbb;
   cursor: grab;
-  font-size: 14px;
+  font-size: var(--font-md);
   user-select: none;
 }
 .line-index {
   min-width: 18px;
   text-align: center;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--font-md);
 }
 .shot-thumb {
   position: relative;
   width: 72px;
   height: 42px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   background: #f0f0f0;
   display: flex;
@@ -182,7 +250,10 @@ const onGenerateShot = async () => {
   justify-content: center;
   flex-shrink: 0;
   border: 1px solid transparent;
-  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+  transition:
+    transform 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s;
   cursor: pointer;
 }
 .shot-thumb:hover {
@@ -220,18 +291,23 @@ const onGenerateShot = async () => {
 .dh-chip {
   width: 48px;
   height: 27px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   object-fit: contain;
   border: 1px solid var(--border);
   box-shadow: 0 0 0 2px #fff;
-  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+  transition:
+    transform 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 .dh-chip:hover {
   position: relative;
   z-index: 2;
   transform: translateY(-3px) scale(1.06);
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px #fff, 0 5px 12px rgba(255, 90, 44, 0.22);
+  box-shadow:
+    0 0 0 2px #fff,
+    0 5px 12px rgba(255, 90, 44, 0.22);
 }
 .line-info {
   flex: 1;
@@ -246,7 +322,7 @@ const onGenerateShot = async () => {
 }
 .lyrics {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--font-md);
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -260,9 +336,9 @@ const onGenerateShot = async () => {
 }
 .shot-type {
   padding: 2px 7px;
-  border-radius: 5px;
-  background: #eef3ff;
-  color: #4776c8;
+  border-radius: var(--radius-xs);
+  background: var(--info-light);
+  color: var(--info);
   font-size: 11px;
   font-weight: 600;
 }
@@ -287,7 +363,7 @@ const onGenerateShot = async () => {
 }
 .segment-tag {
   padding: 2px 7px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: #f4ecff;
   color: #7b5ac8;
   font-size: 11px;
@@ -309,7 +385,7 @@ const onGenerateShot = async () => {
 /* 非中文歌词的中文翻译 */
 .lyrics-zh {
   margin: 2px 0 0;
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--text);
   opacity: 0.65;
   white-space: nowrap;
@@ -323,7 +399,7 @@ const onGenerateShot = async () => {
   padding: 0 4px;
   font-size: 10px;
   line-height: 15px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--primary);
   background: var(--primary-light);
   border: 1px solid rgba(255, 90, 44, 0.35);
@@ -331,7 +407,7 @@ const onGenerateShot = async () => {
 }
 .prompt {
   margin: 3px 0 0;
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -341,43 +417,5 @@ const onGenerateShot = async () => {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
-}
-.icon-btn {
-  width: 32px;
-  height: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #fff;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 14px;
-  transition: border-color 0.15s, background 0.15s, color 0.15s, transform 0.15s, box-shadow 0.15s;
-}
-.icon-btn:hover:not(:disabled) {
-  border-color: var(--primary);
-  background: var(--primary-light);
-  color: var(--primary);
-  transform: translateY(-2px) scale(1.05);
-  box-shadow: 0 5px 12px rgba(255, 90, 44, 0.18);
-}
-.icon-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.icon-btn.active {
-  border-color: var(--primary);
-  background: rgba(255, 90, 44, 0.08);
-  color: var(--primary);
-}
-.icon-btn.active:hover:not(:disabled) {
-  background: rgba(255, 90, 44, 0.14);
-}
-.icon-btn.danger:hover {
-  border-color: #e33;
-  background: rgba(238, 51, 51, 0.06);
-  color: #e33;
 }
 </style>

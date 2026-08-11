@@ -1,7 +1,78 @@
 <script setup lang="ts">
-import { ref } from 'vue'; import { useRouter } from 'vue-router'; import { apiRequest } from '../api/client'; import { useAuthStore } from '../stores/auth'
-const current=ref(''), next=ref(''), confirm=ref(''), error=ref(''); const router=useRouter(), auth=useAuthStore()
-const submit=async()=>{error.value='';if(next.value!==confirm.value){error.value='两次新密码不一致';return}try{await apiRequest('/auth/change-password',{method:'POST',body:JSON.stringify({current_password:current.value,new_password:next.value})});if(auth.user)auth.user.mustChangePassword=false;await router.replace('/projects')}catch(value){error.value=value instanceof Error?value.message:'修改失败'}}
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { apiRequest } from '../api/client'
+import { useAuthStore } from '../stores/auth'
+const current = ref(''),
+  next = ref(''),
+  confirm = ref(''),
+  error = ref('')
+const router = useRouter(),
+  auth = useAuthStore()
+const submit = async () => {
+  error.value = ''
+  if (next.value !== confirm.value) {
+    error.value = '两次新密码不一致'
+    return
+  }
+  try {
+    await apiRequest('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password: current.value, new_password: next.value }),
+    })
+    if (auth.user) auth.user.mustChangePassword = false
+    await router.replace('/projects')
+  } catch (value) {
+    error.value = value instanceof Error ? value.message : '修改失败'
+  }
+}
 </script>
-<template><main class="page"><form @submit.prevent="submit"><h1>修改密码</h1><label>当前密码<input v-model="current" type="password" required></label><label>新密码<input v-model="next" type="password" minlength="8" required></label><label>确认新密码<input v-model="confirm" type="password" minlength="8" required></label><p v-if="error">{{error}}</p><button>保存新密码</button><RouterLink to="/projects">返回工作台</RouterLink></form></main></template>
-<style scoped>.page{min-height:100vh;display:grid;place-items:center;background:#f6f7fa}form{width:360px;background:white;padding:30px;border-radius:16px;display:flex;flex-direction:column;gap:15px;box-shadow:0 15px 50px #0001}label{display:flex;flex-direction:column;gap:6px}input,button{padding:10px;border:1px solid #ddd;border-radius:8px}button{border:0;background:#f05a2a;color:#fff}p{color:#d33}</style>
+<template>
+  <main class="page">
+    <form @submit.prevent="submit">
+      <h1>修改密码</h1>
+      <label>当前密码<input v-model="current" type="password" required /></label
+      ><label>新密码<input v-model="next" type="password" minlength="8" required /></label
+      ><label>确认新密码<input v-model="confirm" type="password" minlength="8" required /></label>
+      <p v-if="error">{{ error }}</p>
+      <button>保存新密码</button><RouterLink to="/projects">返回工作台</RouterLink>
+    </form>
+  </main>
+</template>
+<style scoped>
+.page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: #f6f7fa;
+}
+form {
+  width: 360px;
+  background: white;
+  padding: 30px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  box-shadow: 0 15px 50px #0001;
+}
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+input,
+button {
+  padding: 10px;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-sm);
+}
+button {
+  border: 0;
+  background: var(--primary-hover);
+  color: #fff;
+}
+p {
+  color: var(--danger);
+}
+</style>

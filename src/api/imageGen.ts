@@ -25,7 +25,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 /** 发起图片创建任务，返回 taskId */
-export async function createImageTask(prompt: string, options: ImageTaskOptions = {}): Promise<string> {
+export async function createImageTask(
+  prompt: string,
+  options: ImageTaskOptions = {},
+): Promise<string> {
   const data = await request<GenerationJob>('/generations/images', {
     method: 'POST',
     body: JSON.stringify({
@@ -34,7 +37,9 @@ export async function createImageTask(prompt: string, options: ImageTaskOptions 
       quality: options.quality ?? 'auto',
       n: options.n ?? 1,
       purpose: 'digital_human',
-      ...(options.image ? { images: Array.isArray(options.image) ? options.image : [options.image] } : {}),
+      ...(options.image
+        ? { images: Array.isArray(options.image) ? options.image : [options.image] }
+        : {}),
     }),
   })
   return data.id
@@ -71,7 +76,10 @@ export async function generateImage(prompt: string, options?: ImageTaskOptions):
   return (await waitForImageAsset(taskId)).url
 }
 
-export async function generateImageAsset(prompt: string, options?: ImageTaskOptions): Promise<{ url: string; thumbnailUrl?: string }> {
+export async function generateImageAsset(
+  prompt: string,
+  options?: ImageTaskOptions,
+): Promise<{ url: string; thumbnailUrl?: string }> {
   const taskId = await createImageTask(prompt, options)
   return waitForImageAsset(taskId)
 }

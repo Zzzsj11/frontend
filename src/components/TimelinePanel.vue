@@ -131,7 +131,10 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
               :key="'shot-' + clip.lineId"
               class="clip shot-clip"
               :class="{ selected: clip.lineId === store.selectedLineId }"
-              :style="{ left: clip.start * pxPerSec + 'px', width: clip.duration * pxPerSec - 4 + 'px' }"
+              :style="{
+                left: clip.start * pxPerSec + 'px',
+                width: clip.duration * pxPerSec - 4 + 'px',
+              }"
               @mousedown.stop
               @click="onClipClick(clip.lineId, $event)"
             >
@@ -155,7 +158,9 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
 
           <!-- 播放指针 -->
           <div class="playhead" :style="{ left: playheadX + 'px' }">
-            <span class="playhead-label" :style="playheadLabelStyle">{{ formatTime(store.currentTime) }}</span>
+            <span class="playhead-label" :style="playheadLabelStyle">{{
+              formatTime(store.currentTime)
+            }}</span>
             <div class="playhead-line" />
           </div>
         </div>
@@ -193,7 +198,7 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
   width: 110px;
   height: 68px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: #fff;
   display: flex;
   align-items: center;
@@ -243,8 +248,8 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
   top: 0;
   height: 100%;
   border: 1px solid var(--border-dark);
-  border-radius: 10px;
-  background: #fafafa;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -252,7 +257,9 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
   gap: 2px;
   overflow: hidden;
   cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 .clip.selected {
   border-color: var(--primary);
@@ -298,7 +305,7 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
   color: #fff;
   font-size: 11px;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }

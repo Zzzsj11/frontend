@@ -3,9 +3,16 @@ import { computed, ref, watch } from 'vue'
 import type { GeneralStoryboardRequest, ShotGenOptions } from '../types'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
+import BaseModal from './base/BaseModal.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
 import { MAX_VIDEO_DURATION, MIN_VIDEO_DURATION } from '../mediaConstraints'
-import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, loadGenerationModels } from '../generationModels'
+import {
+  DEFAULT_IMAGE_MODEL,
+  DEFAULT_VIDEO_MODEL,
+  IMAGE_MODEL_OPTIONS,
+  VIDEO_MODEL_OPTIONS,
+  loadGenerationModels,
+} from '../generationModels'
 
 const store = useProjectStore()
 void loadGenerationModels()
@@ -26,16 +33,30 @@ const totalDuration = ref(100)
 const extraRequirement = ref('')
 const selectedHumanIds = ref<string[]>([])
 
-const genreOption = computed(() => store.generalStoryboardOptions?.genres.find((item) => item.value === genre.value))
+const genreOption = computed(() =>
+  store.generalStoryboardOptions?.genres.find((item) => item.value === genre.value),
+)
 const secondaryOptions = computed(() => genreOption.value?.children ?? [])
-const secondaryOption = computed(() => secondaryOptions.value.find((item) => item.value === secondary.value))
+const secondaryOption = computed(() =>
+  secondaryOptions.value.find((item) => item.value === secondary.value),
+)
 const tertiaryOptions = computed(() => secondaryOption.value?.children ?? [])
-const totalShots = computed(() => Math.max(0, emptyShotCount.value) + Math.max(0, characterShotCount.value))
+const totalShots = computed(
+  () => Math.max(0, emptyShotCount.value) + Math.max(0, characterShotCount.value),
+)
 const minimumTotalDuration = computed(() => totalShots.value * MIN_VIDEO_DURATION)
 const maximumTotalDuration = computed(() => totalShots.value * MAX_VIDEO_DURATION)
-const averageDuration = computed(() => totalShots.value ? Math.round(totalDuration.value / totalShots.value * 10) / 10 : 0)
-const durationIsValid = computed(() => totalDuration.value >= minimumTotalDuration.value && totalDuration.value <= maximumTotalDuration.value)
-const canSubmit = computed(() => !!genre.value && !!secondary.value && totalShots.value > 0 && durationIsValid.value)
+const averageDuration = computed(() =>
+  totalShots.value ? Math.round((totalDuration.value / totalShots.value) * 10) / 10 : 0,
+)
+const durationIsValid = computed(
+  () =>
+    totalDuration.value >= minimumTotalDuration.value &&
+    totalDuration.value <= maximumTotalDuration.value,
+)
+const canSubmit = computed(
+  () => !!genre.value && !!secondary.value && totalShots.value > 0 && durationIsValid.value,
+)
 
 const reset = () => {
   const options = store.generalStoryboardOptions
@@ -44,7 +65,9 @@ const reset = () => {
   tertiary.value = options?.genres[0]?.children?.[0]?.children?.[0]?.value ?? ''
   season.value = options?.seasons.includes('秋') ? '秋' : (options?.seasons[0] ?? '')
   ageGroup.value = options?.ageGroups.includes('青年') ? '青年' : (options?.ageGroups[0] ?? '')
-  visualStyle.value = options?.visualStyles.includes('电影写实') ? '电影写实' : (options?.visualStyles[0] ?? '')
+  visualStyle.value = options?.visualStyles.includes('电影写实')
+    ? '电影写实'
+    : (options?.visualStyles[0] ?? '')
   ratio.value = options?.ratios[0] ?? '16:9'
   resolution.value = '720p'
   imageModel.value = DEFAULT_IMAGE_MODEL
@@ -57,15 +80,25 @@ const reset = () => {
   selectedHumanIds.value = [...store.castIds]
 }
 
-watch(() => store.generalStoryboardOpen, (open) => { if (open) reset() })
-watch(() => store.generalStoryboardOptions, (options) => {
-  if (store.generalStoryboardOpen && options && !genre.value) reset()
-})
+watch(
+  () => store.generalStoryboardOpen,
+  (open) => {
+    if (open) reset()
+  },
+)
+watch(
+  () => store.generalStoryboardOptions,
+  (options) => {
+    if (store.generalStoryboardOpen && options && !genre.value) reset()
+  },
+)
 watch(genre, () => {
   secondary.value = secondaryOptions.value[0]?.value ?? ''
   tertiary.value = secondaryOptions.value[0]?.children?.[0]?.value ?? ''
 })
-watch(secondary, () => { tertiary.value = tertiaryOptions.value[0]?.value ?? '' })
+watch(secondary, () => {
+  tertiary.value = tertiaryOptions.value[0]?.value ?? ''
+})
 
 const toggleHuman = (id: string) => {
   const index = selectedHumanIds.value.indexOf(id)
@@ -100,93 +133,478 @@ const submit = () => {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="store.generalStoryboardOpen" class="modal-mask" @click.self="store.closeGeneralStoryboard()">
-      <div class="modal">
-        <header class="modal-header">
-          <h3><AppIcon name="movie" :size="18" />通用 MV 视频</h3>
-          <button class="close-btn" :disabled="store.generalStoryboardLoading" @click="store.closeGeneralStoryboard()">
-            <AppIcon name="close" :size="13" />关闭
-          </button>
-        </header>
+  <BaseModal
+    :open="store.generalStoryboardOpen"
+    width="920px"
+    max-height="94vh"
+    :loading="store.generalStoryboardLoading"
+    aria-label="通用 MV 视频"
+    @close="store.closeGeneralStoryboard()"
+  >
+    <template #title><AppIcon name="movie" :size="18" />通用 MV 视频</template>
+    <div class="modal-body">
+      <p v-if="store.generalStoryboardError" class="error-tip">
+        {{ store.generalStoryboardError }}
+      </p>
+      <p
+        v-if="!store.generalStoryboardOptions && !store.generalStoryboardError"
+        class="loading-tip"
+      >
+        <span class="spinner" />正在加载生成选项…
+      </p>
 
-        <div class="modal-body">
-          <p v-if="store.generalStoryboardError" class="error-tip">{{ store.generalStoryboardError }}</p>
-          <p v-if="!store.generalStoryboardOptions && !store.generalStoryboardError" class="loading-tip">
-            <span class="spinner" />正在加载生成选项…
+      <template v-if="store.generalStoryboardOptions">
+        <section class="form-section">
+          <h4>人物素材</h4>
+          <div>
+            <p class="field-label">从已有角色库选择 <span>（可多选，人物镜轮流使用）</span></p>
+            <div class="cast-list">
+              <button
+                v-for="human in store.digitalHumans"
+                :key="human.id"
+                class="cast-item"
+                :class="{ active: selectedHumanIds.includes(human.id) }"
+                @click="toggleHuman(human.id)"
+              >
+                <CharacterPortrait :src="human.avatar" :alt="human.name" /><span>{{
+                  human.name
+                }}</span>
+                <AppIcon v-if="selectedHumanIds.includes(human.id)" name="check" :size="12" />
+              </button>
+              <span v-if="!store.digitalHumans.length" class="empty-cast"
+                >角色库暂无可选人物，请先到角色阵容中添加数字人</span
+              >
+            </div>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <h4>音乐属性</h4>
+          <div class="field-grid three">
+            <label
+              ><span>曲风 *</span
+              ><select v-model="genre">
+                <option
+                  v-for="item in store.generalStoryboardOptions.genres"
+                  :key="item.value"
+                  :value="item.value"
+                >
+                  {{ item.label }}
+                </option>
+              </select></label
+            >
+            <label
+              ><span>二级分类 *</span
+              ><select v-model="secondary">
+                <option v-for="item in secondaryOptions" :key="item.value" :value="item.value">
+                  {{ item.label }}
+                </option>
+              </select></label
+            >
+            <label
+              ><span>三级分类</span
+              ><select v-model="tertiary">
+                <option value="">不指定</option>
+                <option v-for="item in tertiaryOptions" :key="item.value" :value="item.value">
+                  {{ item.label }}
+                </option>
+              </select></label
+            >
+          </div>
+        </section>
+
+        <section class="form-section">
+          <h4>视觉与人物设定</h4>
+          <div class="field-grid five">
+            <label
+              ><span>季节</span
+              ><select v-model="season">
+                <option v-for="item in store.generalStoryboardOptions.seasons" :key="item">
+                  {{ item }}
+                </option>
+              </select></label
+            >
+            <label><span>歌手</span><input v-model="singer" placeholder="如：阿杜" /></label>
+            <label
+              ><span>年龄段</span
+              ><select v-model="ageGroup">
+                <option v-for="item in store.generalStoryboardOptions.ageGroups" :key="item">
+                  {{ item }}
+                </option>
+              </select></label
+            >
+            <label
+              ><span>画面风格</span
+              ><select v-model="visualStyle">
+                <option v-for="item in store.generalStoryboardOptions.visualStyles" :key="item">
+                  {{ item }}
+                </option>
+              </select></label
+            >
+            <label
+              ><span>画幅</span
+              ><select v-model="ratio">
+                <option v-for="item in store.generalStoryboardOptions.ratios" :key="item">
+                  {{ item }}
+                </option>
+              </select></label
+            >
+          </div>
+        </section>
+
+        <section class="form-section">
+          <h4>生成规模</h4>
+          <div class="field-grid three">
+            <label
+              ><span>空镜数量</span
+              ><input v-model.number="emptyShotCount" type="number" min="0" max="50"
+            /></label>
+            <label
+              ><span>人物镜数量</span
+              ><input v-model.number="characterShotCount" type="number" min="0" max="50"
+            /></label>
+            <label
+              ><span>总时长（秒）</span
+              ><input
+                v-model.number="totalDuration"
+                type="number"
+                :min="minimumTotalDuration"
+                :max="maximumTotalDuration"
+            /></label>
+          </div>
+          <p class="estimate" :class="{ invalid: totalShots > 0 && !durationIsValid }">
+            将生成 <strong>{{ totalShots }}</strong> 个视频：{{ emptyShotCount }} 个空镜、{{
+              characterShotCount
+            }}
+            个人物镜，平均每镜约 <strong>{{ averageDuration }} 秒</strong>；允许总时长
+            <strong>{{ minimumTotalDuration }}–{{ maximumTotalDuration }} 秒</strong>（每镜 4–15
+            秒）
           </p>
-
-          <template v-if="store.generalStoryboardOptions">
-            <section class="form-section">
-              <h4>人物素材</h4>
-              <div>
-                <p class="field-label">从已有角色库选择 <span>（可多选，人物镜轮流使用）</span></p>
-                <div class="cast-list">
-                  <button v-for="human in store.digitalHumans" :key="human.id" class="cast-item" :class="{ active: selectedHumanIds.includes(human.id) }" @click="toggleHuman(human.id)">
-                    <CharacterPortrait :src="human.avatar" :alt="human.name" /><span>{{ human.name }}</span>
-                    <AppIcon v-if="selectedHumanIds.includes(human.id)" name="check" :size="12" />
-                  </button>
-                  <span v-if="!store.digitalHumans.length" class="empty-cast">角色库暂无可选人物，请先到角色阵容中添加数字人</span>
-                </div>
-              </div>
-            </section>
-
-            <section class="form-section">
-              <h4>音乐属性</h4>
-              <div class="field-grid three">
-                <label><span>曲风 *</span><select v-model="genre"><option v-for="item in store.generalStoryboardOptions.genres" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
-                <label><span>二级分类 *</span><select v-model="secondary"><option v-for="item in secondaryOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
-                <label><span>三级分类</span><select v-model="tertiary"><option value="">不指定</option><option v-for="item in tertiaryOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
-              </div>
-            </section>
-
-            <section class="form-section">
-              <h4>视觉与人物设定</h4>
-              <div class="field-grid five">
-                <label><span>季节</span><select v-model="season"><option v-for="item in store.generalStoryboardOptions.seasons" :key="item">{{ item }}</option></select></label>
-                <label><span>歌手</span><input v-model="singer" placeholder="如：阿杜" /></label>
-                <label><span>年龄段</span><select v-model="ageGroup"><option v-for="item in store.generalStoryboardOptions.ageGroups" :key="item">{{ item }}</option></select></label>
-                <label><span>画面风格</span><select v-model="visualStyle"><option v-for="item in store.generalStoryboardOptions.visualStyles" :key="item">{{ item }}</option></select></label>
-                <label><span>画幅</span><select v-model="ratio"><option v-for="item in store.generalStoryboardOptions.ratios" :key="item">{{ item }}</option></select></label>
-              </div>
-            </section>
-
-            <section class="form-section">
-              <h4>生成规模</h4>
-              <div class="field-grid three">
-                <label><span>空镜数量</span><input v-model.number="emptyShotCount" type="number" min="0" max="50" /></label>
-                <label><span>人物镜数量</span><input v-model.number="characterShotCount" type="number" min="0" max="50" /></label>
-                <label><span>总时长（秒）</span><input v-model.number="totalDuration" type="number" :min="minimumTotalDuration" :max="maximumTotalDuration" /></label>
-              </div>
-              <p class="estimate" :class="{ invalid: totalShots > 0 && !durationIsValid }">将生成 <strong>{{ totalShots }}</strong> 个视频：{{ emptyShotCount }} 个空镜、{{ characterShotCount }} 个人物镜，平均每镜约 <strong>{{ averageDuration }} 秒</strong>；允许总时长 <strong>{{ minimumTotalDuration }}–{{ maximumTotalDuration }} 秒</strong>（每镜 4–15 秒）</p>
-              <div class="field-grid three model-grid">
-                <label><span>清晰度 *</span><select v-model="resolution"><option value="480p">480p</option><option value="720p">720p</option><option value="1080p">1080p</option></select></label>
-                <label><span>视频模型 *</span><select v-model="videoModel" disabled><option v-for="item in VIDEO_MODEL_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
-                <label><span>图片模型 *</span><select v-model="imageModel" disabled><option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
-              </div>
-              <p class="model-hint">当前内测版模型固定，选项已保留用于后续扩展。</p>
-              <label class="extra-field"><span>额外要求（可选）</span><textarea v-model="extraRequirement" rows="3" placeholder="例如：雨夜、克制情绪、避免舞蹈场面，多使用缓慢运镜…" /></label>
-            </section>
-          </template>
-        </div>
-
-        <footer class="modal-footer">
-          <button class="cancel-btn" :disabled="store.generalStoryboardLoading" @click="store.closeGeneralStoryboard()">取消</button>
-          <button class="btn-primary" :disabled="!canSubmit || store.generalStoryboardLoading || !store.generalStoryboardOptions" @click="submit">
-            <span v-if="store.generalStoryboardLoading" class="spinner light" />
-            <AppIcon v-else name="sparkles" :size="15" />
-            {{ store.generalStoryboardLoading ? '正在生成视频脚本…' : '批量生成' }}
-          </button>
-        </footer>
-      </div>
+          <div class="field-grid three model-grid">
+            <label
+              ><span>清晰度 *</span
+              ><select v-model="resolution">
+                <option value="480p">480p</option>
+                <option value="720p">720p</option>
+                <option value="1080p">1080p</option>
+              </select></label
+            >
+            <label
+              ><span>视频模型 *</span
+              ><select v-model="videoModel" disabled>
+                <option v-for="item in VIDEO_MODEL_OPTIONS" :key="item.value" :value="item.value">
+                  {{ item.label }}
+                </option>
+              </select></label
+            >
+            <label
+              ><span>图片模型 *</span
+              ><select v-model="imageModel" disabled>
+                <option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">
+                  {{ item.label }}
+                </option>
+              </select></label
+            >
+          </div>
+          <p class="model-hint">当前内测版模型固定，选项已保留用于后续扩展。</p>
+          <label class="extra-field"
+            ><span>额外要求（可选）</span
+            ><textarea
+              v-model="extraRequirement"
+              rows="3"
+              placeholder="例如：雨夜、克制情绪、避免舞蹈场面，多使用缓慢运镜…"
+            />
+          </label>
+        </section>
+      </template>
     </div>
-  </Teleport>
+
+    <template #footer>
+      <button
+        class="cancel-btn"
+        :disabled="store.generalStoryboardLoading"
+        @click="store.closeGeneralStoryboard()"
+      >
+        取消
+      </button>
+      <button
+        class="btn-primary"
+        :disabled="!canSubmit || store.generalStoryboardLoading || !store.generalStoryboardOptions"
+        @click="submit"
+      >
+        <span v-if="store.generalStoryboardLoading" class="spinner light" />
+        <AppIcon v-else name="sparkles" :size="15" />
+        {{ store.generalStoryboardLoading ? '正在生成视频脚本…' : '批量生成' }}
+      </button>
+    </template>
+  </BaseModal>
 </template>
 
 <style scoped>
-.modal-mask{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.48);display:flex;align-items:center;justify-content:center;padding:24px}.modal{width:920px;max-width:100%;max-height:94vh;background:#fff;border-radius:16px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.28)}.modal-header{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--border)}.modal-header h3{margin:0;display:flex;align-items:center;gap:8px;font-size:18px}.modal-header h3 .app-icon{color:var(--primary)}.close-btn{border:0;background:none;color:var(--text-secondary);display:flex;align-items:center;gap:4px;cursor:pointer}.modal-body{padding:18px 22px;overflow-y:auto}.form-section{margin-bottom:20px}.form-section:last-child{margin-bottom:0}.form-section h4{margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border);font-size:14px}.field-label{margin:0 0 8px;font-size:13px;font-weight:600}.field-label span,.extra-field>span{color:var(--text-secondary);font-weight:400}.people-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.upload-box,.cast-list{min-height:106px;border:1px dashed var(--border-dark);border-radius:10px;background:#fafafa;padding:10px}.upload-box{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:7px;color:var(--text-secondary);cursor:pointer}.upload-box:hover{border-color:var(--primary);background:var(--primary-light)}.image-list,.cast-list{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.image-list{width:100%;border:0;padding:0;background:transparent}.image-thumb{width:58px;height:72px;position:relative;border-radius:8px;overflow:hidden}.image-thumb img{width:100%;height:100%;object-fit:cover}.image-thumb button{position:absolute;right:3px;top:3px;width:18px;height:18px;border:0;border-radius:50%;background:rgba(0,0,0,.6);color:#fff}.image-add{width:58px;height:72px;border:1px dashed var(--border-dark);border-radius:8px;background:#fff;color:var(--text-secondary)}.cast-item{position:relative;width:62px;border:1px solid var(--border);border-radius:9px;background:#fff;padding:4px;color:var(--text-secondary);cursor:pointer}.cast-item.active{border-color:var(--primary);color:var(--primary);background:var(--primary-light)}.cast-item img{width:100%;height:56px;object-fit:cover;border-radius:6px}.cast-item span{display:block;font-size:11px;overflow:hidden;white-space:nowrap}.cast-item .app-icon{position:absolute;right:5px;top:5px;background:var(--primary);color:#fff;border-radius:50%;padding:2px}.empty-cast{font-size:12px;color:var(--text-secondary)}.field-grid{display:grid;gap:12px}.field-grid.three{grid-template-columns:repeat(3,1fr)}.field-grid.five{grid-template-columns:repeat(5,1fr)}.field-grid label,.extra-field{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--text-secondary)}select,input,textarea{width:100%;border:1px solid var(--border-dark);border-radius:9px;background:#fff;padding:9px 10px;font:inherit;color:var(--text);outline:none}select:focus,input:focus,textarea:focus{border-color:var(--primary)}textarea{resize:vertical}.estimate{margin:11px 0;padding:9px 12px;border-radius:8px;background:var(--primary-light);color:var(--text-secondary);font-size:12px}.estimate strong{color:var(--primary)}.modal-footer{display:flex;justify-content:flex-end;gap:10px;padding:14px 22px 18px;border-top:1px solid var(--border)}.cancel-btn{border:1px solid var(--border-dark);border-radius:20px;background:#fff;padding:9px 20px;cursor:pointer}.error-tip{padding:10px 12px;border-radius:8px;background:#fff0f0;color:#d33}.loading-tip{display:flex;align-items:center;justify-content:center;gap:8px;padding:40px;color:var(--text-secondary)}@media(max-width:760px){.people-grid,.field-grid.three,.field-grid.five{grid-template-columns:1fr 1fr}}@media(max-width:520px){.people-grid,.field-grid.three,.field-grid.five{grid-template-columns:1fr}}
-.cast-list{max-height:210px;overflow-y:auto;align-content:flex-start}
-.estimate.invalid{background:#fff0f0;color:#c33}.estimate.invalid strong{color:#c33}
-.model-grid{margin:12px 0 6px}.model-grid select:disabled{background:#f5f5f6;color:#777;cursor:not-allowed}.model-hint{margin:0 0 12px;color:var(--text-secondary);font-size:12px}
-.cast-list{max-height:240px;overflow-x:hidden;overflow-y:auto;flex-wrap:wrap}.cast-item{flex:1 1 124px;width:124px;max-width:160px}.cast-item img{height:68px;object-fit:contain;background:#f2f2f2}.cast-item .character-portrait{width:100%;height:68px;border-radius:6px}
+.modal-body {
+  padding: 18px 22px;
+  overflow-y: auto;
+}
+.form-section {
+  margin-bottom: 20px;
+}
+.form-section:last-child {
+  margin-bottom: 0;
+}
+.form-section h4 {
+  margin: 0 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--font-md);
+}
+.field-label {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.field-label span,
+.extra-field > span {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+.people-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.upload-box,
+.cast-list {
+  min-height: 106px;
+  border: 1px dashed var(--border-dark);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  padding: 10px;
+}
+.upload-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 7px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.upload-box:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+.image-list,
+.cast-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.image-list {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+.image-thumb {
+  width: 58px;
+  height: 72px;
+  position: relative;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.image-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.image-thumb button {
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+}
+.image-add {
+  width: 58px;
+  height: 72px;
+  border: 1px dashed var(--border-dark);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--text-secondary);
+}
+.cast-item {
+  position: relative;
+  width: 62px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.cast-item.active {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
+}
+.cast-item img {
+  width: 100%;
+  height: 56px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+}
+.cast-item span {
+  display: block;
+  font-size: 11px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.cast-item .app-icon {
+  position: absolute;
+  right: 5px;
+  top: 5px;
+  background: var(--primary);
+  color: #fff;
+  border-radius: 50%;
+  padding: 2px;
+}
+.empty-cast {
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+}
+.field-grid {
+  display: grid;
+  gap: 12px;
+}
+.field-grid.three {
+  grid-template-columns: repeat(3, 1fr);
+}
+.field-grid.five {
+  grid-template-columns: repeat(5, 1fr);
+}
+.field-grid label,
+.extra-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+}
+select,
+input,
+textarea {
+  width: 100%;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 9px 10px;
+  font: inherit;
+  color: var(--text);
+  outline: none;
+}
+select:focus,
+input:focus,
+textarea:focus {
+  border-color: var(--primary);
+}
+textarea {
+  resize: vertical;
+}
+.estimate {
+  margin: 11px 0;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--primary-light);
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+}
+.estimate strong {
+  color: var(--primary);
+}
+.cancel-btn {
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-pill);
+  background: #fff;
+  padding: 9px 20px;
+  cursor: pointer;
+}
+.error-tip {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-light);
+  color: var(--danger);
+}
+.loading-tip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px;
+  color: var(--text-secondary);
+}
+@media (max-width: 760px) {
+  .people-grid,
+  .field-grid.three,
+  .field-grid.five {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 520px) {
+  .people-grid,
+  .field-grid.three,
+  .field-grid.five {
+    grid-template-columns: 1fr;
+  }
+}
+.cast-list {
+  max-height: 210px;
+  overflow-y: auto;
+  align-content: flex-start;
+}
+.estimate.invalid {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+.estimate.invalid strong {
+  color: var(--danger);
+}
+.model-grid {
+  margin: 12px 0 6px;
+}
+.model-grid select:disabled {
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+}
+.model-hint {
+  margin: 0 0 12px;
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+}
+.cast-list {
+  max-height: 240px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  flex-wrap: wrap;
+}
+.cast-item {
+  flex: 1 1 124px;
+  width: 124px;
+  max-width: 160px;
+}
+.cast-item img {
+  height: 68px;
+  object-fit: contain;
+  background: var(--surface-muted);
+}
+.cast-item .character-portrait {
+  width: 100%;
+  height: 68px;
+  border-radius: var(--radius-sm);
+}
 </style>

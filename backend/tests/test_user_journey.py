@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import io
+import threading
 import time
 import zipfile
 
@@ -70,6 +72,19 @@ def wait_for_job(client, job_id: str) -> dict:
             return job
         time.sleep(0.01)
     raise AssertionError(f"job {job_id} did not finish")
+
+
+def wait_for_outline(client, task_id: str) -> dict:
+    """等待 202 异步大纲生成离开 outlining 状态，返回任务快照。"""
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        response = client.get(f"/api/tasks/{task_id}")
+        assert response.status_code == 200
+        task = response.json()
+        if task["status"] != "outlining":
+            return task
+        time.sleep(0.01)
+    raise AssertionError(f"outline of task {task_id} did not finish")
 
 
 def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
@@ -165,8 +180,11 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     blocked_line = client.post(f"/api/tasks/{storyboard.json()['taskId']}/storyboard-lines/{line['id']}/generate", json={})
     assert blocked_line.status_code == 422
     outline = client.post(f"/api/tasks/{storyboard.json()['taskId']}/storyboard-outline/regenerate")
-    assert outline.status_code == 200, outline.text
-    assert outline.json()["failedSegments"] == []
+    assert outline.status_code == 202, outline.text
+    assert outline.json()["status"] == "outlining"
+    outlined = wait_for_outline(client, storyboard.json()["taskId"])
+    assert outlined["status"] == "generating"
+    assert outlined["storyboardConfig"]["storyBible"]["failedSegments"] == []
     generated_line = client.post(f"/api/tasks/{storyboard.json()['taskId']}/storyboard-lines/{line['id']}/generate", json={})
     assert generated_line.status_code == 200, generated_line.text
     assert generated_line.json()["usage"] == {"inputTokens": 120, "outputTokens": 40, "cachedInputTokens": 0, "totalTokens": 160}
@@ -229,8 +247,10 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
         assert "人物素材" in bundle.read("prompts.md").decode()
 
     regenerated_outline = client.post(f"/api/tasks/{storyboard.json()['taskId']}/storyboard-outline/regenerate")
-    assert regenerated_outline.status_code == 200, regenerated_outline.text
-    assert regenerated_outline.json()["storyBible"]["shots"][0]["shotType"] == "character"
+    assert regenerated_outline.status_code == 202, regenerated_outline.text
+    regenerated_task = wait_for_outline(client, storyboard.json()["taskId"])
+    assert regenerated_task["status"] == "generating"
+    assert regenerated_task["storyboardConfig"]["storyBible"]["shots"][0]["shotType"] == "character"
     replanned = client.get(f"/api/tasks/{storyboard.json()['taskId']}").json()["lines"][0]
     assert replanned["generationStatus"] == "pending"
     assert replanned["scenePrompt"] == ""
@@ -301,7 +321,12 @@ def test_ass_storyboard_generates_each_lyric_and_long_gap_with_full_context(clie
         received.append(kwargs)
         return {"scenePrompt": f"scene-{kwargs['current']['index']}", "shotPrompt": "shot", "digitalHumanIds": [], "usage": {"input_tokens": 10, "output_tokens": 5}}
 
+    gate = threading.Event()
+
     async def fake_outline(**kwargs):
+        # 阻塞到测试放行，覆盖 outlining 中间态（重复提交 409）
+        while not gate.is_set():
+            await asyncio.sleep(0.01)
         return outline_result(kwargs["segments"], [])
 
     monkeypatch.setattr(domain, "generate_storyboard_line", fake_line)
@@ -318,8 +343,18 @@ def test_ass_storyboard_generates_each_lyric_and_long_gap_with_full_context(clie
     assert body["status"] == "parsed"
     assert [line["generationStatus"] for line in body["lines"]] == ["pending", "pending", "pending", "pending"]
     assert [line["shotOptions"]["segmentType"] for line in body["lines"]] == ["lyric", "interlude", "lyric", "outro"]
+    no_cast = client.post(f"/api/tasks/{body['taskId']}/storyboard-outline/regenerate")
+    assert no_cast.status_code == 422
+    assert "人物" in no_cast.json()["detail"]
+    cast_updated = client.put(f"/api/tasks/{body['taskId']}/cast", json={"digital_human_ids": ["dh-system-020"]})
+    assert cast_updated.status_code == 200
     regenerated = client.post(f"/api/tasks/{body['taskId']}/storyboard-outline/regenerate")
-    assert regenerated.status_code == 200, regenerated.text
+    assert regenerated.status_code == 202, regenerated.text
+    duplicated = client.post(f"/api/tasks/{body['taskId']}/storyboard-outline/regenerate")
+    assert duplicated.status_code == 409
+    gate.set()
+    progressed = wait_for_outline(client, body["taskId"])
+    assert progressed["status"] == "generating"
     for index, line in enumerate(body["lines"]):
         response = client.post(f"/api/tasks/{body['taskId']}/storyboard-lines/{line['id']}/generate", json={})
         assert response.status_code == 200

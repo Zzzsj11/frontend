@@ -3,7 +3,7 @@ import { computed } from 'vue'
 
 const props = defineProps<{ src?: string; alt?: string }>()
 
-const backgroundImage = computed(() => props.src ? `url(${JSON.stringify(props.src)})` : 'none')
+const backgroundImage = computed(() => (props.src ? `url(${JSON.stringify(props.src)})` : 'none'))
 </script>
 
 <template>
@@ -21,7 +21,7 @@ const backgroundImage = computed(() => props.src ? `url(${JSON.stringify(props.s
   width: 100%;
   height: 100%;
   flex: none;
-  background-color: #f2f2f2;
+  background-color: var(--surface-muted);
   background-repeat: no-repeat;
   background-position: left 38%;
   background-size: 220% auto;

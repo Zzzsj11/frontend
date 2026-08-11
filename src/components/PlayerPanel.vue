@@ -197,7 +197,11 @@ const toggleFullscreen = () => {
       <img v-else-if="currentImage" :src="currentImage" alt="视频预览" class="preview-img" />
       <p v-else class="preview-placeholder">生成视频后在此查看预览</p>
       <!-- MV 歌词字幕（非中文歌词附中文翻译） -->
-      <div v-if="store.currentLine?.lyrics" class="preview-lyrics" :class="{ 'fs-lift': isFullscreen }">
+      <div
+        v-if="store.currentLine?.lyrics"
+        class="preview-lyrics"
+        :class="{ 'fs-lift': isFullscreen }"
+      >
         <p class="lyric-line">{{ store.currentLine.lyrics }}</p>
         <p v-if="store.translationOf(store.currentLine)" class="lyric-zh">
           {{ store.translationOf(store.currentLine) }}
@@ -205,7 +209,11 @@ const toggleFullscreen = () => {
       </div>
       <!-- 全屏时的悬浮控制条 -->
       <div v-if="isFullscreen" class="fs-controls">
-        <button class="fs-btn" :title="store.isPlaying ? '暂停' : '播放'" @click="store.togglePlay()">
+        <button
+          class="fs-btn"
+          :title="store.isPlaying ? '暂停' : '播放'"
+          @click="store.togglePlay()"
+        >
           <AppIcon :name="store.isPlaying ? 'pause' : 'play'" :size="20" />
         </button>
         <span class="fs-time">
@@ -215,7 +223,11 @@ const toggleFullscreen = () => {
           <div class="progress-fill" :style="{ width: fsProgressPercent + '%' }" />
           <div class="progress-thumb" :style="{ left: fsProgressPercent + '%' }" />
         </div>
-        <button class="fs-btn" :title="store.muted ? '取消静音' : '静音'" @click="store.muted = !store.muted">
+        <button
+          class="fs-btn"
+          :title="store.muted ? '取消静音' : '静音'"
+          @click="store.muted = !store.muted"
+        >
           <AppIcon :name="store.muted ? 'volume-off' : 'volume-on'" :size="17" />
         </button>
         <button class="fs-btn" title="退出全屏" @click="toggleFullscreen">
@@ -226,7 +238,11 @@ const toggleFullscreen = () => {
     </div>
 
     <div class="controls">
-      <button class="play-btn" :title="store.isPlaying ? '暂停' : '播放'" @click="store.togglePlay()">
+      <button
+        class="play-btn"
+        :title="store.isPlaying ? '暂停' : '播放'"
+        @click="store.togglePlay()"
+      >
         <AppIcon :name="store.isPlaying ? 'pause' : 'play'" :size="20" />
       </button>
       <span class="time-label">
@@ -236,7 +252,11 @@ const toggleFullscreen = () => {
         <div class="progress-fill" :style="{ width: progressPercent + '%' }" />
         <div class="progress-thumb" :style="{ left: progressPercent + '%' }" />
       </div>
-      <button class="ctrl-icon" :title="store.muted ? '取消静音' : '静音'" @click="store.muted = !store.muted">
+      <button
+        class="ctrl-icon"
+        :title="store.muted ? '取消静音' : '静音'"
+        @click="store.muted = !store.muted"
+      >
         <AppIcon :name="store.muted ? 'volume-off' : 'volume-on'" :size="17" />
       </button>
       <button class="ctrl-icon" title="全屏" @click="toggleFullscreen">
@@ -271,7 +291,9 @@ const toggleFullscreen = () => {
         class="btn-outline synth-btn"
         :disabled="!store.hasVideoAssets || ['queued', 'running'].includes(store.synthesis.status)"
         :title="store.synthesis.stage"
-        @click="store.synthesis.status === 'ready' ? store.downloadLatestExport() : store.runSynthesize()"
+        @click="
+          store.synthesis.status === 'ready' ? store.downloadLatestExport() : store.runSynthesize()
+        "
       >
         <template v-if="['queued', 'running'].includes(store.synthesis.status)">
           {{ store.synthesis.stage || '正在导出素材' }} {{ store.synthesis.progress }}%
@@ -310,8 +332,8 @@ const toggleFullscreen = () => {
 .preview {
   flex: 1;
   min-height: 220px;
-  background: #111;
-  border-radius: 10px;
+  background: var(--surface-dark);
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -324,8 +346,8 @@ const toggleFullscreen = () => {
   object-fit: contain;
 }
 .preview-placeholder {
-  color: #555;
-  font-size: 14px;
+  color: var(--text-regular);
+  font-size: var(--font-md);
 }
 .preview-lyrics {
   position: absolute;
@@ -419,14 +441,14 @@ const toggleFullscreen = () => {
   flex: 1;
   height: 4px;
   background: #e5e5e5;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   position: relative;
   cursor: pointer;
 }
 .progress-fill {
   height: 100%;
   background: var(--primary);
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
 }
 .progress-thumb {
   position: absolute;
@@ -473,11 +495,11 @@ const toggleFullscreen = () => {
   flex-direction: column;
 }
 .check-text strong {
-  font-size: 14px;
+  font-size: var(--font-md);
   color: var(--text);
 }
 .check-text small {
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--text-secondary);
 }
 .synth-btn {

@@ -22,7 +22,9 @@ describe('media generation API client', () => {
         }),
       )
 
-    await expect(generateScene('sunlit room', undefined, undefined, '9:16', DEFAULT_IMAGE_MODEL)).resolves.toEqual({
+    await expect(
+      generateScene('sunlit room', undefined, undefined, '9:16', DEFAULT_IMAGE_MODEL),
+    ).resolves.toEqual({
       imageUrl: '/media/images/scene.png',
     })
     expect(fetchMock).toHaveBeenNthCalledWith(

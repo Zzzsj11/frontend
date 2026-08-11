@@ -106,9 +106,12 @@ onBeforeUnmount(stopSidebarResize)
   bottom: 10px;
   left: 4px;
   width: 2px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: transparent;
-  transition: background 0.15s, width 0.15s, left 0.15s;
+  transition:
+    background 0.15s,
+    width 0.15s,
+    left 0.15s;
 }
 .sidebar-resizer:hover::after,
 .sidebar-resizer:focus-visible::after,

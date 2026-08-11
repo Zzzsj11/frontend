@@ -7,3 +7,5 @@
 交付前执行 `make preflight`。涉及用户旅程、API、部署或权限时，还要运行对应 Playwright 测试。禁止提交 `.env`、密钥、测试媒体、备份和构建产物。禁止直接修改生产服务器源码；发布使用版本化镜像和 `scripts/deploy.sh`。
 
 重要入口：后端 `backend/app/main.py`，领域 API `backend/app/domain.py`，管理 API `backend/app/admin.py`，前端路由 `src/router.ts`，主状态 `src/stores/project.ts`，测试说明 `docs/TESTING.md`。
+
+前端代码须遵循 `docs/FRONTEND-GUIDELINES.md`（组件、样式令牌、弹层与 z-index 层级规范）；格式由 Prettier 统一，`make lint-frontend` 包含 `format:check` 卡口。

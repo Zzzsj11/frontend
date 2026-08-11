@@ -14,6 +14,8 @@ export const TASK_STATUS_LABELS: Record<string, string> = {
 /** 需要醒目提示（警示色）的失败态 */
 export const TASK_STATUS_ALERTS = new Set(['outline_failed', 'partial', 'failed'])
 
-export const taskStatusLabel = (status?: string): string => (status ? TASK_STATUS_LABELS[status] ?? '' : '')
+export const taskStatusLabel = (status?: string): string =>
+  status ? (TASK_STATUS_LABELS[status] ?? '') : ''
 
-export const taskStatusAlert = (status?: string): boolean => !!status && TASK_STATUS_ALERTS.has(status)
+export const taskStatusAlert = (status?: string): boolean =>
+  !!status && TASK_STATUS_ALERTS.has(status)

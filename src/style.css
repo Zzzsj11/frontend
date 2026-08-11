@@ -1,14 +1,49 @@
-/* 全局样式与主题变量 */
+/* 全局样式与主题变量（设计令牌见 docs/FRONTEND-GUIDELINES.md 第 4 节） */
 :root {
+  /* 主色 */
   --primary: #ff5a2c;
+  --primary-hover: #f05a2a;
+  --primary-active: #d43a1a;
   --primary-light: rgba(255, 90, 44, 0.08);
+  --primary-border: #ffc4a7;
+  --primary-gradient: linear-gradient(135deg, #ff7a3c, #ff4a1c);
+  /* 语义色 */
   --success: #4caf7d;
   --success-light: rgba(76, 175, 125, 0.12);
+  --warning: #a66b00;
+  --warning-light: #fff8df;
+  --warning-border: #ffe1ae;
+  --danger: #e53935;
+  --danger-active: #b03a2e;
+  --danger-light: #fff0f0;
+  --danger-border: #ffd0cc;
+  --danger-gradient: linear-gradient(135deg, #ff6b5f, #e53935);
+  --info: #4776c8;
+  --info-light: #eef3ff;
+  /* 中性色 */
   --bg: #f3f4f6;
+  --surface: #fff;
+  --surface-muted: #fafafa;
+  --surface-dark: #111;
   --text: #2b2b2b;
+  --text-regular: #555;
   --text-secondary: #999;
   --border: #eee;
   --border-dark: #ddd;
+  /* 圆角 */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 20px;
+  /* 阴影 */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.03);
+  --shadow-dropdown: 0 18px 45px rgba(52, 37, 26, 0.16);
+  --shadow-modal: 0 24px 70px rgba(0, 0, 0, 0.24);
+  /* 字号 */
+  --font-sm: 12px;
+  --font-md: 14px;
+  --font-lg: 17px;
 }
 
 * {
@@ -19,8 +54,13 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
-  font-size: 14px;
+  font-family:
+    'PingFang SC',
+    'Microsoft YaHei',
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-size: var(--font-md);
 }
 
 #app {
@@ -29,17 +69,17 @@ body {
 
 h2 {
   margin: 0;
-  font-size: 17px;
+  font-size: var(--font-lg);
   font-weight: 700;
 }
 
 /* 通用卡片面板 */
 .panel {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   padding: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  box-shadow: var(--shadow-card);
 }
 
 /* 通用按钮 */
@@ -48,13 +88,15 @@ h2 {
   align-items: center;
   gap: 6px;
   border: 1px solid var(--border-dark);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: #fff;
   color: var(--primary);
   font-size: 13px;
   padding: 7px 14px;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 .btn-outline:hover:not(:disabled) {
   border-color: var(--primary);
@@ -70,15 +112,17 @@ h2 {
   align-items: center;
   gap: 6px;
   border: none;
-  border-radius: 20px;
-  background: linear-gradient(135deg, #ff7a3c, #ff4a1c);
+  border-radius: var(--radius-pill);
+  background: var(--primary-gradient);
   color: #fff;
-  font-size: 14px;
+  font-size: var(--font-md);
   font-weight: 600;
   padding: 9px 20px;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(255, 90, 44, 0.35);
-  transition: filter 0.15s, transform 0.1s;
+  transition:
+    filter 0.15s,
+    transform 0.1s;
 }
 .btn-primary:hover:not(:disabled) {
   filter: brightness(1.05);
@@ -96,9 +140,9 @@ h2 {
   display: inline-block;
   background: var(--success-light);
   color: var(--success);
-  font-size: 12px;
+  font-size: var(--font-sm);
   padding: 3px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 /* 通用转圈 */
@@ -128,7 +172,7 @@ h2 {
 }
 ::-webkit-scrollbar-thumb {
   background: #d5d5d5;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 ::-webkit-scrollbar-track {
   background: transparent;

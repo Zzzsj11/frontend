@@ -10,13 +10,16 @@ describe('apiRequest', () => {
 
   it('retries transient GET network failures without surfacing an error', async () => {
     vi.useFakeTimers()
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
       .mockRejectedValueOnce(new TypeError('Failed to fetch'))
       .mockRejectedValueOnce(new TypeError('Failed to fetch'))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'succeeded' }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'succeeded' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
 
     const resultPromise = apiRequest<{ status: string }>('/generations/job-1')
     await vi.runAllTimersAsync()
@@ -26,9 +29,13 @@ describe('apiRequest', () => {
   })
 
   it('does not replay a mutating request after an uncertain network failure', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
 
-    await expect(apiRequest('/generations/videos', { method: 'POST' })).rejects.toThrow('网络连接失败')
+    await expect(apiRequest('/generations/videos', { method: 'POST' })).rejects.toThrow(
+      '网络连接失败',
+    )
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

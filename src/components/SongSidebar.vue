@@ -67,7 +67,14 @@ const cancelRenameSong = () => {
   editingSongId.value = null
 }
 const removeSong = async (song: SongProject) => {
-  if (await confirmDialog({ title: '删除歌曲项目', message: `确定删除歌曲项目「${song.name}」？其下所有子项目将一并删除。`, confirmText: '删除', danger: true }))
+  if (
+    await confirmDialog({
+      title: '删除歌曲项目',
+      message: `确定删除歌曲项目「${song.name}」？其下所有子项目将一并删除。`,
+      confirmText: '删除',
+      danger: true,
+    })
+  )
     store.deleteSongProject(song.id)
 }
 
@@ -86,7 +93,15 @@ const cancelRenameTask = () => {
   editingTaskId.value = null
 }
 const removeTask = async (songId: string, task: SongTask) => {
-  if (await confirmDialog({ title: '删除子项目', message: `确定删除子项目「${task.title}」？`, confirmText: '删除', danger: true })) store.deleteSongTask(songId, task.id)
+  if (
+    await confirmDialog({
+      title: '删除子项目',
+      message: `确定删除子项目「${task.title}」？`,
+      confirmText: '删除',
+      danger: true,
+    })
+  )
+    store.deleteSongTask(songId, task.id)
 }
 
 const startStoryboard = async (songId: string, type: 'ass' | 'general') => {
@@ -102,7 +117,11 @@ onMounted(() => {
 <template>
   <aside class="panel song-sidebar">
     <div class="sidebar-top">
-      <button class="create-btn" :disabled="store.songProjectsLoading" @click="creating = !creating">
+      <button
+        class="create-btn"
+        :disabled="store.songProjectsLoading"
+        @click="creating = !creating"
+      >
         <AppIcon name="plus" :size="14" />
         创建歌曲项目
       </button>
@@ -117,7 +136,11 @@ onMounted(() => {
           @keyup.enter="submitCreate"
           @keyup.esc="creating = false"
         />
-        <button class="create-ok" :disabled="!newName.trim() || createBusy || store.songProjectsLoading" @click="submitCreate">
+        <button
+          class="create-ok"
+          :disabled="!newName.trim() || createBusy || store.songProjectsLoading"
+          @click="submitCreate"
+        >
           <span v-if="createBusy" class="spinner light" />
           <template v-else>创建</template>
         </button>
@@ -131,7 +154,11 @@ onMounted(() => {
     </div>
 
     <div class="song-list">
-      <div v-if="store.songProjectsLoading" class="sidebar-state skeleton-list" aria-label="正在加载歌曲项目">
+      <div
+        v-if="store.songProjectsLoading"
+        class="sidebar-state skeleton-list"
+        aria-label="正在加载歌曲项目"
+      >
         <span v-for="i in 4" :key="i" class="skeleton-row" />
       </div>
 
@@ -216,7 +243,12 @@ onMounted(() => {
               >
                 <span class="task-dot" />
                 <span class="task-title">{{ task.title }}</span>
-                <span v-if="taskStatusLabel(task.status)" class="task-status" :class="{ alert: taskStatusAlert(task.status) }">{{ taskStatusLabel(task.status) }}</span>
+                <span
+                  v-if="taskStatusLabel(task.status)"
+                  class="task-status"
+                  :class="{ alert: taskStatusAlert(task.status) }"
+                  >{{ taskStatusLabel(task.status) }}</span
+                >
                 <span class="task-time">{{ task.updatedAt }}</span>
               </button>
               <span class="row-actions">
@@ -265,7 +297,7 @@ onMounted(() => {
   border: 1px solid var(--border-dark);
   background: #fff;
   color: var(--text);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 9px 12px;
   font-size: 13px;
   font-weight: 600;
@@ -282,14 +314,14 @@ onMounted(() => {
 }
 .create-error {
   margin: -5px 4px 0;
-  color: #e53935;
+  color: var(--danger);
   font-size: 11px;
 }
 .create-input {
   flex: 1;
   min-width: 0;
   border: 1px solid var(--border-dark);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 7px 10px;
   font-size: 13px;
   font-family: inherit;
@@ -303,7 +335,7 @@ onMounted(() => {
   border: none;
   background: var(--primary);
   color: #fff;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 0 14px;
   font-size: 13px;
   font-weight: 600;
@@ -317,7 +349,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 700;
   color: var(--text-secondary);
   padding: 2px 6px 0;
@@ -344,7 +376,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   color: var(--text-secondary);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   transition: background 0.12s;
   position: relative;
 }
@@ -357,7 +389,7 @@ onMounted(() => {
   border: none;
   background: transparent;
   color: inherit;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 7px 8px;
   font-size: 13px;
   font-weight: 600;
@@ -375,7 +407,9 @@ onMounted(() => {
 }
 .folder-chevron {
   color: var(--text-secondary);
-  transition: transform 0.15s, color 0.15s;
+  transition:
+    transform 0.15s,
+    color 0.15s;
 }
 .folder-chevron.expanded {
   transform: rotate(90deg);
@@ -403,7 +437,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   color: var(--text);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   transition: background 0.12s;
 }
 .song-folder + .task-item,
@@ -422,7 +456,7 @@ onMounted(() => {
   border: none;
   background: transparent;
   color: inherit;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 7px 8px 7px 14px;
   font-size: 13px;
   font-weight: inherit;
@@ -467,15 +501,15 @@ onMounted(() => {
 .task-status {
   flex-shrink: 0;
   padding: 1px 6px;
-  border-radius: 5px;
-  background: #eef3ff;
-  color: #4776c8;
+  border-radius: var(--radius-xs);
+  background: var(--info-light);
+  color: var(--info);
   font-size: 10px;
   white-space: nowrap;
 }
 .task-status.alert {
-  background: #fdeceb;
-  color: #c0392b;
+  background: var(--danger-light);
+  color: var(--danger-active);
 }
 .task-item.active .task-time {
   color: var(--primary);
@@ -484,8 +518,8 @@ onMounted(() => {
   margin: 4px 6px 8px 14px;
   padding: 8px;
   border: 1px dashed var(--border-dark);
-  border-radius: 8px;
-  font-size: 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-sm);
   color: var(--text-secondary);
 }
 .empty-actions {
@@ -496,7 +530,7 @@ onMounted(() => {
 .empty-actions button,
 .state-btn {
   border: 1px solid rgba(255, 90, 44, 0.35);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--primary-light);
   color: var(--primary);
   padding: 5px 7px;
@@ -521,7 +555,7 @@ onMounted(() => {
 }
 .sidebar-state p {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 1.5;
 }
 .skeleton-list {
@@ -532,13 +566,20 @@ onMounted(() => {
 .skeleton-row {
   display: block;
   height: 34px;
-  border-radius: 8px;
-  background: linear-gradient(90deg, #f2f2f2 25%, #fafafa 50%, #f2f2f2 75%);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--surface-muted) 25%,
+    var(--surface-muted) 50%,
+    var(--surface-muted) 75%
+  );
   background-size: 200% 100%;
   animation: sidebar-shimmer 1.2s infinite linear;
 }
 @keyframes sidebar-shimmer {
-  to { background-position: -200% 0; }
+  to {
+    background-position: -200% 0;
+  }
 }
 .row-actions {
   display: flex;
@@ -563,9 +604,11 @@ onMounted(() => {
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition:
+    background 0.12s,
+    color 0.12s;
 }
 .row-act:hover {
   background: rgba(0, 0, 0, 0.08);
@@ -573,7 +616,7 @@ onMounted(() => {
 }
 .row-act.danger:hover {
   background: rgba(229, 57, 53, 0.12);
-  color: #e53935;
+  color: var(--danger);
 }
 .row-act:focus-visible,
 .folder-main:focus-visible,
@@ -589,7 +632,7 @@ onMounted(() => {
   min-width: 0;
   margin: 3px 6px;
   border: 1px solid var(--primary);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 5px 8px;
   font-size: 13px;
   font-family: inherit;

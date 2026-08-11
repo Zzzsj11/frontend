@@ -549,11 +549,117 @@ async def _apply_story_bible_to_lines(db: AsyncSession, lines: list[StoryboardLi
             db.add(StoryboardLineCastModel(id=uid("linecast"), storyboard_line_id=line.id, digital_human_id=human_id, sort_order=index))
 
 
-@router.post("/tasks/{task_id}/storyboard-outline/regenerate")
+# 持有大纲后台生成任务的强引用，避免被事件循环 GC（同 chat.py 的 tasks 表惯例）
+_outline_background_tasks: set[asyncio.Task] = set()
+
+
+async def _run_ass_outline_generation(
+    *,
+    task_id: str,
+    user_id: str,
+    project_id: str,
+    segments: list[dict],
+    selected_humans: list[dict],
+    role_ids: list[str],
+    emotion: dict,
+    extra_requirement: str,
+) -> None:
+    """后台执行 ASS 两轮大纲生成；进度写 storyboard_config.outlineProgress 供 SSE 轮询推送。"""
+
+    async def on_progress(progress: dict) -> None:
+        async with session_factory() as progress_session:
+            item = await progress_session.get(ProjectTaskModel, task_id)
+            if not item or item.deleted_at is not None:
+                return
+            config = dict(item.storyboard_config or {})
+            config["outlineProgress"] = progress
+            item.storyboard_config = config
+            await progress_session.commit()
+
+    async with session_factory() as session:
+        task = await session.get(ProjectTaskModel, task_id)
+        if not task or task.deleted_at is not None:
+            return
+        try:
+            outline = await generate_ass_story_outline(
+                segments=segments,
+                emotion=emotion,
+                selected_humans=selected_humans,
+                extra_requirement=extra_requirement,
+                on_progress=on_progress,
+            )
+        except Exception as exc:
+            for call in getattr(exc, "usage_records", None) or []:
+                add_token_usage(
+                    session,
+                    operation=f"{call.get('operation') or 'ass_scene_plan'}_failed",
+                    provider="openai-compatible",
+                    model=settings.llm_model,
+                    usage=call.get("usage"),
+                    user_id=user_id,
+                    project_id=project_id,
+                    project_task_id=task_id,
+                    request_id=call.get("requestId"),
+                )
+            config = dict(task.storyboard_config or {})
+            config["outlineProgress"] = {"phase": "error", "segmentsDone": 0, "segmentsTotal": 0, "error": f"ASS 分镜大纲生成失败：{exc}"[:300]}
+            task.storyboard_config = config
+            task.status = "outline_failed"
+            await session.commit()
+            return
+        story_bible = build_ass_story_bible(
+            segments=segments,
+            emotion=emotion,
+            role_ids=role_ids,
+            extra_requirement=extra_requirement,
+            outline=outline,
+        )
+        lines = list(
+            (
+                await session.execute(
+                    select(StoryboardLineModel)
+                    .where(StoryboardLineModel.project_task_id == task_id, StoryboardLineModel.deleted_at.is_(None))
+                    .order_by(StoryboardLineModel.sort_order)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        config = dict(task.storyboard_config or {})
+        config["storyBible"] = story_bible
+        config.pop("outlineProgress", None)
+        task.storyboard_config = config
+        task.status = "generating"
+        await _apply_story_bible_to_lines(session, lines, story_bible["shots"], now=utcnow())
+        for call in outline["usageRecords"]:
+            add_token_usage(
+                session,
+                operation=call.get("operation") or "ass_story_outline",
+                provider="openai-compatible",
+                model=settings.llm_model,
+                usage=call.get("usage"),
+                user_id=user_id,
+                project_id=project_id,
+                project_task_id=task_id,
+                request_id=call.get("requestId"),
+            )
+        await session.commit()
+
+
+@router.post("/tasks/{task_id}/storyboard-outline/regenerate", status_code=202)
 async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
     task = await owned_task(db, user.id, task_id)
     if task.storyboard_type != "ass":
         raise HTTPException(422, "只有 ASS 分镜支持重新生成全局大纲")
+    if task.status == "outlining":
+        # 进度回调会持续刷新 updated_at；超过阈值未刷新视为后台任务丢失（服务重启等）的僵尸状态，放行重新生成
+        # sqlite 读回的 updated_at 不带时区，与 aware 的 utcnow 相减前需要补齐
+        updated_at = task.updated_at
+        if updated_at and updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=utcnow().tzinfo)
+        stale_seconds = (utcnow() - updated_at).total_seconds() if updated_at else 999999
+        if stale_seconds < 150:
+            raise HTTPException(409, "分镜大纲正在生成中，请等待本轮完成后再提交")
     lines = list(
         (
             await db.execute(
@@ -584,6 +690,8 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
         for human_id in role_ids
         if (item := human_by_id.get(human_id))
     ]
+    if not selected_humans:
+        raise HTTPException(422, "该任务还未选择人物，请先在人物栏选择人物后再生成分镜大纲")
     segments = [
         {
             "index": line.sort_order,
@@ -596,72 +704,63 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
         for line in lines
     ]
     await consume_daily_quota(db, user_id=user.id, category="chat", limit=settings.daily_chat_limit)
+    progress = {"phase": "planning", "segmentsDone": 0, "segmentsTotal": 0, "startedAt": utcnow().isoformat()}
+    config = dict(task.storyboard_config or {})
+    config["outlineProgress"] = progress
+    task.storyboard_config = config
     task.status = "outlining"
     await db.commit()
-    try:
-        outline = await generate_ass_story_outline(
-            segments=segments,
-            emotion=task.storyboard_config.get("songEmotion") or {},
-            selected_humans=selected_humans,
-            extra_requirement=task.extra_requirement,
-        )
-    except Exception as exc:
-        for call in getattr(exc, "usage_records", None) or []:
-            add_token_usage(
-                db,
-                operation=f"{call.get('operation') or 'ass_scene_plan'}_failed",
-                provider="openai-compatible",
-                model=settings.llm_model,
-                usage=call.get("usage"),
-                user_id=user.id,
-                project_id=task.project_id,
-                project_task_id=task.id,
-                request_id=call.get("requestId"),
-            )
-        task.status = "outline_failed"
-        await db.commit()
-        raise HTTPException(502, f"ASS 分镜大纲生成失败：{exc}") from exc
-    story_bible = build_ass_story_bible(
-        segments=segments,
-        emotion=task.storyboard_config.get("songEmotion") or {},
-        role_ids=role_ids,
-        extra_requirement=task.extra_requirement,
-        outline=outline,
-    )
-    config = dict(task.storyboard_config)
-    config["storyBible"] = story_bible
-    task.storyboard_config = config
-    task.status = "generating"
-    await _apply_story_bible_to_lines(db, lines, story_bible["shots"], now=utcnow())
-    for call in outline["usageRecords"]:
-        add_token_usage(
-            db,
-            operation=call.get("operation") or "ass_story_outline",
-            provider="openai-compatible",
-            model=settings.llm_model,
-            usage=call.get("usage"),
+    background = asyncio.create_task(
+        _run_ass_outline_generation(
+            task_id=task.id,
             user_id=user.id,
             project_id=task.project_id,
-            project_task_id=task.id,
-            request_id=call.get("requestId"),
+            segments=segments,
+            selected_humans=selected_humans,
+            role_ids=role_ids,
+            emotion=(task.storyboard_config or {}).get("songEmotion") or {},
+            extra_requirement=task.extra_requirement or "",
         )
-    await db.commit()
-    return {
-        "storyboardType": task.storyboard_type,
-        "storyBible": story_bible,
-        "failedSegments": outline.get("failedSegments") or [],
-        "lines": [
-            {
-                "id": line.id,
-                "shotType": plan["shotType"],
-                "plannedDuration": line.planned_duration,
-                "shotOptions": line.shot_options,
-                "digitalHumanIds": plan["requiredCharacterIds"],
-                "generationStatus": "pending",
-            }
-            for line, plan in zip(lines, story_bible["shots"], strict=True)
-        ],
-    }
+    )
+    _outline_background_tasks.add(background)
+    background.add_done_callback(_outline_background_tasks.discard)
+    return {"taskId": task.id, "status": "outlining", "progress": progress}
+
+
+@router.get("/tasks/{task_id}/storyboard-outline/events")
+async def storyboard_outline_events(task_id: str, request: Request, user: CurrentUser, db: AsyncSession = Db) -> StreamingResponse:
+    """大纲生成进度的 SSE 推送：轮询任务行的 status 与 outlineProgress，终态后关闭。"""
+    await owned_task(db, user.id, task_id)
+
+    async def stream():
+        last = None
+        while not await request.is_disconnected():
+            async with session_factory() as session:
+                current = (
+                    await session.execute(
+                        select(ProjectTaskModel)
+                        .join(ProjectModel, ProjectModel.id == ProjectTaskModel.project_id)
+                        .where(
+                            ProjectTaskModel.id == task_id,
+                            ProjectTaskModel.deleted_at.is_(None),
+                            ProjectModel.user_id == user.id,
+                            ProjectModel.deleted_at.is_(None),
+                        )
+                    )
+                ).scalar_one_or_none()
+                if not current:
+                    return
+                progress = (current.storyboard_config or {}).get("outlineProgress") or {}
+                marker = (current.status, json.dumps(progress, sort_keys=True, ensure_ascii=False))
+                if marker != last:
+                    payload = {"type": "outline", "taskId": task_id, "status": current.status, "progress": progress}
+                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                    last = marker
+                if current.status != "outlining":
+                    return
+            await asyncio.sleep(0.75)
+
+    return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.post("/tasks/{task_id}/storyboard-outline/segments/{scene_index}/regenerate")
@@ -703,6 +802,8 @@ async def regenerate_storyboard_outline_segment(task_id: str, scene_index: int, 
         for human_id in role_ids
         if (item := human_by_id.get(human_id))
     ]
+    if not selected_humans:
+        raise HTTPException(422, "该任务还未选择人物，请先在人物栏选择人物后再重试场景段")
     segments = [
         {
             "index": line.sort_order,
