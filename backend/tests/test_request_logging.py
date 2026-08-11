@@ -41,6 +41,8 @@ def test_password_redacted_in_request_payload(client):
     detail = client.get(f"/api/admin/request-logs/{logs['items'][0]['id']}").json()
     assert detail["requestPayload"]["username"] == "admin"
     assert detail["requestPayload"]["password"] == "***"
+    # 登录成功响应中的 camelCase 令牌键同样必须脱敏，避免可用令牌落库
+    assert detail["responseBody"]["accessToken"] == "***"
 
 
 def test_runs_aggregation(client):

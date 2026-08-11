@@ -11,11 +11,13 @@ from .database import session_factory
 from .models import ApiErrorLogModel
 
 SENSITIVE_KEYS = {"password", "current_password", "new_password", "access_token", "refresh_token", "token", "authorization", "cookie"}
+# 键名比较前去掉下划线并小写，使 accessToken / access_token 等写法都能命中
+_SENSITIVE_NORMALIZED = {key.replace("_", "") for key in SENSITIVE_KEYS}
 
 
 def _redact(value: Any) -> Any:
     if isinstance(value, dict):
-        return {key: ("***" if key.lower() in SENSITIVE_KEYS else _redact(item)) for key, item in value.items()}
+        return {key: ("***" if key.lower().replace("_", "") in _SENSITIVE_NORMALIZED else _redact(item)) for key, item in value.items()}
     if isinstance(value, list):
         return [_redact(item) for item in value[:50]]
     if isinstance(value, str) and len(value) > 2000:
