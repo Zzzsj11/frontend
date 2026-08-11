@@ -271,6 +271,7 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
             secondary_category: 'city',
             tertiary_category: 'night',
             season: 'autumn',
+            gender: '女',
             age_group: 'adult',
             visual_style: 'cinematic',
             ratio: '9:16',
