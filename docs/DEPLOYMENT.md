@@ -16,6 +16,7 @@ v1.0.0 完成前不建设预发布或正式生产环境，也不通过域名执�
 - 镜像标签固定为 `git-<完整 commit SHA>`，便于定位和回滚。
 - `.env`、供应商 Token、TOS 密钥、数据库密码和 JWT 密钥只保存在服务器，不提交 Git。
 - 数据库结构只通过 Alembic 更新；发布时后端入口会自动执行迁移。
+- backend 采用一次性 green 容器平滑切换：新版本先通过健康检查再接管流量，部署窗口不再产生 502；nginx 通过 Docker 内嵌 DNS 运行时解析上游，无需重启即可感知 backend 容器 IP 变化。
 - PostgreSQL 和 Redis 不开放公网，维护时使用 SSH 隧道。
 - 发布前在本地执行 `make preflight`；发布后执行服务器健康检查和远程自动化测试。
 
@@ -309,9 +310,12 @@ DEPLOY_ENV=production ./scripts/deploy-local-images.sh
 1. 拒绝脏工作区；
 2. 读取当前完整 Git SHA；
 3. 构建 `mvagent-local/mv-agent-frontend:git-<sha>` 和后端镜像；
-4. 使用 Compose 更新容器，而不从远程镜像仓库拉取；
-5. 等待后端健康检查；
-6. 将当前和上一版本写入 `.deployed-version`、`.previous-version`。
+4. 不从远程镜像仓库拉取，先更新 frontend 容器（新 nginx 配置先就绪）；
+5. 平滑切换 backend：用新镜像启动一次性 green 容器 `mv-backend-green`（`compose run` 继承服务的环境/密钥/网络别名），健康检查通过后重建正式容器——整个窗口内始终有健康上游，nginx 不会返回 502；green 未通过健康检查则打印其日志并中止部署，当前版本继续服务；
+6. 等待正式 backend 健康检查后删除 green 容器，并兜底更新其余服务；
+7. 将当前和上一版本写入 `.deployed-version`、`.previous-version`。
+
+切换期间新旧 backend 短暂共存并共同承接流量（共享同一数据库），因此每次发布必须保持 API 向后兼容；数据库迁移遵循 expand/contract。
 
 构建期间另开一个 SSH 会话观察资源，避免误以为进程卡死：
 
@@ -440,6 +444,10 @@ curl -v http://127.0.0.1:8000/api/health
 
 优先定位迁移、配置、数据库、Redis、磁盘和上游供应商错误，不要反复重启掩盖首个异常。
 
+### 部署中止于 green 健康检查
+
+`deploy.sh` 输出 `green backend health check failed` 表示新版本容器未通过健康检查，脚本已打印 green 容器最后 100 行日志并中止，当前版本仍在正常服务。按日志定位迁移、配置或供应商问题，修复后重新部署；不要跳过失败直接强启旧流程。
+
 ## 9. 回滚
 
 先读取版本记录：
@@ -460,4 +468,4 @@ DEPLOY_ENV=production ./scripts/rollback.sh
 
 ## 10. v1.0.0 后再评估的事项
 
-预发布、正式生产环境、域名/HTTPS、远程镜像仓库、自动发布审批、蓝绿或滚动发布均不属于当前部署路径。v1.0.0 功能与验收稳定后，再单独设计环境隔离、Secret 管理、容量、安全和发布治理；在此之前不要让未来方案干扰服务器测试环境的可重复部署。
+预发布、正式生产环境、域名/HTTPS、远程镜像仓库、自动发布审批均不属于当前部署路径。backend 已在单机上用一次性 green 容器实现平滑切换（消除部署 502 窗口），多副本蓝绿/滚动发布与发布治理仍在 v1.0.0 后再评估。v1.0.0 功能与验收稳定后，再单独设计环境隔离、Secret 管理、容量、安全和发布治理；在此之前不要让未来方案干扰服务器测试环境的可重复部署。

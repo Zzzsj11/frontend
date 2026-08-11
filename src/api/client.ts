@@ -3,6 +3,9 @@ import { ApiError, reportApiError } from '../errorBus'
 let accessToken = ''
 let refreshPromise: Promise<boolean> | null = null
 const NETWORK_RETRY_DELAYS_MS = [500, 1500]
+// 502/503 是 nginx 在上游不可达时直接返回的（部署重启窗口），请求从未到达后端，
+// 因此任何方法（含 POST）都可安全重放；预算覆盖一次平滑切换的收敛时间
+const GATEWAY_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000]
 const wait = (delayMs: number) => new Promise((resolve) => setTimeout(resolve, delayMs))
 export const setAccessToken = (value: string) => {
   accessToken = value
@@ -49,13 +52,29 @@ export async function apiRequest<T>(
     }
     if (!response) throw reportApiError(error, '网络连接失败')
   }
+  // 撞上部署重启窗口：按预算重试等待新 backend 就绪，用户无感
+  if (response.status === 502 || response.status === 503) {
+    for (const delayMs of GATEWAY_RETRY_DELAYS_MS) {
+      await wait(delayMs)
+      try {
+        const retried = await request()
+        response = retried
+        if (retried.status !== 502 && retried.status !== 503) break
+      } catch {
+        // 窗口内连接被拒绝：保留上一次响应，继续按预算重试
+      }
+    }
+  }
   if (response.status === 401 && retry && !path.startsWith('/auth/') && (await refreshAccess()))
     return apiRequest<T>(path, init, false)
   const body = await response.json().catch(() => ({}))
   if (!response.ok)
     throw reportApiError(
       new ApiError(
-        body.detail || `请求失败（HTTP ${response.status}）`,
+        body.detail ||
+          (response.status === 502 || response.status === 503
+            ? '服务正在重启，请稍后重试'
+            : `请求失败（HTTP ${response.status}）`),
         response.status,
         body.errorCode,
       ),
@@ -82,7 +101,10 @@ export async function openApiStream(
     const body = await response.json().catch(() => ({}))
     throw reportApiError(
       new ApiError(
-        body.detail || `实时进度连接失败（HTTP ${response.status}）`,
+        body.detail ||
+          (response.status === 502 || response.status === 503
+            ? '服务正在重启，请稍后重试'
+            : `实时进度连接失败（HTTP ${response.status}）`),
         response.status,
         body.errorCode,
       ),

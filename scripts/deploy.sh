@@ -6,11 +6,41 @@ env_file=".env.${env_name}"; test -f "$env_file" || { echo "missing $env_file"; 
 previous="$(cat .deployed-version 2>/dev/null || true)"
 printf '%s\n' "$previous" > .previous-version
 export RELEASE_VERSION="$version"
+compose=(docker compose --env-file "$env_file" -f docker-compose.yml -f "docker-compose.${env_name}.yml")
 if [[ "${DEPLOY_SKIP_PULL:-0}" != "1" ]]; then
-  docker compose --env-file "$env_file" -f docker-compose.yml -f "docker-compose.${env_name}.yml" pull
+  "${compose[@]}" pull
 fi
-docker compose --env-file "$env_file" -f docker-compose.yml -f "docker-compose.${env_name}.yml" up -d --remove-orphans
+
+# 先更新 frontend：新的 nginx（运行时解析 backend 上游）就绪后，后续 backend 切换才不会 502
+"${compose[@]}" up -d --no-deps frontend
+
+# 平滑切换 backend：用新版本起 green 一次性容器（compose run 继承服务的环境/密钥/网络别名），
+# 健康后再重建正式容器 —— 整个窗口内始终有健康上游，消除 502 窗口
+green="mv-backend-green"
+docker rm -f "$green" >/dev/null 2>&1 || true
+"${compose[@]}" run -d --no-deps --name "$green" backend >/dev/null
+green_ok=0
+for _ in {1..60}; do
+  if docker exec "$green" python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')" >/dev/null 2>&1; then
+    green_ok=1
+    break
+  fi
+  sleep 2
+done
+if [[ "$green_ok" != "1" ]]; then
+  echo "green backend health check failed; last logs:" >&2
+  docker logs --tail=100 "$green" >&2 || true
+  docker rm -f "$green" >/dev/null 2>&1 || true
+  echo "aborting deploy, current version still serving" >&2
+  exit 1
+fi
+# 重建正式 backend：旧容器停起期间流量由 green 承载
+"${compose[@]}" up -d --no-deps backend
 for _ in {1..30}; do curl -fsS http://127.0.0.1:8000/api/health >/dev/null && break; sleep 2; done
 curl -fsS http://127.0.0.1:8000/api/health >/dev/null
+docker rm -f "$green" >/dev/null || echo "warn: failed to remove $green" >&2
+
+# 兜底其余服务（postgres/redis 配置漂移等），无变化时为空操作
+"${compose[@]}" up -d --remove-orphans
 printf '%s\n' "$version" > .deployed-version
 echo "deployed $version ($env_name); previous=$previous"
