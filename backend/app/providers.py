@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -36,14 +37,52 @@ def _usage(data: dict[str, Any]) -> dict[str, Any]:
     return {key: data[key] for key in keys if key in data}
 
 
-async def _poll(client: httpx.AsyncClient, url: str, headers: dict[str, str], job: Job) -> dict[str, Any]:
-    import asyncio
+IMAGE_POLL_TIMEOUT_SECONDS = 360
+VIDEO_POLL_TIMEOUT_SECONDS = 900
+POLL_INTERVAL_SECONDS = 3
+POLL_MAX_CONSECUTIVE_ERRORS = 5
 
-    for _ in range(120):
-        await asyncio.sleep(3)
-        response = await client.get(url, headers=headers)
-        response.raise_for_status()
-        data = _unwrap(response.json())
+
+def _image_config() -> tuple[str, dict[str, str]]:
+    if not settings.image_api_key:
+        raise ProviderError("IMAGE_API_KEY 未配置")
+    return settings.image_api_base_url.rstrip("/"), _headers(settings.image_api_key, x_api_key=True)
+
+
+def _video_config() -> tuple[str, dict[str, str]]:
+    if not settings.video_api_key:
+        raise ProviderError("VIDEO_API_KEY 未配置")
+    return settings.video_api_base_url.rstrip("/"), _headers(settings.video_api_key)
+
+
+async def _query_task(client: httpx.AsyncClient, url: str, headers: dict[str, str]) -> dict[str, Any]:
+    response = await client.get(url, headers=headers)
+    response.raise_for_status()
+    return _unwrap(response.json())
+
+
+async def _poll(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict[str, str],
+    job: Job,
+    *,
+    timeout_seconds: int,
+    interval_seconds: int = POLL_INTERVAL_SECONDS,
+) -> dict[str, Any]:
+    """轮询供应商任务至终态。生成任务昂贵：瞬时网络/5xx 抖动连续 5 次才判败，不轻易放弃已计费任务"""
+    deadline = time.monotonic() + timeout_seconds
+    consecutive_errors = 0
+    while time.monotonic() < deadline:
+        await asyncio.sleep(interval_seconds)
+        try:
+            data = await _query_task(client, url, headers)
+        except Exception as exc:
+            consecutive_errors += 1
+            if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS:
+                raise ProviderError(f"查询生成状态连续失败：{str(exc)[:500]}") from exc
+            continue
+        consecutive_errors = 0
         status = str(data.get("status", "")).upper()
         await jobs.update_progress(job, int(data.get("progress") or job.progress + 2))
         if status == "SUCCESS":
@@ -54,10 +93,7 @@ async def _poll(client: httpx.AsyncClient, url: str, headers: dict[str, str], jo
 
 
 async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, Any]:
-    if not settings.image_api_key:
-        raise ProviderError("IMAGE_API_KEY 未配置")
-    base = settings.image_api_base_url.rstrip("/")
-    headers = _headers(settings.image_api_key, x_api_key=True)
+    base, headers = _image_config()
     payload: dict[str, Any] = {
         "model": request.model or settings.image_model,
         "prompt": request.prompt,
@@ -74,7 +110,12 @@ async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, 
         task_id = created.get("taskId")
         if not task_id:
             raise ProviderError("生图接口未返回 taskId")
-        data = await _poll(client, f"{base}/image/generation/tasks/{task_id}", headers, job)
+        await jobs.set_provider_task(job, "yinghe", task_id, idempotency_key=headers.get("Idempotency-Key"))
+        data = await _poll(client, f"{base}/image/generation/tasks/{task_id}", headers, job, timeout_seconds=IMAGE_POLL_TIMEOUT_SECONDS)
+    return await _store_image_result(job, task_id, data, created)
+
+
+async def _store_image_result(job: Job, task_id: str, data: dict[str, Any], created: dict[str, Any]) -> dict[str, Any]:
     urls = data.get("resultUrls") or ([data["resultUrl"]] if data.get("resultUrl") else [])
     if not urls:
         raise ProviderError("生图成功但未返回图片地址")
@@ -83,7 +124,7 @@ async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, 
     return {
         "provider": "yinghe",
         "providerTaskId": task_id,
-        "model": request.model or settings.image_model,
+        "model": (job.request or {}).get("model") or settings.image_model,
         "urls": [item[0] for item in stored_assets],
         "thumbnailUrls": [item[1] for item in stored_assets],
         "sourceUrls": urls,
@@ -92,10 +133,7 @@ async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, 
 
 
 async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
-    if not settings.video_api_key:
-        raise ProviderError("VIDEO_API_KEY 未配置")
-    base = settings.video_api_base_url.rstrip("/")
-    headers = _headers(settings.video_api_key)
+    base, headers = _video_config()
     content: list[dict[str, Any]] = [{"type": "text", "text": request.prompt}]
     content.extend({"type": "image_url", "image_url": {"url": url}, "role": "reference_image"} for url in request.image_urls)
     payload = {
@@ -114,7 +152,13 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         task_id = created.get("taskId")
         if not task_id:
             raise ProviderError("视频接口未返回 taskId")
-        data = await _poll(client, f"{base}/video/generation/tasks/{task_id}", headers, job)
+        await jobs.set_provider_task(job, "yinghe", task_id, idempotency_key=headers.get("Idempotency-Key"))
+        data = await _poll(client, f"{base}/video/generation/tasks/{task_id}", headers, job, timeout_seconds=VIDEO_POLL_TIMEOUT_SECONDS)
+    return await _store_video_result(job, task_id, data, created)
+
+
+async def _store_video_result(job: Job, task_id: str, data: dict[str, Any], created: dict[str, Any]) -> dict[str, Any]:
+    request = job.request or {}
     source_url = data.get("resultUrl")
     if not source_url:
         raise ProviderError("视频生成成功但未返回地址")
@@ -127,15 +171,56 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
     return {
         "provider": "yinghe",
         "providerTaskId": task_id,
-        "model": request.model or settings.video_model,
+        "model": request.get("model") or settings.video_model,
         "usage": _usage(data) or _usage(created),
         "videoUrl": stored_url,
         "coverUrl": stored_cover,
         "coverThumbnailUrl": stored_cover_thumbnail,
         "sourceUrl": source_url,
-        "duration": request.duration,
-        "ratio": request.ratio,
+        "duration": request.get("duration"),
+        "ratio": request.get("ratio"),
     }
+
+
+async def resume_generation(job: Job) -> dict[str, Any]:
+    """重启恢复：按已落库的供应商 taskId 续跑轮询，不重复提交任务"""
+    if not job.provider_task_id:
+        raise ProviderError("缺少供应商任务ID，无法恢复")
+    if job.kind == "image":
+        base, headers = _image_config()
+        url, timeout = f"{base}/image/generation/tasks/{job.provider_task_id}", IMAGE_POLL_TIMEOUT_SECONDS
+    elif job.kind == "video":
+        base, headers = _video_config()
+        url, timeout = f"{base}/video/generation/tasks/{job.provider_task_id}", VIDEO_POLL_TIMEOUT_SECONDS
+    else:
+        raise ProviderError(f"不支持恢复的任务类型：{job.kind}")
+    async with httpx.AsyncClient(timeout=60) as client:
+        data = await _poll(client, url, headers, job, timeout_seconds=timeout)
+    return await store_provider_result(job, data)
+
+
+async def query_provider_task(kind: str, task_id: str) -> dict[str, Any]:
+    """单次查询供应商任务状态（管理后台对账用）"""
+    if kind == "image":
+        base, headers = _image_config()
+        url = f"{base}/image/generation/tasks/{task_id}"
+    elif kind == "video":
+        base, headers = _video_config()
+        url = f"{base}/video/generation/tasks/{task_id}"
+    else:
+        raise ProviderError(f"不支持的任务类型：{kind}")
+    async with httpx.AsyncClient(timeout=60) as client:
+        return await _query_task(client, url, headers)
+
+
+async def store_provider_result(job: Job, data: dict[str, Any]) -> dict[str, Any]:
+    """供应商成功结果下载落库（重启恢复与对账同步共用）"""
+    task_id = job.provider_task_id or ""
+    if job.kind == "image":
+        return await _store_image_result(job, task_id, data, {})
+    if job.kind == "video":
+        return await _store_video_result(job, task_id, data, {})
+    raise ProviderError(f"不支持的任务类型：{job.kind}")
 
 
 async def _video_first_frame(video_url: str, task_id: str, user_id: str | None) -> tuple[str, str]:

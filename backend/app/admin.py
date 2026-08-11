@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import CurrentUser
 from .database import database_session
+from .jobs import jobs as job_manager
 from .models import (
     AdminOperationLogModel,
     AiModelModel,
@@ -21,7 +23,9 @@ from .models import (
     ProjectModel,
     TokenUsageModel,
     UserModel,
+    utcnow,
 )
+from .providers import query_provider_task, resume_generation, store_provider_result
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 Db = Depends(database_session)
@@ -95,10 +99,99 @@ async def projects(user: CurrentUser, db: AsyncSession = Db):
 
 
 @router.get("/jobs")
-async def jobs(user: CurrentUser, db: AsyncSession = Db):
+async def jobs(
+    user: CurrentUser,
+    db: AsyncSession = Db,
+    kind: str | None = None,
+    status: str | None = None,
+    q: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+):
+    """生成任务全量收集：含供应商 taskId，支持类型/状态/关键词筛选与分页"""
     require_admin(user)
-    rows = (await db.execute(select(GenerationJobModel).where(GenerationJobModel.deleted_at.is_(None)).order_by(GenerationJobModel.created_at.desc()).limit(300))).scalars()
-    return [{"id": j.id, "userId": j.user_id, "kind": j.kind, "status": j.status, "provider": j.provider, "error": j.error, "createdAt": iso(j.created_at)} for j in rows]
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 200)
+    conditions = [GenerationJobModel.deleted_at.is_(None)]
+    if kind in {"image", "video"}:
+        conditions.append(GenerationJobModel.kind == kind)
+    if status:
+        conditions.append(GenerationJobModel.status == status)
+    if q and q.strip():
+        term = f"%{q.strip()}%"
+        conditions.append(or_(GenerationJobModel.id.ilike(term), GenerationJobModel.provider_task_id.ilike(term)))
+    total = (await db.execute(select(func.count()).select_from(GenerationJobModel).where(*conditions))).scalar_one()
+    stale_cutoff = utcnow() - timedelta(minutes=10)
+    stale_col = case(
+        (GenerationJobModel.status.in_(("queued", "running")) & (GenerationJobModel.updated_at < stale_cutoff), True),
+        else_=False,
+    )
+    rows = (
+        await db.execute(
+            select(GenerationJobModel, UserModel.username, stale_col.label("stale"))
+            .join(UserModel, UserModel.id == GenerationJobModel.user_id, isouter=True)
+            .where(*conditions)
+            .order_by(GenerationJobModel.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).all()
+    items = [
+        {
+            "id": j.id,
+            "username": username,
+            "kind": j.kind,
+            "status": j.status,
+            "progress": j.progress,
+            "provider": j.provider,
+            "providerTaskId": j.provider_task_id,
+            "model": (j.request or {}).get("model"),
+            "storyboardLineId": j.storyboard_line_id,
+            "error": j.error,
+            "stale": bool(stale),
+            "durationSeconds": round((j.finished_at - j.started_at).total_seconds()) if j.finished_at and j.started_at else None,
+            "createdAt": iso(j.created_at),
+            "finishedAt": iso(j.finished_at),
+        }
+        for j, username, stale in rows
+    ]
+    return {"total": total, "page": page, "pageSize": page_size, "items": items}
+
+
+@router.post("/jobs/{job_id}/sync")
+async def sync_generation_job(job_id: str, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    """按供应商 taskId 主动对账：已成功则补落库资产挽回结果，已失败同步原因，供应商仍在跑而本机无协程则重新挂轮询"""
+    require_admin(user)
+    model = await db.get(GenerationJobModel, job_id)
+    if not model or model.deleted_at is not None:
+        raise HTTPException(404, "任务不存在")
+    if not model.provider_task_id:
+        raise HTTPException(422, "该任务没有供应商任务ID，无法同步")
+    if job_manager.is_active(job_id):
+        return {"providerStatus": None, "action": "skipped", "detail": "任务正在本机执行中，无需同步"}
+    try:
+        data = await query_provider_task(model.kind, model.provider_task_id)
+    except Exception as exc:
+        raise HTTPException(502, f"查询供应商失败：{str(exc)[:300]}") from exc
+    provider_status = str(data.get("status", "")).upper()
+    action = "unchanged"
+    if provider_status == "SUCCESS" and model.status != "succeeded":
+        job = await job_manager.get(job_id)
+        if job:
+            result = await store_provider_result(job, data)
+            await job_manager.finalize_success(job, result)
+            action = "recovered"
+    elif (provider_status in {"FAILED", "CANCELLED"} or "FAIL" in provider_status) and model.status != "failed":
+        job = await job_manager.get(job_id)
+        if job:
+            await job_manager.finalize_failure(job, str(data.get("failReason") or f"供应商任务状态：{provider_status}"))
+            action = "failed"
+    elif "FAIL" not in provider_status and provider_status != "CANCELLED" and model.status in {"queued", "running"}:
+        if await job_manager.resume_one(job_id, resume_generation):
+            action = "resumed"
+    await audit(db, request, user, "job.sync", "generation_job", job_id, after={"providerStatus": provider_status, "action": action})
+    await db.commit()
+    return {"providerStatus": provider_status, "action": action, "progress": data.get("progress")}
 
 
 @router.get("/usage")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import time
 from contextlib import asynccontextmanager
@@ -42,13 +43,15 @@ from .error_logging import record_api_error, request_payload
 from .jobs import jobs
 from .media_constraints import normalize_video_duration
 from .models import AiModelModel, GenerationJobModel, ProjectCastModel, ProjectTaskModel, SongEmotionProfileModel, StoryboardLineModel, UserModel
-from .providers import generate_image, generate_video
+from .providers import generate_image, generate_video, resume_generation
 from .redis_store import close_redis, redis_ok
 from .request_logging import api_request_log_middleware
 from .schemas import ChatMessageCreate, ChatSessionCreate, ImageGenerationCreate, LoginCreate, PasswordChange, RemoteImportCreate, VideoGenerationCreate
 from .seed import recover_stale_storyboard_generation, seed_system_data
 from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
 from .usage_quota import consume_daily_quota
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -57,6 +60,9 @@ async def lifespan(_app: FastAPI):
     await seed_admin()
     await seed_system_data()
     await recover_stale_storyboard_generation()
+    recovered = await jobs.recover_stale_jobs(resume_generation)
+    if recovered["resumed"] or recovered["failed"]:
+        logger.info("媒体生成任务恢复：续跑 %s 个，判败 %s 个", recovered["resumed"], recovered["failed"])
     yield
     await close_redis()
     await close_database()

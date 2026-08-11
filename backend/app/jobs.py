@@ -4,7 +4,7 @@ import asyncio
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
 from sqlalchemy import select
@@ -16,9 +16,17 @@ from .token_usage import add_token_usage
 
 JobRunner = Callable[["Job"], Awaitable[dict[str, Any]]]
 
+# 重启后可续跑挽回的窗口：供应商任务保留期内、本机协程丢失的僵尸任务重新挂轮询
+RECOVERY_WINDOW_SECONDS = 2 * 3600
+
 
 def _timestamp(value: datetime | float) -> float:
-    return value if isinstance(value, float) else value.timestamp()
+    if isinstance(value, float):
+        return value
+    # SQLite 读出的 naive 时间按 UTC 解释（生产 PostgreSQL 读出本就走 aware）
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.timestamp()
 
 
 @dataclass
@@ -36,6 +44,9 @@ class Job:
     project_task_id: str | None = None
     storyboard_line_id: str | None = None
     request: dict[str, Any] | None = None
+    provider: str | None = None
+    provider_task_id: str | None = None
+    idempotency_key: str | None = None
 
     def public(self) -> dict[str, Any]:
         return {
@@ -47,10 +58,17 @@ class Job:
             "error": self.error,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "provider": self.provider,
+            "provider_task_id": self.provider_task_id,
+            "idempotency_key": self.idempotency_key,
         }
 
 
 class JobManager:
+    def __init__(self) -> None:
+        # 本进程内活跃协程的 job id：对账/恢复时防止重复挂轮询
+        self._active: set[str] = set()
+
     async def create(
         self,
         kind: str,
@@ -91,6 +109,9 @@ class JobManager:
             model = await session.get(GenerationJobModel, job.id)
             if model:
                 model.status, model.progress, model.result, model.error = job.status, job.progress, job.result, job.error
+                model.provider, model.provider_task_id = job.provider, job.provider_task_id
+                if job.idempotency_key:
+                    model.idempotency_key = job.idempotency_key
                 if job.status == "running" and model.started_at is None:
                     model.started_at = utcnow()
                 if job.status in {"succeeded", "failed", "cancelled"}:
@@ -100,10 +121,13 @@ class JobManager:
         await cache_job(job.id, job.public())
 
     async def update_progress(self, job: Job, progress: int) -> None:
+        # 进度仅供前端展示，高频更新只写 redis；DB 由状态迁移时的 _persist 负责
         job.progress = max(job.progress, min(progress, 99))
-        await self._persist(job)
+        job.updated_at = time.time()
+        await cache_job(job.id, job.public())
 
     async def _run(self, job: Job, runner: JobRunner) -> None:
+        self._active.add(job.id)
         job.status, job.progress = "running", 5
         await self._persist(job)
         try:
@@ -114,7 +138,7 @@ class JobManager:
             job.status = "cancelled"
             raise
         except Exception as exc:
-            job.status, job.error = "failed", str(exc)
+            job.status, job.error = "failed", str(exc)[:2000]
             async with session_factory() as session:
                 add_token_usage(
                     session,
@@ -131,6 +155,7 @@ class JobManager:
                 )
                 await session.commit()
         finally:
+            self._active.discard(job.id)
             await self._persist(job)
 
     async def _persist_asset(self, job: Job) -> None:
@@ -209,6 +234,106 @@ class JobManager:
                 )
             await session.commit()
 
+    async def set_provider_task(self, job: Job, provider: str, task_id: str, *, idempotency_key: str | None = None) -> None:
+        """供应商 taskId 即时落库：重启恢复与后台对账都依赖它，成功失败都要保留"""
+        job.provider, job.provider_task_id = provider, task_id
+        if idempotency_key:
+            job.idempotency_key = idempotency_key
+        job.updated_at = time.time()
+        async with session_factory() as session:
+            model = await session.get(GenerationJobModel, job.id)
+            if model:
+                model.provider, model.provider_task_id = job.provider, job.provider_task_id
+                model.idempotency_key = job.idempotency_key
+                await session.commit()
+        await cache_job(job.id, job.public())
+
+    def is_active(self, job_id: str) -> bool:
+        return job_id in self._active
+
+    def _from_model(self, model: GenerationJobModel) -> Job:
+        return Job(
+            id=model.id,
+            kind=model.kind,
+            status=model.status,
+            progress=model.progress,
+            result=model.result,
+            error=model.error,
+            created_at=_timestamp(model.created_at),
+            updated_at=_timestamp(model.updated_at),
+            user_id=model.user_id,
+            project_id=model.project_id,
+            project_task_id=model.project_task_id,
+            storyboard_line_id=model.storyboard_line_id,
+            request=model.request,
+            provider=model.provider,
+            provider_task_id=model.provider_task_id,
+            idempotency_key=model.idempotency_key,
+        )
+
+    async def recover_stale_jobs(self, runner: JobRunner) -> dict[str, int]:
+        """重启后恢复媒体生成任务：内存协程已丢，有供应商 taskId 且未过期的续跑轮询挽回结果，其余判败"""
+        now = time.time()
+        to_resume: list[Job] = []
+        stale_failed: list[Job] = []
+        async with session_factory() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(GenerationJobModel).where(
+                            GenerationJobModel.kind.in_(("image", "video")),
+                            GenerationJobModel.status.in_(("queued", "running")),
+                            GenerationJobModel.deleted_at.is_(None),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for model in rows:
+                age = now - _timestamp(model.created_at)
+                if model.provider_task_id and age <= RECOVERY_WINDOW_SECONDS:
+                    to_resume.append(self._from_model(model))
+                    continue
+                model.status = "failed"
+                model.error = "生成任务已过期，请重新生成" if model.provider_task_id else "服务重启导致任务中断，请重新生成"
+                model.finished_at = utcnow()
+                stale_failed.append(self._from_model(model))
+            await session.commit()
+        for job in [*stale_failed, *to_resume]:
+            await cache_job(job.id, job.public())
+        for job in to_resume:
+            asyncio.create_task(self._run(job, runner))
+        return {"resumed": len(to_resume), "failed": len(stale_failed)}
+
+    async def resume_one(self, job_id: str, runner: JobRunner) -> Job | None:
+        """对账发现供应商仍在执行而本机无活跃协程时，重新挂起轮询（不重复提交任务）"""
+        if job_id in self._active:
+            return None
+        async with session_factory() as session:
+            model = await session.get(GenerationJobModel, job_id)
+            if not model or model.deleted_at is not None or model.status not in {"queued", "running"} or not model.provider_task_id:
+                return None
+            job = self._from_model(model)
+        await cache_job(job.id, job.public())
+        asyncio.create_task(self._run(job, runner))
+        return job
+
+    async def finalize_success(self, job: Job, result: dict[str, Any]) -> Job:
+        """对账确认供应商已成功：补写资产与终态"""
+        if job.status != "succeeded":
+            job.result = result
+            job.progress, job.status = 100, "succeeded"
+            await self._persist_asset(job)
+            await self._persist(job)
+        return job
+
+    async def finalize_failure(self, job: Job, error: str) -> Job:
+        if job.status != "failed":
+            job.status, job.error = "failed", error[:2000]
+            await self._persist(job)
+        return job
+
     async def get(self, job_id: str, user_id: str | None = None) -> Job | None:
         cached = await get_cached_job(job_id)
         if cached:
@@ -228,21 +353,7 @@ class JobManager:
             model = await session.get(GenerationJobModel, job_id)
             if not model or model.deleted_at is not None or (user_id is not None and model.user_id != user_id):
                 return None
-            job = Job(
-                id=model.id,
-                kind=model.kind,
-                status=model.status,
-                progress=model.progress,
-                result=model.result,
-                error=model.error,
-                created_at=_timestamp(model.created_at),
-                updated_at=_timestamp(model.updated_at),
-                user_id=model.user_id,
-                project_id=model.project_id,
-                project_task_id=model.project_task_id,
-                storyboard_line_id=model.storyboard_line_id,
-                request=model.request,
-            )
+            job = self._from_model(model)
         await cache_job(job.id, job.public())
         return job
 

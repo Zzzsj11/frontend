@@ -34,6 +34,11 @@ const llmDetail = ref<any>(null),
 const reqFilters = ref({ runId: '', path: '' })
 const reqRuns = ref<any[]>([])
 const reqDetail = ref<any>(null)
+const jobFilters = ref({ kind: '', status: '', q: '' })
+const jobPage = ref(1)
+const jobPageSize = 50
+const notice = ref('')
+const syncing = ref('')
 const llmEndpoint = computed(() => {
   const query = new URLSearchParams()
   if (llmFilters.value.projectTaskId.trim())
@@ -43,13 +48,22 @@ const llmEndpoint = computed(() => {
   query.set('limit', '100')
   return `/admin/llm-calls?${query.toString()}`
 })
+const jobsEndpoint = computed(() => {
+  const query = new URLSearchParams()
+  if (jobFilters.value.kind) query.set('kind', jobFilters.value.kind)
+  if (jobFilters.value.status) query.set('status', jobFilters.value.status)
+  if (jobFilters.value.q.trim()) query.set('q', jobFilters.value.q.trim())
+  query.set('page', String(jobPage.value))
+  query.set('page_size', String(jobPageSize))
+  return `/admin/jobs?${query.toString()}`
+})
 const endpoint = computed(
   () =>
     ({
       dashboard: '/admin/dashboard',
       users: '/admin/users',
       projects: '/admin/projects',
-      jobs: '/admin/jobs',
+      jobs: jobsEndpoint.value,
       usage: '/admin/usage',
       models: '/admin/models',
       errors: '/admin/api-errors',
@@ -120,10 +134,39 @@ const toggleModel = async (row: any) => {
   })
   await load()
 }
+const searchJobs = () => {
+  jobPage.value = 1
+  void load()
+}
+const turnJobPage = (delta: number) => {
+  jobPage.value = Math.max(1, jobPage.value + delta)
+  void load()
+}
+const syncJob = async (row: any) => {
+  syncing.value = row.id
+  notice.value = ''
+  error.value = ''
+  try {
+    const result: any = await apiRequest(`/admin/jobs/${row.id}/sync`, { method: 'POST' })
+    const actionText: Record<string, string> = {
+      recovered: '已挽回结果并落库',
+      failed: '已同步失败原因',
+      resumed: '已重新挂起轮询',
+      unchanged: '状态一致无需处理',
+      skipped: '任务正在执行中',
+    }
+    notice.value = `同步完成：供应商状态 ${result.providerStatus ?? '-'} · ${actionText[result.action] || result.action}`
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '同步失败'
+  } finally {
+    syncing.value = ''
+  }
+}
 const columns = computed(() =>
   rows.value.length
     ? Object.keys(rows.value[0]).filter(
-        (k) => !['capabilities', 'traceback', 'requestPayload'].includes(k),
+        (k) => !['capabilities', 'traceback', 'requestPayload', 'stale'].includes(k),
       )
     : [],
 )
@@ -151,6 +194,7 @@ onMounted(load)
         <button class="refresh" @click="load">刷新</button>
       </header>
       <p v-if="error" class="error">{{ error }}</p>
+      <p v-if="notice" class="notice">{{ notice }}</p>
       <p v-if="loading">加载中…</p>
       <section v-else-if="tab === 'dashboard' && data" class="cards">
         <article>
@@ -187,6 +231,38 @@ onMounted(load)
         </article>
       </section>
       <template v-else>
+        <div v-if="tab === 'jobs'" class="filters">
+          <select v-model="jobFilters.kind" @change="searchJobs">
+            <option value="">全部类型</option>
+            <option value="image">图片</option>
+            <option value="video">视频</option>
+          </select>
+          <select v-model="jobFilters.status" @change="searchJobs">
+            <option value="">全部状态</option>
+            <option value="queued">queued</option>
+            <option value="running">running</option>
+            <option value="succeeded">succeeded</option>
+            <option value="failed">failed</option>
+            <option value="cancelled">cancelled</option>
+          </select>
+          <input
+            v-model="jobFilters.q"
+            placeholder="任务ID / 供应商任务ID"
+            @keyup.enter="searchJobs"
+          />
+          <button class="refresh" @click="searchJobs">查询</button>
+          <span class="pager">
+            <button class="action" :disabled="jobPage <= 1" @click="turnJobPage(-1)">上一页</button>
+            第 {{ jobPage }} 页 · 共 {{ data?.total || 0 }} 条
+            <button
+              class="action"
+              :disabled="jobPage * jobPageSize >= (data?.total || 0)"
+              @click="turnJobPage(1)"
+            >
+              下一页
+            </button>
+          </span>
+        </div>
         <div v-if="tab === 'requests'" class="filters">
           <select v-model="reqFilters.runId" @change="load">
             <option value="">全部批次</option>
@@ -217,7 +293,11 @@ onMounted(load)
             <thead>
               <tr>
                 <th v-for="c in columns" :key="c">{{ c }}</th>
-                <th v-if="tab === 'models' || tab === 'llm' || tab === 'requests'">操作</th>
+                <th
+                  v-if="tab === 'models' || tab === 'llm' || tab === 'requests' || tab === 'jobs'"
+                >
+                  操作
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -229,7 +309,7 @@ onMounted(load)
                       slow: tab === 'requests' && c === 'durationMs' && row[c] >= 1000,
                     }"
                     >{{ typeof row[c] === 'object' ? JSON.stringify(row[c]) : row[c] }}</span
-                  >
+                  ><span v-if="c === 'status' && row.stale" class="stale-flag">（疑似中断）</span>
                 </td>
                 <td v-if="tab === 'models'">
                   <button class="action" @click="toggleModel(row)">
@@ -241,6 +321,16 @@ onMounted(load)
                 </td>
                 <td v-if="tab === 'requests'">
                   <button class="action" @click="openReqDetail(row)">详情</button>
+                </td>
+                <td v-if="tab === 'jobs'">
+                  <button
+                    v-if="row.providerTaskId"
+                    class="action"
+                    :disabled="syncing === row.id"
+                    @click="syncJob(row)"
+                  >
+                    {{ syncing === row.id ? '同步中…' : '同步' }}
+                  </button>
                 </td>
               </tr>
             </tbody>
@@ -443,6 +533,29 @@ th {
 }
 .error {
   color: var(--danger);
+}
+.notice {
+  padding: 10px 14px;
+  background: #eef8ef;
+  border: 1px solid #b7e0bd;
+  border-radius: var(--radius-sm);
+  color: #166534;
+  font-size: 13px;
+}
+.stale-flag {
+  color: #c2410c;
+  font-weight: 600;
+}
+.pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .filters {
   display: flex;
