@@ -28,11 +28,11 @@ make preflight   # 发布前全流程校验
 
 ## 远程验收（对已部署环境）
 
-远程自动化固定使用 `http://124.222.219.76:5173`，不使用业务域名；域名可用性由 `scripts/online-health-check.sh` 单独验证，避免将网络问题误判为应用回归。
+远程自动化固定使用 `http://124.222.219.76:5173`，不使用业务域名；域名可用性由 `scripts/online-health-check.sh` 单独验证，避免将网络问题误判为应用回归。带远程开关（`REMOTE_*`/`ADMIN_*`）运行时 playwright.config.ts 自动以 `e2e/env.ts` 的 `targetBaseURL()` 为目标且不在本地起服务，无需再设 `PLAYWRIGHT_BASE_URL`（设置了则可覆盖目标）。
 
 ```bash
 npm run test:remote:api        # API 契约/鉴权/隔离/软删除（不消耗生成 Token）
-npm run test:remote:frontend   # Chromium 操作线上前端冒烟
+npm run test:remote:frontend   # Chromium 操作线上前端冒烟（ASS 上传会触发数条真实提示词生成，有小额费用）
 npm run test:admin:api         # 管理后台 API 契约
 npm run test:admin:frontend    # 管理后台 UI
 REMOTE_REAL_GENERATION=1 npm run test:remote:api   # 含真实生成分支（产生费用）
