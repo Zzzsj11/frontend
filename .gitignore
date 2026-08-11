@@ -15,6 +15,7 @@ node_modules
 backend/.venv/
 backend/.env
 backend/.env.chat
+e2e/.env
 backend/.provider_config.py
 backend/data/
 __pycache__/

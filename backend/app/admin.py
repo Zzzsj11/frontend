@@ -4,12 +4,24 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import CurrentUser
 from .database import database_session
-from .models import AdminOperationLogModel, AiModelModel, AiProviderModel, ApiErrorLogModel, DigitalHumanModel, GenerationJobModel, ProjectModel, TokenUsageModel, UserModel
+from .models import (
+    AdminOperationLogModel,
+    AiModelModel,
+    AiProviderModel,
+    ApiErrorLogModel,
+    ApiRequestLogModel,
+    DigitalHumanModel,
+    GenerationJobModel,
+    LlmCallLogModel,
+    ProjectModel,
+    TokenUsageModel,
+    UserModel,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 Db = Depends(database_session)
@@ -199,6 +211,157 @@ async def audits(user: CurrentUser, db: AsyncSession = Db):
         await db.execute(select(AdminOperationLogModel).where(AdminOperationLogModel.deleted_at.is_(None)).order_by(AdminOperationLogModel.created_at.desc()).limit(300))
     ).scalars()
     return [{"id": x.id, "adminUserId": x.admin_user_id, "action": x.action, "targetType": x.target_type, "targetId": x.target_id, "createdAt": iso(x.created_at)} for x in rows]
+
+
+def _llm_call_summary(x: LlmCallLogModel) -> dict:
+    return {
+        "id": x.id,
+        "operation": x.operation,
+        "model": x.model,
+        "status": x.status,
+        "error": x.error,
+        "durationMs": x.duration_ms,
+        "inputTokens": x.input_tokens,
+        "outputTokens": x.output_tokens,
+        "cachedInputTokens": x.cached_input_tokens,
+        "totalTokens": x.total_tokens,
+        "requestId": x.request_id,
+        "userId": x.user_id,
+        "projectId": x.project_id,
+        "projectTaskId": x.project_task_id,
+        "storyboardLineId": x.storyboard_line_id,
+        "generationJobId": x.generation_job_id,
+        "createdAt": iso(x.created_at),
+    }
+
+
+@router.get("/llm-calls")
+async def llm_calls(
+    user: CurrentUser,
+    projectTaskId: str | None = None,
+    storyboardLineId: str | None = None,
+    operation: str | None = None,
+    status: str | None = None,
+    requestId: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    db: AsyncSession = Db,
+):
+    """分镜 LLM 调用留痕列表（不含请求/返回原文，详情走 /llm-calls/{id}）。"""
+    require_admin(user)
+    limit, offset = max(1, min(limit, 200)), max(0, offset)
+    conditions = [LlmCallLogModel.deleted_at.is_(None)]
+    if projectTaskId:
+        conditions.append(LlmCallLogModel.project_task_id == projectTaskId)
+    if storyboardLineId:
+        conditions.append(LlmCallLogModel.storyboard_line_id == storyboardLineId)
+    if operation:
+        conditions.append(LlmCallLogModel.operation == operation)
+    if status:
+        conditions.append(LlmCallLogModel.status == status)
+    if requestId:
+        conditions.append(LlmCallLogModel.request_id == requestId)
+    total = (await db.execute(select(func.count()).select_from(LlmCallLogModel).where(*conditions))).scalar_one()
+    rows = (await db.execute(select(LlmCallLogModel).where(*conditions).order_by(LlmCallLogModel.created_at.desc()).limit(limit).offset(offset))).scalars()
+    return {"total": total, "items": [_llm_call_summary(x) for x in rows]}
+
+
+@router.get("/llm-calls/{log_id}")
+async def llm_call_detail(log_id: str, user: CurrentUser, db: AsyncSession = Db):
+    """单条 LLM 调用的全量详情：含请求消息快照与返回原文。"""
+    require_admin(user)
+    item = await db.get(LlmCallLogModel, log_id)
+    if not item or item.deleted_at is not None:
+        raise HTTPException(404, "调用记录不存在")
+    return {**_llm_call_summary(item), "provider": item.provider, "requestMessages": item.request_messages or [], "responseText": item.response_text or ""}
+
+
+def _request_log_summary(x: ApiRequestLogModel) -> dict:
+    return {
+        "id": x.id,
+        "runId": x.run_id,
+        "method": x.method,
+        "path": x.path,
+        "queryString": x.query_string,
+        "statusCode": x.status_code,
+        "durationMs": x.duration_ms,
+        "userId": x.user_id,
+        "clientIp": x.client_ip,
+        "createdAt": iso(x.created_at),
+    }
+
+
+@router.get("/request-logs/runs")
+async def request_log_runs(user: CurrentUser, db: AsyncSession = Db):
+    """测试批次列表：每个批次对应一次全量测试，附耗时统计。"""
+    require_admin(user)
+    rows = (
+        await db.execute(
+            select(
+                ApiRequestLogModel.run_id,
+                func.count().label("requests"),
+                func.avg(ApiRequestLogModel.duration_ms).label("avg_ms"),
+                func.max(ApiRequestLogModel.duration_ms).label("max_ms"),
+                func.min(ApiRequestLogModel.created_at).label("started_at"),
+                func.max(ApiRequestLogModel.created_at).label("finished_at"),
+                func.sum(case((ApiRequestLogModel.status_code >= 500, 1), else_=0)).label("errors"),
+            )
+            .where(ApiRequestLogModel.deleted_at.is_(None), ApiRequestLogModel.run_id != "")
+            .group_by(ApiRequestLogModel.run_id)
+            .order_by(func.max(ApiRequestLogModel.created_at).desc())
+            .limit(50)
+        )
+    ).all()
+    return [
+        {
+            "runId": row.run_id,
+            "requests": row.requests,
+            "avgMs": round(row.avg_ms or 0),
+            "maxMs": row.max_ms or 0,
+            "errors": row.errors or 0,
+            "startedAt": iso(row.started_at),
+            "finishedAt": iso(row.finished_at),
+        }
+        for row in rows
+    ]
+
+
+@router.get("/request-logs")
+async def request_logs(
+    user: CurrentUser,
+    runId: str | None = None,
+    path: str | None = None,
+    method: str | None = None,
+    status: int | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Db,
+):
+    """API 请求耗时列表（不含输入输出原文，详情走 /request-logs/{id}）。"""
+    require_admin(user)
+    limit, offset = max(1, min(limit, 200)), max(0, offset)
+    conditions = [ApiRequestLogModel.deleted_at.is_(None)]
+    if runId:
+        conditions.append(ApiRequestLogModel.run_id == runId)
+    if path:
+        conditions.append(ApiRequestLogModel.path.contains(path))
+    if method:
+        conditions.append(ApiRequestLogModel.method == method.upper())
+    if status:
+        conditions.append(ApiRequestLogModel.status_code == status)
+    total = (await db.execute(select(func.count()).select_from(ApiRequestLogModel).where(*conditions))).scalar_one()
+    rows = (await db.execute(select(ApiRequestLogModel).where(*conditions).order_by(ApiRequestLogModel.created_at.desc()).limit(limit).offset(offset))).scalars()
+    return {"total": total, "items": [_request_log_summary(x) for x in rows]}
+
+
+@router.get("/request-logs/{log_id}")
+async def request_log_detail(log_id: str, user: CurrentUser, db: AsyncSession = Db):
+    """单条请求的全量详情：含脱敏后的输入参数与输出原文。"""
+    require_admin(user)
+    item = await db.get(ApiRequestLogModel, log_id)
+    if not item or item.deleted_at is not None:
+        raise HTTPException(404, "请求日志不存在")
+    return {**_request_log_summary(item), "requestPayload": item.request_payload or {}, "responseBody": item.response_body or {}}
 
 
 public_router = APIRouter(prefix="/api")

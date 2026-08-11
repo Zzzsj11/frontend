@@ -227,7 +227,7 @@ export REAL_E2E_PROJECT_SUFFIX="$REAL_E2E_RUN_ID"
 npm run test:e2e:real
 ```
 
-详细的断点恢复、截图约定、数据库核验、Token 和 TOS 检查方式见 [`docs/REAL_FRONTEND_E2E_GUIDE.md`](docs/REAL_FRONTEND_E2E_GUIDE.md)。首次真实验收结果见 [`docs/FULL_FRONTEND_AUTOMATION_REPORT_2026-08-07.md`](docs/FULL_FRONTEND_AUTOMATION_REPORT_2026-08-07.md)。
+断点恢复、截图约定、数据库核验、远程验收与上线清单统一见 [`docs/TESTING.md`](docs/TESTING.md)。首次真实验收的基准截图保留在 `test-artifacts/full-journey/screenshots/`。
 
 ## 常用运维命令
 

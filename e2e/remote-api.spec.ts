@@ -7,18 +7,16 @@ import {
 } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { remoteCredentials, targetBaseURL, testRunId } from './env'
 
 test.skip(!process.env.REMOTE_API_E2E, 'set REMOTE_API_E2E=1 to test a deployed API')
 test.describe.configure({ mode: 'serial' })
 test.setTimeout(20 * 60 * 1000)
 
-const baseURL =
-  process.env.REMOTE_API_BASE_URL || process.env.PLAYWRIGHT_BASE_URL || 'http://124.222.219.76:5173'
-const adminUsername = process.env.REMOTE_E2E_USERNAME || 'admin'
-const adminPassword = process.env.REMOTE_E2E_PASSWORD || '123456'
+const baseURL = targetBaseURL()
+const { username: adminUsername, password: adminPassword } = remoteCredentials()
 const realGeneration = process.env.REMOTE_REAL_GENERATION === '1'
-const runId =
-  process.env.REMOTE_E2E_RUN_ID || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+const runId = testRunId()
 const assFile =
   process.env.REMOTE_E2E_ASS_FILE ||
   join(process.cwd(), 'test-artifacts/full-journey/inputs/10012204-full-e2e.ass')
@@ -35,7 +33,10 @@ async function login(
   username: string,
   password: string,
 ): Promise<{ api: APIRequestContext; token: string; user: any }> {
-  const session = await playwrightRequest.newContext({ baseURL })
+  const session = await playwrightRequest.newContext({
+    baseURL,
+    extraHTTPHeaders: { 'X-Test-Run-Id': runId },
+  })
   const body = await json(await session.post('/api/auth/login', { data: { username, password } }))
   const token = body.accessToken as string
   expect(token).toBeTruthy()
@@ -44,13 +45,16 @@ async function login(
   const api = await playwrightRequest.newContext({
     baseURL,
     storageState: storage,
-    extraHTTPHeaders: { Authorization: `Bearer ${token}` },
+    extraHTTPHeaders: { Authorization: `Bearer ${token}`, 'X-Test-Run-Id': runId },
   })
   return { api, token, user: body.user }
 }
 
 test('remote API contract, authorization, isolation and soft-delete journey', async () => {
-  const publicApi = await playwrightRequest.newContext({ baseURL })
+  const publicApi = await playwrightRequest.newContext({
+    baseURL,
+    extraHTTPHeaders: { 'X-Test-Run-Id': runId },
+  })
   const health = await json(await publicApi.get('/api/health'))
   expect(health).toMatchObject({ ok: true, postgres: true, redis: true })
   expect((await publicApi.get('/api/auth/me')).status()).toBe(401)

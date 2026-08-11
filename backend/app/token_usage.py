@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import TokenUsageModel
+from .models import LlmCallLogModel, TokenUsageModel
 
 
 def normalize_usage(value: Any) -> dict[str, Any]:
@@ -61,3 +61,49 @@ def add_token_usage(
     )
     db.add(item)
     return item, {key: normalized[key] for key in ("inputTokens", "outputTokens", "cachedInputTokens", "totalTokens")}
+
+
+def add_llm_call_log(
+    db: AsyncSession,
+    *,
+    operation: str,
+    provider: str,
+    model: str,
+    usage: Any,
+    user_id: str | None = None,
+    project_id: str | None = None,
+    project_task_id: str | None = None,
+    storyboard_line_id: str | None = None,
+    generation_job_id: str | None = None,
+    request_id: str | None = None,
+    status: str = "ok",
+    error: str = "",
+    duration_ms: int = 0,
+    request_messages: list[dict[str, Any]] | None = None,
+    response_text: str = "",
+) -> LlmCallLogModel:
+    """落一条分镜 LLM 调用的全量留痕：请求消息快照、返回原文、耗时与 token 用量。"""
+    normalized = normalize_usage(usage)
+    item = LlmCallLogModel(
+        id=f"llm-{uuid.uuid4().hex}",
+        user_id=user_id,
+        project_id=project_id,
+        project_task_id=project_task_id,
+        storyboard_line_id=storyboard_line_id,
+        generation_job_id=generation_job_id,
+        operation=operation,
+        provider=provider,
+        model=model,
+        request_id=request_id,
+        status=status,
+        error=error,
+        duration_ms=duration_ms,
+        input_tokens=normalized["inputTokens"],
+        output_tokens=normalized["outputTokens"],
+        cached_input_tokens=normalized["cachedInputTokens"],
+        total_tokens=normalized["totalTokens"],
+        request_messages=request_messages or [],
+        response_text=response_text,
+    )
+    db.add(item)
+    return item

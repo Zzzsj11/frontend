@@ -62,7 +62,7 @@ from .schemas import (
 from .storage import download_public_url_to_path, get_storage, is_tos_url, safe_key
 from .story_bible import STORY_BIBLE_VERSION, build_ass_story_bible, build_general_story_bible, exact_durations
 from .storyboard_prompt import PROMPT_VERSION, SCHEMA_VERSION, finalize_shot_durations, generate_ass_story_outline, generate_storyboard_line, regenerate_ass_scene_segment
-from .token_usage import add_token_usage, normalize_usage
+from .token_usage import add_llm_call_log, add_token_usage, normalize_usage
 from .usage_quota import consume_daily_quota
 
 router = APIRouter(prefix="/api")
@@ -549,6 +549,54 @@ async def _apply_story_bible_to_lines(db: AsyncSession, lines: list[StoryboardLi
             db.add(StoryboardLineCastModel(id=uid("linecast"), storyboard_line_id=line.id, digital_human_id=human_id, sort_order=index))
 
 
+def _persist_llm_calls(
+    db: AsyncSession,
+    calls: list[dict] | None,
+    *,
+    default_operation: str,
+    user_id: str,
+    project_id: str | None,
+    project_task_id: str | None,
+    storyboard_line_id: str | None = None,
+    generation_job_id: str | None = None,
+    operation_suffix: str = "",
+) -> None:
+    """把一次 LLM 编排的调用记录同时落 token 账本与 llm_call_logs 全量留痕（请求快照、返回原文、耗时）。"""
+    for call in calls or []:
+        operation = f"{call.get('operation') or default_operation}{operation_suffix}"
+        add_token_usage(
+            db,
+            operation=operation,
+            provider="openai-compatible",
+            model=settings.llm_model,
+            usage=call.get("usage"),
+            user_id=user_id,
+            project_id=project_id,
+            project_task_id=project_task_id,
+            storyboard_line_id=storyboard_line_id,
+            generation_job_id=generation_job_id,
+            request_id=call.get("requestId"),
+        )
+        add_llm_call_log(
+            db,
+            operation=operation,
+            provider="openai-compatible",
+            model=settings.llm_model,
+            usage=call.get("usage"),
+            user_id=user_id,
+            project_id=project_id,
+            project_task_id=project_task_id,
+            storyboard_line_id=storyboard_line_id,
+            generation_job_id=generation_job_id,
+            request_id=call.get("requestId"),
+            status=call.get("status") or "ok",
+            error=call.get("error") or "",
+            duration_ms=int(call.get("durationMs") or 0),
+            request_messages=call.get("requestMessages"),
+            response_text=call.get("responseText") or "",
+        )
+
+
 # 持有大纲后台生成任务的强引用，避免被事件循环 GC（同 chat.py 的 tasks 表惯例）
 _outline_background_tasks: set[asyncio.Task] = set()
 
@@ -589,18 +637,15 @@ async def _run_ass_outline_generation(
                 on_progress=on_progress,
             )
         except Exception as exc:
-            for call in getattr(exc, "usage_records", None) or []:
-                add_token_usage(
-                    session,
-                    operation=f"{call.get('operation') or 'ass_scene_plan'}_failed",
-                    provider="openai-compatible",
-                    model=settings.llm_model,
-                    usage=call.get("usage"),
-                    user_id=user_id,
-                    project_id=project_id,
-                    project_task_id=task_id,
-                    request_id=call.get("requestId"),
-                )
+            _persist_llm_calls(
+                session,
+                getattr(exc, "usage_records", None),
+                default_operation="ass_scene_plan",
+                user_id=user_id,
+                project_id=project_id,
+                project_task_id=task_id,
+                operation_suffix="_failed",
+            )
             config = dict(task.storyboard_config or {})
             config["outlineProgress"] = {"phase": "error", "segmentsDone": 0, "segmentsTotal": 0, "error": f"ASS 分镜大纲生成失败：{exc}"[:300]}
             task.storyboard_config = config
@@ -631,18 +676,14 @@ async def _run_ass_outline_generation(
         task.storyboard_config = config
         task.status = "generating"
         await _apply_story_bible_to_lines(session, lines, story_bible["shots"], now=utcnow())
-        for call in outline["usageRecords"]:
-            add_token_usage(
-                session,
-                operation=call.get("operation") or "ass_story_outline",
-                provider="openai-compatible",
-                model=settings.llm_model,
-                usage=call.get("usage"),
-                user_id=user_id,
-                project_id=project_id,
-                project_task_id=task_id,
-                request_id=call.get("requestId"),
-            )
+        _persist_llm_calls(
+            session,
+            outline["usageRecords"],
+            default_operation="ass_story_outline",
+            user_id=user_id,
+            project_id=project_id,
+            project_task_id=task_id,
+        )
         await session.commit()
 
 
@@ -830,18 +871,7 @@ async def regenerate_storyboard_outline_segment(task_id: str, scene_index: int, 
             extra_requirement=task.extra_requirement or "",
         )
     except Exception as exc:
-        for call in getattr(exc, "usage_records", None) or []:
-            add_token_usage(
-                db,
-                operation=call.get("operation") or "ass_scene_segment",
-                provider="openai-compatible",
-                model=settings.llm_model,
-                usage=call.get("usage"),
-                user_id=user.id,
-                project_id=task.project_id,
-                project_task_id=task.id,
-                request_id=call.get("requestId"),
-            )
+        _persist_llm_calls(db, getattr(exc, "usage_records", None), default_operation="ass_scene_segment", user_id=user.id, project_id=task.project_id, project_task_id=task.id)
         await db.commit()
         raise HTTPException(502, f"场景段大纲生成失败：{exc}") from exc
     shot_start, shot_count = result["shotStart"], result["shotCount"]
@@ -871,18 +901,7 @@ async def regenerate_storyboard_outline_segment(task_id: str, scene_index: int, 
     target_lines = lines[shot_start : shot_start + shot_count]
     segment_plans = story_bible["shots"][shot_start : shot_start + shot_count]
     await _apply_story_bible_to_lines(db, target_lines, segment_plans, now=utcnow())
-    for call in result["usageRecords"]:
-        add_token_usage(
-            db,
-            operation=call.get("operation") or "ass_scene_segment",
-            provider="openai-compatible",
-            model=settings.llm_model,
-            usage=call.get("usage"),
-            user_id=user.id,
-            project_id=task.project_id,
-            project_task_id=task.id,
-            request_id=call.get("requestId"),
-        )
+    _persist_llm_calls(db, result["usageRecords"], default_operation="ass_scene_segment", user_id=user.id, project_id=task.project_id, project_task_id=task.id)
     await db.commit()
     return {
         "sceneIndex": scene_index,
@@ -1313,22 +1332,20 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
                 item.deleted_at = utcnow()
             for index, human_id in enumerate(result["digitalHumanIds"]):
                 db.add(StoryboardLineCastModel(id=uid("linecast"), storyboard_line_id=line.id, digital_human_id=human_id, sort_order=index))
-        job.status, job.progress, job.result, job.finished_at = "succeeded", 100, result, utcnow()
+        # job.result 只保留瘦身后的调用记录：请求快照与返回原文体量大，统一入 llm_call_logs
+        slim_records = [{key: value for key, value in call.items() if key not in ("requestMessages", "responseText")} for call in result.get("usageRecords") or []]
+        job.status, job.progress, job.result, job.finished_at = "succeeded", 100, {**result, "usageRecords": slim_records}, utcnow()
         usage_records = result.get("usageRecords") or [{"operation": "storyboard_line", "usage": result.get("usage"), "requestId": result.get("requestId")}]
-        for call in usage_records:
-            add_token_usage(
-                db,
-                operation=call.get("operation") or "storyboard_line",
-                provider="openai-compatible",
-                model=settings.llm_model,
-                usage=call.get("usage"),
-                user_id=user.id,
-                project_id=task.project_id,
-                project_task_id=task.id,
-                storyboard_line_id=line.id,
-                generation_job_id=job.id,
-                request_id=call.get("requestId"),
-            )
+        _persist_llm_calls(
+            db,
+            usage_records,
+            default_operation="storyboard_line",
+            user_id=user.id,
+            project_id=task.project_id,
+            project_task_id=task.id,
+            storyboard_line_id=line.id,
+            generation_job_id=job.id,
+        )
         await _refresh_storyboard_status(db, task)
         await db.commit()
         response = await line_json(db, line, result["digitalHumanIds"])
@@ -1341,21 +1358,17 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
         failed_calls = getattr(exc, "usage_records", None) or [
             {"operation": "storyboard_line_failed", "usage": getattr(exc, "usage", {}), "requestId": getattr(exc, "request_id", None)}
         ]
-        for call in failed_calls:
-            operation = call.get("operation") or "storyboard_line_failed"
-            add_token_usage(
-                db,
-                operation=f"{operation}_failed",
-                provider="openai-compatible",
-                model=settings.llm_model,
-                usage=call.get("usage"),
-                user_id=user.id,
-                project_id=task.project_id,
-                project_task_id=task.id,
-                storyboard_line_id=line.id,
-                generation_job_id=job.id,
-                request_id=call.get("requestId"),
-            )
+        _persist_llm_calls(
+            db,
+            failed_calls,
+            default_operation="storyboard_line_failed",
+            user_id=user.id,
+            project_id=task.project_id,
+            project_task_id=task.id,
+            storyboard_line_id=line.id,
+            generation_job_id=job.id,
+            operation_suffix="_failed",
+        )
         await _refresh_storyboard_status(db, task)
         await db.commit()
         raise HTTPException(502, f"单条分镜生成失败：{exc}") from exc

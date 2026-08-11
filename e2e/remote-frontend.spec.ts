@@ -1,13 +1,13 @@
 import { expect, test } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { remoteCredentials, testRunId } from './env'
 
 test.skip(!process.env.REMOTE_FRONTEND_E2E, 'set REMOTE_FRONTEND_E2E=1 to test a deployed frontend')
 test.setTimeout(5 * 60 * 1000)
 
-const username = process.env.REMOTE_E2E_USERNAME || 'admin'
-const password = process.env.REMOTE_E2E_PASSWORD || '123456'
-const runId = process.env.REMOTE_E2E_RUN_ID || new Date().toISOString().replaceAll(/[:.]/g, '-')
+const { username, password } = remoteCredentials()
+const runId = testRunId()
 const output =
   process.env.REMOTE_E2E_ARTIFACT_DIR ||
   join(process.cwd(), 'test-artifacts/remote/runs', runId, 'screenshots')
@@ -17,6 +17,9 @@ const assFile =
 mkdirSync(output, { recursive: true })
 
 test('deployed frontend login, project and storyboard configuration journey', async ({ page }) => {
+  await page.route('**/api/**', (route) =>
+    route.continue({ headers: { ...route.request().headers(), 'x-test-run-id': runId } }),
+  )
   let accessToken = ''
   let projectId = ''
   const projectName = `REMOTE-UI ${runId}`

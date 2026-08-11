@@ -492,4 +492,3 @@ export async function generateShotVideo(
     storyboardLineId,
   )
 }
-

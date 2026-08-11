@@ -1,8 +1,12 @@
 import { expect, test } from '@playwright/test'
+import { remoteCredentials, testRunId } from './env'
 test.skip(!process.env.ADMIN_CONSOLE_E2E, 'set ADMIN_CONSOLE_E2E=1')
-const username = process.env.REMOTE_E2E_USERNAME || 'admin',
-  password = process.env.REMOTE_E2E_PASSWORD || '123456'
+const { username, password } = remoteCredentials()
+const runId = testRunId()
 test('administrator can inspect dashboard, models, errors and audit logs', async ({ page }) => {
+  await page.route('**/api/**', (route) =>
+    route.continue({ headers: { ...route.request().headers(), 'x-test-run-id': runId } }),
+  )
   await page.goto('/login')
   await page.getByLabel('用户名').fill(username)
   await page.getByLabel('密码').fill(password)

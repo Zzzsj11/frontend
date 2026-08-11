@@ -1,4 +1,9 @@
 import { defineConfig, devices } from '@playwright/test'
+import { config as loadEnv } from 'dotenv'
+import { join } from 'node:path'
+
+// 远程 e2e 凭据从 e2e/.env 读取（已 gitignore，模板见 e2e/.env.example）
+loadEnv({ path: join(process.cwd(), 'e2e', '.env'), quiet: true })
 
 export default defineConfig({
   testDir: './e2e',

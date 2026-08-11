@@ -355,13 +355,11 @@ docker compose --env-file .env.production \
 
 ```bash
 curl -fsS http://124.222.219.76:5173/api/health
-PLAYWRIGHT_BASE_URL=http://124.222.219.76:5173 \
-REMOTE_API_BASE_URL=http://124.222.219.76:5173 \
-REMOTE_E2E_USERNAME=admin REMOTE_E2E_PASSWORD='***' \
-make remote-test
+# 凭据写入 e2e/.env（模板见 e2e/.env.example）后免环境变量直跑
+npm run test:remote:api && npm run test:remote:frontend
 ```
 
-真实模型与媒体生成会产生费用，仅在明确需要全链路验收时按 [`REAL_FRONTEND_E2E_GUIDE.md`](REAL_FRONTEND_E2E_GUIDE.md) 显式开启。完整服务器验收顺序见 [`REMOTE_ACCEPTANCE_TEST_GUIDE.md`](REMOTE_ACCEPTANCE_TEST_GUIDE.md) 和 [`ONLINE_ACCEPTANCE_CHECKLIST.md`](ONLINE_ACCEPTANCE_CHECKLIST.md)。
+真实模型与媒体生成会产生费用，仅在明确需要全链路验收时按 [`TESTING.md`](TESTING.md)「真实生成全链路」显式开启；远程验收命令与上线验收清单见同一文档。
 
 ### 6.3 安装维护任务（首次成功部署后）
 

@@ -284,6 +284,31 @@ class TokenUsageModel(LifecycleMixin, Base):
     raw_usage: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
+class LlmCallLogModel(LifecycleMixin, Base):
+    """分镜 LLM 调用全量留痕：请求消息、返回原文、耗时与 token 用量。"""
+
+    __tablename__ = "llm_call_logs"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
+    project_task_id: Mapped[str | None] = mapped_column(ForeignKey("project_tasks.id"), nullable=True, index=True)
+    storyboard_line_id: Mapped[str | None] = mapped_column(ForeignKey("storyboard_lines.id"), nullable=True, index=True)
+    generation_job_id: Mapped[str | None] = mapped_column(ForeignKey("generation_jobs.id"), nullable=True, index=True)
+    operation: Mapped[str] = mapped_column(String(80), index=True)
+    provider: Mapped[str] = mapped_column(String(80), default="")
+    model: Mapped[str] = mapped_column(String(160), default="")
+    request_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(16), default="ok", index=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cached_input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    request_messages: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    response_text: Mapped[str] = mapped_column(Text, default="")
+
+
 class DailyUsageQuotaModel(LifecycleMixin, Base):
     __tablename__ = "daily_usage_quotas"
     __table_args__ = (UniqueConstraint("user_id", "usage_date", "category", name="uq_daily_usage_quota_user_date_category"),)
@@ -309,6 +334,23 @@ class ApiErrorLogModel(LifecycleMixin, Base):
     traceback: Mapped[str] = mapped_column(Text, default="")
     client_ip: Mapped[str | None] = mapped_column(String(80), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class ApiRequestLogModel(LifecycleMixin, Base):
+    """测试流量的 API 请求耗时留痕；仅带 X-Test-Run-Id 头或开启全量开关的请求才会入库。"""
+
+    __tablename__ = "api_request_logs"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(120), default="", index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    method: Mapped[str] = mapped_column(String(16))
+    path: Mapped[str] = mapped_column(Text)
+    query_string: Mapped[str] = mapped_column(Text, default="")
+    status_code: Mapped[int] = mapped_column(Integer, index=True)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    request_payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    response_body: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    client_ip: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
 
 class AdminRoleModel(LifecycleMixin, Base):

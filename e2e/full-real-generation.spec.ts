@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { remoteCredentials, testRunId } from './env'
 
 test.skip(
   process.env.REAL_GENERATION_E2E !== '1',
@@ -8,7 +9,7 @@ test.skip(
 )
 test.setTimeout(90 * 60 * 1000)
 
-const runId = process.env.REAL_E2E_RUN_ID || new Date().toISOString().replaceAll(/[:.]/g, '-')
+const runId = testRunId()
 const artifactRoot =
   process.env.REAL_E2E_ARTIFACT_DIR ||
   join(process.cwd(), 'test-artifacts/full-journey/runs', runId)
@@ -16,8 +17,7 @@ const output = join(artifactRoot, 'screenshots')
 const assFixture =
   process.env.REAL_E2E_ASS_FILE ||
   join(process.cwd(), 'test-artifacts/full-journey/inputs/10012204-full-e2e.ass')
-const username = process.env.REAL_E2E_USERNAME || 'admin'
-const password = process.env.REAL_E2E_PASSWORD || '123456'
+const { username, password } = remoteCredentials()
 const projectSuffix = process.env.REAL_E2E_PROJECT_SUFFIX
   ? ` ${process.env.REAL_E2E_PROJECT_SUFFIX}`
   : ''
@@ -99,6 +99,9 @@ async function generateAllMedia(page: Page, count: number, prefix: string) {
 test('ASS and general storyboard complete real frontend journeys through generated videos', async ({
   page,
 }) => {
+  await page.route('**/api/**', (route) =>
+    route.continue({ headers: { ...route.request().headers(), 'x-test-run-id': runId } }),
+  )
   await page.goto('/')
   await page.getByLabel('用户名').fill(username)
   await page.getByLabel('密码').fill(password)

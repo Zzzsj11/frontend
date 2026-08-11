@@ -44,6 +44,7 @@ from .media_constraints import normalize_video_duration
 from .models import AiModelModel, ProjectCastModel, ProjectTaskModel, SongEmotionProfileModel, StoryboardLineModel, UserModel
 from .providers import generate_image, generate_video
 from .redis_store import close_redis, redis_ok
+from .request_logging import api_request_log_middleware
 from .schemas import ChatMessageCreate, ChatSessionCreate, ImageGenerationCreate, LoginCreate, PasswordChange, RemoteImportCreate, VideoGenerationCreate
 from .seed import recover_stale_storyboard_generation, seed_system_data
 from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
@@ -63,6 +64,8 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="MV Agent API", version="0.3.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+# 测试流量耗时采集：仅带 X-Test-Run-Id 头或 API_REQUEST_LOG_ALL=true 时入库
+app.middleware("http")(api_request_log_middleware)
 app.include_router(domain_router)
 app.include_router(admin_router)
 app.include_router(model_options_router)

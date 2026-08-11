@@ -1,15 +1,16 @@
 import { expect, test } from '@playwright/test'
+import { remoteCredentials, testRunId } from './env'
 test.skip(!process.env.ADMIN_API_E2E, 'set ADMIN_API_E2E=1')
 test('admin API authorization and contracts', async ({ request }) => {
+  const { username, password } = remoteCredentials()
+  const runId = testRunId()
   const login = await request.post('/api/auth/login', {
-    data: {
-      username: process.env.REMOTE_E2E_USERNAME || 'admin',
-      password: process.env.REMOTE_E2E_PASSWORD || '123456',
-    },
+    data: { username, password },
+    headers: { 'X-Test-Run-Id': runId },
   })
   expect(login.ok()).toBeTruthy()
   const token = (await login.json()).accessToken
-  const headers = { Authorization: `Bearer ${token}` }
+  const headers = { Authorization: `Bearer ${token}`, 'X-Test-Run-Id': runId }
   for (const path of [
     '/api/admin/dashboard',
     '/api/admin/users',

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -231,8 +232,12 @@ async def _plan_ass_scenes(
     messages = [{"role": "system", "content": system}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}]
     last_error: Exception | None = None
     for attempt in range(3):
-        text, usage = await _call(client, messages, 2500)
-        usage_records.append({"operation": "ass_scene_plan" if attempt == 0 else "ass_scene_plan_retry", **usage})
+        operation = "ass_scene_plan" if attempt == 0 else "ass_scene_plan_retry"
+        try:
+            text = await _call(client, messages, 2500, usage_records=usage_records, operation=operation)
+        except Exception as exc:
+            # API 层错误（网络、4xx/5xx）携带留痕记录后中止：重试只针对结构检查失败
+            raise StoryboardPromptError(str(exc), usage_records=usage_records) from exc
         try:
             return _check_scene_plan(_extract_json(text), lyric_count=len(lyric_lines), expected_scenes=expected_scenes)
         except ValueError as exc:
@@ -317,8 +322,13 @@ async def _generate_scene_shots(
     base = len(usage_records)
     last_error: Exception | None = None
     for attempt in range(3):
-        text, usage = await _call(client, messages, 3000)
-        usage_records.append({"operation": f"ass_scene_segment_{scene_index + 1}" if attempt == 0 else f"ass_scene_segment_{scene_index + 1}_retry", **usage})
+        operation = f"ass_scene_segment_{scene_index + 1}" if attempt == 0 else f"ass_scene_segment_{scene_index + 1}_retry"
+        try:
+            text = await _call(client, messages, 3000, usage_records=usage_records, operation=operation)
+        except Exception as exc:
+            for record in usage_records[base:]:
+                record["operation"] = f"{record['operation']}_failed"
+            raise StoryboardPromptError(str(exc), usage_records=usage_records[base:]) from exc
         try:
             return _check_segment_body(_extract_json(text), segment_count=len(scene_segments), role_ids=role_ids, scene_index=scene_index, scene_segments=scene_segments)
         except ValueError as exc:
@@ -526,9 +536,47 @@ def _validate(body: dict[str, Any], *, source: str, current: dict[str, Any], all
     return {"scenePrompt": scene_prompt.strip(), "shotPrompt": shot_prompt.strip(), "digitalHumanIds": role_ids}
 
 
-async def _call(client: AsyncOpenAI, messages: list[dict[str, str]], max_tokens: int) -> tuple[str, dict[str, Any]]:
-    response = await client.chat.completions.create(model=settings.llm_model, messages=messages, temperature=0.2, max_tokens=max_tokens)
-    return response.choices[0].message.content or "", {"usage": _usage_dict(response), "requestId": getattr(response, "id", None)}
+async def _call(
+    client: AsyncOpenAI,
+    messages: list[dict[str, str]],
+    max_tokens: int,
+    *,
+    usage_records: list[dict[str, Any]],
+    operation: str,
+) -> str:
+    """发起一次 LLM 调用并留痕：无论成功失败都向 usage_records 追加记录，
+    携带请求消息快照（调用时点，后续重试追加的消息不会污染）、返回原文、耗时与用量。"""
+    snapshot = [dict(message) for message in messages]
+    started = time.perf_counter()
+    try:
+        response = await client.chat.completions.create(model=settings.llm_model, messages=messages, temperature=0.2, max_tokens=max_tokens)
+    except Exception as exc:
+        usage_records.append(
+            {
+                "operation": operation,
+                "status": "error",
+                "error": str(exc)[:2000],
+                "durationMs": round((time.perf_counter() - started) * 1000),
+                "requestMessages": snapshot,
+                "responseText": "",
+                "usage": {},
+                "requestId": getattr(exc, "request_id", None),
+            }
+        )
+        raise
+    text = response.choices[0].message.content or ""
+    usage_records.append(
+        {
+            "operation": operation,
+            "status": "ok",
+            "durationMs": round((time.perf_counter() - started) * 1000),
+            "requestMessages": snapshot,
+            "responseText": text,
+            "usage": _usage_dict(response),
+            "requestId": getattr(response, "id", None),
+        }
+    )
+    return text
 
 
 async def generate_storyboard_line(*, source: str, current: dict[str, Any], full_context: dict[str, Any], allowed_humans: list[dict[str, Any]]) -> dict[str, Any]:
@@ -566,8 +614,10 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
     }
     messages = [{"role": "system", "content": system}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}]
     client, usage_records = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url), []
-    text, usage = await _call(client, messages, 1400)
-    usage_records.append({"operation": "storyboard_line", **usage})
+    try:
+        text = await _call(client, messages, 1400, usage_records=usage_records, operation="storyboard_line")
+    except Exception as exc:
+        raise StoryboardPromptError(str(exc), usage_records=usage_records) from exc
     try:
         result = _validate(_extract_json(text), source=source, current=current, allowed_humans=allowed_humans)
     except ValueError as first_error:
@@ -587,8 +637,10 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
                 ),
             },
         ]
-        repaired, repair_usage = await _call(client, repair, 1400)
-        usage_records.append({"operation": "storyboard_line_repair", **repair_usage})
+        try:
+            repaired = await _call(client, repair, 1400, usage_records=usage_records, operation="storyboard_line_repair")
+        except Exception as exc:
+            raise StoryboardPromptError(str(exc), usage_records=usage_records) from exc
         try:
             result = _validate(_extract_json(repaired), source=source, current=current, allowed_humans=allowed_humans)
         except Exception as exc:
