@@ -542,7 +542,7 @@ const removeDh = async () => {
 .lib-mask {
   position: fixed;
   inset: 0;
-  z-index: 120;
+  z-index: 1000;
   background: rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: center;
@@ -1018,7 +1018,7 @@ const removeDh = async () => {
 .dh-edit-mask {
   position: fixed;
   inset: 0;
-  z-index: 130;
+  z-index: 1100;
   background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;

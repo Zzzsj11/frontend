@@ -192,7 +192,7 @@ const cancel = () => {
 .modal-mask {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 1000;
   background: rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: center;
