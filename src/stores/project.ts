@@ -308,7 +308,7 @@ export const useProjectStore = defineStore('project', {
     /** ASS 大纲阶段：pending=拆分完成待生成 / outlining=生成中 / failed=生成失败 */
     outlinePhase(state): 'none' | 'pending' | 'outlining' | 'failed' {
       if (state.activeStoryboardType !== 'ass') return 'none'
-      if (state.outlineLocked || state.activeTaskStatus === 'outlining') return 'outlining'
+      if (this.outlineLocked || state.activeTaskStatus === 'outlining') return 'outlining'
       if (state.activeTaskStatus === 'outline_failed') return 'failed'
       if (state.activeTaskStatus === 'parsed') return 'pending'
       return 'none'
