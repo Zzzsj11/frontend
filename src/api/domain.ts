@@ -429,7 +429,7 @@ export async function generateSceneImage(
 export async function generateShotVideo(
   scenePrompt: string,
   shotPrompt: string,
-  _digitalHumanIds: string[],
+  characterImageUrls: string[],
   _index: number,
   _variant: number,
   options?: ShotGenOptions,
@@ -440,6 +440,7 @@ export async function generateShotVideo(
   return mediaGen.generateShotVideo(
     [scenePrompt, shotPrompt].filter(Boolean).join('。'),
     referenceImageUrl,
+    characterImageUrls,
     options ?? {
       resolution: '720p',
       duration: 5,

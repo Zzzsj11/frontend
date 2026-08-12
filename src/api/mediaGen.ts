@@ -64,10 +64,12 @@ export async function generateScene(
 export async function generateShotVideo(
   prompt: string,
   referenceImageUrl: string | undefined,
+  characterImageUrls: string[],
   options: ShotGenOptions,
   projectTaskId?: string,
   storyboardLineId?: string,
 ): Promise<{ coverUrl: string; coverThumbnailUrl?: string; videoUrl: string; duration: number }> {
+  const imageUrls = [referenceImageUrl, ...characterImageUrls].filter(Boolean) as string[]
   const job = await request<GenerationJob>('/generations/videos', {
     method: 'POST',
     body: JSON.stringify({
@@ -76,7 +78,7 @@ export async function generateShotVideo(
       ratio: options.ratio,
       resolution: options.resolution,
       model: options.videoModel,
-      image_urls: referenceImageUrl ? [referenceImageUrl] : [],
+      image_urls: imageUrls,
       generate_audio: false,
       project_task_id: projectTaskId,
       storyboard_line_id: storyboardLineId,

@@ -12,15 +12,20 @@ const state = reactive({ queue: [] as AppErrorNotice[], nextId: 1 })
 export const errorBus = {
   state,
   show(input: Omit<AppErrorNotice, 'id'>) {
+    // 去重：同消息+同错误码只保留一条
     if (
-      !state.queue.some(
+      state.queue.some(
         (item) => item.message === input.message && item.errorCode === input.errorCode,
       )
     )
-      state.queue.push({ id: state.nextId++, ...input })
+      return
+    state.queue.push({ id: state.nextId++, ...input })
   },
   dismiss(id: number) {
     state.queue = state.queue.filter((item) => item.id !== id)
+  },
+  dismissAll() {
+    state.queue = []
   },
 }
 

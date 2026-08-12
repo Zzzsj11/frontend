@@ -458,6 +458,8 @@ export const useProjectStore = defineStore('project', {
           const lineId = lineIds[cursor++]
           const local = this.lines.find((line) => line.id === lineId)
           if (local && this.activeTaskId === taskId && !this._outlineReady(local)) continue
+          // 跳过已经在生成中或已完成的，避免重复提交触发后端 409
+          if (local && this.activeTaskId === taskId && (local.generationStatus === 'running' || local.generationStatus === 'succeeded')) continue
           if (local && this.activeTaskId === taskId) {
             local.generationStatus = 'running'
             local.generationError = undefined
@@ -477,11 +479,17 @@ export const useProjectStore = defineStore('project', {
               )
             }
           } catch (error) {
-            const current = this.lines.find((line) => line.id === lineId)
-            if (current && this.activeTaskId === taskId) {
-              current.generationStatus = 'failed'
-              current.generationError =
-                error instanceof Error ? error.message : '单条视频提示词生成失败'
+            // 409 表示后端已有任务在处理，静默跳过
+            if (error instanceof ApiError && error.status === 409) {
+              const current = this.lines.find((line) => line.id === lineId)
+              if (current && this.activeTaskId === taskId) current.generationStatus = 'running'
+            } else {
+              const current = this.lines.find((line) => line.id === lineId)
+              if (current && this.activeTaskId === taskId) {
+                current.generationStatus = 'failed'
+                current.generationError =
+                  error instanceof Error ? error.message : '单条视频提示词生成失败'
+              }
             }
           } finally {
             localGeneratingLines.delete(lineId)
@@ -1565,11 +1573,14 @@ export const useProjectStore = defineStore('project', {
       line.shot.status = 'generating'
       line.shot.error = undefined
       const variant = line.shot.assets.length
+      const characterUrls = line.digitalHumanIds
+        .map((id) => this.digitalHumans.find((h) => h.id === id)?.avatar)
+        .filter(Boolean) as string[]
       try {
         const { coverUrl, coverThumbnailUrl, videoUrl, duration } = await api.generateShotVideo(
           line.scenePrompt,
           line.shotPrompt,
-          line.digitalHumanIds,
+          characterUrls,
           idx,
           variant,
           genOptions,

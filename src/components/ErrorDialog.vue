@@ -27,7 +27,12 @@ const current = computed(() => errorBus.state.queue[0])
         <p v-if="errorBus.state.queue.length > 1" class="pending">
           还有 {{ errorBus.state.queue.length - 1 }} 条错误待查看
         </p>
-        <button autofocus @click="errorBus.dismiss(current.id)">我知道了</button>
+        <div class="error-actions">
+          <button v-if="errorBus.state.queue.length > 1" class="dismiss-all" @click="errorBus.dismissAll()">
+            关闭全部（{{ errorBus.state.queue.length }} 条）
+          </button>
+          <button autofocus class="dismiss-one" @click="errorBus.dismiss(current.id)">我知道了</button>
+        </div>
       </section>
     </div></Teleport
   >
@@ -95,14 +100,26 @@ dd {
   font-size: var(--font-sm);
   color: #a65;
 }
-.error-dialog button {
-  width: 100%;
+.error-actions {
+  display: flex;
+  gap: 8px;
   margin-top: 14px;
+}
+.error-actions button {
+  flex: 1;
   padding: 10px;
   border: 0;
   border-radius: var(--radius-pill);
+  cursor: pointer;
+  font-size: var(--font-md);
+}
+.dismiss-one {
   background: var(--primary);
   color: #fff;
-  cursor: pointer;
+}
+.dismiss-all {
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  border: 1px solid var(--border) !important;
 }
 </style>
