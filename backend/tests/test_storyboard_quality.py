@@ -2,11 +2,22 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import select
 
 from app.ass_storyboard import AssCue, group_cues
+from app.database import session_factory
+from app.domain import uid
 from app.media_constraints import normalize_video_duration
-from app.schemas import VideoGenerationCreate
-from app.story_bible import build_ass_story_bible, exact_durations
+from app.models import (
+    DigitalHumanModel,
+    ProjectCastModel,
+    ProjectModel,
+    ProjectTaskModel,
+    StoryboardLineModel,
+    UserModel,
+)
+from app.schemas import GeneralStoryboardCreate, VideoGenerationCreate
+from app.story_bible import build_ass_story_bible, build_general_story_bible, exact_durations
 from app.storyboard_prompt import (
     _assign_scene_segments,
     _check_scene_plan,
@@ -275,8 +286,8 @@ def test_storyboard_output_schema_is_strict() -> None:
         _validate({"scenePrompt": "scene", "shotPrompt": "shot", "digitalHumanIds": ["x"]}, source="ass", current={}, allowed_humans=humans)
     with pytest.raises(ValueError, match="预分配人物不一致"):
         _validate({"scenePrompt": "scene", "shotPrompt": "shot", "digitalHumanIds": []}, source="ass", current={"plannedDigitalHumanIds": ["a"]}, allowed_humans=humans)
-    with pytest.raises(ValueError, match="额外内容"):
-        _extract_json('{"scenePrompt":"x"} trailing')
+    # 尾部文字不再报错（_extract_json 宽松解析）
+    assert _extract_json('{"scenePrompt":"x"} trailing') == {"scenePrompt": "x"}
 
 
 def test_general_storyboard_rejects_character_shots_without_cast(client) -> None:
@@ -284,8 +295,8 @@ def test_general_storyboard_rejects_character_shots_without_cast(client) -> None
     response = client.post(
         f"/api/projects/{project['id']}/storyboards/general",
         json={
-            "genre": "pop",
-            "secondary_category": "positive",
+            "genre": "流行歌曲",
+            "secondary_category": "爱情消极",
             "season": "summer",
             "gender": "女",
             "age_group": "young",
@@ -303,8 +314,8 @@ def test_general_storyboard_rejects_character_shots_without_cast(client) -> None
 def test_general_storyboard_enforces_four_to_fifteen_seconds_per_shot(client) -> None:
     project = client.post("/api/projects", json={"name": "Duration validation"}).json()
     base = {
-        "genre": "pop",
-        "secondary_category": "positive",
+        "genre": "流行歌曲",
+        "secondary_category": "爱情消极",
         "season": "summer",
         "gender": "女",
         "age_group": "young",
@@ -337,3 +348,231 @@ def test_general_storyboard_enforces_four_to_fifteen_seconds_per_shot(client) ->
     assert task["storyboardConfig"]["image_model"] == "gpt-image-2"
     assert task["storyboardConfig"]["video_model"] == "doubao-seedance-2.0"
     assert all(line["shotOptions"]["resolution"] == "720p" for line in task["lines"])
+
+
+# ---------- 场景段重试：后台任务 + 幂等 ----------
+
+
+async def _make_segment_retry_task(db, with_storyboard=True):
+    """创建测试任务，返回 task_id。"""
+    # 注意：必须用 username 锁定 admin。`limit(1)` 无 ORDER BY 时 SQLite 可能走主键覆盖索引，
+    # 返回 id 字典序最小的用户——其它测试先跑创建用户后会让归属漂移，导致 client(admin) 404。
+    user = (await db.execute(select(UserModel.id).where(UserModel.username == "admin"))).scalar_one()
+    dhs = (await db.execute(select(DigitalHumanModel.id).where(DigitalHumanModel.deleted_at.is_(None)).limit(2))).scalars().all()
+    project = ProjectModel(id=uid("proj"), user_id=user, name="test")
+    db.add(project)
+    await db.flush()
+    sb = {}
+    if with_storyboard:
+        sb = {
+            "storyBible": {
+                "logline": "test",
+                "characterPolicy": "",
+                "shots": [
+                    {
+                        "index": 0,
+                        "shotType": "character",
+                        "requiredCharacterIds": [dhs[0]],
+                        "locationId": "loc-0",
+                        "intent": "t",
+                        "characterAction": "",
+                        "emotionalFocus": "",
+                        "cameraPurpose": "",
+                        "gapAfterAllocation": "none",
+                    },
+                    {
+                        "index": 1,
+                        "shotType": "empty",
+                        "requiredCharacterIds": [],
+                        "locationId": "loc-0",
+                        "intent": "t",
+                        "characterAction": "",
+                        "emotionalFocus": "",
+                        "cameraPurpose": "",
+                        "gapAfterAllocation": "none",
+                    },
+                ],
+                "scenePlan": [
+                    {
+                        "sceneIndex": 0,
+                        "locationId": "loc-0",
+                        "lineStart": 0,
+                        "lineEnd": 1,
+                        "locationName": "t",
+                        "mood": "c",
+                        "emotion": "s",
+                        "visualTone": "d",
+                        "narrativePurpose": "i",
+                    }
+                ],
+                "failedSegments": [{"sceneIndex": 0, "locationName": "t", "error": "model error"}],
+                "locations": [{"id": "loc-0", "name": "t", "purpose": "i"}],
+                "motifs": [],
+                "globalVisual": {},
+            },
+        }
+    task = ProjectTaskModel(
+        id=uid("task"),
+        project_id=project.id,
+        title="test",
+        storyboard_type="ass" if with_storyboard else "general",
+        status="generating",
+        storyboard_config=sb,
+    )
+    db.add(task)
+    await db.flush()
+    if with_storyboard:
+        for i in range(2):
+            db.add(
+                StoryboardLineModel(
+                    id=uid("line"),
+                    project_task_id=task.id,
+                    sort_order=i,
+                    lyrics=f"line {i}",
+                    start_time=float(i * 5),
+                    end_time=float((i + 1) * 5),
+                    shot_options={"outlineStatus": "failed" if i == 0 else "done", "segmentType": "lyric", "timelineLabel": f"line {i}"},
+                    planned_duration=5,
+                )
+            )
+        db.add(ProjectCastModel(id=uid("cast"), project_task_id=task.id, digital_human_id=dhs[0], sort_order=0))
+    await db.commit()
+    return task.id
+
+
+@pytest.mark.asyncio
+async def test_segment_retry_202_and_409(client):
+    """POST segment regenerate 返回 202，重复提交返回 409。"""
+    async with session_factory() as db:
+        task_id = await _make_segment_retry_task(db)
+
+    r = client.post(f"/api/tasks/{task_id}/storyboard-outline/segments/0/regenerate")
+    assert r.status_code == 202
+    assert r.json()["status"] == "segment_retrying"
+
+    r2 = client.post(f"/api/tasks/{task_id}/storyboard-outline/segments/0/regenerate")
+    assert r2.status_code == 409
+    assert "正在重新生成" in r2.json()["detail"]
+
+    r3 = client.post(f"/api/tasks/{task_id}/storyboard-outline/segments/99/regenerate")
+    assert r3.status_code == 422
+
+    async with session_factory() as db:
+        gid = await _make_segment_retry_task(db, with_storyboard=False)
+    r4 = client.post(f"/api/tasks/{gid}/storyboard-outline/segments/0/regenerate")
+    assert r4.status_code == 422
+    assert "ASS" in r4.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_segment_retry_progress_in_task(client):
+    """段重试进度可通过 GET /tasks/{id} 查询 outlineProgress。"""
+    async with session_factory() as db:
+        task_id = await _make_segment_retry_task(db)
+
+    client.post(f"/api/tasks/{task_id}/storyboard-outline/segments/0/regenerate")
+
+    r = client.get(f"/api/tasks/{task_id}")
+    assert r.status_code == 200
+    progress = (r.json().get("storyboardConfig") or {}).get("outlineProgress") or {}
+    assert progress.get("phase") == "segment_retry"
+    assert progress.get("sceneIndex") == 0
+
+
+# ---------- 段重试失败路径与模型输出宽松解析 ----------
+
+
+@pytest.mark.asyncio
+async def test_segment_retry_failure_marks_progress(client, monkeypatch):
+    """段重试后台任务失败：outlineProgress 落为 segment_retry_failed 并带回错误信息。"""
+    import time
+
+    from app import domain
+
+    async with session_factory() as db:
+        task_id = await _make_segment_retry_task(db)
+
+    async def boom(**kwargs):
+        raise RuntimeError("LLM 抖动")
+
+    monkeypatch.setattr(domain, "regenerate_ass_scene_segment", boom)
+    response = client.post(f"/api/tasks/{task_id}/storyboard-outline/segments/0/regenerate")
+    assert response.status_code == 202
+
+    deadline = time.monotonic() + 3
+    progress = {}
+    while time.monotonic() < deadline:
+        task = client.get(f"/api/tasks/{task_id}").json()
+        progress = (task.get("storyboardConfig") or {}).get("outlineProgress") or {}
+        if progress.get("phase") == "segment_retry_failed":
+            break
+        time.sleep(0.01)
+    assert progress.get("phase") == "segment_retry_failed"
+    assert progress.get("sceneIndex") == 0
+    assert "LLM 抖动" in progress.get("error", "")
+
+
+def test_extract_json_accepts_fenced_and_padded_output() -> None:
+    """LLM 输出的常见噪声（围栏、前导说明、尾部寒暄）都应被宽容解析。"""
+    from app.storyboard_prompt import _extract_json
+
+    assert _extract_json('{"a": 1}') == {"a": 1}
+    assert _extract_json('```json\n{"a": 1}\n```') == {"a": 1}
+    assert _extract_json('```\n{"a": 1}\n```') == {"a": 1}
+    assert _extract_json('好的，以下是结果：{"a": 1}') == {"a": 1}
+    assert _extract_json('{"a": 1}\n希望对你有帮助') == {"a": 1}
+    assert _extract_json('前言 {"a": 1} 后记 {"b": 2}') == {"a": 1}
+
+
+def test_extract_json_rejects_non_object_and_garbage() -> None:
+    from app.storyboard_prompt import _extract_json
+
+    with pytest.raises(ValueError, match="不是 JSON 对象"):
+        _extract_json("[1, 2, 3]")
+    with pytest.raises(ValueError, match="不是 JSON 对象"):
+        _extract_json('"just a string"')
+    with pytest.raises(ValueError, match="不是 JSON 对象"):
+        _extract_json("```json\n[1]\n```")
+    with pytest.raises(ValueError, match="没有返回可解析"):
+        _extract_json("完全不是 JSON 的输出")
+    with pytest.raises(ValueError, match="没有返回可解析"):
+        _extract_json("")
+
+
+# ---------- 通用分镜：无二级分类曲风（戏曲/中文喊麦） ----------
+
+
+def test_general_storyboard_create_allows_missing_secondary_category() -> None:
+    """戏曲、中文喊麦等无下级分类的曲风：secondary_category 允许缺省不填。"""
+    payload = GeneralStoryboardCreate(
+        genre="戏曲",
+        season="通用",
+        gender="女",
+        age_group="青年",
+        visual_style="国风",
+        empty_shot_count=1,
+        character_shot_count=1,
+        total_duration=8,
+    )
+    assert payload.secondary_category is None
+
+
+def test_general_story_bible_logline_skips_empty_secondary_category() -> None:
+    """无二级分类时 logline 不得拼出空段（「戏曲 /  风格」式脏文案）。"""
+    bible = build_general_story_bible(
+        config={"genre": "戏曲", "gender": "女", "season": "通用"},
+        definitions=[],
+        durations=[],
+    )
+    assert bible["logline"].startswith("戏曲 风格的完整 MV 视觉弧光")
+    assert " / " not in bible["logline"]
+
+
+def test_general_story_bible_logline_joins_present_categories() -> None:
+    """二级分类存在时保持「一级 / 二级」拼接。"""
+    bible = build_general_story_bible(
+        config={"genre": "流行歌曲", "secondary_category": "爱情消极", "gender": "女", "season": "秋"},
+        definitions=[],
+        durations=[],
+    )
+    assert bible["logline"].startswith("流行歌曲 / 爱情消极 风格的完整 MV 视觉弧光")

@@ -21,7 +21,7 @@ const assFile = ref<File | null>(null)
 const selectedHumanIds = ref<string[]>([])
 const extraRequirement = ref('')
 const ratio = ref<ShotGenOptions['ratio']>('16:9')
-const resolution = ref<ShotGenOptions['resolution']>('720p')
+const resolution = ref<ShotGenOptions['resolution']>('480p')
 const imageModel = ref(DEFAULT_IMAGE_MODEL)
 const videoModel = ref(DEFAULT_VIDEO_MODEL)
 
@@ -46,7 +46,7 @@ const resetForm = () => {
   selectedHumanIds.value = [...store.castIds]
   extraRequirement.value = ''
   ratio.value = '16:9'
-  resolution.value = '720p'
+  resolution.value = '480p'
   imageModel.value = DEFAULT_IMAGE_MODEL
   videoModel.value = DEFAULT_VIDEO_MODEL
 }

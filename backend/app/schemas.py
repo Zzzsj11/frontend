@@ -130,7 +130,8 @@ class CastUpdate(BaseModel):
 
 class GeneralStoryboardCreate(BaseModel):
     genre: str
-    secondary_category: str
+    # 部分曲风（戏曲、中文喊麦）无下级分类，允许为空
+    secondary_category: str | None = None
     tertiary_category: str | None = None
     season: str
     gender: Literal["女", "男", "男女", "女女", "男男", "多女（三人以上）", "多男（三人以上）", "多人有男有女（三人以上）"]

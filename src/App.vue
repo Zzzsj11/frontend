@@ -8,7 +8,7 @@ import AssetLibrary from './components/AssetLibrary.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 
 const DEFAULT_SIDEBAR_WIDTH = 232
-const MAX_SIDEBAR_WIDTH = Math.round(DEFAULT_SIDEBAR_WIDTH * 1.3)
+const MAX_SIDEBAR_WIDTH = Math.round(DEFAULT_SIDEBAR_WIDTH * 1.69)
 const sidebarWidth = ref(DEFAULT_SIDEBAR_WIDTH)
 const resizingSidebar = ref(false)
 

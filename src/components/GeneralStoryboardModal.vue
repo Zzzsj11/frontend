@@ -25,12 +25,12 @@ const gender = ref<GeneralGender>('女')
 const ageGroup = ref('青年')
 const visualStyle = ref('电影写实')
 const ratio = ref<ShotGenOptions['ratio']>('16:9')
-const resolution = ref<ShotGenOptions['resolution']>('720p')
+const resolution = ref<ShotGenOptions['resolution']>('480p')
 const imageModel = ref(DEFAULT_IMAGE_MODEL)
 const videoModel = ref(DEFAULT_VIDEO_MODEL)
-const emptyShotCount = ref(5)
-const characterShotCount = ref(5)
-const totalDuration = ref(100)
+const emptyShotCount = ref(1)
+const characterShotCount = ref(1)
+const totalDuration = ref(8)
 const extraRequirement = ref('')
 const selectedHumanIds = ref<string[]>([])
 
@@ -56,7 +56,11 @@ const durationIsValid = computed(
     totalDuration.value <= maximumTotalDuration.value,
 )
 const canSubmit = computed(
-  () => !!genre.value && !!secondary.value && totalShots.value > 0 && durationIsValid.value,
+  () =>
+    !!genre.value &&
+    (!secondaryOptions.value.length || !!secondary.value) &&
+    totalShots.value > 0 &&
+    durationIsValid.value,
 )
 
 const reset = () => {
@@ -70,13 +74,13 @@ const reset = () => {
     ? '电影写实'
     : (options?.visualStyles[0] ?? '')
   ratio.value = options?.ratios[0] ?? '16:9'
-  resolution.value = '720p'
+  resolution.value = '480p'
   imageModel.value = DEFAULT_IMAGE_MODEL
   videoModel.value = DEFAULT_VIDEO_MODEL
   gender.value = '女'
-  emptyShotCount.value = 5
-  characterShotCount.value = 5
-  totalDuration.value = 100
+  emptyShotCount.value = 1
+  characterShotCount.value = 1
+  totalDuration.value = 8
   extraRequirement.value = ''
   selectedHumanIds.value = [...store.castIds]
 }
@@ -113,7 +117,9 @@ const submit = () => {
   if (!canSubmit.value || store.generalStoryboardLoading) return
   const request: GeneralStoryboardRequest = {
     genre: labelOf(genre.value, store.generalStoryboardOptions?.genres ?? []),
-    secondaryCategory: labelOf(secondary.value, secondaryOptions.value),
+    secondaryCategory: secondary.value
+      ? labelOf(secondary.value, secondaryOptions.value)
+      : undefined,
     tertiaryCategory: tertiary.value ? labelOf(tertiary.value, tertiaryOptions.value) : undefined,
     season: season.value,
     gender: gender.value,
@@ -156,30 +162,6 @@ const submit = () => {
 
       <template v-if="store.generalStoryboardOptions">
         <section class="form-section">
-          <h4>人物素材</h4>
-          <div>
-            <p class="field-label">从已有角色库选择 <span>（可多选，人物镜轮流使用）</span></p>
-            <div class="cast-list">
-              <button
-                v-for="human in store.digitalHumans"
-                :key="human.id"
-                class="cast-item"
-                :class="{ active: selectedHumanIds.includes(human.id) }"
-                @click="toggleHuman(human.id)"
-              >
-                <CharacterPortrait :src="human.avatar" :alt="human.name" /><span>{{
-                  human.name
-                }}</span>
-                <AppIcon v-if="selectedHumanIds.includes(human.id)" name="check" :size="12" />
-              </button>
-              <span v-if="!store.digitalHumans.length" class="empty-cast"
-                >角色库暂无可选人物，请先到角色阵容中添加数字人</span
-              >
-            </div>
-          </div>
-        </section>
-
-        <section class="form-section">
           <h4>音乐属性</h4>
           <div class="field-grid three">
             <label
@@ -195,8 +177,9 @@ const submit = () => {
               </select></label
             >
             <label
-              ><span>二级分类 *</span
-              ><select v-model="secondary">
+              ><span>二级分类{{ secondaryOptions.length ? ' *' : '' }}</span
+              ><select v-model="secondary" :disabled="!secondaryOptions.length">
+                <option v-if="!secondaryOptions.length" value="">无下级分类</option>
                 <option v-for="item in secondaryOptions" :key="item.value" :value="item.value">
                   {{ item.label }}
                 </option>
@@ -323,6 +306,29 @@ const submit = () => {
               placeholder="例如：雨夜、克制情绪、避免舞蹈场面，多使用缓慢运镜…"
             />
           </label>
+        </section>
+        <section class="form-section">
+          <h4>人物素材</h4>
+          <div>
+            <p class="field-label">从已有角色库选择 <span>（可多选，人物镜轮流使用）</span></p>
+            <div class="cast-list">
+              <button
+                v-for="human in store.digitalHumans"
+                :key="human.id"
+                class="cast-item"
+                :class="{ active: selectedHumanIds.includes(human.id) }"
+                @click="toggleHuman(human.id)"
+              >
+                <CharacterPortrait :src="human.avatar" :alt="human.name" /><span>{{
+                  human.name
+                }}</span>
+                <AppIcon v-if="selectedHumanIds.includes(human.id)" name="check" :size="12" />
+              </button>
+              <span v-if="!store.digitalHumans.length" class="empty-cast"
+                >角色库暂无可选人物，请先到角色阵容中添加数字人</span
+              >
+            </div>
+          </div>
         </section>
       </template>
     </div>

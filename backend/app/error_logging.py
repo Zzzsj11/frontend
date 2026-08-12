@@ -62,3 +62,41 @@ async def record_api_error(request: Request, *, status_code: int, error_type: st
     except Exception:
         pass
     return error_code
+
+
+async def log_background_error(
+    *,
+    user_id: str | None = None,
+    path: str = "",
+    status_code: int = 500,
+    error_type: str = "LLMError",
+    message: str,
+    traceback_text: str = "",
+    project_id: str | None = None,
+    project_task_id: str | None = None,
+) -> str:
+    """记录后台任务/非 HTTP 路径的 LLM 调用错误，供复盘使用。"""
+    error_code = f"ERR-{uuid.uuid4().hex[:12].upper()}"
+    try:
+        async with session_factory() as db:
+            db.add(
+                ApiErrorLogModel(
+                    id=f"apierr-{uuid.uuid4().hex}",
+                    error_code=error_code,
+                    user_id=user_id,
+                    method="POST",
+                    path=path[:4000],
+                    query_string="",
+                    status_code=status_code,
+                    error_type=error_type[:160],
+                    message=message[:4000],
+                    request_payload={"projectId": project_id, "projectTaskId": project_task_id},
+                    traceback=traceback_text[:12000],
+                    client_ip=None,
+                    user_agent=None,
+                )
+            )
+            await db.commit()
+    except Exception:
+        pass
+    return error_code

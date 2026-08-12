@@ -1,7 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { useAuthStore } from '../src/stores/auth'
 import { useProjectStore } from '../src/stores/project'
-import type { MaterialExport, ScriptLine } from '../src/types'
+import type {
+  DigitalHuman,
+  MaterialExport,
+  ScriptLine,
+  SongProject,
+  StoryBible,
+} from '../src/types'
 
 describe('project user journey state', () => {
   beforeEach(() => {
@@ -217,5 +224,484 @@ describe('project user journey state', () => {
     await vi.waitFor(() => expect(line.shot.status).toBe('done'))
     expect(line.shot.assets[0]?.videoUrl).toBe('/shot.mp4')
     expect(line.shot.currentAssetId).toBe('asset-1')
+  })
+})
+
+describe('sidebar selection persistence (per user)', () => {
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+
+  const song = (id: string, taskIds: string[]): SongProject => ({
+    id,
+    name: id,
+    tasks: taskIds.map((taskId) => ({
+      id: taskId,
+      title: taskId,
+      updatedAt: '',
+      status: 'ready',
+      storyboardType: 'ass',
+    })),
+  })
+
+  const projects = [song('song-a', ['task-a1']), song('song-b', ['task-b1', 'task-b2'])]
+
+  const mockShellFetch = () =>
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url === '/api/projects') return json(projects)
+      if (url === '/api/digital-humans') return json([])
+      if (url === '/api/digital-human-styles') return json([])
+      if (url.endsWith('/material-exports')) return json([])
+      if (url.endsWith('/generations/active')) return json([])
+      if (/^\/api\/tasks\/[^/]+$/.test(url))
+        return json({
+          cast: [],
+          storyboardType: 'ass',
+          status: 'ready',
+          storyboardConfig: {},
+          lines: [],
+        })
+      return json({}, 404)
+    })
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    const auth = useAuthStore()
+    auth.user = {
+      id: 'u1',
+      username: 'u1',
+      displayName: 'U1',
+      role: 'user',
+      mustChangePassword: false,
+    }
+  })
+
+  it('restores the persisted song and task selection for the current user', async () => {
+    localStorage.setItem('mv_sidebar_song_u1', 'song-b')
+    localStorage.setItem('mv_sidebar_task_u1', 'task-b2')
+    mockShellFetch()
+    const store = useProjectStore()
+
+    await store.loadSongProjects()
+    expect(store.activeSongId).toBe('song-b')
+    expect(store.activeTaskId).toBe('task-b2')
+    // 恢复后把选中态回写，保持 localStorage 与实际一致
+    expect(localStorage.getItem('mv_sidebar_song_u1')).toBe('song-b')
+    expect(localStorage.getItem('mv_sidebar_task_u1')).toBe('task-b2')
+  })
+
+  it('falls back to the first song and task when nothing is persisted', async () => {
+    mockShellFetch()
+    const store = useProjectStore()
+
+    await store.loadSongProjects()
+    expect(store.activeSongId).toBe('song-a')
+    expect(store.activeTaskId).toBe('task-a1')
+    expect(localStorage.getItem('mv_sidebar_song_u1')).toBe('song-a')
+    expect(localStorage.getItem('mv_sidebar_task_u1')).toBe('task-a1')
+  })
+
+  it('ignores a stale persisted task id and falls back to the first task of the song', async () => {
+    localStorage.setItem('mv_sidebar_song_u1', 'song-b')
+    localStorage.setItem('mv_sidebar_task_u1', 'task-deleted')
+    mockShellFetch()
+    const store = useProjectStore()
+
+    await store.loadSongProjects()
+    expect(store.activeSongId).toBe('song-b')
+    expect(store.activeTaskId).toBe('task-b1')
+  })
+
+  it("does not read another user's persisted selection", async () => {
+    // 其它用户的记录不生效（key 按用户隔离）
+    localStorage.setItem('mv_sidebar_song_other', 'song-b')
+    localStorage.setItem('mv_sidebar_task_other', 'task-b2')
+    mockShellFetch()
+    const store = useProjectStore()
+
+    await store.loadSongProjects()
+    expect(store.activeSongId).toBe('song-a')
+    expect(store.activeTaskId).toBe('task-a1')
+  })
+})
+
+describe('drag ordering with optimistic update', () => {
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+
+  const song = (id: string, taskIds: string[]): SongProject => ({
+    id,
+    name: id,
+    tasks: taskIds.map((taskId) => ({ id: taskId, title: taskId, updatedAt: '' })),
+  })
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('keeps the optimistic project order when the reorder API succeeds', async () => {
+    const store = useProjectStore()
+    store.songProjects = [song('a', []), song('b', []), song('c', [])]
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => json({ ok: true }))
+
+    await store.reorderSongProjects(['c', 'a', 'b'])
+    expect(store.songProjects.map((item) => item.id)).toEqual(['c', 'a', 'b'])
+    expect(String(fetchMock.mock.calls[0][0])).toBe('/api/projects/reorder')
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH')
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ order: ['c', 'a', 'b'] })
+  })
+
+  it('rolls back the project order when the reorder API fails', async () => {
+    const store = useProjectStore()
+    store.songProjects = [song('a', []), song('b', []), song('c', [])]
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => json({ detail: 'boom' }, 500))
+
+    await store.reorderSongProjects(['c', 'a', 'b'])
+    expect(store.songProjects.map((item) => item.id)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('rolls back the task order within a song when the reorder API fails', async () => {
+    const store = useProjectStore()
+    store.songProjects = [song('song-1', ['t1', 't2', 't3'])]
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => json({ detail: 'boom' }, 500))
+
+    await store.reorderSongTasks('song-1', ['t3', 't1', 't2'])
+    expect(store.songProjects[0].tasks.map((task) => task.id)).toEqual(['t1', 't2', 't3'])
+    expect(String(fetchMock.mock.calls[0][0])).toBe('/api/projects/song-1/tasks/reorder')
+  })
+})
+
+describe('outline segment retry polling', () => {
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+
+  const bible = (failedSegments: unknown[] = []): StoryBible =>
+    ({
+      failedSegments,
+      shots: [],
+      scenePlan: [],
+      locations: [],
+      motifs: [],
+    }) as unknown as StoryBible
+
+  const taskPayload = (config: Record<string, unknown>) => ({
+    cast: [],
+    storyboardType: 'ass',
+    status: 'ready',
+    storyboardConfig: config,
+    lines: [],
+  })
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('waits for completion then refreshes the story bible', async () => {
+    const store = useProjectStore()
+    store.activeTaskId = 'task-1'
+    store.activeStoryboardType = 'ass'
+    store.activeStoryBible = bible([{ sceneIndex: 0, locationName: '街道', error: '模型超时' }])
+
+    const refreshed = bible([])
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/segments/0/regenerate'))
+        return json({ taskId: 'task-1', sceneIndex: 0, status: 'segment_retrying' })
+      // 轮询与最终刷新都返回「无 outlineProgress」（后台已完成）
+      if (url === '/api/tasks/task-1') return json(taskPayload({ storyBible: refreshed }))
+      return json({}, 404)
+    })
+
+    await store.retryOutlineSegment(0)
+    expect(store.segmentRetrying[0]).toBe(false)
+    expect(store.activeStoryBible).toEqual(refreshed)
+  })
+
+  it('tolerates a 409 (already retrying) and still waits for completion', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = useProjectStore()
+      store.activeTaskId = 'task-1'
+      store.activeStoryboardType = 'ass'
+      store.activeStoryBible = bible([{ sceneIndex: 0, locationName: '街道', error: '模型超时' }])
+
+      let taskReads = 0
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        const url = String(input)
+        if (url.endsWith('/segments/0/regenerate'))
+          return json({ detail: '该场景段正在重新生成中' }, 409)
+        if (url === '/api/tasks/task-1') {
+          taskReads += 1
+          // 第一次轮询：后台仍在跑；第二次：进度已清空（完成）
+          if (taskReads === 1)
+            return json(taskPayload({ outlineProgress: { phase: 'segment_retry', sceneIndex: 0 } }))
+          return json(taskPayload({ storyBible: bible([]) }))
+        }
+        return json({}, 404)
+      })
+
+      const promise = store.retryOutlineSegment(0)
+      await vi.runAllTimersAsync()
+      await promise
+      expect(store.segmentRetrying[0]).toBe(false)
+      expect(taskReads).toBeGreaterThanOrEqual(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('resets the retrying flag and keeps the old bible when the background retry fails', async () => {
+    const store = useProjectStore()
+    store.activeTaskId = 'task-1'
+    store.activeStoryboardType = 'ass'
+    const original = bible([{ sceneIndex: 0, locationName: '街道', error: '模型超时' }])
+    store.activeStoryBible = original
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/segments/0/regenerate'))
+        return json({ taskId: 'task-1', sceneIndex: 0, status: 'segment_retrying' })
+      if (url === '/api/tasks/task-1')
+        return json(
+          taskPayload({
+            outlineProgress: {
+              phase: 'segment_retry_failed',
+              sceneIndex: 0,
+              error: 'LLM 持续超时',
+            },
+          }),
+        )
+      return json({}, 404)
+    })
+
+    // 失败经由 errorBus 上报，action 本身不向外抛
+    await store.retryOutlineSegment(0)
+    expect(store.segmentRetrying[0]).toBe(false)
+    // storyBible 未被刷新（Pinia state 为 reactive 代理，用值比较）
+    expect(store.activeStoryBible).toEqual(original)
+  })
+})
+
+describe('digital human generation with template reference', () => {
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  afterEach(async () => {
+    // 复位模块级模板单例，避免污染其它测试
+    const { setTemplateAvatar } = await import('../src/api/imageGen')
+    setTemplateAvatar('')
+  })
+
+  it('sends the system template sheet as the first reference image', async () => {
+    const { setTemplateAvatar } = await import('../src/api/imageGen')
+    setTemplateAvatar('https://tos.test/system/template.png')
+
+    const store = useProjectStore()
+    store.dhStyleIds = { 古风: 'style-1' }
+    const calls: { url: string; body?: Record<string, unknown> }[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : undefined
+      calls.push({ url, body })
+      if (url === '/api/generations/images')
+        return json({ id: 'job-dh', status: 'queued', progress: 0 })
+      if (url === '/api/generations/job-dh')
+        return json({
+          id: 'job-dh',
+          status: 'succeeded',
+          progress: 100,
+          result: {
+            urls: ['https://tos.test/dh.png'],
+            thumbnailUrls: ['https://tos.test/dh-t.png'],
+          },
+        })
+      // ensureDhStyle 对新风格做 fire-and-forget 登记（POST /digital-human-styles）
+      if (url === '/api/digital-human-styles') return json({ id: 'style-1', name: '古风' })
+      if (url === '/api/digital-humans')
+        return json({
+          id: 'dh-new',
+          name: '小月',
+          style: '古风',
+          avatar: 'https://tos.test/dh-t.png',
+          description: '青衣少女',
+          scope: 'private',
+        })
+      return json({}, 404)
+    })
+
+    const dh = await store.generateDigitalHuman({
+      name: '小月',
+      style: '古风',
+      description: '青衣少女',
+      referenceImage: 'https://tos.test/user-photo.png',
+    })
+    expect(dh.id).toBe('dh-new')
+
+    const creation = calls.find((call) => call.url === '/api/generations/images')
+    expect(creation, '未发起生图请求').toBeDefined()
+    // 模板三视图在前（prompt 中的「第一张参考图」），用户参考图在后
+    expect(creation!.body?.images).toEqual([
+      'https://tos.test/system/template.png',
+      'https://tos.test/user-photo.png',
+    ])
+    expect(String(creation!.body?.prompt)).toContain('参照第一张参考图')
+    expect(String(creation!.body?.prompt)).toContain('青衣少女')
+    // 任务创建后留了恢复草稿，完成后又清理掉
+    expect(localStorage.getItem('mv:pending-dh')).toBeNull()
+  })
+
+  it('omits the images field when neither template nor user reference exists', async () => {
+    const store = useProjectStore()
+    store.dhStyleIds = { 古风: 'style-1' }
+    store.digitalHumans = []
+    const calls: { url: string; body?: Record<string, unknown> }[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : undefined
+      calls.push({ url, body })
+      if (url === '/api/generations/images')
+        return json({ id: 'job-dh', status: 'queued', progress: 0 })
+      if (url === '/api/generations/job-dh')
+        return json({
+          id: 'job-dh',
+          status: 'succeeded',
+          progress: 100,
+          result: { urls: ['https://tos.test/dh.png'] },
+        })
+      if (url === '/api/digital-human-styles') return json({ id: 'style-1', name: '古风' })
+      if (url === '/api/digital-humans')
+        return json({
+          id: 'dh-new',
+          name: '小月',
+          style: '古风',
+          avatar: 'https://tos.test/dh.png',
+          description: '',
+          scope: 'private',
+        })
+      return json({}, 404)
+    })
+
+    await store.generateDigitalHuman({ name: '小月', style: '古风', description: '青衣少女' })
+    const creation = calls.find((call) => call.url === '/api/generations/images')
+    expect(creation!.body).not.toHaveProperty('images')
+  })
+})
+
+describe('digital human avatar regeneration with template reference', () => {
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+
+  const dhFixture = (overrides: Record<string, unknown>) =>
+    ({
+      id: 'dh-1',
+      name: '小月',
+      style: '古风',
+      description: '青衣少女',
+      avatar: 'https://tos.test/old.png',
+      avatarPrompt: '',
+      scope: 'private',
+      readOnly: false,
+      ...overrides,
+    }) as unknown as DigitalHuman
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  afterEach(async () => {
+    // 复位模块级模板单例，避免污染其它测试
+    const { setTemplateAvatar } = await import('../src/api/imageGen')
+    setTemplateAvatar('')
+  })
+
+  it('sends the template sheet before the current avatar and persists private humans', async () => {
+    const { setTemplateAvatar } = await import('../src/api/imageGen')
+    setTemplateAvatar('https://tos.test/system/template.png')
+
+    const store = useProjectStore()
+    store.digitalHumans = [dhFixture({})]
+    const calls: { url: string; method?: string; body?: Record<string, unknown> }[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : undefined
+      calls.push({ url, method: init?.method, body })
+      if (url === '/api/generations/images')
+        return json({ id: 'job-re', status: 'queued', progress: 0 })
+      if (url === '/api/generations/job-re')
+        return json({
+          id: 'job-re',
+          status: 'succeeded',
+          progress: 100,
+          result: {
+            urls: ['https://tos.test/new.png'],
+            thumbnailUrls: ['https://tos.test/new-t.png'],
+          },
+        })
+      if (url === '/api/digital-humans/dh-1') return json({})
+      return json({}, 404)
+    })
+
+    await store.regenerateDigitalHumanAvatar('dh-1')
+
+    const creation = calls.find((call) => call.url === '/api/generations/images')
+    // 模板三视图在前（prompt 中的「第一张参考图」），当前头像在后
+    expect(creation!.body?.images).toEqual([
+      'https://tos.test/system/template.png',
+      'https://tos.test/old.png',
+    ])
+    const patch = calls.find((call) => call.url === '/api/digital-humans/dh-1')
+    expect(patch?.method).toBe('PATCH')
+    expect(patch?.body?.avatar_url).toBe('https://tos.test/new.png')
+    // 本地状态同步：头像用缩略图，originalAvatar 用原图
+    expect(store.digitalHumans[0].avatar).toBe('https://tos.test/new-t.png')
+    expect(store.digitalHumans[0].originalAvatar).toBe('https://tos.test/new.png')
+  })
+
+  it('updates a system (readOnly) human locally without persisting to the backend', async () => {
+    const store = useProjectStore()
+    store.digitalHumans = [
+      dhFixture({
+        id: 'dh-system-001',
+        scope: 'system',
+        readOnly: true,
+        avatar: 'https://tos.test/sys.png',
+      }),
+    ]
+    const calls: { url: string; method?: string }[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      calls.push({ url, method: init?.method })
+      if (url === '/api/generations/images')
+        return json({ id: 'job-re', status: 'queued', progress: 0 })
+      if (url === '/api/generations/job-re')
+        return json({
+          id: 'job-re',
+          status: 'succeeded',
+          progress: 100,
+          result: { urls: ['https://tos.test/new.png'] },
+        })
+      return json({}, 404)
+    })
+
+    await store.regenerateDigitalHumanAvatar('dh-system-001')
+
+    // 无缩略图时头像回落到原图
+    expect(store.digitalHumans[0].avatar).toBe('https://tos.test/new.png')
+    // 系统人物只读：不回写后端
+    expect(calls.some((call) => call.url.includes('/api/digital-humans'))).toBe(false)
   })
 })

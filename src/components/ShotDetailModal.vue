@@ -35,6 +35,14 @@ const lyricsTranslation = computed(() => {
   return zh
 })
 const isGeneral = computed(() => store.editingLine?.source === 'general')
+// ASS 大纲已生成的行，角色由大纲分配不可手动修改
+const castLocked = computed(
+  () =>
+    store.activeStoryboardType === 'ass' &&
+    store.editingLine?.shotOptions?.outlineStatus !== undefined &&
+    store.editingLine?.shotOptions?.outlineStatus !== 'pending' &&
+    store.editingLine?.shotOptions?.outlineStatus !== 'failed',
+)
 
 // 人物预览：当前分镜出演角色（空 = 空镜头）
 const castOfLine = computed(() => {
@@ -254,14 +262,13 @@ const cancel = () => store.closeEditor()
         <!-- 人物调整面板 -->
         <div v-if="activeTab === 'cast'" class="tab-panel">
           <div class="panel-head">
-            <span class="panel-title"
-              >出演角色 <span class="field-tip">从全局阵容勾选，不选 = 空镜头</span></span
-            >
+            <span class="panel-title">出演角色</span>
             <button class="btn-outline regen-btn" @click="store.openLibrary()">
               <AppIcon name="users" :size="14" />
               管理阵容
             </button>
           </div>
+          <p v-if="castLocked" class="cast-locked-hint">角色由大纲分配，不支持手动修改</p>
           <div class="cast-row">
             <template v-if="store.castHumans.length">
               <button
@@ -269,7 +276,9 @@ const cancel = () => store.closeEditor()
                 :key="dh.id"
                 class="cast-pick"
                 :class="{ active: store.editingLine.digitalHumanIds.includes(dh.id) }"
-                @click="store.toggleLineHuman(store.editingLine.id, dh.id)"
+                :disabled="castLocked"
+                :title="castLocked ? '角色由大纲分配，不支持修改' : undefined"
+                @click="!castLocked && store.toggleLineHuman(store.editingLine.id, dh.id)"
               >
                 <CharacterPortrait :src="dh.avatar" :alt="dh.name" />
                 <span>{{ dh.name }}</span>
@@ -738,13 +747,25 @@ const cancel = () => store.closeEditor()
   border-radius: var(--radius-sm);
   object-fit: cover;
 }
-.cast-pick:hover {
+.cast-pick:hover:not(:disabled) {
   border-color: var(--primary);
 }
 .cast-pick.active {
   border-color: var(--primary);
   background: var(--primary-light);
   color: var(--primary);
+}
+.cast-pick:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.cast-locked-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: #f5f3f0;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
 }
 .pick-mark {
   display: inline-flex;

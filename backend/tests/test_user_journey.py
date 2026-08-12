@@ -169,7 +169,8 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
         files={"ass_file": ("10012204-journey.ass", ASS_CONTENT, "text/plain")},
     )
     assert storyboard.status_code == 200
-    assert storyboard.json()["title"] == "10012204"
+    # 任务标题由曲库情感档案拼成：「歌名 – 歌曲编号」（song_code 10012204 对应「他不爱我」）
+    assert storyboard.json()["title"] == "他不爱我 – 10012204"
     assert storyboard.json()["status"] == "parsed"
     line = storyboard.json()["lines"][0]
     assert line["generationStatus"] == "pending"
@@ -190,7 +191,8 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     assert generated_line.json()["usage"] == {"inputTokens": 120, "outputTokens": 40, "cachedInputTokens": 0, "totalTokens": 160}
     line = generated_line.json()
     assert line["shotOptions"]["ratio"] == "16:9"
-    assert line["shotOptions"]["resolution"] == "720p"
+    # 生图/视频默认清晰度已下调为 480p（ASS 上传 Form 默认值）
+    assert line["shotOptions"]["resolution"] == "480p"
     assert line["shotOptions"]["imageModel"] == "gpt-image-2"
     assert line["shotOptions"]["videoModel"] == "doubao-seedance-2.0"
 

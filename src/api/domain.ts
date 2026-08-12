@@ -15,6 +15,7 @@ import type {
 import * as mediaGen from './mediaGen'
 import { apiRequest, openApiStream } from './client'
 import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL } from '../generationModels'
+import { SONG_CATEGORY_GENRES } from '../songCategories'
 
 /**
  * 领域 API 门面 —— 镜像后端 domain 路由（backend/app/domain.py）：
@@ -41,12 +42,13 @@ export async function fetchSongScript(taskId: string): Promise<{
   storyboardType: string
   storyBible?: StoryBible
   status: string
+  outlineProgress?: Record<string, unknown>
 }> {
   const task = await apiRequest<{
     cast: string[]
     storyboardType: string
     status: string
-    storyboardConfig?: { storyBible?: StoryBible }
+    storyboardConfig?: { storyBible?: StoryBible; outlineProgress?: Record<string, unknown> }
     lines: Array<Record<string, unknown>>
   }>(`/tasks/${taskId}`)
   return {
@@ -54,6 +56,7 @@ export async function fetchSongScript(taskId: string): Promise<{
     storyboardType: task.storyboardType,
     status: task.status,
     storyBible: task.storyboardConfig?.storyBible,
+    outlineProgress: task.storyboardConfig?.outlineProgress,
     lines: task.lines.map((item) => {
       const sceneAssets =
         (item.sceneAssets as Array<{
@@ -192,6 +195,13 @@ export async function generateMagicScript(
 export const updateSongProject = (id: string, name: string) =>
   apiRequest(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) })
 export const deleteSongProject = (id: string) => apiRequest(`/projects/${id}`, { method: 'DELETE' })
+export const reorderProjects = (order: string[]) =>
+  apiRequest('/projects/reorder', { method: 'PATCH', body: JSON.stringify({ order }) })
+export const reorderProjectTasks = (projectId: string, order: string[]) =>
+  apiRequest(`/projects/${projectId}/tasks/reorder`, {
+    method: 'PATCH',
+    body: JSON.stringify({ order }),
+  })
 export const updateSongTask = (id: string, title: string) =>
   apiRequest(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) })
 export const deleteSongTask = (id: string) => apiRequest(`/tasks/${id}`, { method: 'DELETE' })
@@ -354,68 +364,7 @@ export const regenerateStoryboardOutlineSegment = (taskId: string, sceneIndex: n
   }>(`/tasks/${taskId}/storyboard-outline/segments/${sceneIndex}/regenerate`, { method: 'POST' })
 
 const generalStoryboardOptions: GeneralStoryboardOptions = {
-  genres: [
-    {
-      value: 'pop',
-      label: '流行',
-      children: [
-        {
-          value: 'positive-love',
-          label: '爱情积极',
-          children: [
-            { value: 'young-crush', label: '青涩心动' },
-            { value: 'confession', label: '热烈告白' },
-            { value: 'sweet-love', label: '甜蜜相恋' },
-          ],
-        },
-        {
-          value: 'negative-love',
-          label: '爱情消极',
-          children: [
-            { value: 'regret', label: '遗憾错过' },
-            { value: 'farewell', label: '失恋离别' },
-            { value: 'lonely-memory', label: '孤独回忆' },
-          ],
-        },
-        {
-          value: 'inspiring',
-          label: '励志',
-          children: [
-            { value: 'growth', label: '青春成长' },
-            { value: 'dream', label: '追逐梦想' },
-          ],
-        },
-      ],
-    },
-    {
-      value: 'rock',
-      label: '摇滚',
-      children: [
-        {
-          value: 'passion',
-          label: '热血',
-          children: [
-            { value: 'breakthrough', label: '突破束缚' },
-            { value: 'live-stage', label: '现场舞台' },
-          ],
-        },
-      ],
-    },
-    {
-      value: 'folk',
-      label: '民谣',
-      children: [
-        {
-          value: 'narrative',
-          label: '叙事',
-          children: [
-            { value: 'hometown', label: '故乡回忆' },
-            { value: 'journey', label: '远方旅途' },
-          ],
-        },
-      ],
-    },
-  ],
+  genres: SONG_CATEGORY_GENRES,
   seasons: ['春', '夏', '秋', '冬', '通用'],
   ageGroups: ['少儿', '青少年', '青年', '中年', '老年'],
   visualStyles: ['电影写实', '动漫', '国风', '复古', '赛博朋克'],

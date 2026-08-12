@@ -87,58 +87,6 @@ const removeStyle = async (s: string) => {
   if (activeStyle.value === s) activeStyle.value = '全部'
 }
 
-// 生成数字人：调用真实异步生图接口，成功后新卡片加入资产库
-const genOpen = ref(false)
-const genName = ref('')
-const genStyle = ref('')
-const genDesc = ref('')
-const genReference = ref('')
-const genFileRef = ref<HTMLInputElement>()
-const genError = ref('')
-const canGen = computed(() => !!genName.value.trim() && !!genDesc.value.trim())
-
-const submitGen = async () => {
-  if (!canGen.value || store.dhGenerating) return
-  genError.value = ''
-  try {
-    await store.generateDigitalHuman({
-      name: genName.value.trim(),
-      style: genStyle.value.trim() || '自定义',
-      description: genDesc.value.trim(),
-      referenceImage: genReference.value || undefined,
-    })
-    genOpen.value = false
-    genName.value = ''
-    genStyle.value = ''
-    genDesc.value = ''
-    genReference.value = ''
-    activeStyle.value = '全部'
-  } catch (e) {
-    genError.value = e instanceof Error ? e.message : '生成失败，请稍后重试'
-  }
-}
-
-/** 选择生成参考图：与上传数字人头像一致，压缩为 3:4 范围内的 data URL */
-const onGenReferenceChange = (e: Event) => {
-  const target = e.target as HTMLInputElement
-  const file = target.files?.[0]
-  target.value = ''
-  if (!file || !file.type.startsWith('image/')) return
-  const url = URL.createObjectURL(file)
-  const img = new Image()
-  img.onload = () => {
-    const ratio = Math.min(600 / img.width, 800 / img.height, 1)
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.round(img.width * ratio)
-    canvas.height = Math.round(img.height * ratio)
-    canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height)
-    genReference.value = canvas.toDataURL('image/jpeg', 0.85)
-    URL.revokeObjectURL(url)
-  }
-  img.onerror = () => URL.revokeObjectURL(url)
-  img.src = url
-}
-
 // 上传自定义数字人：自备头像 + 名称/风格（名称、风格为必填，头像/描述可选）
 const uploadOpen = ref(false)
 const upName = ref('')
@@ -149,15 +97,9 @@ const upFileRef = ref<HTMLInputElement>()
 const uploadError = ref('')
 const canUpload = computed(() => !!upName.value.trim() && !!upStyle.value.trim())
 
-// 生成 / 上传 两个面板互斥展开
-const openGen = () => {
-  genOpen.value = !genOpen.value
-  if (genOpen.value) uploadOpen.value = false
-}
 const openUpload = () => {
   uploadOpen.value = !uploadOpen.value
   if (uploadOpen.value) {
-    genOpen.value = false
     uploadError.value = ''
   }
 }
@@ -209,6 +151,7 @@ const submitUpload = async () => {
       description: upDesc.value.trim(),
       avatar: upAvatar.value || initialsAvatar(name, style),
     })
+    // 生成完成后才清空
     uploadOpen.value = false
     upName.value = ''
     upStyle.value = ''
@@ -229,6 +172,19 @@ const editDesc = ref('')
 const editPrompt = ref('')
 const editError = ref('')
 const regenBusy = computed(() => !!editing.value && store.dhRegeneratingId === editing.value.id)
+
+// 大图预览
+const previewImage = ref<{ src: string; alt: string } | null>(null)
+const showPreview = (dh: { originalAvatar?: string; avatar: string; name: string }) => {
+  previewImage.value = { src: dh.originalAvatar || dh.avatar, alt: dh.name }
+}
+const closePreview = () => {
+  previewImage.value = null
+}
+
+window.addEventListener('keydown', (e: KeyboardEvent) => {
+  if (e.key === 'Escape' && previewImage.value) closePreview()
+})
 
 const openEdit = (id: string) => {
   const dh = store.digitalHumans.find((d) => d.id === id)
@@ -311,9 +267,6 @@ const removeDh = async () => {
       <button class="btn-upload-dh" @click="openUpload">
         <AppIcon name="image" :size="14" /> 上传数字人
       </button>
-      <button class="btn-gen-dh" :disabled="store.dhGenerating" @click="openGen">
-        <AppIcon name="sparkles" :size="14" /> 生成数字人
-      </button>
     </template>
     <p class="lib-hint">
       点击卡片加入/移出本 MV
@@ -324,73 +277,15 @@ const removeDh = async () => {
     <datalist id="dh-style-options">
       <option v-for="s in styles.slice(1)" :key="s" :value="s" />
     </datalist>
-
-    <!-- 生成数字人表单（真实生图接口） -->
-    <div v-if="genOpen" class="gen-panel">
-      <div class="upload-body">
-        <div
-          class="upload-avatar gen-reference"
-          :class="{ filled: genReference }"
-          title="点击上传生成参考图（可选）"
-          @click="genFileRef?.click()"
-        >
-          <img v-if="genReference" :src="genReference" alt="生成参考图预览" />
-          <template v-else>
-            <AppIcon name="image" :size="24" />
-            <span>上传参考图<br />（可选）</span>
-          </template>
-          <button
-            v-if="genReference"
-            class="reference-remove"
-            title="移除参考图"
-            @click.stop="genReference = ''"
-          >
-            <AppIcon name="close" :size="10" />
-          </button>
-        </div>
-        <input
-          ref="genFileRef"
-          type="file"
-          accept="image/*"
-          hidden
-          @change="onGenReferenceChange"
-        />
-        <div class="upload-fields">
-          <div class="gen-row">
-            <input v-model="genName" class="gen-input gen-name" placeholder="角色名称（必填）" />
-            <input
-              v-model="genStyle"
-              class="gen-input gen-style"
-              list="dh-style-options"
-              placeholder="风格，如：韩系青春"
-            />
-          </div>
-          <textarea
-            v-model="genDesc"
-            class="gen-desc"
-            rows="2"
-            placeholder="形象描述提示词（必填），例如：22岁短发女生，穿 oversize 卫衣，元气笑容，阳光温暖…"
-          />
-        </div>
-      </div>
-      <div class="gen-actions">
-        <span v-if="genError" class="gen-error">{{ genError }}</span>
-        <button class="gen-submit" :disabled="!canGen || store.dhGenerating" @click="submitGen">
-          <span v-if="store.dhGenerating" class="spinner light" />
-          <AppIcon v-else name="sparkles" :size="14" />
-          {{ store.dhGenerating ? '正在生成形象（约需半分钟）…' : '开始生成' }}
-        </button>
-      </div>
-    </div>
-
-    <!-- 上传参考图后统一生成三视图数字人（名称、风格必填） -->
-    <div v-if="uploadOpen" class="gen-panel upload-panel">
+    <div v-show="uploadOpen" class="gen-panel upload-panel">
       <div class="upload-body">
         <div
           class="upload-avatar"
-          :class="{ filled: upAvatar }"
-          title="点击上传人物参考图（将统一生成三视图）"
-          @click="upFileRef?.click()"
+          :class="{ filled: upAvatar, disabled: store.dhGenerating }"
+          :title="
+            store.dhGenerating ? '正在生成中，请稍候' : '点击上传人物参考图（将统一生成三视图）'
+          "
+          @click="!store.dhGenerating && upFileRef?.click()"
         >
           <img v-if="upAvatar" :src="upAvatar" alt="头像预览" />
           <template v-else>
@@ -401,15 +296,27 @@ const removeDh = async () => {
         <input ref="upFileRef" type="file" accept="image/*" hidden @change="onUpAvatarChange" />
         <div class="upload-fields">
           <div class="gen-row">
-            <input v-model="upName" class="gen-input gen-name" placeholder="人物名称（必填）" />
+            <input
+              v-model="upName"
+              class="gen-input gen-name"
+              placeholder="人物名称（必填）"
+              :disabled="store.dhGenerating"
+            />
             <input
               v-model="upStyle"
               class="gen-input gen-style"
               list="dh-style-options"
               placeholder="风格分类（必填）"
+              :disabled="store.dhGenerating"
             />
           </div>
-          <textarea v-model="upDesc" class="gen-desc" rows="2" placeholder="形象描述（可选）" />
+          <textarea
+            v-model="upDesc"
+            class="gen-desc"
+            rows="2"
+            placeholder="形象描述（可选）"
+            :disabled="store.dhGenerating"
+          />
         </div>
       </div>
       <div class="gen-actions">
@@ -423,7 +330,13 @@ const removeDh = async () => {
         >
           <span v-if="store.dhGenerating" class="spinner light" />
           <AppIcon v-else name="check" :size="14" />
-          {{ store.dhGenerating ? '正在上传并生成三视图…' : '添加到资产库' }}
+          {{
+            store.dhGenerating
+              ? store.dhGeneratingPhase === 'uploading'
+                ? '正在上传…'
+                : '正在生成三视图…'
+              : '添加到资产库'
+          }}
         </button>
       </div>
       <p v-if="uploadError" class="error-tip" role="alert">{{ uploadError }}</p>
@@ -507,17 +420,20 @@ const removeDh = async () => {
         :class="{ active: store.castIds.includes(dh.id) }"
         @click="store.toggleCast(dh.id)"
       >
-        <div class="dh-portrait" title="点击编辑数字人" @click.stop="openEdit(dh.id)">
+        <div class="dh-portrait" title="查看大图" @click.stop="showPreview(dh)">
           <CharacterPortrait :src="dh.avatar" :alt="dh.name" />
-          <ImageZoom :src="dh.originalAvatar || dh.avatar" :alt="`${dh.name} · 原图预览`" />
-          <span v-if="store.castIds.includes(dh.id)" class="dh-check"
+          <span v-show="store.castIds.includes(dh.id)" class="dh-check"
             ><AppIcon name="check" :size="11" /> 已入阵容</span
           >
-          <span class="dh-edit-badge"
-            ><AppIcon :name="dh.readOnly ? 'user' : 'edit'" :size="11" />
-            {{ dh.readOnly ? '查看' : '编辑' }}</span
-          >
         </div>
+        <button
+          class="dh-edit-badge"
+          :title="dh.readOnly ? '查看详情' : '编辑'"
+          @click.stop="openEdit(dh.id)"
+        >
+          <AppIcon :name="dh.readOnly ? 'user' : 'edit'" :size="11" />
+          {{ dh.readOnly ? '查看' : '编辑' }}
+        </button>
         <div class="dh-info">
           <div class="dh-name-row">
             <strong>{{ dh.name }}</strong>
@@ -543,7 +459,7 @@ const removeDh = async () => {
     </template>
     <template v-if="editing">
       <div class="edit-body">
-        <div class="edit-portrait">
+        <div class="edit-portrait" @click="showPreview(editing)" title="点击查看大图">
           <img :src="editing.originalAvatar || editing.avatar" :alt="editing.name" />
           <ImageZoom
             :src="editing.originalAvatar || editing.avatar"
@@ -616,6 +532,19 @@ const removeDh = async () => {
       </div>
     </template>
   </BaseModal>
+
+  <!-- 大图预览 -->
+  <Teleport to="body">
+    <div v-if="previewImage" class="preview-mask" @click.self="closePreview">
+      <div class="preview-dialog">
+        <button class="preview-close" @click="closePreview">
+          <AppIcon name="close" :size="18" />
+        </button>
+        <img :src="previewImage.src" :alt="previewImage.alt" />
+        <span>{{ previewImage.alt }}</span>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -786,6 +715,10 @@ const removeDh = async () => {
 .upload-avatar.filled {
   border-style: solid;
 }
+.upload-avatar.disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
 .upload-avatar img {
   width: 100%;
   height: 100%;
@@ -953,9 +886,11 @@ const removeDh = async () => {
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 14px;
   padding: 16px 22px 22px;
-  max-height: 56vh;
+  flex: 1 1 auto;
+  min-height: 200px;
   overflow-x: hidden;
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 .dh-card {
   border: 2px solid var(--border);
@@ -964,13 +899,12 @@ const removeDh = async () => {
   cursor: pointer;
   transition:
     border-color 0.15s,
-    transform 0.1s,
     box-shadow 0.15s;
   background: #fff;
+  min-height: 200px;
 }
 .dh-card:hover {
   border-color: rgba(255, 90, 44, 0.5);
-  transform: translateY(-2px);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
 }
 .dh-card.active {
@@ -1001,23 +935,26 @@ const removeDh = async () => {
   gap: 3px;
 }
 .dh-edit-badge {
-  position: absolute;
-  left: 8px;
-  bottom: 8px;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
   font-size: 11px;
   padding: 3px 8px;
   border-radius: var(--radius-sm);
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  opacity: 0;
-  transition: opacity 0.15s;
-  pointer-events: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s;
 }
-.dh-portrait:hover .dh-edit-badge {
-  opacity: 1;
+.dh-edit-badge:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
 }
 .readonly-tip {
   padding: 8px 10px;
@@ -1222,5 +1159,66 @@ const removeDh = async () => {
   width: 100%;
   height: 100%;
   border-radius: inherit;
+}
+
+/* 大图预览 */
+.preview-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: rgba(12, 12, 15, 0.82);
+  backdrop-filter: blur(4px);
+}
+.preview-dialog {
+  position: relative;
+  display: flex;
+  max-width: min(1200px, 92vw);
+  max-height: 92vh;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: var(--radius-lg);
+  background: #19191c;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.55);
+}
+.preview-dialog img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(92vh - 58px);
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  background: var(--border);
+}
+.preview-dialog span {
+  color: #fff;
+  text-align: center;
+  font-size: var(--font-sm);
+}
+.preview-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 1;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    transform 0.15s;
+}
+.preview-close:hover {
+  background: var(--primary);
+  transform: scale(1.08);
 }
 </style>

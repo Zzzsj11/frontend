@@ -7,12 +7,14 @@ import tempfile
 import uuid
 import zipfile
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import or_, select, update
+from pydantic import BaseModel
+from sqlalchemy import case, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import CurrentUser, hash_password, user_public
@@ -245,10 +247,17 @@ async def owned_line(db: AsyncSession, user_id: str, line_id: str) -> Storyboard
 
 
 async def visible_humans(db: AsyncSession, user_id: str, ids: list[str] | None = None) -> list[DigitalHumanModel]:
-    query = select(DigitalHumanModel).where(
-        DigitalHumanModel.deleted_at.is_(None),
-        DigitalHumanModel.status == "active",
-        or_(DigitalHumanModel.scope == "system", DigitalHumanModel.user_id == user_id),
+    query = (
+        select(DigitalHumanModel)
+        .where(
+            DigitalHumanModel.deleted_at.is_(None),
+            DigitalHumanModel.status == "active",
+            or_(DigitalHumanModel.scope == "system", DigitalHumanModel.user_id == user_id),
+        )
+        .order_by(
+            case((DigitalHumanModel.scope == "private", 0), else_=1),
+            DigitalHumanModel.created_at.desc(),
+        )
     )
     if ids is not None:
         query = query.where(DigitalHumanModel.id.in_(ids))
@@ -304,7 +313,13 @@ def task_json(item: ProjectTaskModel) -> dict:
 @router.get("/projects")
 async def list_projects(user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
     projects = list(
-        (await db.execute(select(ProjectModel).where(ProjectModel.user_id == user.id, ProjectModel.deleted_at.is_(None)).order_by(ProjectModel.updated_at.desc()))).scalars().all()
+        (
+            await db.execute(
+                select(ProjectModel).where(ProjectModel.user_id == user.id, ProjectModel.deleted_at.is_(None)).order_by(ProjectModel.sort_order, ProjectModel.updated_at.desc())
+            )
+        )
+        .scalars()
+        .all()
     )
     if not projects:
         return []
@@ -313,7 +328,7 @@ async def list_projects(user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
             await db.execute(
                 select(ProjectTaskModel)
                 .where(ProjectTaskModel.project_id.in_([p.id for p in projects]), ProjectTaskModel.deleted_at.is_(None))
-                .order_by(ProjectTaskModel.created_at)
+                .order_by(ProjectTaskModel.sort_order, ProjectTaskModel.created_at)
             )
         )
         .scalars()
@@ -323,6 +338,33 @@ async def list_projects(user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
     for task in tasks:
         by_project.setdefault(task.project_id, []).append(task)
     return [project_json(project, by_project.get(project.id, [])) for project in projects]
+
+
+class ReorderRequest(BaseModel):
+    order: list[str]
+
+
+@router.patch("/projects/reorder")
+async def reorder_projects(payload: ReorderRequest, user: CurrentUser, db: AsyncSession = Db) -> dict:
+    """批量更新歌曲项目的排序。{order: ["id1","id2",...]}"""
+    for index, project_id in enumerate(payload.order):
+        await db.execute(update(ProjectModel).where(ProjectModel.id == project_id, ProjectModel.user_id == user.id, ProjectModel.deleted_at.is_(None)).values(sort_order=index))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.patch("/projects/{project_id}/tasks/reorder")
+async def reorder_tasks(project_id: str, payload: ReorderRequest, user: CurrentUser, db: AsyncSession = Db) -> dict:
+    """批量更新子项目的排序。{order: ["id1","id2",...]}"""
+    await owned_project(db, user.id, project_id)
+    for index, task_id in enumerate(payload.order):
+        await db.execute(
+            update(ProjectTaskModel)
+            .where(ProjectTaskModel.id == task_id, ProjectTaskModel.project_id == project_id, ProjectTaskModel.deleted_at.is_(None))
+            .values(sort_order=index)
+        )
+    await db.commit()
+    return {"ok": True}
 
 
 @router.post("/projects", status_code=201)
@@ -599,6 +641,7 @@ def _persist_llm_calls(
 
 # 持有大纲后台生成任务的强引用，避免被事件循环 GC（同 chat.py 的 tasks 表惯例）
 _outline_background_tasks: set[asyncio.Task] = set()
+_segment_retry_tasks: set[asyncio.Task] = set()
 
 
 async def _run_ass_outline_generation(
@@ -792,19 +835,105 @@ async def storyboard_outline_events(task_id: str, request: Request, user: Curren
                 if not current:
                     return
                 progress = (current.storyboard_config or {}).get("outlineProgress") or {}
+                has_outline = current.status == "outlining"
+                has_segment_retry = progress.get("phase") == "segment_retry"
                 marker = (current.status, json.dumps(progress, sort_keys=True, ensure_ascii=False))
                 if marker != last:
                     payload = {"type": "outline", "taskId": task_id, "status": current.status, "progress": progress}
                     yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                     last = marker
-                if current.status != "outlining":
+                if not has_outline and not has_segment_retry:
                     return
             await asyncio.sleep(0.75)
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-@router.post("/tasks/{task_id}/storyboard-outline/segments/{scene_index}/regenerate")
+async def _run_segment_retry(
+    *,
+    task_id: str,
+    scene_index: int,
+    segments: list[dict],
+    scene_plan: list[dict],
+    story_bible: dict[str, Any],
+    selected_humans: list[dict],
+    extra_requirement: str,
+    emotion: dict,
+    role_ids: list[str],
+    user_id: str,
+    project_id: str,
+) -> None:
+    """后台执行单个场景段的重新生成，完成后更新 storyBible 与分镜行。"""
+    old_shots = list(story_bible.get("shots") or [])
+    try:
+        result = await regenerate_ass_scene_segment(
+            segments=segments,
+            scene_plan=scene_plan,
+            scene_index=scene_index,
+            global_visual=story_bible.get("globalVisual") or {},
+            emotion=emotion,
+            selected_humans=selected_humans,
+            extra_requirement=extra_requirement,
+        )
+    except Exception as exc:
+        async with session_factory() as session:
+            task = await session.get(ProjectTaskModel, task_id)
+            if not task or task.deleted_at is not None:
+                return
+            _persist_llm_calls(session, getattr(exc, "usage_records", None), default_operation="ass_scene_segment", user_id=user_id, project_id=project_id, project_task_id=task_id)
+            config = dict(task.storyboard_config or {})
+            config["outlineProgress"] = {"phase": "segment_retry_failed", "sceneIndex": scene_index, "error": str(exc)[:300]}
+            task.storyboard_config = config
+            await session.commit()
+        return
+    async with session_factory() as session:
+        task = await session.get(ProjectTaskModel, task_id)
+        if not task or task.deleted_at is not None:
+            return
+        lines = list(
+            (
+                await session.execute(
+                    select(StoryboardLineModel)
+                    .where(StoryboardLineModel.project_task_id == task_id, StoryboardLineModel.deleted_at.is_(None))
+                    .order_by(StoryboardLineModel.sort_order)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        shot_start, shot_count = result["shotStart"], result["shotCount"]
+        updated_shots = old_shots[:shot_start] + result["shots"] + old_shots[shot_start + shot_count :]
+        for position, shot in enumerate(updated_shots):
+            shot["index"] = position
+        finalize_shot_durations(updated_shots, segments)
+        prefix = f"s{scene_index + 1}."
+        merged_outline = {
+            "globalVisual": story_bible.get("globalVisual"),
+            "locations": story_bible.get("locations") or [],
+            "motifs": [m for m in (story_bible.get("motifs") or []) if not str(m.get("id") or "").startswith(prefix)] + result["motifs"],
+            "scenePlan": scene_plan,
+            "failedSegments": [item for item in (story_bible.get("failedSegments") or []) if item.get("sceneIndex") != scene_index],
+            "shots": updated_shots,
+        }
+        new_bible = build_ass_story_bible(
+            segments=segments,
+            emotion=emotion,
+            role_ids=role_ids,
+            extra_requirement=extra_requirement or "",
+            outline=merged_outline,
+        )
+        config = dict(task.storyboard_config or {})
+        config["storyBible"] = new_bible
+        config.pop("outlineProgress", None)
+        task.storyboard_config = config
+        target_lines = lines[shot_start : shot_start + shot_count]
+        segment_plans = new_bible["shots"][shot_start : shot_start + shot_count]
+        await _apply_story_bible_to_lines(session, target_lines, segment_plans, now=utcnow())
+        _persist_llm_calls(session, result["usageRecords"], default_operation="ass_scene_segment", user_id=user_id, project_id=project_id, project_task_id=task_id)
+        await session.commit()
+
+
+@router.post("/tasks/{task_id}/storyboard-outline/segments/{scene_index}/regenerate", status_code=202)
 async def regenerate_storyboard_outline_segment(task_id: str, scene_index: int, user: CurrentUser, db: AsyncSession = Db) -> dict:
     task = await owned_task(db, user.id, task_id)
     if task.storyboard_type != "ass":
@@ -859,65 +988,35 @@ async def regenerate_storyboard_outline_segment(task_id: str, scene_index: int, 
     old_shots = list(story_bible.get("shots") or [])
     if len(old_shots) != len(segments):
         raise HTTPException(422, "分镜数据与时间轴不一致，请重新生成全局大纲")
+    # 幂等：该场景段正在后台重试中
+    current_progress = (task.storyboard_config or {}).get("outlineProgress") or {}
+    if current_progress.get("phase") == "segment_retry" and current_progress.get("sceneIndex") == scene_index:
+        raise HTTPException(409, "该场景段正在重新生成中，请等待本轮完成后再提交")
     await consume_daily_quota(db, user_id=user.id, category="chat", limit=settings.daily_chat_limit)
-    try:
-        result = await regenerate_ass_scene_segment(
+    emotion = (task.storyboard_config or {}).get("songEmotion") or {}
+    progress = {"phase": "segment_retry", "sceneIndex": scene_index, "startedAt": utcnow().isoformat()}
+    config = dict(task.storyboard_config or {})
+    config["outlineProgress"] = progress
+    task.storyboard_config = config
+    await db.commit()
+    background = asyncio.create_task(
+        _run_segment_retry(
+            task_id=task.id,
+            scene_index=scene_index,
             segments=segments,
             scene_plan=scene_plan,
-            scene_index=scene_index,
-            global_visual=story_bible.get("globalVisual") or {},
-            emotion=(task.storyboard_config or {}).get("songEmotion") or {},
+            story_bible=story_bible,
             selected_humans=selected_humans,
             extra_requirement=task.extra_requirement or "",
+            emotion=emotion,
+            role_ids=role_ids,
+            user_id=user.id,
+            project_id=task.project_id,
         )
-    except Exception as exc:
-        _persist_llm_calls(db, getattr(exc, "usage_records", None), default_operation="ass_scene_segment", user_id=user.id, project_id=task.project_id, project_task_id=task.id)
-        await db.commit()
-        raise HTTPException(502, f"场景段大纲生成失败：{exc}") from exc
-    shot_start, shot_count = result["shotStart"], result["shotCount"]
-    updated_shots = old_shots[:shot_start] + result["shots"] + old_shots[shot_start + shot_count :]
-    for position, shot in enumerate(updated_shots):
-        shot["index"] = position
-    finalize_shot_durations(updated_shots, segments)
-    prefix = f"s{scene_index + 1}."
-    merged_outline = {
-        "globalVisual": story_bible.get("globalVisual"),
-        "locations": story_bible.get("locations") or [],
-        "motifs": [motif for motif in (story_bible.get("motifs") or []) if not str(motif.get("id") or "").startswith(prefix)] + result["motifs"],
-        "scenePlan": scene_plan,
-        "failedSegments": [item for item in (story_bible.get("failedSegments") or []) if item.get("sceneIndex") != scene_index],
-        "shots": updated_shots,
-    }
-    story_bible = build_ass_story_bible(
-        segments=segments,
-        emotion=(task.storyboard_config or {}).get("songEmotion") or {},
-        role_ids=role_ids,
-        extra_requirement=task.extra_requirement or "",
-        outline=merged_outline,
     )
-    config = dict(task.storyboard_config)
-    config["storyBible"] = story_bible
-    task.storyboard_config = config
-    target_lines = lines[shot_start : shot_start + shot_count]
-    segment_plans = story_bible["shots"][shot_start : shot_start + shot_count]
-    await _apply_story_bible_to_lines(db, target_lines, segment_plans, now=utcnow())
-    _persist_llm_calls(db, result["usageRecords"], default_operation="ass_scene_segment", user_id=user.id, project_id=task.project_id, project_task_id=task.id)
-    await db.commit()
-    return {
-        "sceneIndex": scene_index,
-        "failedSegments": story_bible.get("failedSegments") or [],
-        "lines": [
-            {
-                "id": line.id,
-                "shotType": plan["shotType"],
-                "plannedDuration": line.planned_duration,
-                "shotOptions": line.shot_options,
-                "digitalHumanIds": plan["requiredCharacterIds"],
-                "generationStatus": "pending",
-            }
-            for line, plan in zip(target_lines, segment_plans, strict=True)
-        ],
-    }
+    _segment_retry_tasks.add(background)
+    background.add_done_callback(_segment_retry_tasks.discard)
+    return {"taskId": task.id, "sceneIndex": scene_index, "status": "segment_retrying", "progress": progress}
 
 
 @router.delete("/tasks/{task_id}")
@@ -1725,6 +1824,17 @@ async def create_material_export(task_id: str, user: CurrentUser, db: AsyncSessi
     )
     if active_count >= settings.export_per_user_concurrency:
         raise HTTPException(429, f"每个用户最多同时导出 {settings.export_per_user_concurrency} 个子项目")
+    # 清理同任务的历史已完成/已失败导出（每个子项目只保留最新一次）
+    now = utcnow()
+    await db.execute(
+        update(MaterialExportModel)
+        .where(
+            MaterialExportModel.project_task_id == task.id,
+            MaterialExportModel.deleted_at.is_(None),
+            MaterialExportModel.status.in_(("ready", "failed", "cancelled")),
+        )
+        .values(deleted_at=now)
+    )
     export = MaterialExportModel(id=uid("export"), user_id=user.id, project_task_id=task.id)
     db.add(export)
     await db.commit()

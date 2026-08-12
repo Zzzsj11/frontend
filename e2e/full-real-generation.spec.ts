@@ -24,6 +24,7 @@ const projectSuffix = process.env.REAL_E2E_PROJECT_SUFFIX
 mkdirSync(output, { recursive: true })
 const generalOnly = process.env.REAL_E2E_PHASE === 'general'
 const exportOnly = process.env.REAL_E2E_PHASE === 'general-export'
+const assOnly = process.env.REAL_E2E_PHASE === 'ass'
 let shot = exportOnly ? 21 : generalOnly ? 12 : 0
 const capture = async (page: Page, name: string) => {
   shot += 1
@@ -140,8 +141,17 @@ test('ASS and general storyboard complete real frontend journeys through generat
     await page.locator('.role-card').nth(16).click()
     await capture(page, 'ass-input-and-cast-selected')
     await page.getByRole('button', { name: '生成', exact: true }).click()
-    await waitForPrompts(page, 2, 'ass')
-    await generateAllMedia(page, 2, 'ass')
+    await expect(page.locator('.line-wrapper').first()).toBeVisible({ timeout: 5 * 60_000 })
+    await capture(page, 'ass-storyboard-outline-generating')
+    // 夹具拆分出 3 行：2 歌词行 + 1 尾奏空行（outro），全部参与逐句生成
+    await waitForPrompts(page, 3, 'ass')
+    await generateAllMedia(page, 3, 'ass')
+  }
+
+  if (assOnly) {
+    await expect(page.locator('[role="alertdialog"]')).toHaveCount(0)
+    await capture(page, 'ass-journey-final-state')
+    return
   }
 
   await createProject(page, `通用 MV 视频全链路真实验收${projectSuffix}`)

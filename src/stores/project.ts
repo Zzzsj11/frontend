@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { useAuthStore } from './auth'
 import type {
   DigitalHuman,
   GeneralStoryboardOptions,
@@ -23,12 +24,18 @@ import { ApiError, reportApiError } from '../errorBus'
 import { DEFAULT_VIDEO_DURATION, normalizeShotOptions } from '../mediaConstraints'
 import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL } from '../generationModels'
 
+/** 侧边栏选中状态持久化 key（按用户隔离） */
+const sidebarKeys = (userId: string) => ({
+  song: `mv_sidebar_song_${userId}`,
+  task: `mv_sidebar_task_${userId}`,
+})
+
 /** 无配音时的占位时长（秒） */
 export const DEFAULT_CLIP_DURATION = 5
 
 /** 分镜视频生成参数默认值（清晰度 / 时长 / 画幅） */
 export const DEFAULT_SHOT_OPTIONS: ShotGenOptions = {
-  resolution: '720p',
+  resolution: '480p',
   duration: DEFAULT_VIDEO_DURATION,
   ratio: '16:9',
   imageModel: DEFAULT_IMAGE_MODEL,
@@ -145,6 +152,8 @@ export const useProjectStore = defineStore('project', {
     magicLoading: false,
     /** 正在调用真实生图接口生成数字人形象 */
     dhGenerating: false,
+    /** 当前阶段：uploading / generating */
+    dhGeneratingPhase: '' as string,
     /** 编辑弹窗中正在重新生成形象的数字人 id（null 表示空闲） */
     dhRegeneratingId: null as string | null,
     exportsByTaskId: {} as Record<string, MaterialExport[]>,
@@ -325,14 +334,26 @@ export const useProjectStore = defineStore('project', {
         ])
         this.songProjects = projects
         this.digitalHumans = humans
+        // 以系统人物 001 的三视图为后续生成的模板参考
+        const template = humans.find((h) => h.id === 'dh-system-001')
+        if (template) imageGen.setTemplateAvatar(template.avatar)
         this.dhStyles = styles.map((item) => item.name)
         this.dhStyleIds = Object.fromEntries(styles.map((item) => [item.name, item.id]))
         this.systemDhStyles = styles.filter((item) => item.readOnly).map((item) => item.name)
         void this.resumePendingDigitalHuman()
-        if (!this.activeSongId && projects[0]) {
-          this.activeSongId = projects[0].id
-          const taskId = projects[0].tasks[0]?.id
-          if (taskId) await this._loadTask(projects[0].id, taskId)
+        // 恢复上次选中的项目和子项目（按用户隔离），无记录则默认第一个
+        const auth = useAuthStore()
+        const userId = auth.user?.id || ''
+        const savedSongId =
+          !this.activeSongId && userId ? localStorage.getItem(sidebarKeys(userId).song) : null
+        const savedTaskId =
+          !this.activeTaskId && userId ? localStorage.getItem(sidebarKeys(userId).task) : null
+        const song = savedSongId ? projects.find((p) => p.id === savedSongId) : projects[0]
+        if (song) {
+          const task = savedTaskId ? song.tasks.find((t) => t.id === savedTaskId) : song.tasks[0]
+          if (task) await this._loadTask(song.id, task.id)
+          else if (song.tasks[0]) await this._loadTask(song.id, song.tasks[0].id)
+          else this.activeSongId = song.id
         }
       } catch (err) {
         this.songProjectsError = err instanceof Error ? err.message : '歌曲项目加载失败'
@@ -383,6 +404,9 @@ export const useProjectStore = defineStore('project', {
       this.lines = script.lines
       this.activeSongId = songId
       this.activeTaskId = taskId
+      const auth = useAuthStore()
+      if (songId && auth.user) localStorage.setItem(sidebarKeys(auth.user.id).song, songId)
+      if (taskId && auth.user) localStorage.setItem(sidebarKeys(auth.user.id).task, taskId)
       this.activeStoryBible = script.storyBible ?? null
       this.activeStoryboardType = script.storyboardType || null
       this.activeTaskStatus = script.status || null
@@ -406,6 +430,16 @@ export const useProjectStore = defineStore('project', {
         // 刷新前仍在逐句生成的行：后端孤儿请求仍会跑完，轮询待其落定后合并
         if (this.lines.some((line) => line.generationStatus === 'running'))
           void this._watchRunningStoryboardLines(taskId)
+        // 有失败的场景段：自动重试（后台任务可能还在跑，幂等保护由后端 409 兜底）
+        const failedSegments = script.storyBible?.failedSegments ?? []
+        if (failedSegments.length) {
+          void (async () => {
+            for (const seg of failedSegments) {
+              if (this.activeTaskId !== taskId) break
+              await this.retryOutlineSegment(seg.sceneIndex).catch(() => {})
+            }
+          })()
+        }
       }
     },
 
@@ -691,20 +725,51 @@ export const useProjectStore = defineStore('project', {
       if (!taskId || this.activeStoryboardType !== 'ass' || this.segmentRetrying[sceneIndex]) return
       this.segmentRetrying = { ...this.segmentRetrying, [sceneIndex]: true }
       try {
-        const result = await api.regenerateStoryboardOutlineSegment(taskId, sceneIndex)
-        this._applyOutlineLines(result.lines)
-        // 段级端点只返回该段的行，重新拉取一次大纲保证弹窗与段级失败标注一致
+        // 202：后台任务已受理；409：后台已有任务在跑，转为轮询等待
+        try {
+          await api.regenerateStoryboardOutlineSegment(taskId, sceneIndex)
+        } catch (error) {
+          if (!(error instanceof ApiError && error.status === 409)) throw error
+        }
+        await this._pollSegmentRetry(taskId, sceneIndex)
+        // 后台完成后全量刷新
         const fresh = await api.fetchSongScript(taskId)
         if (this.activeTaskId === taskId && fresh.storyBible)
           this.activeStoryBible = fresh.storyBible
-        void this._generateStoryboardQueue(
-          taskId,
-          result.lines.map((line) => line.id),
+        // 重试成功的行进入逐句生成队列
+        const retriedLineIds = fresh.lines
+          .filter((line) => line.shotOptions?.outlineStatus !== 'failed')
+          .map((line) => line.id)
+        // 只提交那些还没在生成中的行
+        const newIds = retriedLineIds.filter(
+          (id) =>
+            !this.lines.find((line) => line.id === id)?.generationStatus ||
+            this.lines.find((line) => line.id === id)?.generationStatus === 'pending',
         )
+        if (newIds.length) void this._generateStoryboardQueue(taskId, newIds)
       } catch (error) {
         reportApiError(error, '场景段大纲重新生成失败')
       } finally {
         this.segmentRetrying = { ...this.segmentRetrying, [sceneIndex]: false }
+      }
+    },
+
+    /** 轮询等待段级重试完成后返回（最多 5 分钟） */
+    async _pollSegmentRetry(taskId: string, sceneIndex: number): Promise<void> {
+      const deadline = Date.now() + 300_000
+      while (Date.now() < deadline && this.activeTaskId === taskId) {
+        const fresh = await api.fetchSongScript(taskId).catch(() => null)
+        if (!fresh || this.activeTaskId !== taskId) return
+        const progress = fresh.outlineProgress as
+          { phase?: string; sceneIndex?: number; error?: string } | undefined
+        if (progress?.phase === 'segment_retry_failed') {
+          throw new Error(progress.error || '场景段大纲重新生成失败')
+        }
+        // outlineProgress 被清掉或 phase 不是 segment_retry 说明任务已结束
+        if (!progress || progress.phase !== 'segment_retry' || progress.sceneIndex !== sceneIndex) {
+          return
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2000))
       }
     },
 
@@ -757,6 +822,32 @@ export const useProjectStore = defineStore('project', {
         }
       } finally {
         this.songSwitching = false
+      }
+    },
+
+    /** 拖拽排序：项目 */
+    async reorderSongProjects(order: string[]) {
+      const prev = [...this.songProjects]
+      this.songProjects = order
+        .map((id) => this.songProjects.find((s) => s.id === id)!)
+        .filter(Boolean)
+      try {
+        await api.reorderProjects(order)
+      } catch {
+        this.songProjects = prev
+      }
+    },
+
+    /** 拖拽排序：子项目 */
+    async reorderSongTasks(songId: string, order: string[]) {
+      const song = this.songProjects.find((s) => s.id === songId)
+      if (!song) return
+      const prev = [...song.tasks]
+      song.tasks = order.map((id) => song.tasks.find((t) => t.id === id)!).filter(Boolean)
+      try {
+        await api.reorderProjectTasks(songId, order)
+      } catch {
+        song.tasks = prev
       }
     },
 
@@ -1013,14 +1104,16 @@ export const useProjectStore = defineStore('project', {
       try {
         const prompt = imageGen.buildPortraitPrompt(input.description, input.style)
         const id = nextId('dh')
-        const referenceImage =
-          input.referenceImage || this.digitalHumans.find((human) => human.readOnly)?.originalAvatar
+        const template = imageGen.getTemplateAvatar()
+        const userRef =
+          input.referenceImage || this.digitalHumans.find((human) => human.readOnly)?.avatar
+        const references = [template, userRef].filter(Boolean) as string[]
         const generated = await imageGen.generateImageAsset(
           prompt,
           {
             size: '1344x768',
             quality: 'medium',
-            ...(referenceImage ? { image: referenceImage } : {}),
+            ...(references.length ? { image: references } : {}),
           },
           // 任务创建后先留草稿：页面刷新后可据此恢复等待态并补建数字人
           (jobId) =>
@@ -1056,6 +1149,7 @@ export const useProjectStore = defineStore('project', {
       avatar: string
     }): Promise<DigitalHuman> {
       this.dhGenerating = true
+      this.dhGeneratingPhase = 'uploading'
       try {
         let styleId = this.dhStyleIds[input.style]
         if (!styleId) {
@@ -1066,9 +1160,15 @@ export const useProjectStore = defineStore('project', {
         }
         const prompt = imageGen.buildPortraitPrompt(input.description || input.name, input.style)
         const reference = await api.uploadDataUrl(input.avatar, `${nextId('reference')}.jpg`)
+        this.dhGeneratingPhase = 'generating'
+        const template = imageGen.getTemplateAvatar()
         const generated = await imageGen.generateImageAsset(
           prompt,
-          { size: '1344x768', quality: 'medium', image: reference.url },
+          {
+            size: '1344x768',
+            quality: 'medium',
+            image: template ? [template, reference.url] : reference.url,
+          },
           (jobId) =>
             savePendingDhDraft({
               mode: 'uploaded',
@@ -1092,6 +1192,7 @@ export const useProjectStore = defineStore('project', {
       } finally {
         clearPendingDhDraft()
         this.dhGenerating = false
+        this.dhGeneratingPhase = ''
       }
     },
 
@@ -1196,7 +1297,7 @@ export const useProjectStore = defineStore('project', {
     /** 用（可能已修改的）提示词重新生成数字人形象，成功后本地化存储并替换头像 */
     async regenerateDigitalHumanAvatar(id: string, prompt?: string): Promise<void> {
       const dh = this.digitalHumans.find((d) => d.id === id)
-      if (!dh || dh.readOnly || this.dhRegeneratingId) return
+      if (!dh || this.dhRegeneratingId) return
       this.dhRegeneratingId = id
       try {
         const finalPrompt = (
@@ -1204,17 +1305,20 @@ export const useProjectStore = defineStore('project', {
           dh.avatarPrompt ??
           imageGen.buildPortraitPrompt(dh.description, dh.style)
         ).trim()
+        const template = imageGen.getTemplateAvatar()
+        const dhRef = dh.avatar
+        const references = [template, dhRef].filter(Boolean) as string[]
         const generated = await imageGen.generateImageAsset(finalPrompt, {
           size: '1344x768',
           quality: 'medium',
-          image: dh.originalAvatar || dh.avatar,
+          ...(references.length ? { image: references } : {}),
         })
         dh.avatar = generated.thumbnailUrl || generated.url
-        dh.originalAvatar = await imageGen.localizeImage(dh.id, generated.url)
+        dh.originalAvatar = generated.url
         dh.avatarPrompt = finalPrompt
         if (!dh.readOnly)
           await api.updateDigitalHuman(id, {
-            avatar_url: dh.originalAvatar,
+            avatar_url: generated.url,
             avatar_thumbnail_url: generated.thumbnailUrl,
             avatar_prompt: finalPrompt,
           })

@@ -91,9 +91,9 @@ def test_general_storyboard_persists_type_specific_configuration(client) -> None
         f"/api/projects/{project['id']}/storyboards/general",
         headers=headers,
         json={
-            "genre": "pop",
-            "secondary_category": "positive-love",
-            "tertiary_category": "young-crush",
+            "genre": "流行歌曲",
+            "secondary_category": "爱情积极",
+            "tertiary_category": "青涩心动",
             "season": "春",
             "gender": "女",
             "age_group": "青年",
@@ -110,7 +110,7 @@ def test_general_storyboard_persists_type_specific_configuration(client) -> None
     result = response.json()
     assert result["title"].startswith("通用分镜-")
     assert len(result["title"]) == len("通用分镜-20260810-01-23-38")
-    assert result["storyboardConfig"]["genre"] == "pop"
+    assert result["storyboardConfig"]["genre"] == "流行歌曲"
     assert result["storyboardConfig"]["gender"] == "女"
     assert result["storyboardConfig"]["storyBible"]["visualContinuity"]["singerGender"] == "女"
     assert {line["shotType"] for line in result["lines"]} == {"empty", "character"}
@@ -119,6 +119,33 @@ def test_general_storyboard_persists_type_specific_configuration(client) -> None
     task = client.get(f"/api/tasks/{result['taskId']}", headers=headers).json()
     assert task["storyboardType"] == "general"
     assert task["overallPrompt"] == "统一暖色电影质感"
+
+
+def test_general_storyboard_allows_genre_without_secondary_category(client) -> None:
+    _, headers = create_and_login_user(client, "no-secondary-user")
+    project = client.post("/api/projects", headers=headers, json={"name": "Xiqu MV"}).json()
+    response = client.post(
+        f"/api/projects/{project['id']}/storyboards/general",
+        headers=headers,
+        json={
+            "genre": "戏曲",
+            "season": "春",
+            "gender": "女",
+            "age_group": "青年",
+            "visual_style": "国风",
+            "ratio": "16:9",
+            "empty_shot_count": 1,
+            "character_shot_count": 1,
+            "total_duration": 10,
+            "digital_human_ids": ["dh-system-020"],
+        },
+    )
+    assert response.status_code == 201
+    result = response.json()
+    assert result["storyboardConfig"]["secondary_category"] is None
+    logline = result["storyboardConfig"]["storyBible"]["logline"]
+    assert logline.startswith("戏曲 风格")
+    assert "None" not in logline
 
 
 def test_material_exports_are_isolated_between_users(client, monkeypatch) -> None:
@@ -136,8 +163,8 @@ def test_material_exports_are_isolated_between_users(client, monkeypatch) -> Non
         f"/api/projects/{project['id']}/storyboards/general",
         headers=user_a,
         json={
-            "genre": "pop",
-            "secondary_category": "positive",
+            "genre": "流行歌曲",
+            "secondary_category": "爱情消极",
             "season": "春",
             "gender": "女",
             "age_group": "青年",
@@ -168,8 +195,8 @@ def test_active_generations_reflect_running_jobs_only(client) -> None:
         f"/api/projects/{project['id']}/storyboards/general",
         headers=headers,
         json={
-            "genre": "pop",
-            "secondary_category": "positive",
+            "genre": "流行歌曲",
+            "secondary_category": "爱情消极",
             "season": "春",
             "gender": "女",
             "age_group": "青年",
@@ -210,3 +237,171 @@ def test_active_generations_reflect_running_jobs_only(client) -> None:
     assert active[0]["storyboardLineId"] == line_id
     assert active[0]["kind"] == "video"
     assert client.get(f"/api/tasks/{task_id}/generations/active", headers=other).status_code == 404
+
+
+# ---------- 拖拽排序（reorder）、素材导出清理、数字人列表排序 ----------
+
+
+def test_project_reorder_applies_only_to_own_projects(client) -> None:
+    _, headers = create_and_login_user(client, "reorder-owner")
+    ids = [client.post("/api/projects", headers=headers, json={"name": name}).json()["id"] for name in ("P1", "P2", "P3")]
+
+    reordered = [ids[2], ids[0], ids[1]]
+    response = client.patch("/api/projects/reorder", headers=headers, json={"order": reordered})
+    assert response.status_code == 200
+    listed = client.get("/api/projects", headers=headers).json()
+    assert [item["id"] for item in listed] == reordered
+
+    # 其它用户的项目 id 混入：被静默忽略（不占排序位，也不改写他人数据）
+    _, outsider = create_and_login_user(client, "reorder-outsider")
+    foreign = client.post("/api/projects", headers=outsider, json={"name": "foreign"}).json()
+    client.patch("/api/projects/reorder", headers=headers, json={"order": [ids[1], foreign["id"], ids[2]]})
+    listed = client.get("/api/projects", headers=headers).json()
+    assert [item["id"] for item in listed] == [ids[1], ids[0], ids[2]]
+    assert [item["id"] for item in client.get("/api/projects", headers=outsider).json()] == [foreign["id"]]
+
+
+def test_task_reorder_scoped_to_project_owner(client) -> None:
+    _, headers = create_and_login_user(client, "task-reorder-owner")
+    _, outsider = create_and_login_user(client, "task-reorder-outsider")
+    project = client.post("/api/projects", headers=headers, json={"name": "T"}).json()
+    task_ids = [client.post(f"/api/projects/{project['id']}/tasks", headers=headers, json={"title": title}).json()["id"] for title in ("t1", "t2", "t3")]
+
+    reordered = [task_ids[2], task_ids[0], task_ids[1]]
+    response = client.patch(f"/api/projects/{project['id']}/tasks/reorder", headers=headers, json={"order": reordered})
+    assert response.status_code == 200
+
+    def task_order(project_id: str) -> list[str]:
+        listed = client.get("/api/projects", headers=headers).json()
+        item = next(entry for entry in listed if entry["id"] == project_id)
+        return [task["id"] for task in item["tasks"]]
+
+    assert task_order(project["id"]) == reordered
+
+    # 越权：outsider 对该项目重排 → 404（项目不可见）
+    assert client.patch(f"/api/projects/{project['id']}/tasks/reorder", headers=outsider, json={"order": reordered}).status_code == 404
+
+    # 跨项目的 task id 混入：按 project_id 过滤跳过，不影响其它项目
+    other_project = client.post("/api/projects", headers=headers, json={"name": "T2"}).json()
+    other_task = client.post(f"/api/projects/{other_project['id']}/tasks", headers=headers, json={"title": "x"}).json()
+    client.patch(
+        f"/api/projects/{project['id']}/tasks/reorder",
+        headers=headers,
+        json={"order": [task_ids[1], other_task["id"], task_ids[2], task_ids[0]]},
+    )
+    assert task_order(project["id"]) == [task_ids[1], task_ids[2], task_ids[0]]
+    assert task_order(other_project["id"]) == [other_task["id"]]
+
+
+def _set_export_status(export_id: str, status: str) -> None:
+    import sqlite3
+
+    from conftest import TEST_DB
+
+    connection = sqlite3.connect(TEST_DB, timeout=10)
+    try:
+        connection.execute("UPDATE material_exports SET status = ? WHERE id = ?", (status, export_id))
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def test_material_export_supersedes_finished_history(client, monkeypatch) -> None:
+    import sqlite3
+    from dataclasses import replace
+
+    from conftest import TEST_DB
+
+    from app import domain
+
+    async def fake_export(export_id: str, job) -> dict:
+        # 不推进导出状态：导出记录保持 queued，便于测试幂等与清理分支
+        return {}
+
+    monkeypatch.setattr(domain, "_run_material_export", fake_export)
+
+    _, headers = create_and_login_user(client, "export-clean-owner")
+    project = client.post("/api/projects", headers=headers, json={"name": "E"}).json()
+    task = client.post(f"/api/projects/{project['id']}/tasks", headers=headers, json={"title": "e"}).json()
+    other_task = client.post(f"/api/projects/{project['id']}/tasks", headers=headers, json={"title": "e2"}).json()
+
+    try:
+        first = client.post(f"/api/tasks/{task['id']}/material-exports", headers=headers)
+        assert first.status_code == 202
+        # 进行中重复提交：幂等返回同一导出，不产生新记录
+        again = client.post(f"/api/tasks/{task['id']}/material-exports", headers=headers)
+        assert again.status_code == 202
+        assert again.json()["id"] == first.json()["id"]
+
+        # first 进入终态后再次导出：产生新记录，旧的 ready 记录被软删（每个子项目只留最新一次）
+        _set_export_status(first.json()["id"], "ready")
+        second = client.post(f"/api/tasks/{task['id']}/material-exports", headers=headers)
+        assert second.status_code == 202
+        assert second.json()["id"] != first.json()["id"]
+        listed = client.get(f"/api/tasks/{task['id']}/material-exports", headers=headers).json()
+        assert [item["id"] for item in listed] == [second.json()["id"]]
+
+        # failed 同样会被清理；其它任务的导出不受牵连
+        _set_export_status(second.json()["id"], "failed")
+        foreign = client.post(f"/api/tasks/{other_task['id']}/material-exports", headers=headers)
+        assert foreign.status_code == 202
+        _set_export_status(foreign.json()["id"], "ready")
+        third = client.post(f"/api/tasks/{task['id']}/material-exports", headers=headers)
+        assert third.status_code == 202
+        listed = client.get(f"/api/tasks/{task['id']}/material-exports", headers=headers).json()
+        assert [item["id"] for item in listed] == [third.json()["id"]]
+        assert client.get(f"/api/material-exports/{foreign.json()['id']}", headers=headers).status_code == 200
+
+        # 用户级并发上限：存在进行中导出时，对另一个任务发起导出返回 429
+        monkeypatch.setattr(domain, "settings", replace(domain.settings, export_per_user_concurrency=1))
+        blocked = client.post(f"/api/tasks/{other_task['id']}/material-exports", headers=headers)
+        assert blocked.status_code == 429
+        assert "导出" in blocked.json()["detail"]
+    finally:
+        # 清场：收编仍 queued 的导出，避免占用后续测试的用户级并发额度
+        connection = sqlite3.connect(TEST_DB, timeout=10)
+        try:
+            connection.execute("UPDATE material_exports SET status = 'cancelled' WHERE status IN ('queued', 'running')")
+            connection.commit()
+        finally:
+            connection.close()
+
+
+def test_private_humans_sort_before_system(client) -> None:
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+
+    from app.database import session_factory
+    from app.domain import uid
+    from app.models import DigitalHumanModel
+
+    user_id, headers = create_and_login_user(client, "dh-sort-owner")
+
+    async def insert_private(human_id: str, created_at: datetime) -> None:
+        async with session_factory() as db:
+            db.add(
+                DigitalHumanModel(
+                    id=human_id,
+                    user_id=user_id,
+                    scope="private",
+                    status="active",
+                    name=human_id,
+                    avatar_url="https://tos.test/avatar.png",
+                    created_at=created_at,
+                    updated_at=created_at,
+                )
+            )
+            await db.commit()
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    asyncio.run(insert_private(f"{uid('dh')}-old", now - timedelta(days=1)))
+    asyncio.run(insert_private(f"{uid('dh')}-new", now))
+
+    humans = client.get("/api/digital-humans", headers=headers).json()
+    scopes = [item["scope"] for item in humans]
+    # 私有角色整体排在系统人物之前
+    assert scopes == sorted(scopes, key=lambda scope: 0 if scope == "private" else 1)
+    # 同组内按创建时间倒序（新创建的排前面）
+    private_ids = [item["id"] for item in humans if item["scope"] == "private"]
+    assert private_ids.index(next(pid for pid in private_ids if pid.endswith("-new"))) < private_ids.index(next(pid for pid in private_ids if pid.endswith("-old")))
+    assert any(item["id"] == "dh-system-001" for item in humans)

@@ -53,9 +53,16 @@ export const useAuthStore = defineStore('auth', {
       }
     },
     async logout() {
+      const uid = this.user?.id
       await logoutRequest()
       this.user = null
       this.balance = null
+      // 清空用户相关的 localStorage
+      if (uid) {
+        localStorage.removeItem(`mv_sidebar_song_${uid}`)
+        localStorage.removeItem(`mv_sidebar_task_${uid}`)
+      }
+      localStorage.removeItem('mv:pending-dh')
     },
   },
 })

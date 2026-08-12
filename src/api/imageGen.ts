@@ -86,9 +86,22 @@ export async function generateImageAsset(
   return waitForImageAsset(taskId)
 }
 
-/** 数字人定妆照提示词模板（与批量生成脚本 scripts/generate-digital-humans.mjs 保持一致） */
+/** 数字人定妆照提示词模板 */
 export function buildPortraitPrompt(description: string, style: string): string {
-  return `MV 数字人角色三视图设定板。角色描述：${description || '依据参考图保持人物身份特征'}。视觉风格：${style || '电影写实'}。横版 16:9，单一角色，必须在同一张图中从左到右完整展示正面、90度侧面、背面三个人物全身视图；三视图必须保持同一张脸、同一发型、同一体型、同一服装、同一配饰和完全一致的色彩材质。人物从头顶到鞋底完整可见，站姿自然中性，比例准确，视图之间留有均匀间距。浅灰或米白纯色摄影棚背景，均匀柔光，无场景、无道具、无文字、无标签、无水印、无 Logo、无边框。禁止裁切身体，禁止额外人物，禁止把三个视图生成成不同角色。高质量角色设计参考图，可直接用于后续 MV 分镜人物一致性参考。`
+  const parts: string[] = []
+  if (description) parts.push(`角色描述：${description}`)
+  if (style) parts.push(`画面风格：${style}`)
+  const extra = parts.length ? parts.join('。') + '。' : ''
+  return `参照第一张参考图的构图版式、光线风格和清晰度。将参考图中的人物，替换为上传照片中的人物，保持一模一样的人物外貌、服装和配饰。${extra}除此之外的光线、背景、排版、画面品质，完全与参考图保持一致。`
+}
+
+/** 获取系统人物三视图模板（用于生成/重生的参考图） */
+let _templateAvatar: string | null = null
+export function setTemplateAvatar(url: string) {
+  _templateAvatar = url
+}
+export function getTemplateAvatar(): string | null {
+  return _templateAvatar
 }
 
 /** 生成结果已经由后端落入本地存储或 TOS，无需浏览器二次下载。 */

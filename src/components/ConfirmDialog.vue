@@ -5,7 +5,9 @@ import AppIcon from './AppIcon.vue'
 
 const { state, close } = useConfirmDialog()
 const onKeydown = (event: KeyboardEvent) => {
-  if (state.open && event.key === 'Escape') close(false)
+  if (!state.open) return
+  if (event.key === 'Escape') close(false)
+  if (event.key === 'Enter') close(true)
 }
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))

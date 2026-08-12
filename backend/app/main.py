@@ -234,7 +234,7 @@ async def create_ass_storyboard(
     digital_human_ids: str = Form("[]"),
     extra_requirement: str = Form(""),
     ratio: Literal["16:9", "9:16", "4:3", "1:1"] = Form("16:9"),
-    resolution: Literal["480p", "720p", "1080p"] = Form("720p"),
+    resolution: Literal["480p", "720p", "1080p"] = Form("480p"),
     image_model: str = Form("gpt-image-2"),
     video_model: str = Form("doubao-seedance-2.0"),
     db: AsyncSession = Depends(database_session),
@@ -288,7 +288,7 @@ async def create_ass_storyboard(
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     ass_url = await get_storage().put_bytes(safe_key(f"users/{user.id}/ass", ass_file.filename), content, ass_file.content_type)
-    title = emotion.song_code
+    title = f"{emotion.song_name} – {emotion.song_code}"
     task = ProjectTaskModel(
         id=uid("task"),
         project_id=project_id,
@@ -389,10 +389,30 @@ async def generation_context(user: UserModel, task_id: str | None, line_id: str 
     return task.project_id, task.id, line_id
 
 
+async def _check_concurrency(db: AsyncSession, user_id: str, kind: str, limit: int) -> None:
+    """检查单用户同类型生成任务的并发数，超限抛出 429。"""
+    from sqlalchemy import func
+
+    count = (
+        await db.execute(
+            select(func.count(GenerationJobModel.id)).where(
+                GenerationJobModel.user_id == user_id,
+                GenerationJobModel.kind == kind,
+                GenerationJobModel.deleted_at.is_(None),
+                GenerationJobModel.status.in_(("queued", "running")),
+            )
+        )
+    ).scalar_one()
+    if count >= limit:
+        label = "视频" if kind == "video" else "图片"
+        raise HTTPException(429, f"同时进行的{label}生成已达上限（{limit}个），请等待部分任务完成后再提交")
+
+
 @app.post("/api/generations/images", status_code=202)
 async def create_image_generation(payload: ImageGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
     await require_active_model(db, payload.model or settings.image_model, "image")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
+    await _check_concurrency(db, user.id, "image", 20)
     await consume_daily_quota(db, user_id=user.id, category="image", limit=settings.daily_image_limit)
     job = await jobs.create(
         "image",
@@ -410,6 +430,7 @@ async def create_image_generation(payload: ImageGenerationCreate, user: CurrentU
 async def create_video_generation(payload: VideoGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
     await require_active_model(db, payload.model or settings.video_model, "video")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
+    await _check_concurrency(db, user.id, "video", 20)
     await consume_daily_quota(db, user_id=user.id, category="video", limit=settings.daily_video_limit)
     job = await jobs.create(
         "video",

@@ -267,9 +267,9 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
       const general = await json(
         await user.post(`/api/projects/${projectId}/storyboards/general`, {
           data: {
-            genre: 'pop',
-            secondary_category: 'city',
-            tertiary_category: 'night',
+            genre: '流行歌曲',
+            secondary_category: '爱情消极',
+            tertiary_category: '失恋',
             season: 'autumn',
             gender: '女',
             age_group: 'adult',

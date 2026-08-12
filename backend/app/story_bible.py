@@ -71,9 +71,11 @@ def build_ass_story_bible(*, segments: list[dict[str, Any]], emotion: dict[str, 
 
 def build_general_story_bible(*, config: dict[str, Any], definitions: list[tuple[str, tuple[str, str], list[str]]], durations: list[float]) -> dict[str, Any]:
     total = len(definitions)
+    # 部分曲风（戏曲、中文喊麦）没有二级分类，拼接风格路径时跳过空段
+    category_path = " / ".join(part for part in (config.get("genre"), config.get("secondary_category")) if part)
     return {
         "version": STORY_BIBLE_VERSION,
-        "logline": f"{config.get('genre')} / {config.get('secondary_category')} 风格的完整 MV 视觉弧光，出镜人物性别构成：{config.get('gender') or '女'}。",
+        "logline": f"{category_path} 风格的完整 MV 视觉弧光，出镜人物性别构成：{config.get('gender') or '女'}。",
         "visualContinuity": {
             "season": config.get("season"),
             "singerGender": config.get("gender"),

@@ -25,6 +25,7 @@ export type IconName =
   | 'folder'
   | 'chevron-right'
   | 'alert'
+  | 'download'
 
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
 
@@ -78,6 +79,7 @@ const paths: Record<IconName, string[]> = {
     'M9.29 6.71a.996.996 0 0 0 0 1.41L13.17 12l-3.88 3.88a.996.996 0 1 0 1.41 1.41l4.59-4.59a.996.996 0 0 0 0-1.41L10.7 6.7a.996.996 0 0 0-1.41.01z',
   ],
   alert: ['M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-6h-2v-4h2v4z'],
+  download: ['M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z'],
 }
 </script>
 

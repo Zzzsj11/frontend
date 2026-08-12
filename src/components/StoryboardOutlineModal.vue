@@ -1,10 +1,14 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useProjectStore } from '../stores/project'
 import { confirmDialog } from '../composables/useConfirmDialog'
 import AppIcon from './AppIcon.vue'
 import BaseModal from './base/BaseModal.vue'
 
 const store = useProjectStore()
+
+const tab = ref<'scenes' | 'shots'>('shots')
+
 const roleNames = (ids: string[] = []) =>
   ids.map((id) => store.digitalHumanOf(id)?.name || id).join('、')
 const roleIdsOf = (shot: NonNullable<typeof store.activeStoryBible>['shots'][number]) =>
@@ -54,90 +58,153 @@ const regenerate = async () => {
   >
     <template #title> <AppIcon name="file" :size="17" /> MV 大纲总览 </template>
     <template v-if="store.activeStoryBible">
-      <p class="outline-sub">{{ store.activeStoryBible.logline }}</p>
-      <div class="policy">{{ displayPolicy(store.activeStoryBible.characterPolicy) }}</div>
-      <div v-if="store.failedOutlineSegments.length" class="failed-segments">
-        <div
-          v-for="seg in store.failedOutlineSegments"
-          :key="seg.sceneIndex"
-          class="failed-segment"
-        >
-          <span class="failed-text" :title="seg.error"
-            >场景{{ seg.sceneIndex + 1 }}「{{
-              seg.locationName
-            }}」大纲生成失败，该段镜头已保留占位</span
-          >
-          <button
-            :disabled="!!store.segmentRetrying[seg.sceneIndex]"
-            @click="store.retryOutlineSegment(seg.sceneIndex)"
-          >
-            {{ store.segmentRetrying[seg.sceneIndex] ? '正在重新生成…' : '重新生成该场景段' }}
-          </button>
-        </div>
-      </div>
-      <div class="outline-list">
-        <article
-          v-for="shot in store.activeStoryBible.shots"
-          :key="shot.index"
-          class="outline-shot"
-          :class="{ 'is-failed': shot.outlineStatus === 'failed' }"
-        >
-          <div class="shot-index">{{ String(shot.index + 1).padStart(2, '0') }}</div>
-          <div class="shot-content">
-            <div class="shot-head">
-              <strong>{{ shot.stage }}</strong>
-              <span :class="['shot-type', shotTypeOf(shot)]">{{
-                shotTypeOf(shot) === 'character' ? '人物镜' : '空镜'
-              }}</span>
-              <span v-if="shot.outlineStatus === 'failed'" class="failed-tag">大纲未生成</span>
-              <span v-if="shot.generationDuration" class="duration-tag"
-                >生成 {{ shot.generationDuration }} 秒</span
-              >
-            </div>
-            <p v-if="shot.lyrics || shot.timelineLabel" class="lyrics">
-              {{ shot.lyrics || `【${shot.timelineLabel}】` }}
-            </p>
-            <p class="intent">
-              {{ shot.intent || [shot.outlineScene, shot.outlineShot].filter(Boolean).join('；') }}
-            </p>
-            <p class="roles">
-              出场人物：{{
-                shotTypeOf(shot) === 'character' ? roleNames(roleIdsOf(shot)) || '尚未分配' : '无人'
-              }}
-            </p>
-            <div v-if="shot.locationId || shot.characterAction" class="shot-contract">
-              <span v-if="shot.locationId"
-                ><b>场景：</b>{{ locationOf(shot.locationId)?.name || shot.locationId
-                }}{{ shot.locationChange ? ' · 切换地点' : ' · 延续地点' }}</span
-              >
-              <span v-if="shot.characterAction"><b>动作：</b>{{ shot.characterAction }}</span>
-              <span v-if="shot.emotionalFocus"><b>情绪：</b>{{ shot.emotionalFocus }}</span>
-              <span v-if="shot.cameraPurpose"><b>镜头目的：</b>{{ shot.cameraPurpose }}</span>
-              <span v-if="shot.motifIds?.length"
-                ><b>视觉母题：</b>{{ motifNames(shot.motifIds) }}</span
-              >
-              <span v-if="shot.sourceDuration !== undefined"
-                ><b>歌词显示：</b>{{ shot.sourceDuration }} 秒</span
-              >
-              <span v-if="shot.gapBefore"><b>前间隙：</b>{{ shot.gapBefore }} 秒</span>
-              <span v-if="shot.gapAfter"
-                ><b>后间隙：</b>{{ shot.gapAfter }} 秒 ·
-                {{
-                  shot.gapAfterAllocation === 'current'
-                    ? '归入本镜'
-                    : shot.gapAfterAllocation === 'next'
-                      ? '归入下镜'
-                      : '不合并'
-                }}</span
-              >
-              <span v-if="shot.materialDuration !== undefined"
-                ><b>时间轴素材：</b>{{ shot.materialDuration }} 秒</span
-              >
-            </div>
+      <!-- Tab 切换 -->
+      <nav class="outline-tabs">
+        <button :class="{ active: tab === 'scenes' }" @click="tab = 'scenes'">场景总览</button>
+        <button :class="{ active: tab === 'shots' }" @click="tab = 'shots'">逐镜大纲</button>
+      </nav>
+
+      <!-- 场景总览 Tab -->
+      <template v-if="tab === 'scenes'">
+        <div v-if="store.activeStoryBible.scenePlan?.length" class="scene-list">
+          <div class="global-visual" v-if="store.activeStoryBible.globalVisual">
+            <h4>全片视觉基调</h4>
+            <dl>
+              <template v-for="(v, k) in store.activeStoryBible.globalVisual" :key="k">
+                <dt>
+                  {{
+                    {
+                      visualStyle: '视觉风格',
+                      colorPalette: '调色板',
+                      lighting: '光线',
+                      weather: '天气',
+                      timeOfDay: '时间',
+                      continuityRules: '连续性规则',
+                    }[k] || k
+                  }}
+                </dt>
+                <dd>{{ Array.isArray(v) ? v.join('；') : v }}</dd>
+              </template>
+            </dl>
           </div>
-        </article>
-      </div>
-      <p v-if="store.outlineError" class="outline-error">{{ store.outlineError }}</p>
+          <article
+            v-for="scene in store.activeStoryBible.scenePlan"
+            :key="scene.sceneIndex"
+            class="scene-card"
+          >
+            <div class="scene-index">{{ String(scene.sceneIndex + 1).padStart(2, '0') }}</div>
+            <div class="scene-body">
+              <div class="scene-head">
+                <strong>{{ scene.locationName }}</strong>
+                <span class="scene-range"
+                  >第 {{ (scene.lineStart ?? 0) + 1 }} – {{ (scene.lineEnd ?? 0) + 1 }} 句</span
+                >
+              </div>
+              <div class="scene-attrs">
+                <span v-if="scene.mood"><b>意境：</b>{{ scene.mood }}</span>
+                <span v-if="scene.emotion"><b>情绪：</b>{{ scene.emotion }}</span>
+                <span v-if="scene.visualTone"><b>视觉基调：</b>{{ scene.visualTone }}</span>
+                <span v-if="scene.narrativePurpose"
+                  ><b>叙事功能：</b>{{ scene.narrativePurpose }}</span
+                >
+              </div>
+            </div>
+          </article>
+        </div>
+        <p v-else class="empty-tab">暂无场景规划数据</p>
+      </template>
+
+      <!-- 逐镜大纲 Tab（原内容） -->
+      <template v-if="tab === 'shots'">
+        <p class="outline-sub">{{ store.activeStoryBible.logline }}</p>
+        <div class="policy">{{ displayPolicy(store.activeStoryBible.characterPolicy) }}</div>
+        <div v-if="store.failedOutlineSegments.length" class="failed-segments">
+          <div
+            v-for="seg in store.failedOutlineSegments"
+            :key="seg.sceneIndex"
+            class="failed-segment"
+          >
+            <span class="failed-text" :title="seg.error"
+              >场景{{ seg.sceneIndex + 1 }}「{{
+                seg.locationName
+              }}」大纲生成失败，该段镜头已保留占位</span
+            >
+            <button
+              :disabled="!!store.segmentRetrying[seg.sceneIndex]"
+              @click="store.retryOutlineSegment(seg.sceneIndex)"
+            >
+              {{ store.segmentRetrying[seg.sceneIndex] ? '正在重新生成…' : '重新生成该场景段' }}
+            </button>
+          </div>
+        </div>
+        <div class="outline-list">
+          <article
+            v-for="shot in store.activeStoryBible.shots"
+            :key="shot.index"
+            class="outline-shot"
+            :class="{ 'is-failed': shot.outlineStatus === 'failed' }"
+          >
+            <div class="shot-index">{{ String(shot.index + 1).padStart(2, '0') }}</div>
+            <div class="shot-content">
+              <div class="shot-head">
+                <strong>{{ shot.stage }}</strong>
+                <span :class="['shot-type', shotTypeOf(shot)]">{{
+                  shotTypeOf(shot) === 'character' ? '人物镜' : '空镜'
+                }}</span>
+                <span v-if="shot.outlineStatus === 'failed'" class="failed-tag">大纲未生成</span>
+                <span v-if="shot.generationDuration" class="duration-tag"
+                  >生成 {{ shot.generationDuration }} 秒</span
+                >
+              </div>
+              <p v-if="shot.lyrics || shot.timelineLabel" class="lyrics">
+                {{ shot.lyrics || `【${shot.timelineLabel}】` }}
+              </p>
+              <p class="intent">
+                {{
+                  shot.intent || [shot.outlineScene, shot.outlineShot].filter(Boolean).join('；')
+                }}
+              </p>
+              <p class="roles">
+                出场人物：{{
+                  shotTypeOf(shot) === 'character'
+                    ? roleNames(roleIdsOf(shot)) || '尚未分配'
+                    : '无人'
+                }}
+              </p>
+              <div v-if="shot.locationId || shot.characterAction" class="shot-contract">
+                <span v-if="shot.locationId"
+                  ><b>场景：</b>{{ locationOf(shot.locationId)?.name || shot.locationId
+                  }}{{ shot.locationChange ? ' · 切换地点' : ' · 延续地点' }}</span
+                >
+                <span v-if="shot.characterAction"><b>动作：</b>{{ shot.characterAction }}</span>
+                <span v-if="shot.emotionalFocus"><b>情绪：</b>{{ shot.emotionalFocus }}</span>
+                <span v-if="shot.cameraPurpose"><b>镜头目的：</b>{{ shot.cameraPurpose }}</span>
+                <span v-if="shot.motifIds?.length"
+                  ><b>视觉母题：</b>{{ motifNames(shot.motifIds) }}</span
+                >
+                <span v-if="shot.sourceDuration !== undefined"
+                  ><b>歌词显示：</b>{{ shot.sourceDuration }} 秒</span
+                >
+                <span v-if="shot.gapBefore"><b>前间隙：</b>{{ shot.gapBefore }} 秒</span>
+                <span v-if="shot.gapAfter"
+                  ><b>后间隙：</b>{{ shot.gapAfter }} 秒 ·
+                  {{
+                    shot.gapAfterAllocation === 'current'
+                      ? '归入本镜'
+                      : shot.gapAfterAllocation === 'next'
+                        ? '归入下镜'
+                        : '不合并'
+                  }}</span
+                >
+                <span v-if="shot.materialDuration !== undefined"
+                  ><b>时间轴素材：</b>{{ shot.materialDuration }} 秒</span
+                >
+              </div>
+            </div>
+          </article>
+        </div>
+        <p v-if="store.outlineError" class="outline-error">{{ store.outlineError }}</p>
+      </template>
     </template>
     <template #footer>
       <span class="outline-tip">该大纲将指导后续每条视频提示词生成，只支持查看。</span>
@@ -159,6 +226,132 @@ const regenerate = async () => {
 </template>
 
 <style scoped>
+/* ---------- Tabs ---------- */
+.outline-tabs {
+  display: flex;
+  gap: 0;
+  margin: 10px 20px 0;
+  border-bottom: 2px solid var(--border-light, #eee);
+}
+.outline-tabs button {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
+}
+.outline-tabs button:hover {
+  color: var(--text);
+}
+.outline-tabs button.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+/* ---------- 场景总览 ---------- */
+.scene-list {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 9px;
+  overflow: auto;
+  padding: 14px 20px;
+}
+.global-visual {
+  margin-bottom: 6px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: #f8f5f0;
+}
+.global-visual h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+.global-visual dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+.global-visual dt {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.global-visual dd {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.5;
+}
+.scene-card {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: #fff;
+}
+.scene-index {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: var(--font-sm);
+  font-weight: 750;
+}
+.scene-body {
+  min-width: 0;
+  flex: 1;
+}
+.scene-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.scene-head strong {
+  font-size: 13px;
+}
+.scene-range {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.scene-attrs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+  margin-top: 7px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: #faf8f6;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.scene-attrs b {
+  color: var(--text);
+  font-weight: 650;
+}
+.empty-tab {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
 .outline-sub {
   margin: 14px 20px 0;
   color: var(--text-secondary);

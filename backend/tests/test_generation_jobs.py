@@ -237,3 +237,108 @@ def test_admin_job_sync_resumes_orphan_running_at_provider(client, monkeypatch) 
     body = response.json()
     assert body["action"] == "resumed"
     assert body["providerStatus"] == "RUNNING"
+
+
+# ---------- 单用户并发上限（429）与供应商错误友好翻译 ----------
+
+
+def _insert_owned_job(job_id: str, *, user_id: str, kind: str = "image", status: str = "queued", deleted: bool = False) -> None:
+    """带属主的任务插入：_check_concurrency 按 user_id + kind + 活跃状态计数。"""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+    connection = sqlite3.connect(TEST_DB, timeout=10)
+    try:
+        connection.execute(
+            "INSERT INTO generation_jobs (id, kind, status, progress, request, attempt, user_id, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (job_id, kind, status, 10, "{}", 1, user_id, now, now, now if deleted else None),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _fail_active_jobs() -> None:
+    connection = sqlite3.connect(TEST_DB, timeout=10)
+    try:
+        connection.execute("UPDATE generation_jobs SET status = 'failed' WHERE status IN ('queued', 'running')")
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def test_generation_concurrency_limit_returns_429(client, monkeypatch) -> None:
+    from app import main
+
+    user = client.get("/api/auth/me").json()
+    # 清场：前序测试遗留的活跃任务先收编，保证计数精确
+    _fail_active_jobs()
+
+    async def fake_image(payload, job) -> dict:
+        return {"urls": ["https://tos.test/images/ok.png"]}
+
+    async def fake_video(payload, job) -> dict:
+        return {"videoUrl": "https://tos.test/videos/ok.mp4", "coverUrl": "https://tos.test/images/ok.png", "duration": 5}
+
+    monkeypatch.setattr(main, "generate_image", fake_image)
+    monkeypatch.setattr(main, "generate_video", fake_video)
+
+    try:
+        # 上限 20：占满 20 个活跃图片任务后，第 21 个被拒（429 在消耗配额之前）
+        for index in range(20):
+            _insert_owned_job(f"job-conc-img-{index}", user_id=user["id"], kind="image")
+        blocked = client.post("/api/generations/images", json={"prompt": "concurrency"})
+        assert blocked.status_code == 429
+        assert "图片" in blocked.json()["detail"] and "20" in blocked.json()["detail"]
+
+        # 终态与软删除不占额度：一条转 failed、一条软删后可再各进一条
+        connection = sqlite3.connect(TEST_DB, timeout=10)
+        try:
+            connection.execute("UPDATE generation_jobs SET status = 'failed' WHERE id = 'job-conc-img-0'")
+            connection.execute("UPDATE generation_jobs SET deleted_at = datetime('now') WHERE id = 'job-conc-img-1'")
+            connection.commit()
+        finally:
+            connection.close()
+        assert client.post("/api/generations/images", json={"prompt": "after-terminal"}).status_code == 202
+        assert client.post("/api/generations/images", json={"prompt": "after-soft-delete"}).status_code == 202
+
+        # 类型独立：图片占满不影响视频提交
+        assert client.post("/api/generations/videos", json={"prompt": "v", "duration": 5}).status_code == 202
+
+        # 用户隔离：其它用户占满图片额度不影响当前用户
+        for index in range(20):
+            _insert_owned_job(f"job-conc-other-{index}", user_id="user-not-admin", kind="image")
+        assert client.post("/api/generations/images", json={"prompt": "isolation"}).status_code == 202
+    finally:
+        _fail_active_jobs()
+        # 本测试成功提交的请求消耗了 admin 的当日配额，清除避免挤占后续配额断言
+        connection = sqlite3.connect(TEST_DB, timeout=10)
+        try:
+            connection.execute("DELETE FROM daily_usage_quotas WHERE user_id = ? AND category IN ('image', 'video')", (user["id"],))
+            connection.commit()
+        finally:
+            connection.close()
+
+
+def test_raise_for_status_translates_aigc_error_codes() -> None:
+    import httpx
+
+    from app.providers import ProviderError, _raise_for_status
+
+    def make_response(status: int, payload: dict | None) -> httpx.Response:
+        request = httpx.Request("POST", "https://provider.test/tasks")
+        if payload is None:
+            return httpx.Response(status, content=b"<html>bad gateway</html>", request=request)
+        return httpx.Response(status, json=payload, request=request)
+
+    # 命中映射：额度耗尽翻译为可执行的友好提示
+    with pytest.raises(ProviderError, match="视频生成额度已用尽"):
+        _raise_for_status(make_response(400, {"code": 500, "msg": "task failed", "data": {"code": "VID-4030"}}))
+    with pytest.raises(ProviderError, match="图片生成额度已用尽"):
+        _raise_for_status(make_response(403, {"msg": "denied", "data": {"code": "IMG-4030"}}))
+    # 未命中映射：透传供应商 msg
+    with pytest.raises(ProviderError, match="内容审核未通过"):
+        _raise_for_status(make_response(400, {"msg": "内容审核未通过", "data": {"code": "VID-9999"}}))
+    # body 非 JSON：回退为 HTTP 状态错误描述
+    with pytest.raises(ProviderError):
+        _raise_for_status(make_response(502, None))
+    # 2xx 正常返回不抛错
+    _raise_for_status(make_response(200, {"code": 200, "data": {}}))

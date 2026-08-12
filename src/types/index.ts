@@ -264,7 +264,8 @@ export type GeneralGender = (typeof GENERAL_GENDER_OPTIONS)[number]
 export interface GeneralStoryboardRequest {
   projectId?: string
   genre: string
-  secondaryCategory: string
+  /** 二级分类：部分曲风（戏曲、中文喊麦）无下级分类，可为空 */
+  secondaryCategory?: string
   tertiaryCategory?: string
   season: string
   gender: GeneralGender

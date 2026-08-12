@@ -54,6 +54,7 @@ class ProjectModel(LifecycleMixin, Base):
     description: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(32), default="active", index=True)
     cover_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)
 
 
 class SongEmotionProfileModel(LifecycleMixin, Base):
@@ -81,6 +82,7 @@ class ProjectTaskModel(LifecycleMixin, Base):
     extra_requirement: Mapped[str] = mapped_column(Text, default="")
     overall_prompt: Mapped[str] = mapped_column(Text, default="")
     storyboard_config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class DigitalHumanStyleModel(LifecycleMixin, Base):

@@ -23,6 +23,14 @@ const refreshAccess = async () => {
       })
   return refreshPromise
 }
+/** token 彻底失效时清空本地状态并跳转登录页 */
+const forceLogout = () => {
+  accessToken = ''
+  // 避免循环 redirect：当前已在 /login 页则不再跳转
+  if (window.location.pathname !== '/login') {
+    window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`
+  }
+}
 export async function apiRequest<T>(
   path: string,
   init: RequestInit = {},
@@ -65,8 +73,11 @@ export async function apiRequest<T>(
       }
     }
   }
-  if (response.status === 401 && retry && !path.startsWith('/auth/') && (await refreshAccess()))
-    return apiRequest<T>(path, init, false)
+  if ((response.status === 401 || response.status === 403) && retry && !path.startsWith('/auth/')) {
+    if (await refreshAccess()) return apiRequest<T>(path, init, false)
+    forceLogout()
+    throw reportApiError(new ApiError('登录已过期，请重新登录', response.status))
+  }
   const body = await response.json().catch(() => ({}))
   if (!response.ok)
     throw reportApiError(
@@ -95,8 +106,11 @@ export async function openApiStream(
   } catch (error) {
     throw reportApiError(error, '实时进度连接失败')
   }
-  if (response.status === 401 && retry && (await refreshAccess()))
-    return openApiStream(path, signal, false)
+  if ((response.status === 401 || response.status === 403) && retry) {
+    if (await refreshAccess()) return openApiStream(path, signal, false)
+    forceLogout()
+    throw reportApiError(new ApiError('登录已过期，请重新登录', response.status))
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw reportApiError(

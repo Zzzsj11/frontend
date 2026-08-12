@@ -19,6 +19,33 @@ class ProviderError(RuntimeError):
     pass
 
 
+# AIGC 供应商错误码 → 用户友好提示
+_AIGC_FRIENDLY_ERRORS: dict[str, str] = {
+    "VID-4030": "视频生成额度已用尽，请联系管理员充值或更换 API Key",
+    "IMG-4030": "图片生成额度已用尽，请联系管理员充值或更换 API Key",
+}
+
+
+def _raise_for_status(response: httpx.Response) -> None:
+    """对 AIGC 返回的 HTTP 错误，尝试解析 body 中的业务错误码并翻译为友好提示。"""
+    try:
+        response.raise_for_status()
+        return
+    except httpx.HTTPStatusError as exc:
+        try:
+            body = response.json()
+            code = (body.get("data") or {}).get("code", "")
+            msg = body.get("msg", "")
+        except Exception:
+            raise ProviderError(str(exc)) from exc
+        friendly = _AIGC_FRIENDLY_ERRORS.get(code)
+        if friendly:
+            raise ProviderError(friendly) from exc
+        if msg:
+            raise ProviderError(msg) from exc
+        raise ProviderError(str(exc)) from exc
+
+
 def _headers(api_key: str, *, x_api_key: bool = False) -> dict[str, str]:
     auth = {"x-api-key": api_key} if x_api_key else {"Authorization": f"Bearer {api_key}"}
     return {**auth, "Content-Type": "application/json", "Idempotency-Key": str(uuid.uuid4())}
@@ -39,7 +66,7 @@ def _usage(data: dict[str, Any]) -> dict[str, Any]:
 
 IMAGE_POLL_TIMEOUT_SECONDS = 360
 VIDEO_POLL_TIMEOUT_SECONDS = 900
-POLL_INTERVAL_SECONDS = 3
+POLL_INTERVAL_SECONDS = 30
 POLL_MAX_CONSECUTIVE_ERRORS = 5
 
 
@@ -57,7 +84,7 @@ def _video_config() -> tuple[str, dict[str, str]]:
 
 async def _query_task(client: httpx.AsyncClient, url: str, headers: dict[str, str]) -> dict[str, Any]:
     response = await client.get(url, headers=headers)
-    response.raise_for_status()
+    _raise_for_status(response)
     return _unwrap(response.json())
 
 
@@ -105,7 +132,7 @@ async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, 
         payload["image"] = request.images if len(request.images) > 1 else request.images[0]
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(f"{base}/image/generation/tasks", headers=headers, json=payload)
-        response.raise_for_status()
+        _raise_for_status(response)
         created = _unwrap(response.json())
         task_id = created.get("taskId")
         if not task_id:
@@ -147,7 +174,7 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
     }
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(f"{base}/video/generation/tasks", headers=headers, json=payload)
-        response.raise_for_status()
+        _raise_for_status(response)
         created = _unwrap(response.json())
         task_id = created.get("taskId")
         if not task_id:

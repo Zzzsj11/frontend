@@ -8,6 +8,77 @@ import { confirmDialog } from '../composables/useConfirmDialog'
 
 const store = useProjectStore()
 
+// ---------- 拖拽排序 ----------
+const dragKind = ref<'song' | 'task' | null>(null)
+const dragSongId = ref<string | null>(null)
+const dragOverIndex = ref<number | null>(null)
+
+const onSongDragStart = (e: DragEvent, song: SongProject) => {
+  if (editingSongId.value) return
+  dragKind.value = 'song'
+  dragSongId.value = song.id
+  e.dataTransfer!.effectAllowed = 'move'
+  e.dataTransfer!.setData('text/plain', song.id)
+}
+const onSongDragOver = (e: DragEvent, index: number) => {
+  if (dragKind.value !== 'song') return
+  e.preventDefault()
+  dragOverIndex.value = index
+}
+const onSongDrop = async (e: DragEvent) => {
+  e.preventDefault()
+  dragOverIndex.value = null
+  if (dragKind.value !== 'song' || !dragSongId.value) return
+  const fromId = dragSongId.value
+  const newOrder = store.songProjects.map((s) => s.id)
+  const fromIdx = newOrder.indexOf(fromId)
+  const toIdx = store.songProjects.findIndex((_, i) => i === Math.max(0, dragOverIndex.value ?? 0))
+  if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) {
+    newOrder.splice(fromIdx, 1)
+    newOrder.splice(toIdx, 0, fromId)
+    await store.reorderSongProjects(newOrder)
+  }
+  dragKind.value = null
+  dragSongId.value = null
+}
+const onSongDragEnd = () => {
+  dragOverIndex.value = null
+}
+
+const onTaskDragStart = (e: DragEvent, songId: string, task: SongTask) => {
+  if (editingTaskId.value) return
+  dragKind.value = 'task'
+  dragSongId.value = songId
+  e.dataTransfer!.effectAllowed = 'move'
+  e.dataTransfer!.setData('text/plain', task.id)
+}
+const onTaskDragOver = (e: DragEvent, index: number) => {
+  if (dragKind.value !== 'task') return
+  e.preventDefault()
+  dragOverIndex.value = index
+}
+const onTaskDrop = async (e: DragEvent, songId: string) => {
+  e.preventDefault()
+  dragOverIndex.value = null
+  if (dragKind.value !== 'task' || dragSongId.value !== songId) return
+  const song = store.songProjects.find((s) => s.id === songId)
+  if (!song) return
+  const draggedId = e.dataTransfer!.getData('text/plain')
+  const newOrder = song.tasks.map((t) => t.id)
+  const fromIdx = newOrder.indexOf(draggedId)
+  const toIdx = Math.max(0, dragOverIndex.value ?? 0)
+  if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) {
+    newOrder.splice(fromIdx, 1)
+    newOrder.splice(toIdx, 0, draggedId)
+    await store.reorderSongTasks(songId, newOrder)
+  }
+  dragKind.value = null
+  dragSongId.value = null
+}
+const onTaskDragEnd = () => {
+  dragOverIndex.value = null
+}
+
 /** 折叠的歌曲目录 id 集合（默认全部展开） */
 const collapsed = ref<Set<string>>(new Set())
 const toggleCollapse = (songId: string) => {
@@ -175,12 +246,23 @@ onMounted(() => {
       </div>
 
       <div
-        v-for="song in store.songProjects"
+        v-for="(song, index) in store.songProjects"
         v-show="!store.songProjectsLoading && !store.songProjectsError"
         :key="song.id"
         class="song-group"
       >
-        <div class="song-folder" :class="{ current: song.id === store.activeSongId }">
+        <div
+          class="song-folder"
+          :class="{
+            current: song.id === store.activeSongId,
+            'drag-over': dragKind === 'song' && dragOverIndex === index,
+          }"
+          draggable="true"
+          @dragstart="onSongDragStart($event, song)"
+          @dragover="onSongDragOver($event, index)"
+          @drop="onSongDrop($event)"
+          @dragend="onSongDragEnd"
+        >
           <input
             v-if="editingSongId === song.id"
             :ref="autoFocus"
@@ -220,10 +302,19 @@ onMounted(() => {
 
         <template v-if="!collapsed.has(song.id)">
           <div
-            v-for="task in song.tasks"
+            v-for="(task, tIndex) in song.tasks"
             :key="task.id"
             class="task-item"
-            :class="{ active: song.id === store.activeSongId && task.id === store.activeTaskId }"
+            :class="{
+              active: song.id === store.activeSongId && task.id === store.activeTaskId,
+              'drag-over':
+                dragKind === 'task' && dragSongId === song.id && dragOverIndex === tIndex,
+            }"
+            draggable="true"
+            @dragstart="onTaskDragStart($event, song.id, task)"
+            @dragover="onTaskDragOver($event, tIndex)"
+            @drop="onTaskDrop($event, song.id)"
+            @dragend="onTaskDragEnd"
           >
             <input
               v-if="editingTaskId === task.id"
@@ -242,14 +333,13 @@ onMounted(() => {
                 @click="pickTask(song.id, task.id)"
               >
                 <span class="task-dot" />
-                <span class="task-title">{{ task.title }}</span>
+                <span class="task-title" :title="task.title">{{ task.title }}</span>
                 <span
                   v-if="taskStatusLabel(task.status)"
                   class="task-status"
                   :class="{ alert: taskStatusAlert(task.status) }"
                   >{{ taskStatusLabel(task.status) }}</span
                 >
-                <span class="task-time">{{ task.updatedAt }}</span>
               </button>
               <span class="row-actions">
                 <button class="row-act" title="重命名" @click.stop="startRenameTask(task)">
@@ -642,5 +732,17 @@ onMounted(() => {
 }
 .rename-input.task-rename {
   margin-left: 14px;
+}
+
+/* 拖拽排序 */
+.song-folder[draggable='true'],
+.task-item[draggable='true'] {
+  cursor: grab;
+}
+.song-folder.drag-over,
+.task-item.drag-over {
+  outline: 2px dashed var(--primary);
+  outline-offset: -2px;
+  background: rgba(255, 90, 44, 0.06);
 }
 </style>

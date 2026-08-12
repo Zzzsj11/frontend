@@ -203,6 +203,17 @@ const onGenerateShot = async () => {
         "
         @click="onGenerateShot"
       />
+      <!-- 下载视频 -->
+      <a
+        v-if="line.shot.status === 'done' && video"
+        class="base-icon-btn download-btn"
+        :href="video"
+        download
+        title="下载视频"
+        :aria-label="'下载视频'"
+      >
+        <AppIcon name="download" :size="15" />
+      </a>
       <!-- 删除（仅手动添加的分镜可删，脚本生成的分镜不显示） -->
       <BaseIconButton
         v-if="line.manual"
@@ -461,5 +472,28 @@ const onGenerateShot = async () => {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+}
+.download-btn {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s,
+    transform 0.15s;
+}
+.download-btn:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  transform: translateY(-2px) scale(1.05);
 }
 </style>
