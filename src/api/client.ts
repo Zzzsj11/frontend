@@ -1,4 +1,5 @@
 import { ApiError, reportApiError } from '../errorBus'
+import { isPollingHeaders, recordApiTiming } from '../perf'
 
 let accessToken = ''
 let refreshPromise: Promise<boolean> | null = null
@@ -48,7 +49,11 @@ export async function apiRequest<T>(
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type'))
     headers.set('Content-Type', 'application/json')
+  // 轮询/长连接请求不进入性能埋点（与后端全量日志同一语义）
+  const tracked = !isPollingHeaders(headers)
+  const t0 = tracked ? performance.now() : 0
   let response: Response | undefined
+  let retried = false
   const request = () => fetch(`/api${path}`, { ...init, headers, credentials: 'include' })
   try {
     response = await request()
@@ -60,6 +65,7 @@ export async function apiRequest<T>(
         await wait(delayMs)
         try {
           response = await request()
+          retried = true
           break
         } catch {
           // Report only after the bounded retry budget is exhausted.
@@ -73,9 +79,10 @@ export async function apiRequest<T>(
     for (const delayMs of GATEWAY_RETRY_DELAYS_MS) {
       await wait(delayMs)
       try {
-        const retried = await request()
-        response = retried
-        if (retried.status !== 502 && retried.status !== 503) break
+        const retriedResponse = await request()
+        response = retriedResponse
+        retried = true
+        if (retriedResponse.status !== 502 && retriedResponse.status !== 503) break
       } catch {
         // 窗口内连接被拒绝：保留上一次响应，继续按预算重试
       }
@@ -87,7 +94,19 @@ export async function apiRequest<T>(
     forceLogout()
     throw reportApiError(new ApiError('登录已过期，请重新登录', response.status))
   }
+  const t1 = tracked ? performance.now() : 0
   const body = await response.json().catch(() => ({}))
+  if (tracked) {
+    recordApiTiming({
+      path,
+      method: (init.method ?? 'GET').toUpperCase(),
+      status: response.status,
+      networkMs: Math.round(t1 - t0),
+      parseMs: Math.round(performance.now() - t1),
+      totalMs: Math.round(performance.now() - t0),
+      retried,
+    })
+  }
   if (!response.ok)
     throw reportApiError(
       new ApiError(
@@ -110,11 +129,25 @@ export async function openApiStream(
 ): Promise<Response> {
   const headers = new Headers(extraHeaders)
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
+  const tracked = !isPollingHeaders(headers)
+  const t0 = tracked ? performance.now() : 0
   let response: Response
   try {
     response = await fetch(`/api${path}`, { headers, credentials: 'include', signal })
   } catch (error) {
     throw reportApiError(error, '实时进度连接失败')
+  }
+  if (tracked) {
+    const t1 = performance.now()
+    recordApiTiming({
+      path,
+      method: 'GET',
+      status: response.status,
+      networkMs: Math.round(t1 - t0),
+      parseMs: 0,
+      totalMs: Math.round(t1 - t0),
+      retried: false,
+    })
   }
   if ((response.status === 401 || response.status === 403) && retry) {
     if (!intentionalLogout && (await refreshAccess())) return openApiStream(path, signal, false, extraHeaders)

@@ -69,6 +69,48 @@ def test_polling_requests_skipped(client):
     assert logs["items"][0]["path"] == "/api/auth/me"
 
 
+def test_request_logs_filter_min_ms_and_sort_by_duration(client):
+    """慢请求 TOP：minMs 只返回耗时达标的请求，orderBy=duration 按耗时倒序。"""
+    run_id = _run_id("slow")
+    for _ in range(3):
+        client.get("/api/auth/me", headers={"X-Test-Run-Id": run_id})
+    # minMs 过滤（阈值取 1ms：正常请求都能通过，验证参数链路）
+    filtered = client.get(
+        "/api/admin/request-logs", params={"runId": run_id, "minMs": 1}
+    ).json()
+    assert filtered["total"] == 3
+    # 荒谬大阈值 → 一条都没有（说明条件真实生效）
+    none = client.get(
+        "/api/admin/request-logs", params={"runId": run_id, "minMs": 10**9}
+    ).json()
+    assert none["total"] == 0
+    # orderBy=duration：耗时倒序返回
+    by_duration = client.get(
+        "/api/admin/request-logs", params={"runId": run_id, "orderBy": "duration"}
+    ).json()
+    durations = [item["durationMs"] for item in by_duration["items"]]
+    assert durations == sorted(durations, reverse=True)
+
+
+def test_request_log_summary_aggregates_by_path(client):
+    """聚合接口：正式流量按 path+method 汇总 count/avg/p95/max。
+
+    测试客户端默认带 X-Test-Run-Id，summary 只统计正式流量（run_id 为空），
+    因此本批次请求不应出现在聚合结果里——验证隔离逻辑。
+    """
+    run_id = _run_id("summary")
+    client.get("/api/auth/me", headers={"X-Test-Run-Id": run_id})
+    summary = client.get(
+        "/api/admin/request-logs/summary", params={"hours": 24, "minCount": 1}
+    ).json()
+    assert isinstance(summary, list)
+    assert all(
+        row["count"] >= 1 and row["avgMs"] >= 0 and row["p95Ms"] >= 0 and row["maxMs"] >= 0
+        for row in summary
+    )
+    assert not any(row["path"] == "/api/auth/me" for row in summary)
+
+
 def test_runs_aggregation(client):
     run_id = _run_id("runs")
     for _ in range(3):

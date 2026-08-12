@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { apiRequest } from '../api/client'
+import { perfSnapshot } from '../perf'
 type Tab =
   | 'dashboard'
   | 'users'
@@ -12,6 +13,7 @@ type Tab =
   | 'audit'
   | 'llm'
   | 'requests'
+  | 'perf'
 const tab = ref<Tab>('dashboard'),
   loading = ref(false),
   error = ref(''),
@@ -27,6 +29,7 @@ const tabs: [Tab, string][] = [
   ['audit', '操作审计'],
   ['llm', 'LLM 调用'],
   ['requests', '接口耗时'],
+  ['perf', '性能'],
 ]
 const llmFilters = ref({ projectTaskId: '', operation: '', status: '' })
 const llmDetail = ref<any>(null),
@@ -70,12 +73,15 @@ const endpoint = computed(
       audit: '/admin/audit-logs',
       llm: llmEndpoint.value,
       requests: reqEndpoint.value,
+      perf: '',
     })[tab.value],
 )
 const rows = computed<any[]>(() =>
   Array.isArray(data.value) ? data.value : data.value?.items || [],
 )
 const load = async () => {
+  // 性能页不走通用 endpoint（数据为后端聚合 + 本会话快照）
+  if (tab.value === 'perf') return loadPerf()
   loading.value = true
   error.value = ''
   try {
@@ -89,6 +95,7 @@ const load = async () => {
 const select = async (value: Tab) => {
   tab.value = value
   if (value === 'requests') void loadReqRuns()
+  if (value === 'perf') return void loadPerf()
   await load()
 }
 const reqEndpoint = computed(() => {
@@ -103,6 +110,27 @@ const loadReqRuns = async () => {
     reqRuns.value = await apiRequest('/admin/request-logs/runs')
   } catch {
     reqRuns.value = []
+  }
+}
+/** 性能页：后端慢请求 TOP + 接口耗时聚合 + 本浏览器会话性能快照 */
+const backendSlow = ref<any[]>([])
+const backendSummary = ref<any[]>([])
+const frontPerf = ref(perfSnapshot())
+const loadPerf = async () => {
+  loading.value = true
+  error.value = ''
+  try {
+    const [summary, slow] = await Promise.all([
+      apiRequest<any[]>('/admin/request-logs/summary?hours=24&minCount=2&limit=30'),
+      apiRequest<{ items: any[] }>('/admin/request-logs?minMs=1000&orderBy=duration&limit=30'),
+    ])
+    backendSummary.value = summary
+    backendSlow.value = slow.items || []
+    frontPerf.value = perfSnapshot()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '加载失败'
+  } finally {
+    loading.value = false
   }
 }
 const openReqDetail = async (row: any) => {
@@ -191,7 +219,7 @@ onMounted(load)
           <h1>{{ tabs.find((x) => x[0] === tab)?.[1] }}</h1>
           <p>MV AI 生产平台运营与模型控制中心</p>
         </div>
-        <button class="refresh" @click="load">刷新</button>
+        <button class="refresh" @click="tab === 'perf' ? loadPerf() : load()">刷新</button>
       </header>
       <p v-if="error" class="error">{{ error }}</p>
       <p v-if="notice" class="notice">{{ notice }}</p>
@@ -231,6 +259,124 @@ onMounted(load)
         </article>
       </section>
       <template v-else>
+        <!-- 性能页：后端全量耗时（慢请求 TOP + 路径聚合） + 本浏览器会话观测 -->
+        <div v-if="tab === 'perf'" class="perf">
+          <section class="perf-group">
+            <h3>后端 · 慢请求 TOP（≥1000ms，按耗时倒序）</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>方法</th><th>路径</th><th>状态</th><th>耗时</th><th>时间</th><th>操作</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in backendSlow" :key="row.id">
+                    <td>{{ row.method }}</td>
+                    <td class="path">{{ row.path }}</td>
+                    <td>{{ row.statusCode }}</td>
+                    <td><span :class="{ slow: row.durationMs >= 1000 }">{{ row.durationMs }}ms</span></td>
+                    <td class="muted">{{ row.createdAt }}</td>
+                    <td><button class="action" @click="openReqDetail(row)">详情</button></td>
+                  </tr>
+                </tbody>
+              </table>
+              <p v-if="!backendSlow.length" class="empty">暂无慢请求（轮询/SSE 已自动排除）</p>
+            </div>
+          </section>
+          <section class="perf-group">
+            <h3>后端 · 接口耗时聚合（24h 正式流量 · max 倒序 TOP30）</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>方法</th><th>路径</th><th>次数</th><th>平均</th><th>P95</th><th>最大</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in backendSummary" :key="`${row.method} ${row.path}`">
+                    <td>{{ row.method }}</td>
+                    <td class="path">{{ row.path }}</td>
+                    <td>{{ row.count }}</td>
+                    <td>{{ row.avgMs }}ms</td>
+                    <td><span :class="{ slow: row.p95Ms >= 1000 }">{{ row.p95Ms }}ms</span></td>
+                    <td><span :class="{ slow: row.maxMs >= 1000 }">{{ row.maxMs }}ms</span></td>
+                  </tr>
+                </tbody>
+              </table>
+              <p v-if="!backendSummary.length" class="empty">暂无正式流量数据</p>
+            </div>
+          </section>
+          <section class="perf-group">
+            <h3>本浏览器会话 · API 耗时聚合</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>方法</th><th>路径</th><th>次数</th><th>平均</th><th>P95</th><th>最大</th><th>解析均耗</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in frontPerf.apiSummary" :key="`${row.method} ${row.path}`">
+                    <td>{{ row.method }}</td>
+                    <td class="path">{{ row.path }}</td>
+                    <td>{{ row.count }}</td>
+                    <td>{{ row.avgMs }}ms</td>
+                    <td><span :class="{ slow: row.p95Ms >= 800 }">{{ row.p95Ms }}ms</span></td>
+                    <td><span :class="{ slow: row.maxMs >= 800 }">{{ row.maxMs }}ms</span></td>
+                    <td>{{ row.parseAvgMs }}ms</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p v-if="!frontPerf.apiSummary.length" class="empty">本会话暂无 API 请求</p>
+            </div>
+          </section>
+          <section class="perf-group">
+            <h3>本浏览器会话 · 主线程长任务（>50ms 即渲染/脚本卡顿）</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>耗时</th><th>来源</th><th>时间</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="task in frontPerf.longTasks" :key="task.id">
+                    <td><span :class="{ slow: task.durationMs >= 200 }">{{ task.durationMs }}ms</span></td>
+                    <td class="path">{{ task.target || '-' }}</td>
+                    <td class="muted">{{ new Date(task.at).toLocaleTimeString() }}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p v-if="!frontPerf.longTasks.length" class="empty">本会话未捕获主线程长任务</p>
+            </div>
+          </section>
+          <section v-if="frontPerf.navigation" class="perf-group">
+            <h3>本浏览器会话 · 整页加载计时</h3>
+            <p class="nav-timing">
+              TTFB <b>{{ frontPerf.navigation.ttfbMs }}ms</b> · DOMContentLoaded
+              <b>{{ frontPerf.navigation.domContentLoadedMs }}ms</b> · Load
+              <b>{{ frontPerf.navigation.loadMs }}ms</b>
+            </p>
+          </section>
+          <section class="perf-group" v-if="frontPerf.slowApi.length">
+            <h3>本浏览器会话 · 最近慢请求（≥800ms）</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>方法</th><th>路径</th><th>状态</th><th>耗时</th><th>网络</th><th>解析</th><th>重试</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in frontPerf.slowApi" :key="row.id">
+                    <td>{{ row.method }}</td>
+                    <td class="path">{{ row.path }}</td>
+                    <td>{{ row.status }}</td>
+                    <td><span class="slow">{{ row.totalMs }}ms</span></td>
+                    <td>{{ row.networkMs }}ms</td>
+                    <td>{{ row.parseMs }}ms</td>
+                    <td>{{ row.retried ? '是' : '否' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <p class="perf-tip">
+            定位链：后端 P95/max 大 → 接口/数据库/上游慢；本会话网络耗时大而后端正常 → 网络/网关；
+            解析耗时长 → 响应体大；长任务集中在渲染期 → 前端渲染问题（大数据列表/图片解码）。
+          </p>
+        </div>
         <div v-if="tab === 'jobs'" class="filters">
           <select v-model="jobFilters.kind" @change="searchJobs">
             <option value="">全部类型</option>
@@ -288,7 +434,7 @@ onMounted(load)
           </select>
           <button class="refresh" @click="load">查询</button>
         </div>
-        <section class="table-wrap">
+        <section v-if="tab !== 'perf'" class="table-wrap">
           <table>
             <thead>
               <tr>
@@ -561,6 +707,52 @@ th {
   display: flex;
   gap: 10px;
   margin-bottom: 14px;
+}
+/* ---------- 性能页 ---------- */
+.perf {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.perf-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.perf-group h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text);
+}
+.path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  max-width: 480px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.muted {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.nav-timing {
+  padding: 10px 14px;
+  background: #f8f5f0;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.nav-timing b {
+  color: var(--primary);
+}
+.perf-tip {
+  margin: 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--primary);
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.7;
 }
 .filters input,
 .filters select {

@@ -427,11 +427,16 @@ async def request_logs(
     path: str | None = None,
     method: str | None = None,
     status: int | None = None,
+    minMs: int | None = None,
+    orderBy: str = "created",
     limit: int = 100,
     offset: int = 0,
     db: AsyncSession = Db,
 ):
-    """API 请求耗时列表（不含输入输出原文，详情走 /request-logs/{id}）。"""
+    """API 请求耗时列表（不含输入输出原文，详情走 /request-logs/{id}）。
+
+    minMs=仅返回耗时不低于该值的请求；orderBy=duration 时按耗时倒序（慢请求 TOP）。
+    """
     require_admin(user)
     limit, offset = max(1, min(limit, 200)), max(0, offset)
     conditions = [ApiRequestLogModel.deleted_at.is_(None)]
@@ -443,9 +448,74 @@ async def request_logs(
         conditions.append(ApiRequestLogModel.method == method.upper())
     if status:
         conditions.append(ApiRequestLogModel.status_code == status)
+    if minMs is not None:
+        conditions.append(ApiRequestLogModel.duration_ms >= max(0, minMs))
+    order_by_clause = (
+        (ApiRequestLogModel.duration_ms.desc(), ApiRequestLogModel.created_at.desc())
+        if orderBy == "duration"
+        else (ApiRequestLogModel.created_at.desc(),)
+    )
     total = (await db.execute(select(func.count()).select_from(ApiRequestLogModel).where(*conditions))).scalar_one()
-    rows = (await db.execute(select(ApiRequestLogModel).where(*conditions).order_by(ApiRequestLogModel.created_at.desc()).limit(limit).offset(offset))).scalars()
+    rows = (await db.execute(select(ApiRequestLogModel).where(*conditions).order_by(*order_by_clause).limit(limit).offset(offset))).scalars()
     return {"total": total, "items": [_request_log_summary(x) for x in rows]}
+
+
+@router.get("/request-logs/summary")
+async def request_log_summary(
+    user: CurrentUser,
+    db: AsyncSession = Db,
+    hours: int = 24,
+    minCount: int = 3,
+    limit: int = 50,
+):
+    """按 path+method 聚合正式流量（run_id 为空）的耗时分布：count/avg/p95/max。
+
+    直接回答「哪个接口慢」：按 max 倒序取 TOP；p95 精确计算识别偶发慢请求
+    与稳定慢接口。跨方言实现（p95 在 Python 计算，不依赖 PostgreSQL
+    percentile_cont，测试库 SQLite 同样可用）。
+    """
+    require_admin(user)
+    hours = max(1, min(hours, 168))
+    limit = max(1, min(limit, 100))
+    since = utcnow() - timedelta(hours=hours)
+    # 取时间窗口内最近 2 万条正式流量的耗时明细（防止极端流量下内存膨胀），
+    # 在 Python 中按 path+method 分桶计算 count/avg/p95/max
+    rows = (
+        await db.execute(
+            select(
+                ApiRequestLogModel.path,
+                ApiRequestLogModel.method,
+                ApiRequestLogModel.duration_ms,
+            )
+            .where(
+                ApiRequestLogModel.deleted_at.is_(None),
+                ApiRequestLogModel.created_at >= since,
+                ApiRequestLogModel.run_id == "",
+            )
+            .order_by(ApiRequestLogModel.created_at.desc())
+            .limit(20_000)
+        )
+    ).all()
+    buckets: dict[tuple[str, str], list[int]] = {}
+    for path, method, duration_ms in rows:
+        buckets.setdefault((path, method), []).append(duration_ms)
+    summary = []
+    for (path, method), durations in buckets.items():
+        if len(durations) < minCount:
+            continue
+        durations.sort()
+        summary.append(
+            {
+                "path": path,
+                "method": method,
+                "count": len(durations),
+                "avgMs": round(sum(durations) / len(durations)),
+                "p95Ms": durations[int(len(durations) * 0.95) - 1],
+                "maxMs": durations[-1],
+            }
+        )
+    summary.sort(key=lambda row: row["maxMs"], reverse=True)
+    return summary[:limit]
 
 
 @router.get("/request-logs/{log_id}")
