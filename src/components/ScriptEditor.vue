@@ -57,7 +57,7 @@ const onDragEnd = () => {
 const outlineElapsed = ref(0)
 let outlineTimer = 0
 watch(
-  () => store.outlineLoading,
+  () => store.outlineLocked,
   (loading) => {
     window.clearInterval(outlineTimer)
     if (loading) {
@@ -172,11 +172,7 @@ const outlineStageText = computed(() => {
           store.outlineError ? `：${store.outlineError}` : ''
         }}，已拆分的分镜列表已保留</span
       >
-      <button
-        class="banner-btn"
-        :disabled="store.outlineLoading"
-        @click="store.regenerateOutline()"
-      >
+      <button class="banner-btn" :disabled="store.outlineLocked" @click="store.regenerateOutline()">
         重新生成大纲
       </button>
     </div>

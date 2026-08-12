@@ -50,7 +50,7 @@ const regenerate = async () => {
 <template>
   <BaseModal
     :open="store.outlineOpen && !!store.activeStoryBible"
-    :loading="store.outlineLoading"
+    :loading="store.outlineLocked"
     width="900px"
     max-height="90vh"
     aria-label="MV 大纲总览"
@@ -211,14 +211,14 @@ const regenerate = async () => {
       <button
         v-if="store.activeStoryboardType === 'ass'"
         class="regenerate"
-        :disabled="store.outlineLoading"
+        :disabled="store.outlineLocked"
         @click="regenerate"
       >
-        <span v-if="store.outlineLoading" class="spinner" />{{
-          store.outlineLoading ? '正在重新规划…' : '不满意，重新生成'
+        <span v-if="store.outlineLocked" class="spinner" />{{
+          store.outlineLocked ? '正在重新规划…' : '不满意，重新生成'
         }}
       </button>
-      <button class="close" :disabled="store.outlineLoading" @click="store.closeOutline()">
+      <button class="close" :disabled="store.outlineLocked" @click="store.closeOutline()">
         关闭
       </button>
     </template>

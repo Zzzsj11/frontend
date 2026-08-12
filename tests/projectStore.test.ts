@@ -705,3 +705,40 @@ describe('digital human avatar regeneration with template reference', () => {
     expect(calls.some((call) => call.url.includes('/api/digital-humans'))).toBe(false)
   })
 })
+
+describe('outline loading lock scoped to its own task', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('does not lock the outline modal of another task while one task is generating', () => {
+    const store = useProjectStore()
+    // 任务 A 正在生成大纲（全局 outlineLoading=true），当前编辑区已切到任务 B
+    store.activeTaskId = 'task-B'
+    store.activeStoryBible = { shots: [] } as unknown as StoryBible
+    store.outlineLoading = true
+    store.outlineTaskId = 'task-A'
+    store.outlineOpen = true
+
+    expect(store.outlineLocked).toBe(false)
+    store.closeOutline()
+    expect(store.outlineOpen).toBe(false) // B 的弹窗可正常关闭
+  })
+
+  it('keeps the modal locked only while its own task is generating', () => {
+    const store = useProjectStore()
+    store.activeTaskId = 'task-A'
+    store.outlineLoading = true
+    store.outlineTaskId = 'task-A'
+    store.outlineOpen = true
+
+    expect(store.outlineLocked).toBe(true)
+    store.closeOutline()
+    expect(store.outlineOpen).toBe(true) // 自身生成中：维持原锁定行为
+
+    store.outlineLoading = false
+    store.outlineTaskId = null
+    store.closeOutline()
+    expect(store.outlineOpen).toBe(false) // 生成结束即可关闭
+  })
+})

@@ -131,6 +131,9 @@ export const useProjectStore = defineStore('project', {
     generalStoryboardOptions: null as GeneralStoryboardOptions | null,
     outlineOpen: false,
     outlineLoading: false,
+    /** 大纲生成中的任务归属：全局 outlineLoading 不区分任务，切到其他子项目时
+     *  该任务自己的弹窗/按钮不能被别人的生成状态锁死，用 outlineTaskId 隔离 */
+    outlineTaskId: null as string | null,
     outlineError: null as string | null,
     /** 大纲后台生成进度（SSE 推送：planning/segments 阶段与场景段计数） */
     outlineProgress: null as OutlineProgress | null,
@@ -295,10 +298,17 @@ export const useProjectStore = defineStore('project', {
       }
     },
 
+    /** 大纲加载锁：仅当「当前任务自己」正在生成大纲时为 true。
+     *  outlineLoading 是全局的（别的子项目生成中也会置位），用它直接锁弹窗/按钮
+     *  会把其他任务的大纲弹窗一并锁死（无法关闭），故用 outlineTaskId 归属隔离 */
+    outlineLocked(state): boolean {
+      return state.outlineLoading && state.outlineTaskId === state.activeTaskId
+    },
+
     /** ASS 大纲阶段：pending=拆分完成待生成 / outlining=生成中 / failed=生成失败 */
     outlinePhase(state): 'none' | 'pending' | 'outlining' | 'failed' {
       if (state.activeStoryboardType !== 'ass') return 'none'
-      if (state.outlineLoading || state.activeTaskStatus === 'outlining') return 'outlining'
+      if (state.outlineLocked || state.activeTaskStatus === 'outlining') return 'outlining'
       if (state.activeTaskStatus === 'outline_failed') return 'failed'
       if (state.activeTaskStatus === 'parsed') return 'pending'
       return 'none'
@@ -604,7 +614,9 @@ export const useProjectStore = defineStore('project', {
       if (this.activeTaskId && this.activeStoryBible) this.outlineOpen = true
     },
     closeOutline() {
-      if (!this.outlineLoading) this.outlineOpen = false
+      // 只锁「当前任务自己」的生成中状态；其他任务生成中不影响本任务弹窗关闭
+      if (this.outlineLocked) return
+      this.outlineOpen = false
     },
 
     /** 同步任务状态到当前编辑区与侧边栏任务列表 */
@@ -677,12 +689,14 @@ export const useProjectStore = defineStore('project', {
         !id ||
         this.activeTaskId !== id ||
         this.activeStoryboardType !== 'ass' ||
-        this.outlineLoading
+        // 防重入只看同任务：别的子项目正在生成时不阻塞本任务触发
+        (this.outlineLoading && this.outlineTaskId === id)
       )
         return
       // 进入时已是 outlining：后台仍在生成（如刷新后续跑），直接订阅进度，不重复触发
       const resumeWatching = this.activeTaskStatus === 'outlining'
       this.outlineLoading = true
+      this.outlineTaskId = id
       this.outlineError = null
       this.outlineProgress = null
       this.outlineStartedAt = Date.now()
@@ -725,6 +739,7 @@ export const useProjectStore = defineStore('project', {
         this.outlineError = error instanceof Error ? error.message : '大纲生成失败'
       } finally {
         this.outlineLoading = false
+        if (this.outlineTaskId === id) this.outlineTaskId = null
       }
     },
 
