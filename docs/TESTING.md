@@ -19,12 +19,26 @@ make preflight   # 发布前全流程校验
 - 禁止把真实密码写进任何入库文件。
 - 本地后端测试环境 admin/123456 由 `backend/tests/conftest.py` seed，属合法默认值。
 
-## API 耗时采集（接口耗时页）
+## API 耗时采集与性能观测
 
-- 后端 middleware 仅对带 `X-Test-Run-Id` 请求头的流量入库（生产正常流量零开销）；置 `API_REQUEST_LOG_ALL=true` 可临时全量记录（注意数据量）。
+完整文档见 [`PERFORMANCE-MONITORING.md`](PERFORMANCE-MONITORING.md)：三层观测体系
+（后端全量请求日志 / 前端会话埋点 / 管理后台「性能」页），可回答「卡顿是接口慢
+还是渲染慢」。
+
+- 默认仅对带 `X-Test-Run-Id` 请求头的流量入库（测试流量）；置 `API_REQUEST_LOG_ALL=true`
+  后全量记录正式流量（线上已开启）。变量写在 `backend/.env`（容器 `env_file`），
+  写 `.env.production` 不会注入容器。
+- **轮询/SSE 长连接请求统一打 `X-Polling: 1` 头，后端中间件直接跳过**——新增轮询点
+  时必须打标（前端打标清单见性能文档 3.3），否则会刷日志。
 - pytest 全量测试由 conftest 自动注入批次头；e2e 的 API 级 spec 注入 `extraHTTPHeaders`，UI 级 spec 通过 `page.route('**/api/**')` 注入。
-- 管理后台「接口耗时」页查看：批次列表（次数/均峰值/错误数）→ 单批请求表格（≥1s 高亮）→ 单条详情（脱敏后的输入参数与输出原文）。
+- 管理后台查看：批次列表（次数/均峰值/错误数）→ 单批请求表格（≥1s 高亮）→ 单条详情
+  （脱敏后的输入参数与输出原文）；「性能」页含后端慢请求 TOP、24h 接口耗时聚合
+  （count/avg/P95/max）、本浏览器会话的 API 耗时拆分（网络 vs 解析）、主线程长任务
+  与整页加载计时。
 - 请求/响应体仅 JSON 且 ≤8KB 入库；SSE/流式/二进制只记元信息。密码等敏感字段自动脱敏为 `***`。
+- 回归测试：后端 `backend/tests/test_request_logging.py`（9 个：轮询跳过/minMs 过滤/
+  duration 排序/聚合/脱敏/权限），前端 `tests/perf.test.ts`（4 个：聚合计算/阈值过滤/
+  标记识别/埋点集成）。
 
 ## 远程验收（对已部署环境）
 
