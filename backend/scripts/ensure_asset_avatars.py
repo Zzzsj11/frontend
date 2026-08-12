@@ -7,8 +7,8 @@
 宿主机 crontab（每分钟）：
     */1 * * * * docker exec mv-agent-frontend-backend-1 python /srv/mvagent/scripts/ensure_asset_avatars.py >> /var/log/mvagent-asset-sync.log 2>&1
 
-说明：幂等；仅处理 active 且 asset_avatar_url 为空的人物；与启动兜底任务共用
-ensure_pending_asset_avatars，双保险。文件锁防止与上一分钟的任务重入。
+说明：幂等；仅处理 active 且 asset_avatar_url 为空的人物；复用 seed.py 的
+ensure_pending_asset_avatars。文件锁防止与上一分钟的任务重入。
 """
 from __future__ import annotations
 

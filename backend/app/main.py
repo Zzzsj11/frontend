@@ -47,7 +47,7 @@ from .providers import generate_image, generate_video, resume_generation
 from .redis_store import close_redis, redis_ok
 from .request_logging import api_request_log_middleware
 from .schemas import ChatMessageCreate, ChatSessionCreate, ImageGenerationCreate, LoginCreate, PasswordChange, RemoteImportCreate, VideoGenerationCreate
-from .seed import ensure_pending_asset_avatars, recover_stale_storyboard_generation, seed_system_data
+from .seed import recover_stale_storyboard_generation, seed_system_data
 from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
 from .usage_quota import consume_daily_quota
 
@@ -60,8 +60,8 @@ async def lifespan(_app: FastAPI):
     await seed_admin()
     await seed_system_data()
     await recover_stale_storyboard_generation()
-    # 数字人虚拟资产注册（系统 + 用户上传）：后台执行（幂等），生成视频时用 asset:// 链接过真人人脸校验
-    asyncio.create_task(ensure_pending_asset_avatars())
+    # 数字人虚拟资产补注册由 cron 脚本每分钟执行（scripts/ensure_asset_avatars.py，带防重入锁），
+    # 不再在启动时重复扫描，避免与 cron 并发导致同一人物重复注册资产
     recovered = await jobs.recover_stale_jobs(resume_generation)
     if recovered["resumed"] or recovered["failed"]:
         logger.info("媒体生成任务恢复：续跑 %s 个，判败 %s 个", recovered["resumed"], recovered["failed"])
