@@ -42,13 +42,29 @@ const jobPage = ref(1)
 const jobPageSize = 50
 const notice = ref('')
 const syncing = ref('')
+/** 通用 offset 分页：projects/errors/audit/llm/requests 共用，切 tab 重置 */
+const pageOffset = ref(0)
+const pageSize = 50
+const pageCount = computed(() => Math.max(1, Math.ceil((data.value?.total || 0) / pageSize)))
+const currentPage = computed(() => Math.floor(pageOffset.value / pageSize) + 1)
+const isPagedTab = computed(() =>
+  ['projects', 'errors', 'audit', 'llm', 'requests'].includes(tab.value),
+)
+const turnPage = (delta: number) => {
+  pageOffset.value = Math.max(
+    0,
+    Math.min((pageCount.value - 1) * pageSize, pageOffset.value + delta * pageSize),
+  )
+  void load()
+}
 const llmEndpoint = computed(() => {
   const query = new URLSearchParams()
   if (llmFilters.value.projectTaskId.trim())
     query.set('projectTaskId', llmFilters.value.projectTaskId.trim())
   if (llmFilters.value.operation.trim()) query.set('operation', llmFilters.value.operation.trim())
   if (llmFilters.value.status) query.set('status', llmFilters.value.status)
-  query.set('limit', '100')
+  query.set('limit', String(pageSize))
+  query.set('offset', String(pageOffset.value))
   return `/admin/llm-calls?${query.toString()}`
 })
 const jobsEndpoint = computed(() => {
@@ -65,12 +81,12 @@ const endpoint = computed(
     ({
       dashboard: '/admin/dashboard',
       users: '/admin/users',
-      projects: '/admin/projects',
+      projects: `/admin/projects?limit=${pageSize}&offset=${pageOffset.value}`,
       jobs: jobsEndpoint.value,
       usage: '/admin/usage',
       models: '/admin/models',
-      errors: '/admin/api-errors',
-      audit: '/admin/audit-logs',
+      errors: `/admin/api-errors?limit=${pageSize}&offset=${pageOffset.value}`,
+      audit: `/admin/audit-logs?limit=${pageSize}&offset=${pageOffset.value}`,
       llm: llmEndpoint.value,
       requests: reqEndpoint.value,
       perf: '',
@@ -94,6 +110,7 @@ const load = async () => {
 }
 const select = async (value: Tab) => {
   tab.value = value
+  pageOffset.value = 0
   if (value === 'requests') void loadReqRuns()
   if (value === 'perf') return void loadPerf()
   await load()
@@ -102,7 +119,8 @@ const reqEndpoint = computed(() => {
   const query = new URLSearchParams()
   if (reqFilters.value.runId) query.set('runId', reqFilters.value.runId)
   if (reqFilters.value.path.trim()) query.set('path', reqFilters.value.path.trim())
-  query.set('limit', '200')
+  query.set('limit', String(pageSize))
+  query.set('offset', String(pageOffset.value))
   return `/admin/request-logs?${query.toString()}`
 })
 const loadReqRuns = async () => {
@@ -434,6 +452,19 @@ onMounted(load)
           </select>
           <button class="refresh" @click="load">查询</button>
         </div>
+        <div v-if="isPagedTab" class="pager-bar">
+          <span class="pager">
+            <button class="action" :disabled="currentPage <= 1" @click="turnPage(-1)">上一页</button>
+            第 {{ currentPage }} 页 · 共 {{ data?.total || 0 }} 条 · 每页 {{ pageSize }} 条
+            <button
+              class="action"
+              :disabled="currentPage >= pageCount"
+              @click="turnPage(1)"
+            >
+              下一页
+            </button>
+          </span>
+        </div>
         <section v-if="tab !== 'perf'" class="table-wrap">
           <table>
             <thead>
@@ -707,6 +738,11 @@ th {
   display: flex;
   gap: 10px;
   margin-bottom: 14px;
+}
+.pager-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
 }
 /* ---------- 性能页 ---------- */
 .perf {

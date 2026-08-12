@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import case, or_, select, update
+from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import CurrentUser, hash_password, user_public
@@ -74,13 +74,34 @@ export_slots = asyncio.Semaphore(settings.export_concurrency)
 
 
 @router.get("/admin/api-errors")
-async def list_api_errors(user: CurrentUser, limit: int = 100, db: AsyncSession = Db) -> dict:
+async def list_api_errors(
+    user: CurrentUser,
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Db,
+) -> dict:
     require_admin(user)
     limit = min(500, max(1, limit))
+    offset = max(0, offset)
+    conditions = [ApiErrorLogModel.deleted_at.is_(None)]
+    total = (
+        await db.execute(select(func.count()).select_from(ApiErrorLogModel).where(*conditions))
+    ).scalar_one()
     items = list(
-        (await db.execute(select(ApiErrorLogModel).where(ApiErrorLogModel.deleted_at.is_(None)).order_by(ApiErrorLogModel.created_at.desc()).limit(limit))).scalars().all()
+        (
+            await db.execute(
+                select(ApiErrorLogModel)
+                .where(*conditions)
+                .order_by(ApiErrorLogModel.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+        )
+        .scalars()
+        .all()
     )
     return {
+        "total": total,
         "items": [
             {
                 "id": item.id,
@@ -124,9 +145,15 @@ def require_admin(user) -> None:
 
 
 @router.get("/admin/users")
-async def list_users(user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
+async def list_users(user: CurrentUser, limit: int = 100, db: AsyncSession = Db) -> list[dict]:
+    """用户列表：强制 limit 上限，防止全量拉取拖垮数据库。"""
     require_admin(user)
-    items = (await db.execute(select(UserModel).where(UserModel.deleted_at.is_(None)).order_by(UserModel.created_at))).scalars().all()
+    limit = min(500, max(1, limit))
+    items = (
+        await db.execute(
+            select(UserModel).where(UserModel.deleted_at.is_(None)).order_by(UserModel.created_at).limit(limit)
+        )
+    ).scalars().all()
     return [{**user_public(item), "status": item.status, "createdAt": item.created_at.isoformat()} for item in items]
 
 

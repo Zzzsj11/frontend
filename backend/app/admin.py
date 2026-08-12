@@ -85,18 +85,36 @@ async def dashboard(user: CurrentUser, db: AsyncSession = Db):
 
 
 @router.get("/projects")
-async def projects(user: CurrentUser, db: AsyncSession = Db):
+async def projects(
+    user: CurrentUser,
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Db,
+):
+    """项目列表：offset 分页，limit 上限 300，防止全量拉取拖垮数据库。"""
     require_admin(user)
+    limit, offset = max(1, min(limit, 300)), max(0, offset)
+    conditions = [ProjectModel.deleted_at.is_(None)]
+    total = (
+        await db.execute(select(func.count()).select_from(ProjectModel).where(*conditions))
+    ).scalar_one()
     rows = (
         await db.execute(
             select(ProjectModel, UserModel.username)
             .join(UserModel, UserModel.id == ProjectModel.user_id)
-            .where(ProjectModel.deleted_at.is_(None))
+            .where(*conditions)
             .order_by(ProjectModel.created_at.desc())
-            .limit(300)
+            .limit(limit)
+            .offset(offset)
         )
     ).all()
-    return [{"id": p.id, "name": p.name, "username": u, "status": p.status, "createdAt": iso(p.created_at)} for p, u in rows]
+    return {
+        "total": total,
+        "items": [
+            {"id": p.id, "name": p.name, "username": u, "status": p.status, "createdAt": iso(p.created_at)}
+            for p, u in rows
+        ],
+    }
 
 
 @router.get("/jobs")
@@ -299,12 +317,44 @@ async def update_model(model_id: str, payload: dict, request: Request, user: Cur
 
 
 @router.get("/audit-logs")
-async def audits(user: CurrentUser, db: AsyncSession = Db):
+async def audits(
+    user: CurrentUser,
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Db,
+):
+    """操作审计列表：offset 分页，limit 上限 300，防止全量拉取拖垮数据库。"""
     require_admin(user)
+    limit, offset = max(1, min(limit, 300)), max(0, offset)
+    conditions = [AdminOperationLogModel.deleted_at.is_(None)]
+    total = (
+        await db.execute(
+            select(func.count()).select_from(AdminOperationLogModel).where(*conditions)
+        )
+    ).scalar_one()
     rows = (
-        await db.execute(select(AdminOperationLogModel).where(AdminOperationLogModel.deleted_at.is_(None)).order_by(AdminOperationLogModel.created_at.desc()).limit(300))
+        await db.execute(
+            select(AdminOperationLogModel)
+            .where(*conditions)
+            .order_by(AdminOperationLogModel.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
     ).scalars()
-    return [{"id": x.id, "adminUserId": x.admin_user_id, "action": x.action, "targetType": x.target_type, "targetId": x.target_id, "createdAt": iso(x.created_at)} for x in rows]
+    return {
+        "total": total,
+        "items": [
+            {
+                "id": x.id,
+                "adminUserId": x.admin_user_id,
+                "action": x.action,
+                "targetType": x.target_type,
+                "targetId": x.target_id,
+                "createdAt": iso(x.created_at),
+            }
+            for x in rows
+        ],
+    }
 
 
 def _llm_call_summary(x: LlmCallLogModel) -> dict:
