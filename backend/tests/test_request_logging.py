@@ -45,6 +45,30 @@ def test_password_redacted_in_request_payload(client):
     assert detail["responseBody"]["accessToken"] == "***"
 
 
+def test_polling_requests_skipped(client):
+    """轮询/长连接请求（X-Polling: 1）不落库：每 2-5 秒刷一次或挂几分钟，
+    全量记录会刷出海量重复数据并污染慢请求统计（SSE 的 duration_ms 等于连接时长）。"""
+    run_id = _run_id("polling")
+    saved = client.headers.pop("X-Test-Run-Id")
+    client.headers["X-Test-Run-Id"] = run_id
+    try:
+        # 普通请求落库
+        assert client.get("/api/auth/me").status_code == 200
+        # 同一路径带轮询标记不落库
+        assert (
+            client.get(
+                "/api/auth/me",
+                headers={"X-Polling": "1"},
+            ).status_code
+            == 200
+        )
+    finally:
+        client.headers["X-Test-Run-Id"] = saved
+    logs = client.get("/api/admin/request-logs", params={"runId": run_id}).json()
+    assert logs["total"] == 1
+    assert logs["items"][0]["path"] == "/api/auth/me"
+
+
 def test_runs_aggregation(client):
     run_id = _run_id("runs")
     for _ in range(3):

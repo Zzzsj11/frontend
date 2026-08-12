@@ -17,7 +17,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export async function waitForJob<T>(id: string, timeoutMs = 660_000): Promise<T> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
-    const job = await request<GenerationJob<T>>(`/generations/${id}`)
+    // 每 3 秒轮询直到生成完成（最长 11 分钟）：打 X-Polling 标记，后端全量日志跳过
+    const job = await request<GenerationJob<T>>(`/generations/${id}`, {
+      headers: { 'X-Polling': '1' },
+    })
     if (job.status === 'succeeded' && job.result) return job.result
     if (job.status === 'failed' || job.status === 'cancelled')
       throw new Error(job.error || '生成失败')

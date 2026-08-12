@@ -106,8 +106,9 @@ export async function openApiStream(
   path: string,
   signal?: AbortSignal,
   retry = true,
+  extraHeaders: Record<string, string> = {},
 ): Promise<Response> {
-  const headers = new Headers()
+  const headers = new Headers(extraHeaders)
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
   let response: Response
   try {
@@ -116,7 +117,7 @@ export async function openApiStream(
     throw reportApiError(error, '实时进度连接失败')
   }
   if ((response.status === 401 || response.status === 403) && retry) {
-    if (!intentionalLogout && (await refreshAccess())) return openApiStream(path, signal, false)
+    if (!intentionalLogout && (await refreshAccess())) return openApiStream(path, signal, false, extraHeaders)
     if (intentionalLogout) throw new ApiError('已退出登录', response.status)
     forceLogout()
     throw reportApiError(new ApiError('登录已过期，请重新登录', response.status))

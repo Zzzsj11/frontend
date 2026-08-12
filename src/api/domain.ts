@@ -36,7 +36,10 @@ export async function fetchSongProjects(): Promise<SongProject[]> {
 }
 
 /** GET /api/songs/{id}/script — 载入某首歌曲的分镜脚本与角色阵容 */
-export async function fetchSongScript(taskId: string): Promise<{
+export async function fetchSongScript(
+  taskId: string,
+  polling = false,
+): Promise<{
   cast: string[]
   lines: ScriptLine[]
   storyboardType: string
@@ -50,7 +53,7 @@ export async function fetchSongScript(taskId: string): Promise<{
     status: string
     storyboardConfig?: { storyBible?: StoryBible; outlineProgress?: Record<string, unknown> }
     lines: Array<Record<string, unknown>>
-  }>(`/tasks/${taskId}`)
+  }>(`/tasks/${taskId}`, polling ? { headers: { 'X-Polling': '1' } } : {})
   return {
     cast: task.cast,
     storyboardType: task.storyboardType,
@@ -269,7 +272,13 @@ export async function streamStoryboardOutline(
   onEvent: (event: { taskId: string; status: string; progress: OutlineProgress }) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await openApiStream(`/tasks/${taskId}/storyboard-outline/events`, signal)
+  const response = await openApiStream(
+    `/tasks/${taskId}/storyboard-outline/events`,
+    signal,
+    true,
+    // SSE 长连接：duration_ms 等于整个订阅时长，全量日志跳过
+    { 'X-Polling': '1' },
+  )
   if (!response.body) throw new Error('浏览器不支持实时进度流')
   const reader = response.body.getReader(),
     decoder = new TextDecoder()
@@ -302,7 +311,13 @@ export async function streamMaterialExport(
   onExport: (item: MaterialExport) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await openApiStream(`/material-exports/${exportId}/events`, signal)
+  const response = await openApiStream(
+    `/material-exports/${exportId}/events`,
+    signal,
+    true,
+    // SSE 长连接：duration_ms 等于整个订阅时长，全量日志跳过
+    { 'X-Polling': '1' },
+  )
   if (!response.body) throw new Error('浏览器不支持实时进度流')
   const reader = response.body.getReader(),
     decoder = new TextDecoder()

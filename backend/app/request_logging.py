@@ -40,6 +40,10 @@ def _decode_payload(raw: bytes) -> dict[str, Any]:
 
 async def api_request_log_middleware(request: Request, call_next: RequestResponseEndpoint) -> Response:
     run_id = request.headers.get("x-test-run-id", "")
+    # 轮询/长连接（前端打 X-Polling: 1）：每 2-5 秒刷一次或挂几分钟，
+    # 全量记录会产生海量重复数据并污染慢请求统计（SSE 的 duration_ms 等于连接时长）
+    if request.headers.get("x-polling") == "1":
+        return await call_next(request)
     if not request.url.path.startswith("/api/") or (not run_id and not settings.api_request_log_all):
         return await call_next(request)
     body = await request.body()

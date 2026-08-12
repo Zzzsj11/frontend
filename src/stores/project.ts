@@ -585,7 +585,7 @@ export const useProjectStore = defineStore('project', {
         for (let attempt = 0; attempt < 60; attempt++) {
           await new Promise((resolve) => setTimeout(resolve, 5000))
           if (this.activeTaskId !== taskId) return
-          const fresh = await api.fetchSongScript(taskId).catch(() => null)
+          const fresh = await api.fetchSongScript(taskId, true).catch(() => null)
           if (!fresh || this.activeTaskId !== taskId) return
           for (const freshLine of fresh.lines) {
             const current = this.lines.find((item) => item.id === freshLine.id)
@@ -786,7 +786,7 @@ export const useProjectStore = defineStore('project', {
     async _pollSegmentRetry(taskId: string, sceneIndex: number): Promise<void> {
       const deadline = Date.now() + 300_000
       while (Date.now() < deadline && this.activeTaskId === taskId) {
-        const fresh = await api.fetchSongScript(taskId).catch(() => null)
+        const fresh = await api.fetchSongScript(taskId, true).catch(() => null)
         if (!fresh || this.activeTaskId !== taskId) return
         const progress = fresh.outlineProgress as
           { phase?: string; sceneIndex?: number; error?: string } | undefined
