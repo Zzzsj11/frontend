@@ -42,12 +42,12 @@ from .domain import router as domain_router
 from .error_logging import record_api_error, request_payload
 from .jobs import jobs
 from .media_constraints import normalize_video_duration
-from .models import AiModelModel, GenerationJobModel, ProjectCastModel, ProjectTaskModel, SongEmotionProfileModel, StoryboardLineModel, UserModel
+from .models import AiModelModel, DigitalHumanModel, GenerationJobModel, ProjectCastModel, ProjectTaskModel, SongEmotionProfileModel, StoryboardLineModel, UserModel
 from .providers import generate_image, generate_video, resume_generation
 from .redis_store import close_redis, redis_ok
 from .request_logging import api_request_log_middleware
 from .schemas import ChatMessageCreate, ChatSessionCreate, ImageGenerationCreate, LoginCreate, PasswordChange, RemoteImportCreate, VideoGenerationCreate
-from .seed import recover_stale_storyboard_generation, seed_system_data
+from .seed import ensure_pending_asset_avatars, recover_stale_storyboard_generation, seed_system_data
 from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
 from .usage_quota import consume_daily_quota
 
@@ -60,6 +60,8 @@ async def lifespan(_app: FastAPI):
     await seed_admin()
     await seed_system_data()
     await recover_stale_storyboard_generation()
+    # 数字人虚拟资产注册（系统 + 用户上传）：后台执行（幂等），生成视频时用 asset:// 链接过真人人脸校验
+    asyncio.create_task(ensure_pending_asset_avatars())
     recovered = await jobs.recover_stale_jobs(resume_generation)
     if recovered["resumed"] or recovered["failed"]:
         logger.info("媒体生成任务恢复：续跑 %s 个，判败 %s 个", recovered["resumed"], recovered["failed"])
@@ -426,12 +428,39 @@ async def create_image_generation(payload: ImageGenerationCreate, user: CurrentU
     return job.public()
 
 
+async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str]) -> list[str]:
+    """把数字人头像 TOS 路径替换为 AIGC 平台 asset:// 链接（过真人人脸校验）；非头像 URL 原样保留。"""
+    if not image_urls:
+        return image_urls
+    humans = (
+        (
+            await db.execute(
+                select(DigitalHumanModel).where(
+                    DigitalHumanModel.deleted_at.is_(None),
+                    DigitalHumanModel.asset_avatar_url.isnot(None),
+                    DigitalHumanModel.asset_avatar_url != "",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    lookup: dict[str, str] = {}
+    for human in humans:
+        lookup[human.avatar_url] = human.asset_avatar_url
+        if human.avatar_thumbnail_url:
+            lookup[human.avatar_thumbnail_url] = human.asset_avatar_url
+    return [lookup.get(url, url) for url in image_urls]
+
+
 @app.post("/api/generations/videos", status_code=202)
 async def create_video_generation(payload: VideoGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
     await require_active_model(db, payload.model or settings.video_model, "video")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
     await _check_concurrency(db, user.id, "video", 20)
     await consume_daily_quota(db, user_id=user.id, category="video", limit=settings.daily_video_limit)
+    # 数字人头像优先用平台虚拟资产（asset://），其余 URL（如场景图）原样保留
+    payload.image_urls = await _resolve_asset_avatar_urls(db, payload.image_urls)
     job = await jobs.create(
         "video",
         payload.model_dump(mode="json"),

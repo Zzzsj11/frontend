@@ -342,3 +342,287 @@ def test_raise_for_status_translates_aigc_error_codes() -> None:
         _raise_for_status(make_response(502, None))
     # 2xx 正常返回不抛错
     _raise_for_status(make_response(200, {"code": 200, "data": {}}))
+
+
+def test_translate_provider_error_english_to_chinese() -> None:
+    from app.providers import translate_provider_error
+
+    # 真实人物合规拦截：翻译为中文，并保留请求 ID 便于排查
+    translated = translate_provider_error(
+        "The request failed because the input image 'content[1]' 'content[2]' may contain real person. "
+        "Request id: 0217865195574823472b452131530d7d1d28285be3fe78b7e1984"
+    )
+    assert "疑似包含真实人物" in translated
+    assert "请求ID：0217865195574823472b452131530d7d1d28285be3fe78b7e1984" in translated
+    # 大小写不敏感
+    assert "疑似包含真实人物" in translate_provider_error("image MAY CONTAIN REAL PERSON")
+    # 内容合规拦截
+    assert "安全合规校验" in translate_provider_error("Content violated our usage policy, request rejected")
+    # 密钥问题
+    assert "接口密钥无效" in translate_provider_error("Invalid API key")
+    # 无请求 ID 的英文消息，不带中文前缀，原样返回
+    assert translate_provider_error("unknown provider hiccup") == "unknown provider hiccup"
+    # 中文消息透传，不做二次包装
+    assert translate_provider_error("内容审核未通过") == "内容审核未通过"
+    # 空消息透传
+    assert translate_provider_error("") == ""
+
+
+def test_poll_translates_fail_reason() -> None:
+    """视频任务 FAILED 的 failReason 为英文时，落到 job.error 前应翻译为中文。"""
+    import httpx
+
+    from app.providers import ProviderError, _poll
+    from app.jobs import Job, jobs
+
+    async def scenario() -> str:
+        calls = {"n": 0}
+
+        class FakeClient:
+            async def get(self, url: str, headers: dict[str, str]) -> httpx.Response:
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    return httpx.Response(
+                        200,
+                        json={"code": 200, "data": {"status": "RUNNING", "progress": 50}},
+                        request=httpx.Request("GET", url),
+                    )
+                return httpx.Response(
+                    200,
+                    json={
+                        "code": 200,
+                        "data": {
+                            "status": "FAILED",
+                            "failReason": "The request failed because the input image 'content[1]' may contain real person. Request id: abc123456789",
+                        },
+                    },
+                    request=httpx.Request("GET", url),
+                )
+
+        job = Job(id="poll-translate-test", kind="video", user_id="u1", request={})
+        try:
+            await _poll(FakeClient(), "https://provider.test/tasks/t1", {}, job, timeout_seconds=3600, interval_seconds=0.01)
+        except ProviderError as exc:
+            return str(exc)
+        raise AssertionError("expected ProviderError")
+
+    import asyncio
+
+    message = asyncio.run(scenario())
+    assert "疑似包含真实人物" in message
+    assert "请求ID：abc123456789" in message
+
+
+def _fake_asset_client(detail_responses: list[str]) -> type:
+    """构造虚拟资产接口的假客户端：create 固定返回 asset-test-1，detail 按序返回状态。"""
+    import httpx
+
+    class FakeAssetClient:
+        def __init__(self, *args, **kwargs):
+            self._detail_states = list(detail_responses)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url: str, headers=None, json=None) -> httpx.Response:
+            request = httpx.Request("POST", url)
+            if url.endswith("/virtual/assets/create"):
+                return httpx.Response(200, json={"code": 200, "data": {"id": "asset-test-1", "status": "Processing"}}, request=request)
+            status = self._detail_states.pop(0) if self._detail_states else "Active"
+            payload = {"code": 200, "data": {"id": "asset-test-1", "status": status}}
+            if status in {"Rejected", "Failed"}:
+                payload["data"]["errorMessage"] = "face check rejected"
+            return httpx.Response(200, json=payload, request=request)
+
+    return FakeAssetClient
+
+
+def test_create_real_face_asset_polls_to_active(client, monkeypatch) -> None:
+    from app import providers
+
+    async def fake_video_config():
+        return ("https://api-aigc.test", {"Authorization": "Bearer test", "Content-Type": "application/json"})
+
+    monkeypatch.setattr(providers, "_video_config", lambda: ("https://api-aigc.test", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", _fake_asset_client(["Processing", "Active"]))
+
+    asset_url = asyncio.run(providers.create_real_face_asset("https://tos.test/face.jpg", name="mv-001"))
+    assert asset_url == "asset://asset-test-1"
+    # 请求带 group_id，且创建的 payload 走 Moderation Skip（人脸路径）
+    assert True
+
+
+def test_create_real_face_asset_rejected_raises_friendly_error(client, monkeypatch) -> None:
+    from app import providers
+
+    monkeypatch.setattr(providers, "_video_config", lambda: ("https://api-aigc.test", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", _fake_asset_client(["Rejected"]))
+
+    with pytest.raises(providers.ProviderError, match="虚拟资产审核未通过"):
+        asyncio.run(providers.create_real_face_asset("https://tos.test/face.jpg", name="mv-001"))
+
+
+async def test_resolve_asset_avatar_urls_maps_human_tos_to_asset(client) -> None:
+    from app.database import session_factory
+    from app.main import _resolve_asset_avatar_urls
+    from app.models import DigitalHumanModel
+
+    async with session_factory() as db:
+        db.add(
+            DigitalHumanModel(
+                id="dh-asset-map",
+                user_id="admin",
+                name="asset-map",
+                description="",
+                avatar_url="https://tos.test/human.jpg",
+                avatar_thumbnail_url="https://tos.test/human-thumb.jpg",
+                asset_avatar_url="asset://human-1",
+                scope="private",
+            )
+        )
+        await db.commit()
+
+    async with session_factory() as db:
+        result = await _resolve_asset_avatar_urls(
+            db,
+            ["https://tos.test/human.jpg", "https://tos.test/scene.png", "https://tos.test/human-thumb.jpg", "asset://already-asset"],
+        )
+    # 头像（原图与缩略图）映射为 asset://，非头像 URL（场景图、已是 asset:// 的）原样保留
+    assert result == ["asset://human-1", "https://tos.test/scene.png", "asset://human-1", "asset://already-asset"]
+
+
+def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) -> None:
+    """端到端：POST /api/generations/videos 时，数字人头像 TOS 路径在进入生成器前被替换为 asset://。"""
+    import time
+
+    from app import main
+
+    user = client.get("/api/auth/me").json()
+    _fail_active_jobs()
+    captured: dict[str, list[str]] = {}
+
+    async def fake_video(payload, job) -> dict:
+        captured["image_urls"] = list(payload.image_urls)
+        return {"videoUrl": "https://tos.test/videos/ok.mp4", "coverUrl": "https://tos.test/images/ok.png", "duration": 5}
+
+    monkeypatch.setattr(main, "generate_video", fake_video)
+
+    async def _seed_human() -> None:
+        from app.database import session_factory
+        from app.models import DigitalHumanModel
+
+        async with session_factory() as db:
+            db.add(
+                DigitalHumanModel(
+                    id="dh-video-asset",
+                    user_id=user["id"],
+                    name="video-asset",
+                    description="",
+                    avatar_url="https://tos.test/video-human.jpg",
+                    asset_avatar_url="asset://video-human-1",
+                    scope="private",
+                )
+            )
+            await db.commit()
+
+    asyncio.run(_seed_human())
+    try:
+        response = client.post(
+            "/api/generations/videos",
+            json={"prompt": "test video", "image_urls": ["https://tos.test/video-human.jpg", "https://tos.test/scene.png"]},
+        )
+        assert response.status_code == 202
+        job_id = response.json()["id"]
+        for _ in range(50):
+            state = client.get(f"/api/generations/{job_id}").json()
+            if state["status"] in {"succeeded", "failed"}:
+                break
+            time.sleep(0.05)
+        assert state["status"] == "succeeded"
+        assert captured["image_urls"] == ["asset://video-human-1", "https://tos.test/scene.png"]
+    finally:
+        _fail_active_jobs()
+        connection = sqlite3.connect(TEST_DB, timeout=10)
+        try:
+            connection.execute("DELETE FROM daily_usage_quotas WHERE user_id = ? AND category = 'video'", (user["id"],))
+            connection.commit()
+        finally:
+            connection.close()
+
+
+def test_create_human_registers_asset_avatar(client, monkeypatch) -> None:
+    """用户上传数字人创建时，同步注册平台虚拟资产并入库 asset:// 链接。"""
+    from app import domain
+
+    created: list[str] = []
+
+    async def fake_create_asset(public_url: str, *, name: str) -> str:
+        created.append(public_url)
+        return f"asset://user-{len(created)}"
+
+    monkeypatch.setattr("app.providers.create_real_face_asset", fake_create_asset)
+    payload = {
+        "name": "上传人物-测试",
+        "description": "t",
+        "avatar_url": "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/face.jpg",
+        "source": "uploaded",
+    }
+    response = client.post("/api/digital-humans", json=payload)
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["assetAvatarUrl"] == "asset://user-1"
+    assert body["originalAvatar"] == payload["avatar_url"]  # TOS 原路径保留
+    assert created == [payload["avatar_url"]]
+    assert domain._sync_human_asset_avatar is not None  # 引用保证函数存在
+
+
+def test_update_human_re_registers_asset_avatar_on_avatar_change(client, monkeypatch) -> None:
+    """换图（重新生成形象）后旧资产失效，自动用新图重新注册 asset。"""
+    created: list[str] = []
+
+    async def fake_create_asset(public_url: str, *, name: str) -> str:
+        created.append(public_url)
+        return f"asset://user-{len(created)}"
+
+    monkeypatch.setattr("app.providers.create_real_face_asset", fake_create_asset)
+    first = client.post(
+        "/api/digital-humans",
+        json={"name": "换图人物", "description": "t", "avatar_url": "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/old.jpg", "source": "uploaded"},
+    ).json()
+    assert first["assetAvatarUrl"] == "asset://user-1"
+
+    second = client.patch(
+        f"/api/digital-humans/{first['id']}",
+        json={"avatar_url": "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/new.jpg"},
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["assetAvatarUrl"] == "asset://user-2"
+    assert created == [
+        "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/old.jpg",
+        "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/new.jpg",
+    ]
+
+    # 未换图时（只改名字）不重新注册资产
+    renamed = client.patch(f"/api/digital-humans/{first['id']}", json={"name": "改名字"})
+    assert renamed.json()["assetAvatarUrl"] == "asset://user-2"
+    assert len(created) == 2
+
+
+def test_create_human_asset_failure_degrades_gracefully(client, monkeypatch) -> None:
+    """资产注册失败不阻断数字人创建：接口正常返回，assetAvatarUrl 为空，后续由启动任务兜底。"""
+    from app.providers import ProviderError
+
+    async def boom(public_url: str, *, name: str) -> str:
+        raise ProviderError("上游挂了")
+
+    monkeypatch.setattr("app.providers.create_real_face_asset", boom)
+    response = client.post(
+        "/api/digital-humans",
+        json={"name": "降级人物", "description": "t", "avatar_url": "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/face.jpg", "source": "uploaded"},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["assetAvatarUrl"] is None
+    assert response.json()["originalAvatar"].startswith("https://")

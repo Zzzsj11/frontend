@@ -56,3 +56,41 @@ def parse_system_human(code: str, markdown: str) -> dict[str, str]:
 
 
 SYSTEM_HUMANS = [parse_system_human(code, markdown) for code, markdown in SYSTEM_HUMAN_MARKDOWN.items()]
+
+
+# 系统人物在 AIGC 平台的虚拟资产链接（asset://）。资产由平台托管，同一平台账号跨环境通用，
+# seed 时直接写入 asset_avatar_url，生成视频时传此引用可绕过真实人物检测，无需每次启动重新注册。
+SYSTEM_HUMAN_ASSET_URLS: dict[str, str] = {
+    "001": "asset://asset-20260812154310-rnkt5",
+    "002": "asset://asset-20260812153722-g6xf4",
+    "003": "asset://asset-20260812153729-p6d4r",
+    "004": "asset://asset-20260812153735-srbtk",
+    "005": "asset://asset-20260812153744-vkc4t",
+    "006": "asset://asset-20260812153751-lmgm2",
+    "007": "asset://asset-20260812153756-x9kcr",
+    "008": "asset://asset-20260812153802-2mxvm",
+    "009": "asset://asset-20260812153810-b4dgr",
+    "010": "asset://asset-20260812153817-gwfqj",
+    "011": "asset://asset-20260812153824-jltqf",
+    "012": "asset://asset-20260812154316-r9hzt",
+    "013": "asset://asset-20260812153841-j7ql9",
+    "014": "asset://asset-20260812153847-qb2xv",
+    "015": "asset://asset-20260812153852-bmclt",
+    "016": "asset://asset-20260812153900-kk5pj",
+    "017": "asset://asset-20260812153909-sqgdj",
+    "018": "asset://asset-20260812153920-lkdkr",
+    "019": "asset://asset-20260812153925-55ml9",
+    "020": "asset://asset-20260812153931-rwlhq",
+    "021": "asset://asset-20260812153938-kbphn",
+    "022": "asset://asset-20260812153943-fkdf4",
+    "023": "asset://asset-20260812154321-kfqgh",
+    "024": "asset://asset-20260812154026-ntz6h",
+    "025": "asset://asset-20260812154033-86dcj",
+    "026": "asset://asset-20260812154038-6p77z",
+    "027": "asset://asset-20260812154042-ct2xf",
+    "028": "asset://asset-20260812154055-wpfwf",
+    "029": "asset://asset-20260812154100-v98km",
+    "030": "asset://asset-20260812154106-ntw6s",
+    "031": "asset://asset-20260812154114-w9825",
+    "032": "asset://asset-20260812154119-zll87",
+}

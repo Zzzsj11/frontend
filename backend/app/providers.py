@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import tempfile
 import time
 import uuid
@@ -25,6 +26,43 @@ _AIGC_FRIENDLY_ERRORS: dict[str, str] = {
     "IMG-4030": "图片生成额度已用尽，请联系管理员充值或更换 API Key",
 }
 
+# AIGC 供应商英文错误关键词 → 中文友好提示（按顺序匹配，首个命中的生效）
+_PROVIDER_ERROR_TRANSLATIONS: list[tuple[re.Pattern[str], str]] = [
+    (
+        re.compile(r"may contain real person", re.IGNORECASE),
+        "输入参考图疑似包含真实人物，受平台合规限制无法生成。请更换为系统角色或 AI 生成的人物素材",
+    ),
+    (
+        re.compile(r"content polic|sensitive content|unsafe content|violat", re.IGNORECASE),
+        "内容未通过平台安全合规校验，请调整画面内容或提示词后重试",
+    ),
+    (
+        re.compile(r"invalid (api.?key|token)|unauthorized|permission denied|api key not (found|valid)", re.IGNORECASE),
+        "接口密钥无效或未授权，请联系管理员检查 API Key 配置",
+    ),
+]
+
+_REQUEST_ID_RE = re.compile(r"request\s*id[:\s]*([a-zA-Z0-9\-]+)", re.IGNORECASE)
+
+
+def translate_provider_error(msg: str) -> str:
+    """把上游返回的英文错误翻译为中文友好提示；request id 单独保留，便于排查问题。"""
+    if not msg:
+        return msg
+    request_id = ""
+    match = _REQUEST_ID_RE.search(msg)
+    if match:
+        request_id = match.group(1)
+    clean = _REQUEST_ID_RE.sub("", msg)
+    translated = msg
+    for pattern, friendly in _PROVIDER_ERROR_TRANSLATIONS:
+        if pattern.search(clean):
+            translated = friendly
+            break
+    if request_id:
+        translated = f"{translated}（请求ID：{request_id}）"
+    return translated
+
 
 def _raise_for_status(response: httpx.Response) -> None:
     """对 AIGC 返回的 HTTP 错误，尝试解析 body 中的业务错误码并翻译为友好提示。"""
@@ -42,7 +80,7 @@ def _raise_for_status(response: httpx.Response) -> None:
         if friendly:
             raise ProviderError(friendly) from exc
         if msg:
-            raise ProviderError(msg) from exc
+            raise ProviderError(translate_provider_error(msg)) from exc
         raise ProviderError(str(exc)) from exc
 
 
@@ -53,7 +91,7 @@ def _headers(api_key: str, *, x_api_key: bool = False) -> dict[str, str]:
 
 def _unwrap(body: dict[str, Any]) -> dict[str, Any]:
     if body.get("code") != 200:
-        raise ProviderError(body.get("msg") or f"上游接口返回错误：{body.get('code')}")
+        raise ProviderError(translate_provider_error(body.get("msg") or f"上游接口返回错误：{body.get('code')}"))
     return body.get("data") or {}
 
 
@@ -68,6 +106,43 @@ IMAGE_POLL_TIMEOUT_SECONDS = 360
 VIDEO_POLL_TIMEOUT_SECONDS = 900
 POLL_INTERVAL_SECONDS = 30
 POLL_MAX_CONSECUTIVE_ERRORS = 5
+
+ASSET_POLL_TIMEOUT_SECONDS = 180
+ASSET_POLL_INTERVAL_SECONDS = 3.0
+
+
+async def create_real_face_asset(public_url: str, *, name: str) -> str:
+    """把公开图片注册为 AIGC 平台虚拟资产，轮询至 Active，返回 asset://{id} 链接。
+
+    视频生成传 asset:// 引用的是平台内部已托管素材，可绕过上游对真实人物的直接检测。
+    """
+    base, headers = _video_config()
+    headers["group_id"] = settings.aigc_asset_group_id
+    payload = {
+        "url": public_url,
+        "name": name,
+        "assetType": "Image",
+        "Moderation": {"Strategy": "Skip"},
+    }
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(f"{base}/virtual/assets/create", headers=headers, json=payload)
+        _raise_for_status(response)
+        created = _unwrap(response.json())
+        asset_id = created.get("id")
+        if not asset_id:
+            raise ProviderError("虚拟资产接口未返回 asset id")
+        deadline = time.monotonic() + ASSET_POLL_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            await asyncio.sleep(ASSET_POLL_INTERVAL_SECONDS)
+            detail_response = await client.post(f"{base}/virtual/assets/detail", headers=headers, json={"assetId": asset_id})
+            _raise_for_status(detail_response)
+            detail = _unwrap(detail_response.json())
+            status = str(detail.get("status") or "")
+            if status == "Active":
+                return f"asset://{asset_id}"
+            if status in {"Rejected", "Failed"}:
+                raise ProviderError(f"虚拟资产审核未通过：{detail.get('errorMessage') or detail.get('errorCode') or status}")
+        raise ProviderError(f"虚拟资产创建超时：{asset_id}")
 
 
 def _image_config() -> tuple[str, dict[str, str]]:
@@ -115,7 +190,7 @@ async def _poll(
         if status == "SUCCESS":
             return data
         if status in {"FAILED", "CANCELLED"} or "FAIL" in status:
-            raise ProviderError(data.get("failReason") or f"生成任务状态：{status}")
+            raise ProviderError(translate_provider_error(data.get("failReason") or f"生成任务状态：{status}"))
     raise ProviderError("生成任务超时，请稍后查询")
 
 

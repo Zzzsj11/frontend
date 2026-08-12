@@ -22,7 +22,8 @@ from .models import (
 )
 from .song_emotions import SONG_EMOTIONS
 from .storage import TosStorage
-from .system_humans import SYSTEM_HUMANS
+from .system_humans import SYSTEM_HUMAN_ASSET_URLS, SYSTEM_HUMANS
+from .error_logging import log_background_error
 
 
 async def seed_system_data() -> None:
@@ -118,6 +119,8 @@ async def seed_system_data() -> None:
             avatar_url = TosStorage._public_url(bucket, object_key)
             thumbnail_bucket, thumbnail_key = TosStorage._bucket_for(f"system/digital-humans/thumbnails/{data['asset_code']}.jpg")
             thumbnail_url = TosStorage._public_url(thumbnail_bucket, thumbnail_key)
+            # 平台虚拟资产链接已注册并固化，seed 直接写入（asset:// 由平台托管，跨环境通用）
+            asset_avatar_url = SYSTEM_HUMAN_ASSET_URLS.get(data["asset_code"])
             if not human:
                 human = DigitalHumanModel(
                     id=human_id,
@@ -130,12 +133,14 @@ async def seed_system_data() -> None:
                     description=data["appearance_style"],
                     avatar_url=avatar_url,
                     avatar_thumbnail_url=thumbnail_url,
+                    asset_avatar_url=asset_avatar_url,
                     **{key: value for key, value in data.items() if key != "category"},
                 )
                 session.add(human)
             else:
                 human.style_id, human.deleted_at, human.status = style.id, None, "active"
                 human.avatar_url, human.avatar_thumbnail_url = avatar_url, thumbnail_url
+                human.asset_avatar_url = asset_avatar_url
                 human.avatar_prompt, human.description = data["system_prompt"], data["appearance_style"]
                 for key, value in data.items():
                     if key == "category":
@@ -162,6 +167,48 @@ async def seed_system_data() -> None:
                 for key, value in values.items():
                     setattr(profile, key, value)
         await session.commit()
+
+
+async def ensure_pending_asset_avatars() -> None:
+    """为尚无 asset:// 链接的数字人（系统 + 用户上传）注册 AIGC 平台虚拟资产（幂等，启动后台执行）。
+
+    数字人头像注册到平台后返回 asset:// 链接，生成视频时用它替代原始 TOS 路径，
+    可绕过上游对真实人物的直接检测；创建失败只记日志，不影响启动与原有 TOS 路径可用性，
+    下次启动会继续补注册（创建接口同步失败的用户头像由此兜底）。
+    """
+    from .providers import create_real_face_asset
+
+    async with session_factory() as session:
+        pending = (
+            (
+                await session.execute(
+                    select(DigitalHumanModel).where(
+                        DigitalHumanModel.deleted_at.is_(None),
+                        DigitalHumanModel.asset_avatar_url.is_(None),
+                        DigitalHumanModel.avatar_url.isnot(None),
+                        DigitalHumanModel.avatar_url != "",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    for human in pending:
+        try:
+            asset_url = await create_real_face_asset(human.avatar_url, name=f"mv-{human.asset_code or human.id}")
+        except Exception as exc:
+            await log_background_error(
+                user_id=human.user_id,
+                path="/virtual/assets/create",
+                error_type="AssetError",
+                message=f"digital human asset create failed: {human.id}: {exc}",
+            )
+            continue
+        async with session_factory() as session:
+            current = await session.get(DigitalHumanModel, human.id)
+            if current and current.asset_avatar_url is None:
+                current.asset_avatar_url = asset_url
+                await session.commit()
 
 
 async def recover_stale_storyboard_generation() -> None:

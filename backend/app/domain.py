@@ -1077,6 +1077,7 @@ def human_json(item: DigitalHumanModel, style_name: str | None = None) -> dict:
         "style": style_name or "未分类",
         "avatar": item.avatar_thumbnail_url or item.avatar_url,
         "originalAvatar": item.avatar_url,
+        "assetAvatarUrl": item.asset_avatar_url,
         "description": item.description,
         "avatarPrompt": item.avatar_prompt,
         "assetCode": item.asset_code,
@@ -1101,6 +1102,34 @@ async def list_humans(user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
     return [human_json(item, styles.get(item.style_id)) for item in items]
 
 
+async def _sync_human_asset_avatar(human: DigitalHumanModel) -> None:
+    """为数字人注册 AIGC 平台虚拟资产（asset://），生成视频时用于过真人人脸校验。
+
+    同步等待上游 Active（约数秒）；失败只记录日志，降级继续用原始 TOS 路径。
+    换图后旧 asset 失效：调用方需先清空 asset_avatar_url 再传新 avatar_url。
+    """
+    from .error_logging import log_background_error
+    from .providers import create_real_face_asset
+
+    if not human.avatar_url or human.asset_avatar_url:
+        return
+    try:
+        # 同步等待上游 Active，但设上限避免接口长时间阻塞；超时降级走 TOS 路径，由启动任务兜底补注册
+        asset_url = await asyncio.wait_for(
+            create_real_face_asset(human.avatar_url, name=f"mv-{human.asset_code or human.id}"),
+            timeout=30,
+        )
+    except Exception as exc:
+        await log_background_error(
+            user_id=human.user_id,
+            path="/virtual/assets/create",
+            error_type="AssetError",
+            message=f"digital human asset create failed: {human.id}: {exc}",
+        )
+        return
+    human.asset_avatar_url = asset_url
+
+
 @router.post("/digital-humans", status_code=201)
 async def create_human(payload: DigitalHumanCreate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     if not is_tos_url(payload.avatar_url) or (payload.avatar_thumbnail_url and not is_tos_url(payload.avatar_thumbnail_url)):
@@ -1112,6 +1141,9 @@ async def create_human(payload: DigitalHumanCreate, user: CurrentUser, db: Async
             raise HTTPException(422, "角色分类不可用")
     item = DigitalHumanModel(id=uid("dh"), user_id=user.id, scope="private", **payload.model_dump())
     db.add(item)
+    await db.commit()
+    # 用户上传/生成的三视图同样注册平台虚拟资产，生成视频时用 asset:// 过真人人脸校验
+    await _sync_human_asset_avatar(item)
     await db.commit()
     return human_json(item, style.name if style else None)
 
@@ -1130,6 +1162,11 @@ async def update_human(human_id: str, payload: DigitalHumanUpdate, user: Current
         if key in {"avatar_url", "avatar_thumbnail_url"} and value and not is_tos_url(str(value)):
             raise HTTPException(422, "角色图片必须存储在配置的 TOS")
         setattr(item, key, value)
+    # 换图后旧资产链接失效：清空后重新注册，确保 asset:// 始终对应当前头像
+    if "avatar_url" in payload.model_dump(exclude_unset=True):
+        item.asset_avatar_url = None
+        await db.commit()
+        await _sync_human_asset_avatar(item)
     await db.commit()
     return human_json(item)
 
