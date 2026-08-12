@@ -60,7 +60,7 @@ def build_ass_story_bible(*, segments: list[dict[str, Any]], emotion: dict[str, 
             "atmosphere": emotion.get("atmosphere"),
             "stylePriority": extra_requirement or "统一时间、天气、色彩与人物服装，通过合理空间移动形成场景变化",
         },
-        "characterPolicy": "逐镜类型、人物、地点与动作均由全局大纲确定。单条生成必须严格沿用预分配角色、镜头类型、地点与人物动作；不得临时改为空镜、替换人物、引入其他人物或改变人物身份服装。",
+        "characterPolicy": "逐镜类型、人物、地点与动作均由全局大纲确定。单条生成必须严格沿用预分配角色、镜头类型、地点与人物动作；视频中的人物必须与参考图中的角色保持严格一致——面容、发型、服装、配饰完全一致，不得改变任何外貌细节。不得临时改为空镜、替换人物、引入其他人物或改变人物身份服装。",
         "technicalPolicy": {
             "negativeConstraints": ["无字幕", "无水印", "无 Logo", "不得出现未指定人物", "不得改变人物服装与身份"],
             "locationRule": "同一故事世界允许跨多个关联地点推进；一致性来自时间、天气、色彩、服装和空间衔接，而非所有镜头固定在同一地点。",

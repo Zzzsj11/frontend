@@ -643,7 +643,7 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
             "严格继承 globalContext.storyBible 的 globalVisual、人物连续性和 technicalPolicy，但当前地点必须使用 currentShot.outline.locationId 对应的 locations 条目。不得为了保持一致而擅自回到上一镜地点。",
             "严格执行 currentShot.outline 中的 characterAction、emotionalFocus、cameraPurpose、motifIds 和 locationChange；未列入 motifIds 的视觉母题不得擅自加入。",
             "一致性来自时间、天气、色彩、服装与空间衔接，不等于所有镜头停留在同一场景。scenePrompt 必须体现大纲规划的场景推进。",
-            "只要 plannedDigitalHumanIds 非空，shotPrompt 必须逐一写入对应 allowedCharacters 的身份、外貌与服装特征；严禁出现未列入本镜的其他人物。",
+            "只要 plannedDigitalHumanIds 非空，shotPrompt 必须逐一写入对应 allowedCharacters 的身份信息，并明确要求视频中生成的人物与参考图中的角色保持严格一致性——包括面容、发型、服装、配饰完全一致，不得改变任何外貌细节。严禁出现未列入本镜的其他人物。",
             "当 plannedDigitalHumanIds 为空时，digitalHumanIds 必须为空，shotPrompt 必须明确为无人出镜的空镜，不得描写可识别人物。",
             "构图必须适配指定画幅比例，动作必须能在 plannedDuration 内完成。",
             "shotPrompt 必须明确写出 plannedDuration 对应的秒数，并让动作、运镜和停顿在该时长内完整结束；不得套用固定 5 秒节奏。",
