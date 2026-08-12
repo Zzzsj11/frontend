@@ -45,9 +45,11 @@ export async function createImageTask(
   return data.id
 }
 
-/** 查询任务状态 */
+/** 查询任务状态（waitForImageAsset 每 3 秒轮询调用：打 X-Polling 标记，后端全量日志跳过） */
 export function getImageTask(taskId: string): Promise<GenerationJob> {
-  return request<GenerationJob>(`/generations/${taskId}`)
+  return request<GenerationJob>(`/generations/${taskId}`, {
+    headers: { 'X-Polling': '1' },
+  })
 }
 
 /** 轮询直至任务完成，返回首张图片地址 */
