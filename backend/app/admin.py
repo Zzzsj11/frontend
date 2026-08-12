@@ -9,6 +9,7 @@ from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import CurrentUser
+from .config import settings
 from .database import database_session
 from .jobs import jobs as job_manager
 from .models import (
@@ -25,7 +26,7 @@ from .models import (
     UserModel,
     utcnow,
 )
-from .providers import query_provider_task, resume_generation, store_provider_result
+from .providers import ProviderError, list_video_models, query_provider_task, resume_generation, store_provider_result
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 Db = Depends(database_session)
@@ -467,3 +468,23 @@ async def model_options(user: CurrentUser, modality: str | None = None, db: Asyn
         query = query.where(AiModelModel.modality == modality)
     rows = (await db.execute(query.order_by(AiModelModel.modality, AiModelModel.sort_order))).scalars()
     return [{"id": x.code, "name": x.name, "modality": x.modality, "capabilities": x.capabilities, "isDefault": x.is_default} for x in rows]
+
+
+@public_router.get("/aigc/models")
+async def aigc_provider_models(user: CurrentUser):
+    """工具：实时查询上游 AIGC 平台当前账号可见的模型列表（/v1/models）。
+
+    用途：核对环境变量（VIDEO_API_KEY/AIGC_TOKEN）指向的账号在平台侧实际开放了哪些
+    模型，排查“模型名不存在/不可用”类问题；key 与生成链路同一来源，不做缓存。
+    """
+    try:
+        models = await list_video_models()
+    except ProviderError as exc:
+        raise HTTPException(502, f"上游模型列表查询失败：{exc}") from exc
+    return {
+        "provider": "yinghe",
+        "baseUrl": settings.video_api_base_url,
+        "apiKeySuffix": settings.video_api_key[-6:],
+        "count": len(models),
+        "models": models,
+    }

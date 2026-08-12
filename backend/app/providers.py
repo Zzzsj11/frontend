@@ -194,6 +194,25 @@ async def _poll(
     raise ProviderError("生成任务超时，请稍后查询")
 
 
+async def list_video_models() -> list[dict[str, Any]]:
+    """查询 AIGC 平台当前账号可见的模型列表（OpenAI 风格 /v1/models）。
+
+    key 从环境变量读取：VIDEO_API_KEY 优先，缺省回退 AIGC_TOKEN（与生成链路同一账号），
+    保证列表展示的模型就是实际可用于生成（视频/图像/文本）的模型。
+    """
+    base, headers = _video_config()
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.get(f"{base}/v1/models", headers=headers)
+        _raise_for_status(response)
+        body = response.json()
+    if not isinstance(body, dict):
+        raise ProviderError("模型列表接口返回格式异常")
+    data = body.get("data")
+    if not isinstance(data, list):
+        raise ProviderError("模型列表接口未返回 data 数组")
+    return [item for item in data if isinstance(item, dict)]
+
+
 async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, Any]:
     base, headers = _image_config()
     payload: dict[str, Any] = {
