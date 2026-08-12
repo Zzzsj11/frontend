@@ -2,6 +2,8 @@ import { ApiError, reportApiError } from '../errorBus'
 
 let accessToken = ''
 let refreshPromise: Promise<boolean> | null = null
+/** 用户主动退出登录后置位：在途请求/轮询撞上 401 时静默失败，不再弹“登录已过期”或强制跳转 */
+let intentionalLogout = false
 const NETWORK_RETRY_DELAYS_MS = [500, 1500]
 // 502/503 是 nginx 在上游不可达时直接返回的（部署重启窗口），请求从未到达后端，
 // 因此任何方法（含 POST）都可安全重放；预算覆盖一次平滑切换的收敛时间
@@ -9,6 +11,12 @@ const GATEWAY_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000]
 const wait = (delayMs: number) => new Promise((resolve) => setTimeout(resolve, delayMs))
 export const setAccessToken = (value: string) => {
   accessToken = value
+}
+/** 重置会话辅助状态（测试清理 / 登录页兜底）：清 token、退出标志与进行中的刷新 */
+export function resetAuthState() {
+  accessToken = ''
+  intentionalLogout = false
+  refreshPromise = null
 }
 const refreshAccess = async () => {
   if (!refreshPromise)
@@ -74,7 +82,8 @@ export async function apiRequest<T>(
     }
   }
   if ((response.status === 401 || response.status === 403) && retry && !path.startsWith('/auth/')) {
-    if (await refreshAccess()) return apiRequest<T>(path, init, false)
+    if (!intentionalLogout && (await refreshAccess())) return apiRequest<T>(path, init, false)
+    if (intentionalLogout) throw new ApiError('已退出登录', response.status)
     forceLogout()
     throw reportApiError(new ApiError('登录已过期，请重新登录', response.status))
   }
@@ -107,7 +116,8 @@ export async function openApiStream(
     throw reportApiError(error, '实时进度连接失败')
   }
   if ((response.status === 401 || response.status === 403) && retry) {
-    if (await refreshAccess()) return openApiStream(path, signal, false)
+    if (!intentionalLogout && (await refreshAccess())) return openApiStream(path, signal, false)
+    if (intentionalLogout) throw new ApiError('已退出登录', response.status)
     forceLogout()
     throw reportApiError(new ApiError('登录已过期，请重新登录', response.status))
   }
@@ -149,6 +159,7 @@ export async function loginRequest(username: string, password: string) {
   if (!response.ok)
     throw reportApiError(new ApiError(body.detail || '登录失败', response.status, body.errorCode))
   setAccessToken(body.accessToken)
+  intentionalLogout = false // 重新登录成功后，恢复正常的 401 会话处理
   return body as { accessToken: string; user: AuthUser }
 }
 export async function restoreSession(): Promise<AuthUser | null> {
@@ -156,6 +167,7 @@ export async function restoreSession(): Promise<AuthUser | null> {
   return apiRequest<AuthUser>('/auth/me')
 }
 export async function logoutRequest() {
+  intentionalLogout = true
   await apiRequest('/auth/logout', { method: 'POST' }, false).catch(() => undefined)
   setAccessToken('')
 }

@@ -349,8 +349,7 @@ def test_translate_provider_error_english_to_chinese() -> None:
 
     # 真实人物合规拦截：翻译为中文，并保留请求 ID 便于排查
     translated = translate_provider_error(
-        "The request failed because the input image 'content[1]' 'content[2]' may contain real person. "
-        "Request id: 0217865195574823472b452131530d7d1d28285be3fe78b7e1984"
+        "The request failed because the input image 'content[1]' 'content[2]' may contain real person. Request id: 0217865195574823472b452131530d7d1d28285be3fe78b7e1984"
     )
     assert "疑似包含真实人物" in translated
     assert "请求ID：0217865195574823472b452131530d7d1d28285be3fe78b7e1984" in translated
@@ -372,8 +371,8 @@ def test_poll_translates_fail_reason() -> None:
     """视频任务 FAILED 的 failReason 为英文时，落到 job.error 前应翻译为中文。"""
     import httpx
 
+    from app.jobs import Job
     from app.providers import ProviderError, _poll
-    from app.jobs import Job, jobs
 
     async def scenario() -> str:
         calls = {"n": 0}

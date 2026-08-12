@@ -459,7 +459,12 @@ export const useProjectStore = defineStore('project', {
           const local = this.lines.find((line) => line.id === lineId)
           if (local && this.activeTaskId === taskId && !this._outlineReady(local)) continue
           // 跳过已经在生成中或已完成的，避免重复提交触发后端 409
-          if (local && this.activeTaskId === taskId && (local.generationStatus === 'running' || local.generationStatus === 'succeeded')) continue
+          if (
+            local &&
+            this.activeTaskId === taskId &&
+            (local.generationStatus === 'running' || local.generationStatus === 'succeeded')
+          )
+            continue
           if (local && this.activeTaskId === taskId) {
             local.generationStatus = 'running'
             local.generationError = undefined

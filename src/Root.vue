@@ -7,13 +7,13 @@ const auth = useAuthStore()
 <template>
   <ErrorDialog />
   <div v-if="!auth.ready" class="boot">正在加载…</div>
-  <template v-else
-    ><div v-if="auth.authenticated" class="authenticated-shell">
-      <AppHeader />
-      <main class="route-shell"><RouterView /></main>
-    </div>
-    <RouterView v-else
-  /></template>
+  <!-- 只保留单个 RouterView：若按认证状态切换两个 RouterView，退出登录瞬间路由仍是
+       /projects，裸 RouterView 会重新挂载 App.vue，重放 SongSidebar 的 loadSongProjects
+       等初始化请求，此时 token 已清空 → 401 → refresh 失败 → 误弹“登录已过期” -->
+  <div v-else class="app-shell" :class="{ authenticated: auth.authenticated }">
+    <AppHeader v-if="auth.authenticated" />
+    <main class="route-shell"><RouterView /></main>
+  </div>
 </template>
 <style scoped>
 .boot {
@@ -22,7 +22,10 @@ const auth = useAuthStore()
   place-items: center;
   color: var(--text-secondary);
 }
-.authenticated-shell {
+.app-shell {
+  min-height: 0;
+}
+.app-shell.authenticated {
   display: flex;
   height: 100vh;
   height: 100dvh;

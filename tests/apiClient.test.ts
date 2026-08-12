@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { apiRequest, openApiStream, setAccessToken } from '../src/api/client'
+import {
+  apiRequest,
+  logoutRequest,
+  openApiStream,
+  resetAuthState,
+  setAccessToken,
+} from '../src/api/client'
 
 describe('apiRequest', () => {
   afterEach(() => {
@@ -92,7 +98,7 @@ describe('apiRequest auth recovery (401/403)', () => {
 
   afterEach(() => {
     Object.defineProperty(window, 'location', realLocation)
-    setAccessToken('')
+    resetAuthState()
   })
 
   it('replays the request with the refreshed token after a 401', async () => {
@@ -156,6 +162,20 @@ describe('apiRequest auth recovery (401/403)', () => {
 
     await expect(apiRequest('/auth/login', { method: 'POST' })).rejects.toThrow('用户名或密码错误')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(mockLocation.href).toBe('')
+  })
+
+  it('fails silently for in-flight requests after an intentional logout', async () => {
+    setAccessToken('old-token')
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => jsonResponse({ detail: 'token expired' }, 401))
+
+    await logoutRequest()
+    // 退出后任何在途请求撞 401：不尝试 refresh、不弹“登录已过期”、不强制跳转
+    fetchMock.mockClear()
+    await expect(apiRequest('/projects')).rejects.toThrow('已退出登录')
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/auth/refresh', expect.anything())
     expect(mockLocation.href).toBe('')
   })
 
@@ -232,7 +252,7 @@ describe('openApiStream auth recovery (401/403)', () => {
 
   afterEach(() => {
     Object.defineProperty(window, 'location', realLocation)
-    setAccessToken('')
+    resetAuthState()
   })
 
   it('re-opens the stream with the refreshed token after a 401', async () => {

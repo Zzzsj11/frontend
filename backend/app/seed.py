@@ -5,6 +5,7 @@ from datetime import timedelta
 from sqlalchemy import select, update
 
 from .database import session_factory
+from .error_logging import log_background_error
 from .models import (
     AdminPermissionModel,
     AdminRoleModel,
@@ -23,7 +24,6 @@ from .models import (
 from .song_emotions import SONG_EMOTIONS
 from .storage import TosStorage
 from .system_humans import SYSTEM_HUMAN_ASSET_URLS, SYSTEM_HUMANS
-from .error_logging import log_background_error
 
 
 async def seed_system_data() -> None:

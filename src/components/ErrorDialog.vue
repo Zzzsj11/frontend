@@ -28,10 +28,16 @@ const current = computed(() => errorBus.state.queue[0])
           还有 {{ errorBus.state.queue.length - 1 }} 条错误待查看
         </p>
         <div class="error-actions">
-          <button v-if="errorBus.state.queue.length > 1" class="dismiss-all" @click="errorBus.dismissAll()">
+          <button
+            v-if="errorBus.state.queue.length > 1"
+            class="dismiss-all"
+            @click="errorBus.dismissAll()"
+          >
             关闭全部（{{ errorBus.state.queue.length }} 条）
           </button>
-          <button autofocus class="dismiss-one" @click="errorBus.dismiss(current.id)">我知道了</button>
+          <button autofocus class="dismiss-one" @click="errorBus.dismiss(current.id)">
+            我知道了
+          </button>
         </div>
       </section>
     </div></Teleport

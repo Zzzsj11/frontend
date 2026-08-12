@@ -49,7 +49,7 @@ describe('media generation API client', () => {
         }),
       )
 
-    const result = await generateShotVideo('slow push in', '/media/images/scene.png', {
+    const result = await generateShotVideo('slow push in', '/media/images/scene.png', [], {
       resolution: '1080p',
       duration: 5,
       ratio: '16:9',
