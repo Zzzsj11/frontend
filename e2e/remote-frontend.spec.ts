@@ -63,7 +63,7 @@ test('deployed frontend login, project and storyboard configuration journey', as
     await expect(songCode).toHaveValue('10012204')
     await expect(assDialog.getByText(/可不选/)).toBeVisible()
     await expect(assDialog.getByLabel('画幅')).toHaveValue('16:9')
-    await expect(assDialog.getByLabel('清晰度')).toHaveValue('720p')
+    await expect(assDialog.getByLabel('清晰度')).toHaveValue('480p')
     await expect(assDialog.getByLabel('视频模型')).toBeDisabled()
     await expect(assDialog.getByLabel('图片模型')).toBeDisabled()
     await page.screenshot({ path: join(output, '03-ass-dialog.png'), fullPage: true })
