@@ -47,7 +47,7 @@ describe('generationPoller 统一轮询调度器', () => {
 
   it('请求在飞时 abort（fetch 抛 AbortError）时归一为 PollingCancelledError', async () => {
     // mock 模拟真实 fetch 的中止行为：已 abort 立即抛 AbortError，否则挂起直至 abort
-    // （apiRequest 对 GET 有网络重试预算，重试时会以已 abort 的 signal 再次调用 fetch）
+    // （apiRequest 对主动取消不吃重试预算、不上报，AbortError 直达调度器归一）
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
       const signal = init?.signal
       if (signal?.aborted) throw new DOMException('aborted', 'AbortError')
@@ -61,11 +61,11 @@ describe('generationPoller 统一轮询调度器', () => {
       timeoutMs: 60_000,
       select: (s) => s.result,
     })
-    // 等首查请求发出后 abort；apiRequest 重试预算（0.5s+1.5s）耗尽后由调度器归一为取消错误
+    // 等首查请求发出后 abort，在飞的 fetch 立即抛 AbortError，调度器归一为取消错误
     await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
     controller.abort()
     await expect(promise).rejects.toBeInstanceOf(PollingCancelledError)
-  }, 8_000)
+  })
 
   it('任务长期 pending 超过 timeoutMs 后以超时文案 reject', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(

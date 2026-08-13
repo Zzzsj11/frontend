@@ -9,7 +9,27 @@ const NETWORK_RETRY_DELAYS_MS = [500, 1500]
 // 502/503 是 nginx 在上游不可达时直接返回的（部署重启窗口），请求从未到达后端，
 // 因此任何方法（含 POST）都可安全重放；预算覆盖一次平滑切换的收敛时间
 const GATEWAY_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000]
-const wait = (delayMs: number) => new Promise((resolve) => setTimeout(resolve, delayMs))
+/** 可中断等待：signal abort 时提前返回（由调用方检查 aborted 后退出重试） */
+const wait = (delayMs: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    if (signal?.aborted) {
+      resolve()
+      return
+    }
+    const handle = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, delayMs)
+    const onAbort = () => {
+      clearTimeout(handle)
+      resolve()
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+const abortError = () => new DOMException('The operation was aborted.', 'AbortError')
+/** 主动取消（切换子项目等）：signal 已 abort 或 fetch 抛 AbortError；此时不重试、不上报错误弹窗 */
+const isAbortError = (error: unknown, signal?: AbortSignal) =>
+  signal?.aborted === true || (error instanceof DOMException && error.name === 'AbortError')
 export const setAccessToken = (value: string) => {
   accessToken = value
 }
@@ -58,16 +78,21 @@ export async function apiRequest<T>(
   try {
     response = await request()
   } catch (error) {
+    // 主动取消：立即抛回原错误（轮询方归一为 PollingCancelledError），不吃重试预算、不弹错误
+    if (isAbortError(error, init.signal ?? undefined)) throw error
     // Generation jobs are polled for several minutes. A single transient proxy or
     // network interruption must not discard an otherwise successful result.
     if ((init.method ?? 'GET').toUpperCase() === 'GET') {
       for (const delayMs of NETWORK_RETRY_DELAYS_MS) {
-        await wait(delayMs)
+        await wait(delayMs, init.signal ?? undefined)
+        // 重试等待期间被取消：不再补发请求，按取消处理
+        if (init.signal?.aborted) throw abortError()
         try {
           response = await request()
           retried = true
           break
-        } catch {
+        } catch (retryError) {
+          if (isAbortError(retryError, init.signal ?? undefined)) throw retryError
           // Report only after the bounded retry budget is exhausted.
         }
       }
@@ -77,17 +102,21 @@ export async function apiRequest<T>(
   // 撞上部署重启窗口：按预算重试等待新 backend 就绪，用户无感
   if (response.status === 502 || response.status === 503) {
     for (const delayMs of GATEWAY_RETRY_DELAYS_MS) {
-      await wait(delayMs)
+      await wait(delayMs, init.signal ?? undefined)
+      if (init.signal?.aborted) throw abortError()
       try {
         const retriedResponse = await request()
         response = retriedResponse
         retried = true
         if (retriedResponse.status !== 502 && retriedResponse.status !== 503) break
-      } catch {
+      } catch (retryError) {
+        if (isAbortError(retryError, init.signal ?? undefined)) throw retryError
         // 窗口内连接被拒绝：保留上一次响应，继续按预算重试
       }
     }
   }
+  // 请求完成后才被取消：不走 401 刷新/错误上报，直接按取消抛出（结果反正会被调用方丢弃）
+  if (init.signal?.aborted) throw abortError()
   if ((response.status === 401 || response.status === 403) && retry && !path.startsWith('/auth/')) {
     if (!intentionalLogout && (await refreshAccess())) return apiRequest<T>(path, init, false)
     if (intentionalLogout) throw new ApiError('已退出登录', response.status)
@@ -135,6 +164,8 @@ export async function openApiStream(
   try {
     response = await fetch(`/api${path}`, { headers, credentials: 'include', signal })
   } catch (error) {
+    // 主动取消（切换子项目停 SSE）：静默抛出，由调用方按 signal.aborted 过滤
+    if (isAbortError(error, signal)) throw error
     throw reportApiError(error, '实时进度连接失败')
   }
   if (tracked) {

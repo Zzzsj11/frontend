@@ -7,6 +7,7 @@ import {
   resetAuthState,
   setAccessToken,
 } from '../src/api/client'
+import { errorBus } from '../src/errorBus'
 
 describe('apiRequest', () => {
   afterEach(() => {
@@ -76,6 +77,80 @@ describe('apiRequest', () => {
     await vi.runAllTimersAsync()
     await assertion
     expect(fetchMock).toHaveBeenCalledTimes(5)
+  })
+})
+
+describe('apiRequest 主动取消（abort）', () => {
+  const expectAbort = async (promise: Promise<unknown>) => {
+    const failure = await promise.catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(DOMException)
+    expect((failure as DOMException).name).toBe('AbortError')
+  }
+
+  beforeEach(() => {
+    // errorBus 是模块级单例：清掉前面用例（如网络重试耗尽）合法上报的存量弹窗
+    errorBus.dismissAll()
+  })
+
+  afterEach(() => {
+    errorBus.dismissAll()
+  })
+
+  it('已 abort 的 GET 立即失败：不吃网络重试预算、不上报错误弹窗', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new DOMException('aborted', 'AbortError'))
+
+    await expectAbort(apiRequest('/generations/job-1', { signal: controller.signal }))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(errorBus.state.queue).toHaveLength(0)
+  })
+
+  it('网络重试等待期间 abort：立即退出预算，不再补发请求', async () => {
+    const controller = new AbortController()
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockRejectedValue(new DOMException('aborted', 'AbortError'))
+
+    const started = Date.now()
+    const promise = apiRequest('/generations/job-1', { signal: controller.signal })
+    // 首次失败进入 500ms 重试等待，等待期间 abort
+    setTimeout(() => controller.abort(), 30)
+    await expectAbort(promise)
+    expect(Date.now() - started).toBeLessThan(400)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(errorBus.state.queue).toHaveLength(0)
+  })
+
+  it('502 网关重试窗口期间 abort：退出等待且不上报', async () => {
+    const controller = new AbortController()
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => new Response('Bad Gateway', { status: 502 }))
+
+    const started = Date.now()
+    const promise = apiRequest('/generations/videos', {
+      method: 'POST',
+      signal: controller.signal,
+    })
+    // 首个网关等待为 1000ms，等待期间 abort
+    setTimeout(() => controller.abort(), 30)
+    await expectAbort(promise)
+    expect(Date.now() - started).toBeLessThan(900)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(errorBus.state.queue).toHaveLength(0)
+  })
+
+  it('openApiStream 被 abort 时静默抛出，不上报错误弹窗', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new DOMException('aborted', 'AbortError'))
+
+    await expectAbort(openApiStream('/tasks/task-1/outline-events', controller.signal))
+    expect(errorBus.state.queue).toHaveLength(0)
   })
 })
 
