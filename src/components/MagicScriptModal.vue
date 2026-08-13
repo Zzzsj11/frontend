@@ -29,18 +29,6 @@ const assInputRef = ref<HTMLInputElement>()
 
 const canSubmit = computed(() => songId.value.trim() !== '' && assFile.value !== null)
 
-// 每次打开弹窗重置表单（immediate：弹层懒挂载后，挂载即打开，靠 immediate 完成初始化）
-watch(
-  () => store.magicOpen,
-  (open) => {
-    if (open) {
-      resetForm()
-      void loadGenerationModels()
-    }
-  },
-  { immediate: true },
-)
-
 const resetForm = () => {
   songId.value = ''
   assFile.value = null
@@ -51,6 +39,19 @@ const resetForm = () => {
   imageModel.value = DEFAULT_IMAGE_MODEL
   videoModel.value = DEFAULT_VIDEO_MODEL
 }
+
+// 每次打开弹窗重置表单（immediate：弹层懒挂载后，挂载即打开，靠 immediate 完成初始化）
+// 注意：必须声明在 resetForm 之后——immediate 回调在 watch() 调用处同步执行，提前引用 const 会触发 TDZ
+watch(
+  () => store.magicOpen,
+  (open) => {
+    if (open) {
+      resetForm()
+      void loadGenerationModels()
+    }
+  },
+  { immediate: true },
+)
 
 // ---------- ass 文件 ----------
 const pickAss = (files: FileList | null) => {

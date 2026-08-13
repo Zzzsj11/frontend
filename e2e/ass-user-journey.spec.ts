@@ -126,7 +126,8 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
       body: `data: ${JSON.stringify({ type: 'outline', taskId: 'task-e2e', status: 'generating', progress: {} })}\n\n`,
     }),
   )
-  await page.route('**/api/tasks/task-e2e', (route) => {
+  // 注意尾部的 *：fetchSongScript 会带 ?history=0 查询串，不带 * 的 glob 匹配不到会穿透到真实后端
+  await page.route('**/api/tasks/task-e2e*', (route) => {
     if (route.request().method() !== 'GET') return route.fallback()
     return route.fulfill({
       contentType: 'application/json',
@@ -207,7 +208,7 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await expect(page.locator('.song-input')).toBeDisabled()
   await expect(page.locator('.song-input')).toHaveValue('10012204')
   await expect(page.getByLabel('画幅 *')).toHaveValue('16:9')
-  await expect(page.getByLabel('清晰度 *')).toHaveValue('720p')
+  await expect(page.getByLabel('清晰度 *')).toHaveValue('480p')
   await expect(page.getByLabel('视频模型 *')).toHaveValue('doubao-seedance-2.0')
   await expect(page.getByLabel('视频模型 *')).toBeDisabled()
   await expect(page.getByLabel('图片模型 *')).toHaveValue('gpt-image-2')

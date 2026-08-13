@@ -25,4 +25,16 @@ describe('magic script defaults', () => {
     expect(resolutionSelect!.value).toBe('480p')
     wrapper.unmount()
   })
+
+  it('mounts correctly when already open (P3d 懒挂载回归：immediate watch 不得引用未初始化的 const)', async () => {
+    const store = useProjectStore()
+    // 先置 open 再挂载——v-if 懒挂载后挂载即打开，immediate watch 同步执行 resetForm
+    store.magicOpen = true
+    const wrapper = mount(MagicScriptModal, { attachTo: document.body })
+    await vi.waitFor(() =>
+      expect(document.body.querySelectorAll('select').length).toBeGreaterThan(0),
+    )
+    expect(document.body.querySelector('input[type="file"][accept=".ass"]')).toBeTruthy()
+    wrapper.unmount()
+  })
 })
