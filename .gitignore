@@ -13,6 +13,7 @@ lerna-debug.log*
 
 node_modules
 backend/.venv/
+/.env
 backend/.env
 backend/.env.chat
 e2e/.env
