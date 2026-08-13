@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ScriptLine } from '../types'
-import { formatTime, useProjectStore } from '../stores/project'
+import { DEFAULT_SHOT_OPTIONS, formatTime, useProjectStore } from '../stores/project'
+import { VIDEO_DURATION_CHOICES } from '../mediaConstraints'
 import AppIcon from './AppIcon.vue'
 import BaseIconButton from './base/BaseIconButton.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
@@ -69,6 +70,15 @@ const openThumbnailEditor = () => {
           ? 'shot'
           : 'scene'
   store.openEditor(props.line.id, tab)
+}
+
+/** 修改该行视频生成时长：写回 shotOptions 后，点击生成视频即按所选时长生成 */
+const onDurationChange = (event: Event) => {
+  const duration = Number((event.target as HTMLSelectElement).value)
+  store.updateShotOptions(props.line.id, {
+    ...(props.line.shotOptions ?? DEFAULT_SHOT_OPTIONS),
+    duration,
+  })
 }
 
 // 生成 / 重新生成分镜视频片段：已有片段时二次确认，避免误触
@@ -156,9 +166,20 @@ const onGenerateShot = async () => {
         <span class="shot-type" :class="line.shotType">{{
           line.shotType === 'empty' ? '空镜' : '人物镜'
         }}</span>
-        <span v-if="line.plannedDuration" class="planned-duration"
+        <span
+          v-if="line.plannedDuration && line.generationStatus !== 'succeeded'"
+          class="planned-duration"
           >预计 {{ line.plannedDuration }} 秒</span
         >
+        <label v-if="line.generationStatus === 'succeeded'" class="duration-select" @click.stop>
+          <span>时长</span>
+          <select
+            :value="line.shotOptions?.duration ?? DEFAULT_SHOT_OPTIONS.duration"
+            @change="onDurationChange"
+          >
+            <option v-for="d in VIDEO_DURATION_CHOICES" :key="d" :value="d">{{ d }} 秒</option>
+          </select>
+        </label>
       </div>
       <template v-else>
         <div v-if="segmentBadge || timeRange" class="ass-meta">
@@ -405,6 +426,22 @@ const onGenerateShot = async () => {
 .planned-duration {
   color: var(--text-secondary);
   font-size: 11px;
+}
+.duration-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.duration-select select {
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-xs);
+  background: #fff;
+  padding: 1px 5px;
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
 }
 .prompt-generation-state .error-text {
   overflow: hidden;
