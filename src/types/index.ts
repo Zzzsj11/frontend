@@ -88,8 +88,10 @@ export interface ShotInfo {
   imageUrl?: string
   /** 当前选用的资产 id */
   currentAssetId?: string
-  /** 历史生成的视频片段资产 */
+  /** 已加载的视频片段资产（脚本载入时仅含当前选用；打开详情弹窗时懒加载全量历史） */
   assets: ShotAsset[]
+  /** 历史版本总数（含未懒加载的）；缺省等同于 assets.length */
+  assetCount?: number
   /** 最近一次生成失败的原因（status === 'failed' 时展示） */
   error?: string
 }

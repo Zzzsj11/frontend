@@ -59,6 +59,12 @@ const shotOriginalCover = computed(() => {
   )
 })
 
+/** 历史版本总数（含未懒加载的），用于「N 版」徽章 */
+const shotAssetTotal = computed(() => {
+  const line = store.editingLine
+  return line ? (line.shot.assetCount ?? line.shot.assets.length) : 0
+})
+
 /** 弹出预览中的视频片段（点击缩略图时选用并预览） */
 const previewAsset = ref<ShotAsset | null>(null)
 const previewIndex = ref(0)
@@ -97,6 +103,8 @@ watch(
     optionsDraft.value = normalizeShotOptions(line?.shotOptions ?? DEFAULT_SHOT_OPTIONS)
     activeTab.value = store.editingTab
     previewAsset.value = null
+    // 脚本载入只带当前选用资产（P2 响应裁剪），打开弹窗时懒加载完整历史版本
+    if (line) void store.ensureShotHistory(line.id)
   },
   { immediate: true },
 )
@@ -193,9 +201,7 @@ const cancel = () => store.closeEditor()
                 ><AppIcon name="play" :size="16"
               /></span>
               <ImageZoom :src="shotOriginalCover" alt="视频封面原图预览" />
-              <span v-if="store.editingLine.shot.assets.length > 1" class="pcard-badge">
-                {{ store.editingLine.shot.assets.length }} 版
-              </span>
+              <span v-if="shotAssetTotal > 1" class="pcard-badge">{{ shotAssetTotal }} 版</span>
               <div v-if="store.editingLine.shot.status === 'generating'" class="pcard-loading">
                 <span class="spinner light" />
               </div>

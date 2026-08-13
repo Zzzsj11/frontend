@@ -84,22 +84,8 @@ async def list_api_errors(
     limit = min(500, max(1, limit))
     offset = max(0, offset)
     conditions = [ApiErrorLogModel.deleted_at.is_(None)]
-    total = (
-        await db.execute(select(func.count()).select_from(ApiErrorLogModel).where(*conditions))
-    ).scalar_one()
-    items = list(
-        (
-            await db.execute(
-                select(ApiErrorLogModel)
-                .where(*conditions)
-                .order_by(ApiErrorLogModel.created_at.desc())
-                .limit(limit)
-                .offset(offset)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    total = (await db.execute(select(func.count()).select_from(ApiErrorLogModel).where(*conditions))).scalar_one()
+    items = list((await db.execute(select(ApiErrorLogModel).where(*conditions).order_by(ApiErrorLogModel.created_at.desc()).limit(limit).offset(offset))).scalars().all())
     return {
         "total": total,
         "items": [
@@ -120,7 +106,7 @@ async def list_api_errors(
                 "createdAt": item.created_at.isoformat(),
             }
             for item in items
-        ]
+        ],
     }
 
 
@@ -149,11 +135,7 @@ async def list_users(user: CurrentUser, limit: int = 100, db: AsyncSession = Db)
     """用户列表：强制 limit 上限，防止全量拉取拖垮数据库。"""
     require_admin(user)
     limit = min(500, max(1, limit))
-    items = (
-        await db.execute(
-            select(UserModel).where(UserModel.deleted_at.is_(None)).order_by(UserModel.created_at).limit(limit)
-        )
-    ).scalars().all()
+    items = (await db.execute(select(UserModel).where(UserModel.deleted_at.is_(None)).order_by(UserModel.created_at).limit(limit))).scalars().all()
     return [{**user_public(item), "status": item.status, "createdAt": item.created_at.isoformat()} for item in items]
 
 
@@ -540,7 +522,7 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
 
 
 @router.get("/tasks/{task_id}")
-async def get_task(task_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
+async def get_task(task_id: str, user: CurrentUser, db: AsyncSession = Db, history: bool = True) -> dict:
     task = await owned_task(db, user.id, task_id)
     lines = list(
         (
@@ -570,7 +552,63 @@ async def get_task(task_id: str, user: CurrentUser, db: AsyncSession = Db) -> di
     casts: dict[str, list[str]] = {}
     for link in line_cast:
         casts.setdefault(link.storyboard_line_id, []).append(link.digital_human_id)
-    return {**task_json(task), "cast": [item.digital_human_id for item in cast], "lines": [await line_json(db, line, casts.get(line.id, [])) for line in lines]}
+    # P2 切换路径瘦身：批量预取全部行的媒体资产（3 条 IN 查询 + 按行分组），
+    # 替代逐行各查 3 条的 N+1；history=false 时每行只回传当前选用资产 + 历史版本计数
+    line_ids = [line.id for line in lines]
+    scenes_by_line: dict[str, list[SceneAssetModel]] = {}
+    for asset in (
+        (
+            await db.execute(
+                select(SceneAssetModel)
+                .where(SceneAssetModel.storyboard_line_id.in_(line_ids) if line_ids else False, SceneAssetModel.deleted_at.is_(None))
+                .order_by(SceneAssetModel.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    ):
+        scenes_by_line.setdefault(asset.storyboard_line_id, []).append(asset)
+    shots_by_line: dict[str, list[ShotAssetModel]] = {}
+    for asset in (
+        (
+            await db.execute(
+                select(ShotAssetModel)
+                .where(ShotAssetModel.storyboard_line_id.in_(line_ids) if line_ids else False, ShotAssetModel.deleted_at.is_(None))
+                .order_by(ShotAssetModel.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    ):
+        shots_by_line.setdefault(asset.storyboard_line_id, []).append(asset)
+    voices_by_line: dict[str, list[VoiceAssetModel]] = {}
+    for asset in (
+        (
+            await db.execute(
+                select(VoiceAssetModel)
+                .where(VoiceAssetModel.storyboard_line_id.in_(line_ids) if line_ids else False, VoiceAssetModel.deleted_at.is_(None))
+                .order_by(VoiceAssetModel.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    ):
+        voices_by_line.setdefault(asset.storyboard_line_id, []).append(asset)
+    return {
+        **task_json(task),
+        "cast": [item.digital_human_id for item in cast],
+        "lines": [
+            _line_json_from_assets(
+                line,
+                casts.get(line.id, []),
+                scenes_by_line.get(line.id, []),
+                shots_by_line.get(line.id, []),
+                voices_by_line.get(line.id, []),
+                include_history=history,
+            )
+            for line in lines
+        ],
+    }
 
 
 @router.patch("/tasks/{task_id}")
@@ -1299,23 +1337,36 @@ async def reorder_lines(task_id: str, payload: ReorderLines, user: CurrentUser, 
     return {"ok": True}
 
 
-async def line_json(db: AsyncSession, line: StoryboardLineModel, cast: list[str]) -> dict:
-    scenes = list(
-        (await db.execute(select(SceneAssetModel).where(SceneAssetModel.storyboard_line_id == line.id, SceneAssetModel.deleted_at.is_(None)).order_by(SceneAssetModel.created_at)))
-        .scalars()
-        .all()
-    )
-    shots = list(
-        (await db.execute(select(ShotAssetModel).where(ShotAssetModel.storyboard_line_id == line.id, ShotAssetModel.deleted_at.is_(None)).order_by(ShotAssetModel.created_at)))
-        .scalars()
-        .all()
-    )
-    voices = list(
-        (await db.execute(select(VoiceAssetModel).where(VoiceAssetModel.storyboard_line_id == line.id, VoiceAssetModel.deleted_at.is_(None)).order_by(VoiceAssetModel.created_at)))
-        .scalars()
-        .all()
-    )
-    return {
+def _line_json_from_assets(
+    line: StoryboardLineModel,
+    cast: list[str],
+    scenes: list[SceneAssetModel],
+    shots: list[ShotAssetModel],
+    voices: list[VoiceAssetModel],
+    *,
+    include_history: bool = True,
+) -> dict:
+    """组装单行脚本 JSON（纯函数，资产由调用方预取）。
+
+    include_history=False 时每类资产只回传当前选用项并附历史版本计数（P2 响应裁剪；
+    完整历史经 GET /tasks/{task_id}/storyboard-lines/{line_id} 按需获取）。
+    """
+    scene_items = [{"id": a.id, "imageUrl": a.image_thumbnail_url or a.image_url, "originalImageUrl": a.image_url, "isCurrent": a.is_current} for a in scenes]
+    shot_items = [
+        {
+            "id": a.id,
+            "coverUrl": a.cover_thumbnail_url or a.cover_url,
+            "originalCoverUrl": a.cover_url,
+            "videoUrl": a.video_url,
+            "duration": a.duration,
+            "resolution": a.resolution,
+            "ratio": a.ratio,
+            "isCurrent": a.is_current,
+        }
+        for a in shots
+    ]
+    voice_items = [{"id": a.id, "url": a.audio_url, "duration": a.duration, "isCurrent": a.is_current} for a in voices]
+    payload = {
         "id": line.id,
         "source": line.source,
         "shotType": line.shot_type,
@@ -1332,22 +1383,58 @@ async def line_json(db: AsyncSession, line: StoryboardLineModel, cast: list[str]
         "generationAttempt": line.generation_attempt,
         "generatedAt": line.generated_at.isoformat() if line.generated_at else None,
         "digitalHumanIds": cast,
-        "sceneAssets": [{"id": a.id, "imageUrl": a.image_thumbnail_url or a.image_url, "originalImageUrl": a.image_url, "isCurrent": a.is_current} for a in scenes],
-        "shotAssets": [
-            {
-                "id": a.id,
-                "coverUrl": a.cover_thumbnail_url or a.cover_url,
-                "originalCoverUrl": a.cover_url,
-                "videoUrl": a.video_url,
-                "duration": a.duration,
-                "resolution": a.resolution,
-                "ratio": a.ratio,
-                "isCurrent": a.is_current,
-            }
-            for a in shots
-        ],
-        "voiceAssets": [{"id": a.id, "url": a.audio_url, "duration": a.duration, "isCurrent": a.is_current} for a in voices],
+        "sceneAssets": scene_items,
+        "shotAssets": shot_items,
+        "voiceAssets": voice_items,
     }
+    if not include_history:
+        payload["sceneAssets"] = [item for item in scene_items if item["isCurrent"]]
+        payload["shotAssets"] = [item for item in shot_items if item["isCurrent"]]
+        payload["voiceAssets"] = [item for item in voice_items if item["isCurrent"]]
+        payload["sceneAssetCount"] = len(scenes)
+        payload["shotAssetCount"] = len(shots)
+        payload["voiceAssetCount"] = len(voices)
+    return payload
+
+
+async def line_json(db: AsyncSession, line: StoryboardLineModel, cast: list[str]) -> dict:
+    scenes = list(
+        (await db.execute(select(SceneAssetModel).where(SceneAssetModel.storyboard_line_id == line.id, SceneAssetModel.deleted_at.is_(None)).order_by(SceneAssetModel.created_at)))
+        .scalars()
+        .all()
+    )
+    shots = list(
+        (await db.execute(select(ShotAssetModel).where(ShotAssetModel.storyboard_line_id == line.id, ShotAssetModel.deleted_at.is_(None)).order_by(ShotAssetModel.created_at)))
+        .scalars()
+        .all()
+    )
+    voices = list(
+        (await db.execute(select(VoiceAssetModel).where(VoiceAssetModel.storyboard_line_id == line.id, VoiceAssetModel.deleted_at.is_(None)).order_by(VoiceAssetModel.created_at)))
+        .scalars()
+        .all()
+    )
+    return _line_json_from_assets(line, cast, scenes, shots, voices)
+
+
+@router.get("/tasks/{task_id}/storyboard-lines/{line_id}")
+async def get_storyboard_line(task_id: str, line_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
+    """单行全量（含完整资产历史）：生成落定后的增量合并 / 详情弹窗懒加载历史版本（P2）。"""
+    task = await owned_task(db, user.id, task_id)
+    line = await owned_line(db, user.id, line_id)
+    if line.project_task_id != task.id:
+        raise HTTPException(422, "分镜不属于指定子项目")
+    line_cast = list(
+        (
+            await db.execute(
+                select(StoryboardLineCastModel)
+                .where(StoryboardLineCastModel.storyboard_line_id == line.id, StoryboardLineCastModel.deleted_at.is_(None))
+                .order_by(StoryboardLineCastModel.sort_order)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return await line_json(db, line, [item.digital_human_id for item in line_cast])
 
 
 async def _refresh_storyboard_status(db: AsyncSession, task: ProjectTaskModel) -> None:

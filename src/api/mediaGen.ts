@@ -1,6 +1,7 @@
 import type { ShotGenOptions } from '../types'
 import type { ImageModelId } from '../generationModels'
 import { apiRequest } from './client'
+import { watchGenerationJob, type GenerationJobSnapshot } from '../utils/generationPoller'
 
 interface GenerationJob<T = Record<string, unknown>> {
   id: string
@@ -14,19 +15,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return apiRequest<T>(path, init)
 }
 
-export async function waitForJob<T>(id: string, timeoutMs = 660_000): Promise<T> {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    // 每 3 秒轮询直到生成完成（最长 11 分钟）：打 X-Polling 标记，后端全量日志跳过
-    const job = await request<GenerationJob<T>>(`/generations/${id}`, {
-      headers: { 'X-Polling': '1' },
-    })
-    if (job.status === 'succeeded' && job.result) return job.result
-    if (job.status === 'failed' || job.status === 'cancelled')
-      throw new Error(job.error || '生成失败')
-    if (Date.now() >= deadline) throw new Error('生成超时，请稍后重试')
-    await new Promise((resolve) => setTimeout(resolve, 3000))
-  }
+export interface WaitForJobOptions {
+  /** 切换子项目时经统一注册表 abort，轮询立即停止（后端任务照跑，切回后恢复） */
+  signal?: AbortSignal
+}
+
+/** 经统一轮询调度器等待生成任务完成（全前端共享一个 3s tick，替代独立循环） */
+export async function waitForJob<T>(
+  id: string,
+  timeoutMs = 660_000,
+  options: WaitForJobOptions = {},
+): Promise<T> {
+  return watchGenerationJob<T>(id, {
+    signal: options.signal,
+    timeoutMs,
+    select: (snapshot: GenerationJobSnapshot) => snapshot.result as T,
+  })
 }
 
 export async function generateScene(
@@ -36,6 +40,7 @@ export async function generateScene(
   ratio: ShotGenOptions['ratio'] = '16:9',
   model?: ImageModelId,
   resolution: ShotGenOptions['resolution'] = '720p',
+  signal?: AbortSignal,
 ): Promise<{ imageUrl: string; thumbnailUrl?: string }> {
   const size =
     ratio === '9:16'
@@ -59,7 +64,9 @@ export async function generateScene(
       storyboard_line_id: storyboardLineId,
     }),
   })
-  const result = await waitForJob<{ urls: string[]; thumbnailUrls?: string[] }>(job.id)
+  const result = await waitForJob<{ urls: string[]; thumbnailUrls?: string[] }>(job.id, 660_000, {
+    signal,
+  })
   if (!result.urls?.[0]) throw new Error('场景生成成功但没有图片')
   return { imageUrl: result.urls[0], thumbnailUrl: result.thumbnailUrls?.[0] }
 }
@@ -71,6 +78,7 @@ export async function generateShotVideo(
   options: ShotGenOptions,
   projectTaskId?: string,
   storyboardLineId?: string,
+  signal?: AbortSignal,
 ): Promise<{ coverUrl: string; coverThumbnailUrl?: string; videoUrl: string; duration: number }> {
   const imageUrls = [referenceImageUrl, ...characterImageUrls].filter(Boolean) as string[]
   const job = await request<GenerationJob>('/generations/videos', {
@@ -92,7 +100,7 @@ export async function generateShotVideo(
     coverThumbnailUrl?: string
     videoUrl: string
     duration: number
-  }>(job.id)
+  }>(job.id, 660_000, { signal })
   return {
     coverUrl: result.coverUrl || referenceImageUrl || '',
     coverThumbnailUrl: result.coverThumbnailUrl,

@@ -185,28 +185,21 @@ describe('project user journey state', () => {
         progress: 100,
         result: { coverUrl: '/cover.png', videoUrl: '/shot.mp4', duration: 5 },
       },
-      // 重新拉取任务脚本，行数据带上了新资产
+      // P2 增量合并：重新拉取该行（单行全量端点），行数据带上了新资产
       {
-        cast: [],
-        storyboardType: '',
-        status: '',
-        lines: [
+        id: 'line-resume',
+        source: 'manual',
+        lyrics: '',
+        scenePrompt: 'sunlit room',
+        shotPrompt: 'slow push in',
+        digitalHumanIds: [],
+        shotAssets: [
           {
-            id: 'line-resume',
-            source: 'manual',
-            lyrics: '',
-            scenePrompt: 'sunlit room',
-            shotPrompt: 'slow push in',
-            digitalHumanIds: [],
-            shotAssets: [
-              {
-                id: 'asset-1',
-                coverUrl: '/cover.png',
-                videoUrl: '/shot.mp4',
-                duration: 5,
-                isCurrent: true,
-              },
-            ],
+            id: 'asset-1',
+            coverUrl: '/cover.png',
+            videoUrl: '/shot.mp4',
+            duration: 5,
+            isCurrent: true,
           },
         ],
       },
@@ -407,18 +400,24 @@ describe('outline segment retry polling', () => {
     store.activeStoryBible = bible([{ sceneIndex: 0, locationName: '街道', error: '模型超时' }])
 
     const refreshed = bible([])
+    const taskUrls: string[] = []
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input)
       if (url.endsWith('/segments/0/regenerate'))
         return json({ taskId: 'task-1', sceneIndex: 0, status: 'segment_retrying' })
       // 轮询与最终刷新都返回「无 outlineProgress」（后台已完成）
-      if (url === '/api/tasks/task-1') return json(taskPayload({ storyBible: refreshed }))
+      if (url === '/api/tasks/task-1' || url.startsWith('/api/tasks/task-1?')) {
+        taskUrls.push(url)
+        return json(taskPayload({ storyBible: refreshed }))
+      }
       return json({}, 404)
     })
 
     await store.retryOutlineSegment(0)
     expect(store.segmentRetrying[0]).toBe(false)
     expect(store.activeStoryBible).toEqual(refreshed)
+    // P2 响应裁剪契约：脚本拉取固定带 history=0（只回当前选用资产）
+    expect(taskUrls.every((url) => url === '/api/tasks/task-1?history=0')).toBe(true)
   })
 
   it('tolerates a 409 (already retrying) and still waits for completion', async () => {
@@ -434,7 +433,7 @@ describe('outline segment retry polling', () => {
         const url = String(input)
         if (url.endsWith('/segments/0/regenerate'))
           return json({ detail: '该场景段正在重新生成中' }, 409)
-        if (url === '/api/tasks/task-1') {
+        if (url === '/api/tasks/task-1' || url.startsWith('/api/tasks/task-1?')) {
           taskReads += 1
           // 第一次轮询：后台仍在跑；第二次：进度已清空（完成）
           if (taskReads === 1)
@@ -465,7 +464,7 @@ describe('outline segment retry polling', () => {
       const url = String(input)
       if (url.endsWith('/segments/0/regenerate'))
         return json({ taskId: 'task-1', sceneIndex: 0, status: 'segment_retrying' })
-      if (url === '/api/tasks/task-1')
+      if (url === '/api/tasks/task-1' || url.startsWith('/api/tasks/task-1?'))
         return json(
           taskPayload({
             outlineProgress: {

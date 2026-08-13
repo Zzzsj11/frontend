@@ -35,7 +35,9 @@ export async function fetchSongProjects(): Promise<SongProject[]> {
   return apiRequest<SongProject[]>('/projects')
 }
 
-/** GET /api/songs/{id}/script — 载入某首歌曲的分镜脚本与角色阵容 */
+/** GET /api/songs/{id}/script — 载入某首歌曲的分镜脚本与角色阵容。
+ *  固定 history=0 裁剪响应：每行只回传当前选用资产 + 历史版本计数，
+ *  完整历史在打开分镜详情弹窗时经 fetchStoryboardLine 懒加载（P2 切换路径瘦身）。 */
 export async function fetchSongScript(
   taskId: string,
   polling = false,
@@ -53,66 +55,80 @@ export async function fetchSongScript(
     status: string
     storyboardConfig?: { storyBible?: StoryBible; outlineProgress?: Record<string, unknown> }
     lines: Array<Record<string, unknown>>
-  }>(`/tasks/${taskId}`, polling ? { headers: { 'X-Polling': '1' } } : {})
+  }>(`/tasks/${taskId}?history=0`, polling ? { headers: { 'X-Polling': '1' } } : {})
   return {
     cast: task.cast,
     storyboardType: task.storyboardType,
     status: task.status,
     storyBible: task.storyboardConfig?.storyBible,
     outlineProgress: task.storyboardConfig?.outlineProgress,
-    lines: task.lines.map((item) => {
-      const sceneAssets =
-        (item.sceneAssets as Array<{
-          id: string
-          imageUrl: string
-          originalImageUrl?: string
-          isCurrent: boolean
-        }>) || []
-      const shotAssets =
-        (item.shotAssets as Array<{
-          id: string
-          coverUrl: string
-          originalCoverUrl?: string
-          videoUrl: string
-          duration: number
-          isCurrent: boolean
-        }>) || []
-      const currentScene = sceneAssets.find((a) => a.isCurrent)
-      const currentShot = shotAssets.find((a) => a.isCurrent)
-      return {
-        id: String(item.id),
-        source: item.source as ScriptLine['source'],
-        shotType: item.shotType as ScriptLine['shotType'],
-        plannedDuration: item.plannedDuration as number | undefined,
-        start: item.start as number | undefined,
-        end: item.end as number | undefined,
-        lyrics: String(item.lyrics || ''),
-        lyricsZh: item.lyricsZh as string | undefined,
-        scenePrompt: String(item.scenePrompt || ''),
-        shotPrompt: String(item.shotPrompt || ''),
-        digitalHumanIds: item.digitalHumanIds as string[],
-        shotOptions: item.shotOptions as ScriptLine['shotOptions'],
-        generationStatus: item.generationStatus as ScriptLine['generationStatus'],
-        generationError: item.generationError as string | undefined,
-        generationAttempt: Number(item.generationAttempt || 0),
-        voice: { status: 'none' },
-        scene: {
-          status: sceneAssets.length ? 'done' : 'none',
-          imageUrl: currentScene?.imageUrl,
-          originalImageUrl: currentScene?.originalImageUrl,
-        },
-        shot: {
-          status: shotAssets.length ? 'done' : 'none',
-          imageUrl: currentShot?.coverUrl,
-          assets: shotAssets.map((a) => ({
-            ...a,
-            digitalHumanIds: item.digitalHumanIds as string[],
-          })),
-          currentAssetId: currentShot?.id,
-        },
-      }
-    }),
+    lines: task.lines.map(mapScriptLine),
   }
+}
+
+/** 服务端单行 JSON → 前端 ScriptLine（history=0 时 shotAssets 仅含当前选用） */
+function mapScriptLine(item: Record<string, unknown>): ScriptLine {
+  const sceneAssets =
+    (item.sceneAssets as Array<{
+      id: string
+      imageUrl: string
+      originalImageUrl?: string
+      isCurrent: boolean
+    }>) || []
+  const shotAssets =
+    (item.shotAssets as Array<{
+      id: string
+      coverUrl: string
+      originalCoverUrl?: string
+      videoUrl: string
+      duration: number
+      isCurrent: boolean
+    }>) || []
+  const currentScene = sceneAssets.find((a) => a.isCurrent)
+  const currentShot = shotAssets.find((a) => a.isCurrent)
+  return {
+    id: String(item.id),
+    source: item.source as ScriptLine['source'],
+    shotType: item.shotType as ScriptLine['shotType'],
+    plannedDuration: item.plannedDuration as number | undefined,
+    start: item.start as number | undefined,
+    end: item.end as number | undefined,
+    lyrics: String(item.lyrics || ''),
+    lyricsZh: item.lyricsZh as string | undefined,
+    scenePrompt: String(item.scenePrompt || ''),
+    shotPrompt: String(item.shotPrompt || ''),
+    digitalHumanIds: item.digitalHumanIds as string[],
+    shotOptions: item.shotOptions as ScriptLine['shotOptions'],
+    generationStatus: item.generationStatus as ScriptLine['generationStatus'],
+    generationError: item.generationError as string | undefined,
+    generationAttempt: Number(item.generationAttempt || 0),
+    voice: { status: 'none' },
+    scene: {
+      status: sceneAssets.length ? 'done' : 'none',
+      imageUrl: currentScene?.imageUrl,
+      originalImageUrl: currentScene?.originalImageUrl,
+    },
+    shot: {
+      status: shotAssets.length ? 'done' : 'none',
+      imageUrl: currentShot?.coverUrl,
+      assets: shotAssets.map((a) => ({
+        ...a,
+        digitalHumanIds: item.digitalHumanIds as string[],
+      })),
+      currentAssetId: currentShot?.id,
+      // 响应裁剪时服务端回传历史版本总数；未裁剪（单行端点）时即实际长度
+      assetCount: Number(item.shotAssetCount ?? shotAssets.length),
+    },
+  }
+}
+
+/** GET /api/tasks/{taskId}/storyboard-lines/{lineId} — 单行全量（含完整资产历史）：生成落定增量合并 / 详情弹窗懒加载历史版本 */
+export async function fetchStoryboardLine(taskId: string, lineId: string): Promise<ScriptLine> {
+  const item = await apiRequest<Record<string, unknown>>(
+    `/tasks/${taskId}/storyboard-lines/${lineId}`,
+    { headers: { 'X-Polling': '1' } },
+  )
+  return mapScriptLine(item)
 }
 
 /** GET /api/tasks/{id}/generations/active — 任务下仍在排队/执行中的媒体生成任务（刷新后恢复等待态） */
@@ -122,7 +138,8 @@ export const fetchActiveGenerations = (taskId: string) =>
   )
 
 /** 按任务 ID 恢复媒体生成任务的轮询等待（页面刷新后续跑；成功时资产已由后端落库） */
-export const waitGenerationJob = (id: string) => mediaGen.waitForJob(id)
+export const waitGenerationJob = (id: string, signal?: AbortSignal) =>
+  mediaGen.waitForJob(id, 660_000, { signal })
 
 /** POST /api/songs — 新建空歌曲项目，用户随后选择 ASS 分镜或通用分镜 */
 export async function createSongProject(name: string): Promise<SongProject> {
@@ -429,6 +446,7 @@ export async function generateSceneImage(
   ratio: ShotGenOptions['ratio'] = '16:9',
   imageModel?: ShotGenOptions['imageModel'],
   resolution: ShotGenOptions['resolution'] = '720p',
+  signal?: AbortSignal,
 ): Promise<{ imageUrl: string; thumbnailUrl?: string }> {
   return mediaGen.generateScene(
     scenePrompt,
@@ -437,6 +455,7 @@ export async function generateSceneImage(
     ratio,
     imageModel,
     resolution,
+    signal,
   )
 }
 
@@ -451,6 +470,7 @@ export async function generateShotVideo(
   referenceImageUrl?: string,
   projectTaskId?: string,
   storyboardLineId?: string,
+  signal?: AbortSignal,
 ): Promise<{ coverUrl: string; coverThumbnailUrl?: string; videoUrl: string; duration: number }> {
   return mediaGen.generateShotVideo(
     [scenePrompt, shotPrompt].filter(Boolean).join('。'),
@@ -465,5 +485,6 @@ export async function generateShotVideo(
     },
     projectTaskId,
     storyboardLineId,
+    signal,
   )
 }

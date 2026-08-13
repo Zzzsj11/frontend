@@ -1,6 +1,7 @@
 /** 图片生成由 Python 后端代理，第三方密钥不会再暴露到浏览器。 */
 
 import { apiRequest } from './client'
+import { watchGenerationJob, type GenerationJobSnapshot } from '../utils/generationPoller'
 
 export interface ImageTaskOptions {
   /** WIDTHxHEIGHT，宽 × 高必须小于 8,294,400，默认 1024x1024 */
@@ -45,31 +46,31 @@ export async function createImageTask(
   return data.id
 }
 
-/** 查询任务状态（waitForImageAsset 每 3 秒轮询调用：打 X-Polling 标记，后端全量日志跳过） */
-export function getImageTask(taskId: string): Promise<GenerationJob> {
-  return request<GenerationJob>(`/generations/${taskId}`, {
-    headers: { 'X-Polling': '1' },
-  })
+export interface WaitForImageOptions {
+  /** @deprecated 周期由统一调度器管理，保留仅为兼容旧调用签名 */
+  intervalMs?: number
+  timeoutMs?: number
+  signal?: AbortSignal
 }
 
-/** 轮询直至任务完成，返回首张图片地址 */
+/** 轮询直至任务完成，返回首张图片地址（经统一轮询调度器，全前端共享一个 3s tick） */
 export async function waitForImageAsset(
   taskId: string,
-  { intervalMs = 3000, timeoutMs = 300_000 } = {},
+  { intervalMs: _intervalMs = 3000, timeoutMs = 300_000, signal }: WaitForImageOptions = {},
 ): Promise<{ url: string; thumbnailUrl?: string }> {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    const task = await getImageTask(taskId)
-    const status = (task.status ?? '').toLowerCase()
-    if (status === 'succeeded') {
-      const url = task.result?.urls?.[0]
+  void _intervalMs // 周期由统一调度器管理，保留参数仅为兼容旧调用签名
+  return watchGenerationJob<{ url: string; thumbnailUrl?: string }>(taskId, {
+    signal,
+    timeoutMs,
+    failureMessage: '图片生成失败',
+    timeoutMessage: '图片生成超时，请稍后重试',
+    select: (snapshot: GenerationJobSnapshot) => {
+      const result = snapshot.result as { urls?: string[]; thumbnailUrls?: string[] } | undefined
+      const url = result?.urls?.[0]
       if (!url) throw new Error('任务成功但未返回图片地址')
-      return { url, thumbnailUrl: task.result?.thumbnailUrls?.[0] }
-    }
-    if (status === 'failed' || status === 'cancelled') throw new Error(task.error || '图片生成失败')
-    if (Date.now() > deadline) throw new Error('图片生成超时，请稍后重试')
-    await new Promise((r) => setTimeout(r, intervalMs))
-  }
+      return { url, thumbnailUrl: result?.thumbnailUrls?.[0] }
+    },
+  })
 }
 
 /** 一步到位：发起任务并轮询取回图片地址 */

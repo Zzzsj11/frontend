@@ -23,6 +23,12 @@ import { nextId } from '../utils/id'
 import { ApiError, reportApiError } from '../errorBus'
 import { DEFAULT_VIDEO_DURATION, normalizeShotOptions } from '../mediaConstraints'
 import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL } from '../generationModels'
+import {
+  PollingCancelledError,
+  abortableSleep,
+  cancelTaskWatchers,
+  registerTaskWatcher,
+} from '../utils/generationPoller'
 
 /** 侧边栏选中状态持久化 key（按用户隔离） */
 const sidebarKeys = (userId: string) => ({
@@ -398,6 +404,8 @@ export const useProjectStore = defineStore('project', {
 
     /** 载入指定子项目(任务)的脚本到编辑区（不负责缓存当前，调用方自行处理） */
     async _loadTask(songId: string, taskId: string | null) {
+      // P1 统一轮询调度：切走旧子项目时立即停止其全部轮询/SSE（后端任务照跑，切回后恢复）
+      if (this.activeTaskId && this.activeTaskId !== taskId) cancelTaskWatchers(this.activeTaskId)
       const script = taskId
         ? await api.fetchSongScript(taskId)
         : {
@@ -465,6 +473,8 @@ export const useProjectStore = defineStore('project', {
       let cursor = 0
       const worker = async () => {
         while (cursor < lineIds.length) {
+          // 切换子项目后立即停止派发旧任务的生成请求（P1：不再为已切走的任务继续提交）
+          if (this.activeTaskId !== taskId) return
           const lineId = lineIds[cursor++]
           const local = this.lines.find((line) => line.id === lineId)
           if (local && this.activeTaskId === taskId && !this._outlineReady(local)) continue
@@ -548,10 +558,13 @@ export const useProjectStore = defineStore('project', {
       lineId: string,
       kind: 'image' | 'video',
     ) {
+      const watcher = registerTaskWatcher(taskId)
       let failed: string | undefined
       try {
-        await api.waitGenerationJob(jobId)
+        await api.waitGenerationJob(jobId, watcher.signal)
       } catch (error) {
+        // 切换子项目被取消：后端任务照跑且资产落库，切回时会重新恢复，静默退出
+        if (error instanceof PollingCancelledError) return
         failed =
           error instanceof Error
             ? error.message
@@ -562,12 +575,12 @@ export const useProjectStore = defineStore('project', {
         resumedGenerationJobs.delete(jobId)
       }
       if (this.activeTaskId !== taskId) return
-      // 后端在任务成功时已把资产落库，重新拉取后只合并媒体子状态，不覆盖用户正在编辑的提示词
-      const fresh = await api.fetchSongScript(taskId).catch(() => null)
-      if (!fresh || this.activeTaskId !== taskId) return
-      const freshLine = fresh.lines.find((item) => item.id === lineId)
+      // P2 切换路径瘦身：只拉取该行（单行全量端点）做增量合并，不再全量拉脚本；
+      // 后端在任务成功时已把资产落库，只合并媒体子状态，不覆盖用户正在编辑的提示词
+      const freshLine = await api.fetchStoryboardLine(taskId, lineId).catch(() => null)
+      if (!freshLine || this.activeTaskId !== taskId) return
       const current = this.lines.find((item) => item.id === lineId)
-      if (!freshLine || !current) return
+      if (!current) return
       if (kind === 'video') current.shot = freshLine.shot
       else current.scene = freshLine.scene
       if (failed) {
@@ -577,14 +590,35 @@ export const useProjectStore = defineStore('project', {
       }
     },
 
+    /** 懒加载某行的完整视频资产历史（详情弹窗打开时调用；脚本载入默认只带当前选用资产） */
+    async ensureShotHistory(lineId: string) {
+      const line = this.lines.find((l) => l.id === lineId)
+      const taskId = this.activeTaskId
+      if (!line || !taskId) return
+      const total = line.shot.assetCount ?? line.shot.assets.length
+      if (total <= line.shot.assets.length) return
+      const fresh = await api.fetchStoryboardLine(taskId, lineId).catch(() => null)
+      if (!fresh || this.activeTaskId !== taskId) return
+      const current = this.lines.find((l) => l.id === lineId)
+      if (!current) return
+      current.shot.assets = fresh.shot.assets
+      current.shot.assetCount = fresh.shot.assets.length
+      if (fresh.shot.currentAssetId) {
+        current.shot.currentAssetId = fresh.shot.currentAssetId
+        const asset = fresh.shot.assets.find((a) => a.id === fresh.shot.currentAssetId)
+        if (asset) current.shot.imageUrl = asset.coverUrl
+      }
+    },
+
     /** 刷新前被中断的逐句提示词生成：后端孤儿请求仍会跑完并落库，轮询任务直至行状态落定后合并 */
     async _watchRunningStoryboardLines(taskId: string) {
       if (storyboardRunningWatchers.has(taskId)) return
       storyboardRunningWatchers.add(taskId)
+      const watcher = registerTaskWatcher(taskId)
       try {
         for (let attempt = 0; attempt < 60; attempt++) {
-          await new Promise((resolve) => setTimeout(resolve, 5000))
-          if (this.activeTaskId !== taskId) return
+          await abortableSleep(5000, watcher.signal)
+          if (watcher.signal.aborted || this.activeTaskId !== taskId) return
           const fresh = await api.fetchSongScript(taskId, true).catch(() => null)
           if (!fresh || this.activeTaskId !== taskId) return
           for (const freshLine of fresh.lines) {
@@ -656,7 +690,8 @@ export const useProjectStore = defineStore('project', {
      * 服务端只在 status 离开 outlining 后关闭流；僵尸任务（后台丢失）时流不会关闭，由看门狗兜底。
      */
     async _watchOutline(taskId: string): Promise<boolean> {
-      const controller = new AbortController()
+      // 注册到任务 watcher：切换子项目时 SSE 立即停止（后端大纲生成照跑，切回后重新订阅）
+      const controller = registerTaskWatcher(taskId)
       let lastEventAt = Date.now()
       const watchdog = window.setInterval(() => {
         if (Date.now() - lastEventAt > 150_000) controller.abort()
@@ -782,12 +817,13 @@ export const useProjectStore = defineStore('project', {
       }
     },
 
-    /** 轮询等待段级重试完成后返回（最多 5 分钟） */
+    /** 轮询等待段级重试完成后返回（最多 5 分钟）；切换子项目时随 watcher 立即停止 */
     async _pollSegmentRetry(taskId: string, sceneIndex: number): Promise<void> {
       const deadline = Date.now() + 300_000
-      while (Date.now() < deadline && this.activeTaskId === taskId) {
+      const watcher = registerTaskWatcher(taskId)
+      while (Date.now() < deadline && this.activeTaskId === taskId && !watcher.signal.aborted) {
         const fresh = await api.fetchSongScript(taskId, true).catch(() => null)
-        if (!fresh || this.activeTaskId !== taskId) return
+        if (!fresh || this.activeTaskId !== taskId || watcher.signal.aborted) return
         const progress = fresh.outlineProgress as
           { phase?: string; sceneIndex?: number; error?: string } | undefined
         if (progress?.phase === 'segment_retry_failed') {
@@ -797,7 +833,7 @@ export const useProjectStore = defineStore('project', {
         if (!progress || progress.phase !== 'segment_retry' || progress.sceneIndex !== sceneIndex) {
           return
         }
-        await new Promise((resolve) => setTimeout(resolve, 2000))
+        await abortableSleep(2000, watcher.signal)
       }
     },
 
@@ -830,7 +866,10 @@ export const useProjectStore = defineStore('project', {
       if (idx < 0) return
       const [removed] = this.songProjects.splice(idx, 1)
       await api.deleteSongProject(songId)
-      removed.tasks.forEach((t) => delete this.taskScripts[t.id])
+      removed.tasks.forEach((t) => {
+        delete this.taskScripts[t.id]
+        cancelTaskWatchers(t.id)
+      })
       if (songId !== this.activeSongId) return
       // 删除的是当前激活歌曲：切到剩余首个歌曲的首个任务，否则清空编辑区
       const fallback = this.songProjects[0]
@@ -898,6 +937,7 @@ export const useProjectStore = defineStore('project', {
       song.tasks.splice(idx, 1)
       await api.deleteSongTask(taskId)
       delete this.taskScripts[taskId]
+      cancelTaskWatchers(taskId)
       if (taskId !== this.activeTaskId) return
       const next = song.tasks[idx] ?? song.tasks[idx - 1]
       this.songSwitching = true
@@ -1430,6 +1470,9 @@ export const useProjectStore = defineStore('project', {
           storyboardType: 'general',
         }
         song.tasks.push(task)
+        // P1：切到新子项目前停止旧任务的轮询/SSE
+        if (this.activeTaskId && this.activeTaskId !== task.id)
+          cancelTaskWatchers(this.activeTaskId)
         this.stop()
         this.editingLineId = null
         this.castIds = [...result.cast]
@@ -1507,6 +1550,9 @@ export const useProjectStore = defineStore('project', {
           storyboardType: 'ass',
         }
         song.tasks.push(task)
+        // P1：切到新子项目前停止旧任务的轮询/SSE
+        if (this.activeTaskId && this.activeTaskId !== task.id)
+          cancelTaskWatchers(this.activeTaskId)
         // 载入生成结果到新子项目
         this.stop()
         this.editingLineId = null
@@ -1551,6 +1597,8 @@ export const useProjectStore = defineStore('project', {
       line.scene.error = undefined
       const variant = sceneVariants[lineId] ?? 0
       sceneVariants[lineId] = variant + 1
+      // P1：轮询挂到任务 watcher 上，切换子项目即被取消（后端任务照跑，切回后恢复）
+      const watcher = this.activeTaskId ? registerTaskWatcher(this.activeTaskId) : null
       try {
         const options = normalizeShotOptions(line.shotOptions ?? DEFAULT_SHOT_OPTIONS)
         const { imageUrl, thumbnailUrl } = await api.generateSceneImage(
@@ -1562,6 +1610,7 @@ export const useProjectStore = defineStore('project', {
           options.ratio,
           options.imageModel,
           options.resolution,
+          watcher?.signal ?? undefined,
         )
         const still = this.lines.find((l) => l.id === lineId)
         if (still)
@@ -1571,6 +1620,8 @@ export const useProjectStore = defineStore('project', {
             originalImageUrl: imageUrl,
           }
       } catch (error) {
+        // 切换子项目导致轮询被取消：保持 generating 等待切回恢复，不标失败不弹窗
+        if (error instanceof PollingCancelledError) return
         // 失败状态与原因留在行内（可重试），全局弹窗只做即时反馈；不再 throw，
         // 避免 fire-and-forget 调用产生 unhandled rejection、批量生成被单行失败中断
         const reported = reportApiError(error, '场景图生成失败')
@@ -1592,10 +1643,13 @@ export const useProjectStore = defineStore('project', {
       const genOptions = normalizeShotOptions(line.shotOptions ?? DEFAULT_SHOT_OPTIONS)
       line.shot.status = 'generating'
       line.shot.error = undefined
-      const variant = line.shot.assets.length
+      // 历史版本总数（含未懒加载的），用于资产版本序号
+      const variant = line.shot.assetCount ?? line.shot.assets.length
       const characterUrls = line.digitalHumanIds
         .map((id) => this.digitalHumans.find((h) => h.id === id)?.avatar)
         .filter(Boolean) as string[]
+      // P1：轮询挂到任务 watcher 上，切换子项目即被取消（后端任务照跑，切回后恢复）
+      const watcher = this.activeTaskId ? registerTaskWatcher(this.activeTaskId) : null
       try {
         const { coverUrl, coverThumbnailUrl, videoUrl, duration } = await api.generateShotVideo(
           line.scenePrompt,
@@ -1607,6 +1661,7 @@ export const useProjectStore = defineStore('project', {
           line.scene.imageUrl,
           this.activeTaskId ?? undefined,
           lineId,
+          watcher?.signal ?? undefined,
         )
         const still = this.lines.find((l) => l.id === lineId)
         if (still) {
@@ -1622,10 +1677,13 @@ export const useProjectStore = defineStore('project', {
           still.shot.currentAssetId = asset.id
           asset.coverUrl = coverThumbnailUrl || coverUrl
           still.shot.imageUrl = asset.coverUrl
+          still.shot.assetCount = (still.shot.assetCount ?? still.shot.assets.length - 1) + 1
           still.shot.status = 'done'
           still.shot.error = undefined
         }
       } catch (error) {
+        // 切换子项目导致轮询被取消：保持 generating 等待切回恢复，不标失败不弹窗
+        if (error instanceof PollingCancelledError) return
         // 同场景图：失败原因入行内状态，不 throw（保留已有资产封面，重试由行内/详情弹窗发起）
         const reported = reportApiError(error, '视频生成失败')
         const still = this.lines.find((l) => l.id === lineId)
@@ -1649,8 +1707,11 @@ export const useProjectStore = defineStore('project', {
     async generateAllVoices() {
       if (this.batchVoicing) return
       this.batchVoicing = true
+      const taskId = this.activeTaskId
       try {
         for (const line of [...this.lines]) {
+          // 切换子项目后立即停止批量派发
+          if (this.activeTaskId !== taskId) break
           if (line.source !== 'general' && line.voice.status !== 'done')
             await this.generateVoiceFor(line.id)
         }
@@ -1662,8 +1723,11 @@ export const useProjectStore = defineStore('project', {
     async generateAllShots() {
       if (this.batchShooting) return
       this.batchShooting = true
+      const taskId = this.activeTaskId
       try {
         for (const line of [...this.lines]) {
+          // 切换子项目后立即停止批量派发
+          if (this.activeTaskId !== taskId) break
           if (line.shot.status !== 'done') await this.generateShotFor(line.id)
         }
       } finally {
@@ -1682,7 +1746,8 @@ export const useProjectStore = defineStore('project', {
     async _watchMaterialExport(item: MaterialExport) {
       if (!item.jobId || exportStreams.has(item.id) || ['ready', 'failed'].includes(item.status))
         return
-      const controller = new AbortController()
+      // 注册到任务 watcher：切换/删除子项目时导出进度 SSE 随任务取消
+      const controller = registerTaskWatcher(item.taskId)
       exportStreams.set(item.id, controller)
       try {
         for (let attempt = 0; attempt < 4 && !controller.signal.aborted; attempt += 1) {
