@@ -561,7 +561,7 @@ def test_general_story_bible_logline_skips_empty_secondary_category() -> None:
     """无二级分类时 logline 不得拼出空段（「戏曲 /  风格」式脏文案）。"""
     bible = build_general_story_bible(
         config={"genre": "戏曲", "gender": "女", "season": "通用"},
-        definitions=[],
+        shots=[],
         durations=[],
     )
     assert bible["logline"].startswith("戏曲 风格的完整 MV 视觉弧光")
@@ -572,7 +572,7 @@ def test_general_story_bible_logline_joins_present_categories() -> None:
     """二级分类存在时保持「一级 / 二级」拼接。"""
     bible = build_general_story_bible(
         config={"genre": "流行歌曲", "secondary_category": "爱情消极", "gender": "女", "season": "秋"},
-        definitions=[],
+        shots=[],
         durations=[],
     )
     assert bible["logline"].startswith("流行歌曲 / 爱情消极 风格的完整 MV 视觉弧光")

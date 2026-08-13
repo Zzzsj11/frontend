@@ -717,13 +717,13 @@ export const useProjectStore = defineStore('project', {
       }
     },
 
-    /** ASS 大纲生成（上传后自动调用 / 失败后手动重试）：202 受理 + SSE 进度；成功后自动接续逐句提示词生成 */
+    /** 分镜大纲生成（ASS 上传后自动调用 / 通用分镜创建后自动调用 / 失败后手动重试）：202 受理 + SSE 进度；成功后自动接续逐句提示词生成 */
     async runOutlineGeneration(taskId?: string) {
       const id = taskId ?? this.activeTaskId
       if (
         !id ||
         this.activeTaskId !== id ||
-        this.activeStoryboardType !== 'ass' ||
+        (this.activeStoryboardType !== 'ass' && this.activeStoryboardType !== 'general') ||
         // 防重入只看同任务：别的子项目正在生成时不阻塞本任务触发
         (this.outlineLoading && this.outlineTaskId === id)
       )
@@ -1466,7 +1466,7 @@ export const useProjectStore = defineStore('project', {
           id: result.taskId,
           title: result.title,
           updatedAt: '刚刚',
-          status: 'generating',
+          status: 'parsed',
           storyboardType: 'general',
         }
         song.tasks.push(task)
@@ -1483,14 +1483,12 @@ export const useProjectStore = defineStore('project', {
           (result as typeof result & { storyboardConfig?: { storyBible?: StoryBible } })
             .storyboardConfig?.storyBible ?? null
         this.activeStoryboardType = 'general'
-        this.activeTaskStatus = 'generating'
+        this.activeTaskStatus = 'parsed'
         this.selectedLineId = this.lines[0]?.id ?? null
         this.currentTime = 0
         this.generalStoryboardOpen = false
-        void this._generateStoryboardQueue(
-          task.id,
-          lines.map((line) => line.id),
-        )
+        // 异步触发大纲生成：复用 ASS 的 SSE 订阅 + 僵尸恢复 + 完成后自动接续逐句生成
+        void this.runOutlineGeneration(task.id)
       } catch (err) {
         this.generalStoryboardError = err instanceof Error ? err.message : '通用 MV 视频生成失败'
       } finally {

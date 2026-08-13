@@ -427,12 +427,16 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
         raise HTTPException(422, "包含不可用角色")
     config = payload.model_dump(mode="json")
     title = f"通用分镜-{utcnow().astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d-%H-%M-%S')}"
+    try:
+        durations = exact_durations(payload.total_duration, total)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     task = ProjectTaskModel(
         id=uid("task"),
         project_id=project_id,
         title=title,
         storyboard_type="general",
-        status="generating",
+        status="parsed",
         extra_requirement=payload.extra_requirement,
         overall_prompt=payload.overall_prompt,
         storyboard_config=config,
@@ -441,61 +445,16 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
     await db.flush()
     for index, human_id in enumerate(payload.digital_human_ids):
         db.add(ProjectCastModel(id=uid("cast"), project_task_id=task.id, digital_human_id=human_id, sort_order=index))
-    try:
-        durations = exact_durations(payload.total_duration, total)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    # 构建角色描述（与 ASS 流程格式一致）
-    human_by_id = {item.id: item for item in visible}
-    selected_humans = [
-        {
-            "id": item.id,
-            "name": item.name,
-            "gender": item.gender,
-            "ageDescription": item.age_description,
-            "appearanceStyle": item.appearance_style,
-            "clothingDescription": item.clothing_description,
-            "systemPrompt": item.system_prompt or item.avatar_prompt or item.description,
-        }
-        for human_id in payload.digital_human_ids
-        if (item := human_by_id.get(human_id))
-    ]
-    # 调用 LLM 生成大纲
-    await consume_daily_quota(db, user_id=user.id, category="chat", limit=settings.daily_chat_limit)
-    try:
-        outline = await generate_general_story_outline(config=config, selected_humans=selected_humans)
-    except Exception as exc:
-        _persist_llm_calls(
-            db,
-            getattr(exc, "usage_records", None),
-            default_operation="general_story_outline",
-            user_id=user.id,
-            project_id=project_id,
-            project_task_id=task.id,
-            operation_suffix="_failed",
-        )
-        await db.commit()
-        raise HTTPException(502, f"通用分镜大纲生成失败：{exc}") from exc
-    _persist_llm_calls(
-        db,
-        outline["usageRecords"],
-        default_operation="general_story_outline",
-        user_id=user.id,
-        project_id=project_id,
-        project_task_id=task.id,
-    )
-    config["storyBible"] = build_general_story_bible(config=config, shots=outline["shots"], durations=durations)
-    task.storyboard_config = config
+    # 占位 lines：大纲生成前只确定数量与时长，shotType 与大纲字段由后台任务回填
     output = []
-    for index, shot in enumerate(outline["shots"]):
+    for index in range(total):
         duration = durations[index]
-        roles = shot["requiredCharacterIds"]
         line = StoryboardLineModel(
             id=uid("line"),
             project_task_id=task.id,
             sort_order=index,
             source="general",
-            shot_type=shot["shotType"],
+            shot_type="empty",
             planned_duration=duration,
             scene_prompt="",
             shot_prompt="",
@@ -505,27 +464,20 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
                 "imageModel": payload.image_model,
                 "videoModel": payload.video_model,
                 "duration": normalize_video_duration(duration),
-                "outlineScene": shot["outlineScene"],
-                "outlineShot": shot["outlineShot"],
-                "outlineIntent": shot["intent"],
-                "characterAction": shot["characterAction"],
-                "emotionalFocus": shot["emotionalFocus"],
-                "cameraPurpose": shot["cameraPurpose"],
+                "outlineStatus": "pending",
             },
             generation_status="pending",
         )
         db.add(line)
         await db.flush()
-        for role_index, human_id in enumerate(roles):
-            db.add(StoryboardLineCastModel(id=uid("linecast"), storyboard_line_id=line.id, digital_human_id=human_id, sort_order=role_index))
         output.append(
             {
                 "id": line.id,
-                "shotType": shot["shotType"],
+                "shotType": "empty",
                 "plannedDuration": duration,
                 "scenePrompt": "",
                 "shotPrompt": "",
-                "digitalHumanIds": roles,
+                "digitalHumanIds": [],
                 "shotOptions": line.shot_options,
                 "generationStatus": "pending",
             }
@@ -535,12 +487,11 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
         "taskId": task.id,
         "projectId": project_id,
         "title": title,
-        "status": "generating",
+        "status": "parsed",
         "cast": payload.digital_human_ids,
         "totalDuration": payload.total_duration,
         "storyboardConfig": config,
         "lines": output,
-        "usage": outline.get("usage", {}),
     }
 
 
@@ -818,11 +769,120 @@ async def _run_ass_outline_generation(
         await session.commit()
 
 
+async def _apply_general_outline_to_lines(db: AsyncSession, lines: list[StoryboardLineModel], shots: list[dict], durations: list[float]) -> None:
+    """将通用分镜大纲结果回填到占位 lines（镜头类型、人物、时长与大纲字段）。"""
+    now = utcnow()
+    line_ids = [line.id for line in lines]
+    await db.execute(
+        update(StoryboardLineCastModel).where(StoryboardLineCastModel.storyboard_line_id.in_(line_ids), StoryboardLineCastModel.deleted_at.is_(None)).values(deleted_at=now)
+    )
+    for line, shot, duration in zip(lines, shots, durations, strict=True):
+        line.shot_type = shot["shotType"]
+        line.planned_duration = duration
+        line.shot_options = {
+            **(line.shot_options or {}),
+            "duration": normalize_video_duration(duration),
+            "outlineScene": shot["outlineScene"],
+            "outlineShot": shot["outlineShot"],
+            "outlineIntent": shot["intent"],
+            "characterAction": shot["characterAction"],
+            "emotionalFocus": shot["emotionalFocus"],
+            "cameraPurpose": shot["cameraPurpose"],
+            "outlineStatus": "ready",
+        }
+        line.generation_status = "pending"
+        line.generation_error = None
+        line.prompt_context_hash = None
+        for index, human_id in enumerate(shot["requiredCharacterIds"]):
+            db.add(StoryboardLineCastModel(id=uid("linecast"), storyboard_line_id=line.id, digital_human_id=human_id, sort_order=index))
+
+
+async def _run_general_outline_generation(
+    *,
+    task_id: str,
+    user_id: str,
+    project_id: str,
+    selected_humans: list[dict],
+) -> None:
+    """后台执行通用分镜大纲生成；进度写 storyboard_config.outlineProgress 供 SSE 轮询推送。"""
+
+    async def on_progress(progress: dict) -> None:
+        async with session_factory() as progress_session:
+            item = await progress_session.get(ProjectTaskModel, task_id)
+            if not item or item.deleted_at is not None:
+                return
+            config = dict(item.storyboard_config or {})
+            config["outlineProgress"] = progress
+            item.storyboard_config = config
+            await progress_session.commit()
+
+    async with session_factory() as session:
+        task = await session.get(ProjectTaskModel, task_id)
+        if not task or task.deleted_at is not None:
+            return
+        config = dict(task.storyboard_config or {})
+        empty_count = int(config.get("empty_shot_count", 0))
+        character_count = int(config.get("character_shot_count", 0))
+        total = empty_count + character_count
+        try:
+            durations = exact_durations(config.get("total_duration", 0), total)
+        except ValueError:
+            if total:
+                durations = [float(config.get("total_duration", 0)) / total] * total
+            else:
+                durations = []
+        try:
+            outline = await generate_general_story_outline(config=config, selected_humans=selected_humans, on_progress=on_progress)
+        except Exception as exc:
+            _persist_llm_calls(
+                session,
+                getattr(exc, "usage_records", None),
+                default_operation="general_story_outline",
+                user_id=user_id,
+                project_id=project_id,
+                project_task_id=task_id,
+                operation_suffix="_failed",
+            )
+            failed_config = dict(task.storyboard_config or {})
+            failed_config["outlineProgress"] = {"phase": "error", "shotsDone": 0, "shotsTotal": total, "error": f"通用分镜大纲生成失败：{exc}"[:300]}
+            task.storyboard_config = failed_config
+            task.status = "outline_failed"
+            await session.commit()
+            return
+        story_bible = build_general_story_bible(config=config, shots=outline["shots"], durations=durations)
+        lines = list(
+            (
+                await session.execute(
+                    select(StoryboardLineModel)
+                    .where(StoryboardLineModel.project_task_id == task_id, StoryboardLineModel.deleted_at.is_(None))
+                    .order_by(StoryboardLineModel.sort_order)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        done_config = dict(task.storyboard_config or {})
+        done_config["storyBible"] = story_bible
+        done_config.pop("outlineProgress", None)
+        task.storyboard_config = done_config
+        task.status = "generating"
+        await _apply_general_outline_to_lines(session, lines, outline["shots"], durations)
+        _persist_llm_calls(
+            session,
+            outline["usageRecords"],
+            default_operation="general_story_outline",
+            user_id=user_id,
+            project_id=project_id,
+            project_task_id=task_id,
+        )
+        await session.commit()
+
+
 @router.post("/tasks/{task_id}/storyboard-outline/regenerate", status_code=202)
 async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
     task = await owned_task(db, user.id, task_id)
-    if task.storyboard_type != "ass":
-        raise HTTPException(422, "只有 ASS 分镜支持重新生成全局大纲")
+    if task.storyboard_type not in ("ass", "general"):
+        raise HTTPException(422, "该分镜类型不支持生成全局大纲")
     if task.status == "outlining":
         # 进度回调会持续刷新 updated_at；超过阈值未刷新视为后台任务丢失（服务重启等）的僵尸状态，放行重新生成
         # sqlite 读回的 updated_at 不带时区，与 aware 的 utcnow 相减前需要补齐
@@ -832,15 +892,6 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
         stale_seconds = (utcnow() - updated_at).total_seconds() if updated_at else 999999
         if stale_seconds < 150:
             raise HTTPException(409, "分镜大纲正在生成中，请等待本轮完成后再提交")
-    lines = list(
-        (
-            await db.execute(
-                select(StoryboardLineModel).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None)).order_by(StoryboardLineModel.sort_order)
-            )
-        )
-        .scalars()
-        .all()
-    )
     cast_links = list(
         (await db.execute(select(ProjectCastModel).where(ProjectCastModel.project_task_id == task.id, ProjectCastModel.deleted_at.is_(None)).order_by(ProjectCastModel.sort_order)))
         .scalars()
@@ -864,6 +915,37 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
     ]
     if not selected_humans:
         raise HTTPException(422, "该任务还未选择人物，请先在人物栏选择人物后再生成分镜大纲")
+    await consume_daily_quota(db, user_id=user.id, category="chat", limit=settings.daily_chat_limit)
+
+    if task.storyboard_type == "general":
+        config = dict(task.storyboard_config or {})
+        shots_total = int(config.get("empty_shot_count", 0)) + int(config.get("character_shot_count", 0))
+        progress = {"phase": "generating", "shotsDone": 0, "shotsTotal": shots_total, "startedAt": utcnow().isoformat()}
+        config["outlineProgress"] = progress
+        task.storyboard_config = config
+        task.status = "outlining"
+        await db.commit()
+        background = asyncio.create_task(
+            _run_general_outline_generation(
+                task_id=task.id,
+                user_id=user.id,
+                project_id=task.project_id,
+                selected_humans=selected_humans,
+            )
+        )
+        _outline_background_tasks.add(background)
+        background.add_done_callback(_outline_background_tasks.discard)
+        return {"taskId": task.id, "status": "outlining", "progress": progress}
+
+    lines = list(
+        (
+            await db.execute(
+                select(StoryboardLineModel).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None)).order_by(StoryboardLineModel.sort_order)
+            )
+        )
+        .scalars()
+        .all()
+    )
     segments = [
         {
             "index": line.sort_order,
@@ -875,7 +957,6 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
         }
         for line in lines
     ]
-    await consume_daily_quota(db, user_id=user.id, category="chat", limit=settings.daily_chat_limit)
     progress = {"phase": "planning", "segmentsDone": 0, "segmentsTotal": 0, "startedAt": utcnow().isoformat()}
     config = dict(task.storyboard_config or {})
     config["outlineProgress"] = progress

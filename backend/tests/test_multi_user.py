@@ -108,17 +108,19 @@ def test_general_storyboard_persists_type_specific_configuration(client) -> None
     )
     assert response.status_code == 201
     result = response.json()
+    assert result["status"] == "parsed"
     assert result["title"].startswith("通用分镜-")
     assert len(result["title"]) == len("通用分镜-20260810-01-23-38")
     assert result["storyboardConfig"]["genre"] == "流行歌曲"
     assert result["storyboardConfig"]["gender"] == "女"
-    assert result["storyboardConfig"]["storyBible"]["visualContinuity"]["singerGender"] == "女"
-    assert {line["shotType"] for line in result["lines"]} == {"empty", "character"}
+    # 大纲异步生成前，lines 为占位：shotType 统一 empty，人物待后台回填
+    assert {line["shotType"] for line in result["lines"]} == {"empty"}
     assert all(line["shotOptions"]["duration"] == round(line["plannedDuration"]) for line in result["lines"])
-    assert [shot["materialDuration"] for shot in result["storyboardConfig"]["storyBible"]["shots"]] == [line["plannedDuration"] for line in result["lines"]]
+    assert all(line["shotOptions"]["outlineStatus"] == "pending" for line in result["lines"])
     task = client.get(f"/api/tasks/{result['taskId']}", headers=headers).json()
     assert task["storyboardType"] == "general"
     assert task["overallPrompt"] == "统一暖色电影质感"
+    assert task["status"] == "parsed"
 
 
 def test_general_storyboard_allows_genre_without_secondary_category(client) -> None:
@@ -142,10 +144,92 @@ def test_general_storyboard_allows_genre_without_secondary_category(client) -> N
     )
     assert response.status_code == 201
     result = response.json()
+    assert result["status"] == "parsed"
     assert result["storyboardConfig"]["secondary_category"] is None
-    logline = result["storyboardConfig"]["storyBible"]["logline"]
-    assert logline.startswith("戏曲 风格")
-    assert "None" not in logline
+
+
+def test_general_storyboard_outline_generation_is_async(client, monkeypatch) -> None:
+    import time
+
+    from app import domain
+
+    async def fake_general_outline(*, config, selected_humans, on_progress=None):
+        if on_progress:
+            await on_progress({"phase": "generating", "shotsDone": 0, "shotsTotal": 2})
+        return {
+            "shots": [
+                {
+                    "index": 0,
+                    "shotType": "empty",
+                    "outlineScene": "空旷街道夜景",
+                    "outlineShot": "低机位缓慢推进",
+                    "requiredCharacterIds": [],
+                    "intent": "建立孤独氛围",
+                    "characterAction": "无人环境",
+                    "emotionalFocus": "孤寂",
+                    "cameraPurpose": "交代环境",
+                },
+                {
+                    "index": 1,
+                    "shotType": "character",
+                    "outlineScene": "窗边黄昏",
+                    "outlineShot": "人物凝视远方",
+                    "requiredCharacterIds": ["dh-system-020"],
+                    "intent": "引入人物情绪",
+                    "characterAction": "人物望向窗外",
+                    "emotionalFocus": "思念",
+                    "cameraPurpose": "推进到近景",
+                },
+            ],
+            "usageRecords": [{"operation": "general_story_outline", "usage": {}, "requestId": "gen-outline-test"}],
+            "usage": {},
+            "requestId": "gen-outline-test",
+        }
+
+    monkeypatch.setattr(domain, "generate_general_story_outline", fake_general_outline)
+    _, headers = create_and_login_user(client, "general-async-user")
+    project = client.post("/api/projects", headers=headers, json={"name": "General Async"}).json()
+    created = client.post(
+        f"/api/projects/{project['id']}/storyboards/general",
+        headers=headers,
+        json={
+            "genre": "流行歌曲",
+            "secondary_category": "爱情消极",
+            "season": "秋",
+            "gender": "女",
+            "age_group": "青年",
+            "visual_style": "电影写实",
+            "ratio": "16:9",
+            "empty_shot_count": 1,
+            "character_shot_count": 1,
+            "total_duration": 10,
+            "digital_human_ids": ["dh-system-020"],
+        },
+    )
+    assert created.status_code == 201
+    task_id = created.json()["taskId"]
+    assert created.json()["status"] == "parsed"
+    # 创建阶段不触发 LLM，storyBible 尚未生成
+    assert "storyBible" not in created.json()["storyboardConfig"]
+
+    trigger = client.post(f"/api/tasks/{task_id}/storyboard-outline/regenerate", headers=headers)
+    assert trigger.status_code == 202
+    assert trigger.json()["status"] == "outlining"
+
+    deadline = time.monotonic() + 3
+    task = None
+    while time.monotonic() < deadline:
+        task = client.get(f"/api/tasks/{task_id}", headers=headers).json()
+        if task["status"] != "outlining":
+            break
+        time.sleep(0.01)
+    assert task is not None and task["status"] == "generating"
+    assert task["storyboardConfig"]["storyBible"]["shots"][0]["shotType"] == "empty"
+    assert task["storyboardConfig"]["storyBible"]["shots"][1]["shotType"] == "character"
+    lines = task["lines"]
+    assert [line["shotType"] for line in lines] == ["empty", "character"]
+    assert lines[1]["digitalHumanIds"] == ["dh-system-020"]
+    assert all(line["shotOptions"]["outlineStatus"] == "ready" for line in lines)
 
 
 def test_material_exports_are_isolated_between_users(client, monkeypatch) -> None:
