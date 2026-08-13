@@ -69,8 +69,8 @@ def build_ass_story_bible(*, segments: list[dict[str, Any]], emotion: dict[str, 
     }
 
 
-def build_general_story_bible(*, config: dict[str, Any], definitions: list[tuple[str, tuple[str, str], list[str]]], durations: list[float]) -> dict[str, Any]:
-    total = len(definitions)
+def build_general_story_bible(*, config: dict[str, Any], shots: list[dict[str, Any]], durations: list[float]) -> dict[str, Any]:
+    total = len(shots)
     # 部分曲风（戏曲、中文喊麦）没有二级分类，拼接风格路径时跳过空段
     category_path = " / ".join(part for part in (config.get("genre"), config.get("secondary_category")) if part)
     return {
@@ -87,15 +87,19 @@ def build_general_story_bible(*, config: dict[str, Any], definitions: list[tuple
         "shots": [
             {
                 "index": index,
-                "shotType": shot_type,
+                "shotType": shot["shotType"],
                 "stage": _stage(index, total),
-                "outlineScene": outline[0],
-                "outlineShot": outline[1],
-                "requiredCharacterIds": roles,
+                "outlineScene": shot["outlineScene"],
+                "outlineShot": shot["outlineShot"],
+                "requiredCharacterIds": shot["requiredCharacterIds"],
+                "intent": shot["intent"],
+                "characterAction": shot["characterAction"],
+                "emotionalFocus": shot["emotionalFocus"],
+                "cameraPurpose": shot["cameraPurpose"],
                 "materialDuration": durations[index],
                 "generationDuration": normalize_video_duration(durations[index]),
             }
-            for index, (shot_type, outline, roles) in enumerate(definitions)
+            for index, shot in enumerate(shots)
         ],
     }
 

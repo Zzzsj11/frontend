@@ -63,7 +63,7 @@ from .schemas import (
 )
 from .storage import download_public_url_to_path, get_storage, is_tos_url, safe_key
 from .story_bible import STORY_BIBLE_VERSION, build_ass_story_bible, build_general_story_bible, exact_durations
-from .storyboard_prompt import PROMPT_VERSION, SCHEMA_VERSION, finalize_shot_durations, generate_ass_story_outline, generate_storyboard_line, regenerate_ass_scene_segment
+from .storyboard_prompt import PROMPT_VERSION, SCHEMA_VERSION, finalize_shot_durations, generate_ass_story_outline, generate_general_story_outline, generate_storyboard_line, regenerate_ass_scene_segment
 from .token_usage import add_llm_call_log, add_token_usage, normalize_usage
 from .usage_quota import consume_daily_quota
 
@@ -198,17 +198,6 @@ async def delete_user(user_id: str, user: CurrentUser, db: AsyncSession = Db) ->
     await db.commit()
     return {"ok": True}
 
-
-EMPTY_SCENES = [
-    ("城市旧街的潮湿路面倒映暖色路灯，落叶散落在石板路上", "低机位沿街道缓慢推进，浅景深，画面稳定，无人物出镜"),
-    ("安静河岸边的空长椅，远处城市灯光刚刚亮起", "镜头从水面倒影缓慢抬升到长椅，轻微横摇"),
-    ("暖色房间里的老唱片机缓慢旋转，窗外光线渐暗", "微距拍摄唱针落下，镜头沿唱片纹理缓慢旋转"),
-]
-CHARACTER_SCENES = [
-    ("公寓窗边，余晖穿过薄纱窗帘，房间内漂浮细小尘埃", "人物独自靠在窗边凝视远方，镜头从中景缓慢推进至面部近景"),
-    ("傍晚十字路口，人群在霓虹灯下经过，背景车辆虚化成光斑", "人物逆着人流缓慢前行，手持镜头平稳跟随"),
-    ("临街咖啡馆靠窗座位，桌面放着两杯咖啡，其中一把椅子空着", "人物抬头看向窗外，镜头快速跟焦到眼神变化"),
-]
 
 
 async def owned_project(db: AsyncSession, user_id: str, project_id: str) -> ProjectModel:
@@ -456,28 +445,57 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
         durations = exact_durations(payload.total_duration, total)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    definitions: list[tuple[str, tuple[str, str], list[str]]] = []
-    for index in range(max(payload.empty_shot_count, payload.character_shot_count)):
-        if index < payload.empty_shot_count:
-            definitions.append(("empty", EMPTY_SCENES[index % len(EMPTY_SCENES)], []))
-        if index < payload.character_shot_count:
-            roles = [payload.digital_human_ids[index % len(payload.digital_human_ids)]] if payload.digital_human_ids else []
-            if index == payload.character_shot_count - 1 and len(payload.digital_human_ids) > 1:
-                partner = payload.digital_human_ids[(index + 1) % len(payload.digital_human_ids)]
-                if partner not in roles:
-                    roles.append(partner)
-            definitions.append(("character", CHARACTER_SCENES[index % len(CHARACTER_SCENES)], roles))
-    config["storyBible"] = build_general_story_bible(config=config, definitions=definitions, durations=durations)
+    # 构建角色描述（与 ASS 流程格式一致）
+    human_by_id = {item.id: item for item in visible}
+    selected_humans = [
+        {
+            "id": item.id,
+            "name": item.name,
+            "gender": item.gender,
+            "ageDescription": item.age_description,
+            "appearanceStyle": item.appearance_style,
+            "clothingDescription": item.clothing_description,
+            "systemPrompt": item.system_prompt or item.avatar_prompt or item.description,
+        }
+        for human_id in payload.digital_human_ids
+        if (item := human_by_id.get(human_id))
+    ]
+    # 调用 LLM 生成大纲
+    await consume_daily_quota(db, user_id=user.id, category="chat", limit=settings.daily_chat_limit)
+    try:
+        outline = await generate_general_story_outline(config=config, selected_humans=selected_humans)
+    except Exception as exc:
+        _persist_llm_calls(
+            db,
+            getattr(exc, "usage_records", None),
+            default_operation="general_story_outline",
+            user_id=user.id,
+            project_id=project_id,
+            project_task_id=task.id,
+            operation_suffix="_failed",
+        )
+        await db.commit()
+        raise HTTPException(502, f"通用分镜大纲生成失败：{exc}") from exc
+    _persist_llm_calls(
+        db,
+        outline["usageRecords"],
+        default_operation="general_story_outline",
+        user_id=user.id,
+        project_id=project_id,
+        project_task_id=task.id,
+    )
+    config["storyBible"] = build_general_story_bible(config=config, shots=outline["shots"], durations=durations)
     task.storyboard_config = config
     output = []
-    for index, (shot_type, (scene, shot), roles) in enumerate(definitions):
+    for index, shot in enumerate(outline["shots"]):
         duration = durations[index]
+        roles = shot["requiredCharacterIds"]
         line = StoryboardLineModel(
             id=uid("line"),
             project_task_id=task.id,
             sort_order=index,
             source="general",
-            shot_type=shot_type,
+            shot_type=shot["shotType"],
             planned_duration=duration,
             scene_prompt="",
             shot_prompt="",
@@ -487,8 +505,12 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
                 "imageModel": payload.image_model,
                 "videoModel": payload.video_model,
                 "duration": normalize_video_duration(duration),
-                "outlineScene": scene,
-                "outlineShot": shot,
+                "outlineScene": shot["outlineScene"],
+                "outlineShot": shot["outlineShot"],
+                "outlineIntent": shot["intent"],
+                "characterAction": shot["characterAction"],
+                "emotionalFocus": shot["emotionalFocus"],
+                "cameraPurpose": shot["cameraPurpose"],
             },
             generation_status="pending",
         )
@@ -499,7 +521,7 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
         output.append(
             {
                 "id": line.id,
-                "shotType": shot_type,
+                "shotType": shot["shotType"],
                 "plannedDuration": duration,
                 "scenePrompt": "",
                 "shotPrompt": "",
@@ -518,6 +540,7 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
         "totalDuration": payload.total_duration,
         "storyboardConfig": config,
         "lines": output,
+        "usage": outline.get("usage", {}),
     }
 
 
