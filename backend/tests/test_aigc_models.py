@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import asyncio
@@ -39,6 +38,7 @@ def test_aigc_models_endpoint_returns_provider_model_list(client, monkeypatch) -
         {"id": "doubao-seedance-2.0", "object": "model", "created": 0, "owned_by": "yinhe"},
         {"id": "kling-v3", "object": "model", "created": 0, "owned_by": "yinhe"},
     ]
+
     async def fake_list():
         return fake_models
 

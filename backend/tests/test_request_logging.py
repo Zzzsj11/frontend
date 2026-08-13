@@ -75,19 +75,13 @@ def test_request_logs_filter_min_ms_and_sort_by_duration(client):
     for _ in range(3):
         client.get("/api/auth/me", headers={"X-Test-Run-Id": run_id})
     # minMs 过滤（阈值取 1ms：正常请求都能通过，验证参数链路）
-    filtered = client.get(
-        "/api/admin/request-logs", params={"runId": run_id, "minMs": 1}
-    ).json()
+    filtered = client.get("/api/admin/request-logs", params={"runId": run_id, "minMs": 1}).json()
     assert filtered["total"] == 3
     # 荒谬大阈值 → 一条都没有（说明条件真实生效）
-    none = client.get(
-        "/api/admin/request-logs", params={"runId": run_id, "minMs": 10**9}
-    ).json()
+    none = client.get("/api/admin/request-logs", params={"runId": run_id, "minMs": 10**9}).json()
     assert none["total"] == 0
     # orderBy=duration：耗时倒序返回
-    by_duration = client.get(
-        "/api/admin/request-logs", params={"runId": run_id, "orderBy": "duration"}
-    ).json()
+    by_duration = client.get("/api/admin/request-logs", params={"runId": run_id, "orderBy": "duration"}).json()
     durations = [item["durationMs"] for item in by_duration["items"]]
     assert durations == sorted(durations, reverse=True)
 
@@ -100,14 +94,9 @@ def test_request_log_summary_aggregates_by_path(client):
     """
     run_id = _run_id("summary")
     client.get("/api/auth/me", headers={"X-Test-Run-Id": run_id})
-    summary = client.get(
-        "/api/admin/request-logs/summary", params={"hours": 24, "minCount": 1}
-    ).json()
+    summary = client.get("/api/admin/request-logs/summary", params={"hours": 24, "minCount": 1}).json()
     assert isinstance(summary, list)
-    assert all(
-        row["count"] >= 1 and row["avgMs"] >= 0 and row["p95Ms"] >= 0 and row["maxMs"] >= 0
-        for row in summary
-    )
+    assert all(row["count"] >= 1 and row["avgMs"] >= 0 and row["p95Ms"] >= 0 and row["maxMs"] >= 0 for row in summary)
     assert not any(row["path"] == "/api/auth/me" for row in summary)
 
 

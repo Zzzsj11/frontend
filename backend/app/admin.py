@@ -95,9 +95,7 @@ async def projects(
     require_admin(user)
     limit, offset = max(1, min(limit, 300)), max(0, offset)
     conditions = [ProjectModel.deleted_at.is_(None)]
-    total = (
-        await db.execute(select(func.count()).select_from(ProjectModel).where(*conditions))
-    ).scalar_one()
+    total = (await db.execute(select(func.count()).select_from(ProjectModel).where(*conditions))).scalar_one()
     rows = (
         await db.execute(
             select(ProjectModel, UserModel.username)
@@ -110,10 +108,7 @@ async def projects(
     ).all()
     return {
         "total": total,
-        "items": [
-            {"id": p.id, "name": p.name, "username": u, "status": p.status, "createdAt": iso(p.created_at)}
-            for p, u in rows
-        ],
+        "items": [{"id": p.id, "name": p.name, "username": u, "status": p.status, "createdAt": iso(p.created_at)} for p, u in rows],
     }
 
 
@@ -327,20 +322,8 @@ async def audits(
     require_admin(user)
     limit, offset = max(1, min(limit, 300)), max(0, offset)
     conditions = [AdminOperationLogModel.deleted_at.is_(None)]
-    total = (
-        await db.execute(
-            select(func.count()).select_from(AdminOperationLogModel).where(*conditions)
-        )
-    ).scalar_one()
-    rows = (
-        await db.execute(
-            select(AdminOperationLogModel)
-            .where(*conditions)
-            .order_by(AdminOperationLogModel.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-    ).scalars()
+    total = (await db.execute(select(func.count()).select_from(AdminOperationLogModel).where(*conditions))).scalar_one()
+    rows = (await db.execute(select(AdminOperationLogModel).where(*conditions).order_by(AdminOperationLogModel.created_at.desc()).limit(limit).offset(offset))).scalars()
     return {
         "total": total,
         "items": [
@@ -500,11 +483,7 @@ async def request_logs(
         conditions.append(ApiRequestLogModel.status_code == status)
     if minMs is not None:
         conditions.append(ApiRequestLogModel.duration_ms >= max(0, minMs))
-    order_by_clause = (
-        (ApiRequestLogModel.duration_ms.desc(), ApiRequestLogModel.created_at.desc())
-        if orderBy == "duration"
-        else (ApiRequestLogModel.created_at.desc(),)
-    )
+    order_by_clause = (ApiRequestLogModel.duration_ms.desc(), ApiRequestLogModel.created_at.desc()) if orderBy == "duration" else (ApiRequestLogModel.created_at.desc(),)
     total = (await db.execute(select(func.count()).select_from(ApiRequestLogModel).where(*conditions))).scalar_one()
     rows = (await db.execute(select(ApiRequestLogModel).where(*conditions).order_by(*order_by_clause).limit(limit).offset(offset))).scalars()
     return {"total": total, "items": [_request_log_summary(x) for x in rows]}
