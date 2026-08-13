@@ -29,7 +29,7 @@ const assInputRef = ref<HTMLInputElement>()
 
 const canSubmit = computed(() => songId.value.trim() !== '' && assFile.value !== null)
 
-// 每次打开弹窗重置表单
+// 每次打开弹窗重置表单（immediate：弹层懒挂载后，挂载即打开，靠 immediate 完成初始化）
 watch(
   () => store.magicOpen,
   (open) => {
@@ -38,6 +38,7 @@ watch(
       void loadGenerationModels()
     }
   },
+  { immediate: true },
 )
 
 const resetForm = () => {

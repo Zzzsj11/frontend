@@ -225,10 +225,11 @@ const outlineStageText = computed(() => {
       </button>
     </footer>
 
-    <ShotDetailModal />
-    <MagicScriptModal />
-    <GeneralStoryboardModal />
-    <StoryboardOutlineModal />
+    <!-- 弹层懒挂载（P3d）：关闭时不保留组件实例/watchers；打开时的初始化由各弹窗 immediate watch 完成 -->
+    <ShotDetailModal v-if="!!store.editingLine" />
+    <MagicScriptModal v-if="store.magicOpen" />
+    <GeneralStoryboardModal v-if="store.generalStoryboardOpen" />
+    <StoryboardOutlineModal v-if="store.outlineOpen && !!store.activeStoryBible" />
   </section>
 </template>
 
@@ -357,6 +358,11 @@ const outlineStageText = computed(() => {
   margin-top: 14px;
   padding-right: 4px;
   min-height: 0;
+}
+.line-wrapper {
+  /* P3a：屏外行跳过布局/绘制；auto 记住已渲染行真实高度，104px 仅是未渲染行的滚动条估算 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 104px;
 }
 .line-wrapper.drag-over {
   outline: 2px dashed var(--primary);

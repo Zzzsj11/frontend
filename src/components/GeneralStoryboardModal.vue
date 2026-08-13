@@ -85,11 +85,13 @@ const reset = () => {
   selectedHumanIds.value = [...store.castIds]
 }
 
+// immediate：弹层懒挂载（P3d）后挂载即打开，靠 immediate 完成表单初始化
 watch(
   () => store.generalStoryboardOpen,
   (open) => {
     if (open) reset()
   },
+  { immediate: true },
 )
 watch(
   () => store.generalStoryboardOptions,

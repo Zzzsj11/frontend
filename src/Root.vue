@@ -2,10 +2,13 @@
 import { useAuthStore } from './stores/auth'
 import ErrorDialog from './components/ErrorDialog.vue'
 import AppHeader from './components/AppHeader.vue'
+import ImagePreviewOverlay from './components/ImagePreviewOverlay.vue'
 const auth = useAuthStore()
 </script>
 <template>
   <ErrorDialog />
+  <!-- 全局唯一图片预览遮罩（P3b）：各处的 ImageZoom 只是触发按钮 -->
+  <ImagePreviewOverlay />
   <div v-if="!auth.ready" class="boot">正在加载…</div>
   <!-- 只保留单个 RouterView：若按认证状态切换两个 RouterView，退出登录瞬间路由仍是
        /projects，裸 RouterView 会重新挂载 App.vue，重放 SongSidebar 的 loadSongProjects

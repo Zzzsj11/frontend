@@ -1,37 +1,21 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
+import { openImagePreview } from '../composables/useImagePreview'
 
+/**
+ * 图片「查看大图」触发按钮（P3b 单例化后不再自持弹层）。
+ * 点击写入全局预览状态，遮罩由 ImagePreviewOverlay（Root.vue 挂载一次）统一渲染。
+ *
+ * 交互约定：hover 仅显示右下角「查看大图」按钮（由 CSS 控制），点击按钮才打开大图，
+ * 避免全屏预览浮层遮挡上层弹窗（如数字人详情）。
+ */
 const props = withDefaults(defineProps<{ src?: string; alt?: string; label?: string }>(), {
   src: undefined,
   alt: '原图预览',
   label: '查看大图',
 })
 
-const open = ref(false)
-
-// 交互约定：hover 仅显示右下角「查看大图」按钮（由 CSS 控制），点击按钮才打开大图，
-// 避免全屏预览浮层遮挡上层弹窗（如数字人详情）。
-const show = () => {
-  if (!props.src) return
-  open.value = true
-  document.body.style.overflow = 'hidden'
-}
-
-const close = () => {
-  open.value = false
-  document.body.style.overflow = ''
-}
-
-const onKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Escape' && open.value) close()
-}
-
-if (typeof window !== 'undefined') window.addEventListener('keydown', onKeydown)
-onBeforeUnmount(() => {
-  if (typeof window !== 'undefined') window.removeEventListener('keydown', onKeydown)
-  if (open.value) document.body.style.overflow = ''
-})
+const show = () => openImagePreview(props.src, props.alt)
 </script>
 
 <template>
@@ -45,30 +29,6 @@ onBeforeUnmount(() => {
   >
     <AppIcon name="zoom-in" :size="17" />
   </button>
-  <Teleport to="body">
-    <div
-      v-if="open"
-      class="image-zoom-mask"
-      role="dialog"
-      aria-modal="true"
-      :aria-label="label"
-      @click.self="close"
-    >
-      <div class="image-zoom-dialog">
-        <button
-          class="image-zoom-close"
-          type="button"
-          title="关闭大图"
-          aria-label="关闭大图"
-          @click="close"
-        >
-          <AppIcon name="close" :size="18" />
-        </button>
-        <img :src="src" :alt="alt" />
-        <span>{{ alt }}</span>
-      </div>
-    </div>
-  </Teleport>
 </template>
 
 <style scoped>
@@ -107,65 +67,6 @@ onBeforeUnmount(() => {
 .image-zoom-trigger:focus-visible {
   opacity: 1;
   transform: translateY(0) scale(1);
-}
-.image-zoom-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 2000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 28px;
-  background: rgba(12, 12, 15, 0.82);
-  backdrop-filter: blur(4px);
-}
-.image-zoom-dialog {
-  position: relative;
-  display: flex;
-  max-width: min(1200px, 92vw);
-  max-height: 92vh;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: var(--radius-lg);
-  background: #19191c;
-  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.55);
-}
-.image-zoom-dialog img {
-  display: block;
-  max-width: 100%;
-  max-height: calc(92vh - 58px);
-  object-fit: contain;
-  border-radius: var(--radius-sm);
-  background: var(--border);
-}
-.image-zoom-dialog span {
-  color: #fff;
-  text-align: center;
-  font-size: var(--font-sm);
-}
-.image-zoom-close {
-  position: absolute;
-  top: 18px;
-  right: 18px;
-  z-index: 1;
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.62);
-  color: #fff;
-  cursor: pointer;
-  transition:
-    background 0.15s,
-    transform 0.15s;
-}
-.image-zoom-close:hover {
-  background: var(--primary, var(--primary));
-  transform: scale(1.08);
 }
 @media (hover: none) {
   .image-zoom-trigger {
