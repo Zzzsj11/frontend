@@ -138,15 +138,9 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
               @mousedown.stop
               @click="onClipClick(clip.lineId, $event)"
             >
-              <video
-                v-if="lineOf(clip.lineId) && store.videoOf(lineOf(clip.lineId)!)"
-                :src="store.videoOf(lineOf(clip.lineId)!)"
-                class="clip-thumb"
-                preload="metadata"
-                muted
-              />
+              <!-- 片段缩略图固定用封面图，避免每个 clip 挂载 video 元素（媒体元素风暴） -->
               <img
-                v-else-if="lineOf(clip.lineId) && store.coverOf(lineOf(clip.lineId)!)"
+                v-if="lineOf(clip.lineId) && store.coverOf(lineOf(clip.lineId)!)"
                 :src="store.coverOf(lineOf(clip.lineId)!)"
                 class="clip-thumb"
                 alt=""

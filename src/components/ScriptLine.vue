@@ -17,8 +17,9 @@ const store = useProjectStore()
 const selected = computed(() => store.selectedLineId === props.line.id)
 /** 出演角色（可空/可多个） */
 const humans = computed(() => store.lineHumans(props.line))
-/** 缩略图：真实视频 > 视频封面 > 场景底图 */
+/** 当前可播放视频地址（仅供行内下载按钮；缩略图用封面图，不挂 video 元素，避免媒体元素风暴） */
 const video = computed(() => store.videoOf(props.line))
+/** 缩略图：视频封面 > 场景底图 */
 const cover = computed(() => store.coverOf(props.line))
 const originalCover = computed(() => {
   const asset = props.line.shot.assets.find((item) => item.id === props.line.shot.currentAssetId)
@@ -96,8 +97,8 @@ const onGenerateShot = async () => {
       :title="!line.scene.imageUrl && line.shot.assets.length ? '编辑视频' : '编辑场景'"
       @click.stop="openThumbnailEditor"
     >
-      <video v-if="video" :src="video" preload="metadata" muted />
-      <img v-else-if="cover" :src="cover" alt="视频缩略图" />
+      <!-- 缩略图固定用封面图，不为每行挂载 video 元素 -->
+      <img v-if="cover" :src="cover" alt="视频缩略图" />
       <span v-else class="thumb-placeholder"><AppIcon name="image" :size="18" /></span>
       <div
         v-if="line.shot.status === 'generating' || line.scene.status === 'generating'"

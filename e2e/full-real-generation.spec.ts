@@ -78,9 +78,9 @@ async function generateAllMedia(page: Page, count: number, prefix: string) {
     const line = page.locator('.line-wrapper').nth(index)
     await line.getByRole('button', { name: '生成视频片段（场景 × 视频提示词 × 角色）' }).click()
     await capture(page, `${prefix}-line-${index + 1}-video-started`)
-    await expect(line.locator('.shot-thumb video')).toHaveCount(1, { timeout: 25 * 60_000 })
+    await expect(line.locator('a.download-btn')).toHaveCount(1, { timeout: 25 * 60_000 })
   }
-  await expect(page.locator('.line-wrapper .shot-thumb video')).toHaveCount(count, {
+  await expect(page.locator('.line-wrapper a.download-btn')).toHaveCount(count, {
     timeout: 25 * 60_000,
   })
   await capture(page, `${prefix}-all-videos-complete`)
@@ -111,7 +111,7 @@ test('ASS and general storyboard complete real frontend journeys through generat
   if (exportOnly) {
     const task = page.getByRole('button', { name: /通用 MV 视频 ·/ }).last()
     await task.click()
-    await expect(page.locator('.line-wrapper .shot-thumb video')).toHaveCount(2, {
+    await expect(page.locator('.line-wrapper a.download-btn')).toHaveCount(2, {
       timeout: 30_000,
     })
     await page.locator('.line-wrapper').first().click()
