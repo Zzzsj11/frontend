@@ -59,7 +59,10 @@ export function recordApiTiming(t: Omit<ApiTiming, 'id' | 'at'>) {
 
 /** 按 path+method 聚合（本会话）：count/avg/p95/max/解析平均，按 max 倒序 */
 export function apiTimingSummary(limit = 30): ApiTimingRow[] {
-  const buckets = new Map<string, { path: string; method: string; ms: number[]; parseMs: number[] }>()
+  const buckets = new Map<
+    string,
+    { path: string; method: string; ms: number[]; parseMs: number[] }
+  >()
   for (const entry of apiEntries) {
     const key = `${entry.method} ${entry.path}`
     let bucket = buckets.get(key)
@@ -82,9 +85,7 @@ export function apiTimingSummary(limit = 30): ApiTimingRow[] {
       // ceil(n*0.95)-1：保证「95% 的样本不超过 p95」语义
       p95Ms: bucket.ms[Math.max(0, Math.ceil(bucket.ms.length * 0.95) - 1)],
       maxMs: bucket.ms[bucket.ms.length - 1],
-      parseAvgMs: Math.round(
-        bucket.parseMs.reduce((s, v) => s + v, 0) / bucket.parseMs.length,
-      ),
+      parseAvgMs: Math.round(bucket.parseMs.reduce((s, v) => s + v, 0) / bucket.parseMs.length),
     })
   }
   rows.sort((a, b) => b.maxMs - a.maxMs)
@@ -108,8 +109,7 @@ export function recordLongTask(durationMs: number, target: string, at = Date.now
 /** 导航计时：TTFB / DCL / Load（仅整页加载后可用） */
 export function navigationTiming() {
   const nav = performance.getEntriesByType('navigation')[0] as
-    | PerformanceNavigationTiming
-    | undefined
+    PerformanceNavigationTiming | undefined
   if (!nav) return null
   const start = nav.requestStart || nav.startTime
   return {

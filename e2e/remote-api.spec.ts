@@ -21,7 +21,10 @@ const assFile =
   process.env.REMOTE_E2E_ASS_FILE ||
   join(process.cwd(), 'test-artifacts/full-journey/inputs/10012204-full-e2e.ass')
 
-async function json<T = any>(response: APIResponse, expected: number | number[] = 200): Promise<T> {
+async function json<T = Record<string, unknown>>(
+  response: APIResponse,
+  expected: number | number[] = 200,
+): Promise<T> {
   const allowed = Array.isArray(expected) ? expected : [expected]
   expect(allowed, `${response.url()} => ${response.status()} ${await response.text()}`).toContain(
     response.status(),
@@ -32,7 +35,7 @@ async function json<T = any>(response: APIResponse, expected: number | number[] 
 async function login(
   username: string,
   password: string,
-): Promise<{ api: APIRequestContext; token: string; user: any }> {
+): Promise<{ api: APIRequestContext; token: string; user: unknown }> {
   const session = await playwrightRequest.newContext({
     baseURL,
     extraHTTPHeaders: { 'X-Test-Run-Id': runId },
@@ -81,14 +84,14 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
   const changedPassword = `${initialPassword}x`
 
   try {
-    const me = await json(await admin.get('/api/auth/me'))
+    const me = await json<{ username: string }>(await admin.get('/api/auth/me'))
     expect(me.username).toBe(adminUsername)
     await json(await admin.get('/api/account/balance'))
 
-    const refreshed = await json(await admin.post('/api/auth/refresh'))
+    const refreshed = await json<{ accessToken: string }>(await admin.post('/api/auth/refresh'))
     expect(refreshed.accessToken).toBeTruthy()
 
-    const createdUser = await json(
+    const createdUser = await json<{ id: string }>(
       await admin.post('/api/admin/users', {
         data: {
           username,
@@ -105,7 +108,7 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
         data: { display_name: `远程验收已更新 ${runId}` },
       }),
     )
-    const users = await json<any[]>(await admin.get('/api/admin/users'))
+    const users = await json<Record<string, unknown>[]>(await admin.get('/api/admin/users'))
     expect(users.some((item) => item.id === testUserId)).toBeTruthy()
 
     let userLogin = await login(username, initialPassword)
@@ -121,7 +124,7 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
     user = userLogin.api
 
     try {
-      const createdProject = await json(
+      const createdProject = await json<{ id: string }>(
         await user.post('/api/projects', {
           data: {
             name: `REMOTE-E2E ${runId}`,
@@ -139,11 +142,13 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
         }),
       )
       expect(
-        (await json<any[]>(await user.get('/api/projects'))).some((item) => item.id === projectId),
+        (await json<Record<string, unknown>[]>(await user.get('/api/projects'))).some(
+          (item) => item.id === projectId,
+        ),
       ).toBeTruthy()
       expect((await admin.get(`/api/tasks/${projectId}`)).status()).toBe(404)
 
-      const task = await json(
+      const task = await json<{ id: string }>(
         await user.post(`/api/projects/${projectId}/tasks`, {
           data: {
             title: `Manual ${runId}`,
@@ -159,15 +164,17 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
       )
       await json(await user.get(`/api/tasks/${taskId}`))
 
-      const styles = await json<any[]>(await user.get('/api/digital-human-styles'))
+      const styles = await json<Record<string, unknown>[]>(
+        await user.get('/api/digital-human-styles'),
+      )
       expect(styles.length).toBeGreaterThan(0)
-      const style = await json(
+      const style = await json<{ id: string }>(
         await user.post('/api/digital-human-styles', { data: { name: `E2E style ${runId}` } }),
         201,
       )
       styleId = style.id
 
-      const upload = await json(
+      const upload = await json<{ url: string; thumbnailUrl: string }>(
         await user.post('/api/uploads?category=e2e', {
           multipart: {
             file: {
@@ -183,14 +190,14 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
       )
       expect(upload.url).toMatch(/^https:\/\//)
       expect(upload.thumbnailUrl).toMatch(/^https:\/\//)
-      const imported = await json(
+      const imported = await json<{ url: string }>(
         await user.post('/api/uploads/import', {
           data: { url: upload.url, category: 'e2e-imports', filename: `import-${runId}.png` },
         }),
       )
       expect(imported.url).toMatch(/^https:\/\//)
 
-      const human = await json(
+      const human = await json<{ id: string }>(
         await user.post('/api/digital-humans', {
           data: {
             name: `E2E human ${runId}`,
@@ -217,7 +224,7 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
         }),
       )
       expect(
-        (await json<any[]>(await user.get('/api/digital-humans'))).some(
+        (await json<Record<string, unknown>[]>(await user.get('/api/digital-humans'))).some(
           (item) => item.id === humanId,
         ),
       ).toBeTruthy()
@@ -225,7 +232,7 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
         await user.put(`/api/tasks/${taskId}/cast`, { data: { digital_human_ids: [humanId] } }),
       )
 
-      const line1 = await json(
+      const line1 = await json<{ id: string }>(
         await user.post(`/api/tasks/${taskId}/storyboard/lines`, {
           data: {
             source: 'manual',
@@ -239,7 +246,7 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
         }),
         201,
       )
-      const line2 = await json(
+      const line2 = await json<{ id: string }>(
         await user.post(`/api/tasks/${taskId}/storyboard/lines`, {
           data: {
             source: 'manual',
@@ -264,7 +271,7 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
         }),
       )
 
-      const general = await json(
+      const general = await json<{ lines: unknown[]; taskId: string }>(
         await user.post(`/api/projects/${projectId}/storyboards/general`, {
           data: {
             genre: '流行歌曲',
@@ -293,7 +300,7 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
         await user.post(`/api/tasks/${general.taskId}/storyboard/retry-failed`, { data: {} }),
       )
 
-      const ass = await json(
+      const ass = await json<{ status: string; lines: { id: string }[]; taskId: string }>(
         await user.post('/api/storyboards/ass', {
           multipart: {
             project_id: projectId,
@@ -327,14 +334,14 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
             },
           )
           .not.toBe('outlining')
-        const outlined = await json(await user.get(`/api/tasks/${ass.taskId}`))
+        const outlined = await json<{ status: string }>(await user.get(`/api/tasks/${ass.taskId}`))
         expect(outlined.status).toBe('generating')
         await json(
           await user.post(`/api/tasks/${ass.taskId}/storyboard-lines/${ass.lines[0].id}/generate`, {
             data: { force: false },
           }),
         )
-        const imageJob = await json(
+        const imageJob = await json<{ id: string }>(
           await user.post('/api/generations/images', {
             data: { prompt: 'minimal remote API acceptance image', n: 1, purpose: 'other' },
           }),
@@ -373,14 +380,16 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
       expect((await user.get(`/api/generations/missing-${runId}/events`)).status()).toBe(404)
 
       await json(await user.get(`/api/token-usage?project_task_id=${ass.taskId}`))
-      const materialExport = await json(
+      const materialExport = await json<{ id: string }>(
         await user.post(`/api/tasks/${taskId}/material-exports`),
         202,
       )
       expect(materialExport.id).toBeTruthy()
-      const exportStatus = await json(await user.get(`/api/material-exports/${materialExport.id}`))
+      const exportStatus = await json<{ status: string }>(
+        await user.get(`/api/material-exports/${materialExport.id}`),
+      )
       expect(['queued', 'running', 'ready']).toContain(exportStatus.status)
-      const exportHistory = await json<any[]>(
+      const exportHistory = await json<Record<string, unknown>[]>(
         await user.get(`/api/tasks/${taskId}/material-exports`),
       )
       expect(exportHistory.some((item) => item.id === materialExport.id)).toBeTruthy()
@@ -393,7 +402,7 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
       expect(exportEventBody).toContain('"type": "export"')
       expect(exportEventBody).toContain('"progress": 100')
 
-      const chat = await json(
+      const chat = await json<{ id: string }>(
         await user.post('/api/chat/sessions', {
           data: { system_prompt: 'remote acceptance assistant' },
         }),
@@ -435,8 +444,10 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
 
     const errorResponse = await admin.get(`/api/tasks/remote-e2e-missing-${runId}`)
     expect(errorResponse.status()).toBe(404)
-    const errors = await json(await admin.get('/api/admin/api-errors?limit=100'))
-    const createdError = errors.items.find((item: any) =>
+    const errors = await json<{ items: { id: string; path: string }[] }>(
+      await admin.get('/api/admin/api-errors?limit=100'),
+    )
+    const createdError = errors.items.find((item) =>
       item.path.includes(`remote-e2e-missing-${runId}`),
     )
     expect(createdError).toBeTruthy()

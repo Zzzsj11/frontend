@@ -269,8 +269,8 @@ const removeDh = async () => {
       </button>
     </template>
     <p class="lib-hint">
-      点击卡片加入/移出本 MV
-      的角色阵容，全片统一使用同一批角色；每个视频再从阵容中挑选出演角色（可空镜头 / 可多人）
+      悬停人物卡片可加入/移出阵容、看大图或查看详情；阵容为全片统一角色，
+      每个视频再从阵容中挑选出演角色（可空镜头 / 可多人）
     </p>
 
     <!-- 风格分类候选项（生成 / 上传 / 编辑 三处共用） -->
@@ -418,22 +418,32 @@ const removeDh = async () => {
         :key="dh.id"
         class="dh-card"
         :class="{ active: store.castIds.includes(dh.id) }"
-        @click="store.toggleCast(dh.id)"
       >
-        <div class="dh-portrait" title="查看大图" @click.stop="showPreview(dh)">
+        <div class="dh-portrait" title="点击查看大图" @click="showPreview(dh)">
           <CharacterPortrait :src="dh.avatar" :alt="dh.name" />
           <span v-show="store.castIds.includes(dh.id)" class="dh-check"
             ><AppIcon name="check" :size="11" /> 已入阵容</span
           >
+          <!-- 底部滑入操作层：加入/移出阵容、大图、详情；点击图片其他区域 = 查看大图 -->
+          <div class="dh-actions" @click.stop>
+            <button
+              class="dh-action"
+              :class="store.castIds.includes(dh.id) ? 'danger' : 'primary'"
+              @click.stop="store.toggleCast(dh.id)"
+            >
+              <AppIcon :name="store.castIds.includes(dh.id) ? 'close' : 'plus'" :size="13" />
+              {{ store.castIds.includes(dh.id) ? '移出阵容' : '加入阵容' }}
+            </button>
+            <div class="dh-action-row">
+              <button class="dh-action small" @click.stop="showPreview(dh)">
+                <AppIcon name="zoom-in" :size="12" /> 大图
+              </button>
+              <button class="dh-action small" @click.stop="openEdit(dh.id)">
+                <AppIcon name="user" :size="12" /> 详情
+              </button>
+            </div>
+          </div>
         </div>
-        <button
-          class="dh-edit-badge"
-          :title="dh.readOnly ? '查看详情' : '编辑'"
-          @click.stop="openEdit(dh.id)"
-        >
-          <AppIcon :name="dh.readOnly ? 'user' : 'edit'" :size="11" />
-          {{ dh.readOnly ? '查看' : '编辑' }}
-        </button>
         <div class="dh-info">
           <div class="dh-name-row">
             <strong>{{ dh.name }}</strong>
@@ -459,7 +469,7 @@ const removeDh = async () => {
     </template>
     <template v-if="editing">
       <div class="edit-body">
-        <div class="edit-portrait" @click="showPreview(editing)" title="点击查看大图">
+        <div class="edit-portrait" title="点击查看大图" @click="showPreview(editing)">
           <img :src="editing.originalAvatar || editing.avatar" :alt="editing.name" />
           <ImageZoom
             :src="editing.originalAvatar || editing.avatar"
@@ -896,7 +906,6 @@ const removeDh = async () => {
   border: 2px solid var(--border);
   border-radius: var(--radius-md);
   overflow: hidden;
-  cursor: pointer;
   transition:
     border-color 0.15s,
     box-shadow 0.15s;
@@ -914,6 +923,8 @@ const removeDh = async () => {
   position: relative;
   aspect-ratio: 16 / 9;
   background: var(--surface-muted);
+  overflow: hidden;
+  cursor: pointer;
 }
 .dh-portrait img {
   width: 100%;
@@ -925,6 +936,7 @@ const removeDh = async () => {
   position: absolute;
   top: 8px;
   right: 8px;
+  z-index: 2;
   background: var(--primary);
   color: #fff;
   font-size: 11px;
@@ -934,27 +946,74 @@ const removeDh = async () => {
   align-items: center;
   gap: 3px;
 }
-.dh-edit-badge {
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text-secondary);
-  font-size: 11px;
-  padding: 3px 8px;
-  border-radius: var(--radius-sm);
+/* 底部滑入操作层：默认滑出头像下缘（由 overflow 裁剪）；hover / 键盘聚焦（focus-within）时滑入，触屏（无 hover）常驻 */
+.dh-actions {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 8px 8px;
+  background: linear-gradient(to top, rgba(12, 12, 15, 0.82), rgba(12, 12, 15, 0));
+  transform: translateY(100%);
+  transition: transform 0.18s ease;
+}
+.dh-portrait:hover .dh-actions,
+.dh-actions:focus-within {
+  transform: translateY(0);
+}
+@media (hover: none) {
+  .dh-actions {
+    transform: translateY(0);
+  }
+}
+.dh-action {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text);
+  font-size: var(--font-sm);
+  padding: 6px 14px;
   cursor: pointer;
   font-family: inherit;
   transition:
     color 0.15s,
-    border-color 0.15s,
     background 0.15s;
 }
-.dh-edit-badge:hover {
-  border-color: var(--primary);
+.dh-action:hover {
+  background: #fff;
   color: var(--primary);
-  background: var(--primary-light);
+}
+.dh-action.primary {
+  background: var(--primary);
+  color: #fff;
+}
+.dh-action.primary:hover {
+  background: var(--primary-hover);
+  color: #fff;
+}
+.dh-action.danger {
+  background: var(--danger);
+  color: #fff;
+}
+.dh-action.danger:hover {
+  background: var(--danger-active);
+  color: #fff;
+}
+.dh-action-row {
+  display: flex;
+  gap: 8px;
+}
+.dh-action.small {
+  padding: 4px 10px;
+  font-size: 11px;
 }
 .readonly-tip {
   padding: 8px 10px;

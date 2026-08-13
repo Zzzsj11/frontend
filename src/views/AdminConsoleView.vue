@@ -2,6 +2,87 @@
 import { computed, onMounted, ref } from 'vue'
 import { apiRequest } from '../api/client'
 import { perfSnapshot } from '../perf'
+
+/** 管理后台列表行：各 tab 返回列不一致，未建模的列由 columns 动态渲染 */
+interface AdminRow {
+  id?: string
+  model?: string
+  status?: string
+  stale?: boolean
+  providerTaskId?: string
+  [key: string]: unknown
+}
+
+/** 仪表盘与分页响应（users/models 等 tab 直接返回数组，见 rows） */
+interface AdminData {
+  total?: number
+  items?: AdminRow[]
+  users?: number
+  projects?: number
+  jobs?: number
+  systemHumans?: number
+  errors?: number
+  usage?: { totalTokens?: number; inputTokens?: number; outputTokens?: number }
+  jobStatuses?: unknown
+}
+
+/** 性能页：后端慢请求行 */
+interface ReqLogRow {
+  id: string
+  method: string
+  path: string
+  statusCode: number
+  durationMs: number
+  createdAt: string
+}
+
+/** 性能页：后端接口耗时聚合行 */
+interface ReqSummaryRow {
+  method: string
+  path: string
+  count: number
+  avgMs: number
+  p95Ms: number
+  maxMs: number
+}
+
+/** 接口耗时页：批次选项 */
+interface ReqRun {
+  runId: string
+  requests: number
+  avgMs: number
+  maxMs: number
+  errors: number
+}
+
+/** 请求详情弹窗数据 */
+interface ReqDetail {
+  method: string
+  path: string
+  statusCode: number
+  durationMs: number
+  createdAt: string
+  runId?: string
+  queryString?: string
+  requestPayload?: unknown
+  responseBody?: unknown
+}
+
+/** LLM 调用详情弹窗数据 */
+interface LlmDetail {
+  operation: string
+  model: string
+  status: string
+  durationMs: number
+  inputTokens: number
+  outputTokens: number
+  cachedInputTokens: number
+  requestId?: string
+  createdAt: string
+  error?: string
+  requestMessages?: { role: string; content: string }[]
+  responseText?: string
+}
 type Tab =
   | 'dashboard'
   | 'users'
@@ -17,7 +98,7 @@ type Tab =
 const tab = ref<Tab>('dashboard'),
   loading = ref(false),
   error = ref(''),
-  data = ref<any>(null)
+  data = ref<AdminData | null>(null)
 const tabs: [Tab, string][] = [
   ['dashboard', '仪表盘'],
   ['users', '用户'],
@@ -32,11 +113,11 @@ const tabs: [Tab, string][] = [
   ['perf', '性能'],
 ]
 const llmFilters = ref({ projectTaskId: '', operation: '', status: '' })
-const llmDetail = ref<any>(null),
+const llmDetail = ref<LlmDetail | null>(null),
   detailLoading = ref(false)
 const reqFilters = ref({ runId: '', path: '' })
-const reqRuns = ref<any[]>([])
-const reqDetail = ref<any>(null)
+const reqRuns = ref<ReqRun[]>([])
+const reqDetail = ref<ReqDetail | null>(null)
 const jobFilters = ref({ kind: '', status: '', q: '' })
 const jobPage = ref(1)
 const jobPageSize = 50
@@ -92,8 +173,8 @@ const endpoint = computed(
       perf: '',
     })[tab.value],
 )
-const rows = computed<any[]>(() =>
-  Array.isArray(data.value) ? data.value : data.value?.items || [],
+const rows = computed<AdminRow[]>(() =>
+  Array.isArray(data.value) ? (data.value as AdminRow[]) : data.value?.items || [],
 )
 const load = async () => {
   // 性能页不走通用 endpoint（数据为后端聚合 + 本会话快照）
@@ -101,7 +182,7 @@ const load = async () => {
   loading.value = true
   error.value = ''
   try {
-    data.value = await apiRequest(endpoint.value)
+    data.value = await apiRequest<AdminData>(endpoint.value)
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载失败'
   } finally {
@@ -125,22 +206,24 @@ const reqEndpoint = computed(() => {
 })
 const loadReqRuns = async () => {
   try {
-    reqRuns.value = await apiRequest('/admin/request-logs/runs')
+    reqRuns.value = await apiRequest<ReqRun[]>('/admin/request-logs/runs')
   } catch {
     reqRuns.value = []
   }
 }
 /** 性能页：后端慢请求 TOP + 接口耗时聚合 + 本浏览器会话性能快照 */
-const backendSlow = ref<any[]>([])
-const backendSummary = ref<any[]>([])
+const backendSlow = ref<ReqLogRow[]>([])
+const backendSummary = ref<ReqSummaryRow[]>([])
 const frontPerf = ref(perfSnapshot())
 const loadPerf = async () => {
   loading.value = true
   error.value = ''
   try {
     const [summary, slow] = await Promise.all([
-      apiRequest<any[]>('/admin/request-logs/summary?hours=24&minCount=2&limit=30'),
-      apiRequest<{ items: any[] }>('/admin/request-logs?minMs=1000&orderBy=duration&limit=30'),
+      apiRequest<ReqSummaryRow[]>('/admin/request-logs/summary?hours=24&minCount=2&limit=30'),
+      apiRequest<{ items: ReqLogRow[] }>(
+        '/admin/request-logs?minMs=1000&orderBy=duration&limit=30',
+      ),
     ])
     backendSummary.value = summary
     backendSlow.value = slow.items || []
@@ -151,29 +234,29 @@ const loadPerf = async () => {
     loading.value = false
   }
 }
-const openReqDetail = async (row: any) => {
+const openReqDetail = async (row: AdminRow) => {
   detailLoading.value = true
   reqDetail.value = null
   try {
-    reqDetail.value = await apiRequest(`/admin/request-logs/${row.id}`)
+    reqDetail.value = await apiRequest<ReqDetail>(`/admin/request-logs/${row.id}`)
   } catch (e) {
     error.value = e instanceof Error ? e.message : '详情加载失败'
   } finally {
     detailLoading.value = false
   }
 }
-const openLlmDetail = async (row: any) => {
+const openLlmDetail = async (row: AdminRow) => {
   detailLoading.value = true
   llmDetail.value = null
   try {
-    llmDetail.value = await apiRequest(`/admin/llm-calls/${row.id}`)
+    llmDetail.value = await apiRequest<LlmDetail>(`/admin/llm-calls/${row.id}`)
   } catch (e) {
     error.value = e instanceof Error ? e.message : '详情加载失败'
   } finally {
     detailLoading.value = false
   }
 }
-const toggleModel = async (row: any) => {
+const toggleModel = async (row: AdminRow) => {
   await apiRequest(`/admin/models/${row.id}`, {
     method: 'PATCH',
     body: JSON.stringify({ status: row.status === 'active' ? 'disabled' : 'active' }),
@@ -188,12 +271,15 @@ const turnJobPage = (delta: number) => {
   jobPage.value = Math.max(1, jobPage.value + delta)
   void load()
 }
-const syncJob = async (row: any) => {
-  syncing.value = row.id
+const syncJob = async (row: AdminRow) => {
+  syncing.value = row.id ?? ''
   notice.value = ''
   error.value = ''
   try {
-    const result: any = await apiRequest(`/admin/jobs/${row.id}/sync`, { method: 'POST' })
+    const result = await apiRequest<{ providerStatus?: string; action?: string }>(
+      `/admin/jobs/${row.id}/sync`,
+      { method: 'POST' },
+    )
     const actionText: Record<string, string> = {
       recovered: '已挽回结果并落库',
       failed: '已同步失败原因',
@@ -201,7 +287,7 @@ const syncJob = async (row: any) => {
       unchanged: '状态一致无需处理',
       skipped: '任务正在执行中',
     }
-    notice.value = `同步完成：供应商状态 ${result.providerStatus ?? '-'} · ${actionText[result.action] || result.action}`
+    notice.value = `同步完成：供应商状态 ${result.providerStatus ?? '-'} · ${actionText[result.action ?? ''] || result.action}`
     await load()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '同步失败'
@@ -284,14 +370,23 @@ onMounted(load)
             <div class="table-wrap">
               <table>
                 <thead>
-                  <tr><th>方法</th><th>路径</th><th>状态</th><th>耗时</th><th>时间</th><th>操作</th></tr>
+                  <tr>
+                    <th>方法</th>
+                    <th>路径</th>
+                    <th>状态</th>
+                    <th>耗时</th>
+                    <th>时间</th>
+                    <th>操作</th>
+                  </tr>
                 </thead>
                 <tbody>
                   <tr v-for="row in backendSlow" :key="row.id">
                     <td>{{ row.method }}</td>
                     <td class="path">{{ row.path }}</td>
                     <td>{{ row.statusCode }}</td>
-                    <td><span :class="{ slow: row.durationMs >= 1000 }">{{ row.durationMs }}ms</span></td>
+                    <td>
+                      <span :class="{ slow: row.durationMs >= 1000 }">{{ row.durationMs }}ms</span>
+                    </td>
                     <td class="muted">{{ row.createdAt }}</td>
                     <td><button class="action" @click="openReqDetail(row)">详情</button></td>
                   </tr>
@@ -305,7 +400,14 @@ onMounted(load)
             <div class="table-wrap">
               <table>
                 <thead>
-                  <tr><th>方法</th><th>路径</th><th>次数</th><th>平均</th><th>P95</th><th>最大</th></tr>
+                  <tr>
+                    <th>方法</th>
+                    <th>路径</th>
+                    <th>次数</th>
+                    <th>平均</th>
+                    <th>P95</th>
+                    <th>最大</th>
+                  </tr>
                 </thead>
                 <tbody>
                   <tr v-for="row in backendSummary" :key="`${row.method} ${row.path}`">
@@ -313,8 +415,12 @@ onMounted(load)
                     <td class="path">{{ row.path }}</td>
                     <td>{{ row.count }}</td>
                     <td>{{ row.avgMs }}ms</td>
-                    <td><span :class="{ slow: row.p95Ms >= 1000 }">{{ row.p95Ms }}ms</span></td>
-                    <td><span :class="{ slow: row.maxMs >= 1000 }">{{ row.maxMs }}ms</span></td>
+                    <td>
+                      <span :class="{ slow: row.p95Ms >= 1000 }">{{ row.p95Ms }}ms</span>
+                    </td>
+                    <td>
+                      <span :class="{ slow: row.maxMs >= 1000 }">{{ row.maxMs }}ms</span>
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -326,7 +432,15 @@ onMounted(load)
             <div class="table-wrap">
               <table>
                 <thead>
-                  <tr><th>方法</th><th>路径</th><th>次数</th><th>平均</th><th>P95</th><th>最大</th><th>解析均耗</th></tr>
+                  <tr>
+                    <th>方法</th>
+                    <th>路径</th>
+                    <th>次数</th>
+                    <th>平均</th>
+                    <th>P95</th>
+                    <th>最大</th>
+                    <th>解析均耗</th>
+                  </tr>
                 </thead>
                 <tbody>
                   <tr v-for="row in frontPerf.apiSummary" :key="`${row.method} ${row.path}`">
@@ -334,8 +448,12 @@ onMounted(load)
                     <td class="path">{{ row.path }}</td>
                     <td>{{ row.count }}</td>
                     <td>{{ row.avgMs }}ms</td>
-                    <td><span :class="{ slow: row.p95Ms >= 800 }">{{ row.p95Ms }}ms</span></td>
-                    <td><span :class="{ slow: row.maxMs >= 800 }">{{ row.maxMs }}ms</span></td>
+                    <td>
+                      <span :class="{ slow: row.p95Ms >= 800 }">{{ row.p95Ms }}ms</span>
+                    </td>
+                    <td>
+                      <span :class="{ slow: row.maxMs >= 800 }">{{ row.maxMs }}ms</span>
+                    </td>
                     <td>{{ row.parseAvgMs }}ms</td>
                   </tr>
                 </tbody>
@@ -348,11 +466,17 @@ onMounted(load)
             <div class="table-wrap">
               <table>
                 <thead>
-                  <tr><th>耗时</th><th>来源</th><th>时间</th></tr>
+                  <tr>
+                    <th>耗时</th>
+                    <th>来源</th>
+                    <th>时间</th>
+                  </tr>
                 </thead>
                 <tbody>
                   <tr v-for="task in frontPerf.longTasks" :key="task.id">
-                    <td><span :class="{ slow: task.durationMs >= 200 }">{{ task.durationMs }}ms</span></td>
+                    <td>
+                      <span :class="{ slow: task.durationMs >= 200 }">{{ task.durationMs }}ms</span>
+                    </td>
                     <td class="path">{{ task.target || '-' }}</td>
                     <td class="muted">{{ new Date(task.at).toLocaleTimeString() }}</td>
                   </tr>
@@ -369,19 +493,29 @@ onMounted(load)
               <b>{{ frontPerf.navigation.loadMs }}ms</b>
             </p>
           </section>
-          <section class="perf-group" v-if="frontPerf.slowApi.length">
+          <section v-if="frontPerf.slowApi.length" class="perf-group">
             <h3>本浏览器会话 · 最近慢请求（≥800ms）</h3>
             <div class="table-wrap">
               <table>
                 <thead>
-                  <tr><th>方法</th><th>路径</th><th>状态</th><th>耗时</th><th>网络</th><th>解析</th><th>重试</th></tr>
+                  <tr>
+                    <th>方法</th>
+                    <th>路径</th>
+                    <th>状态</th>
+                    <th>耗时</th>
+                    <th>网络</th>
+                    <th>解析</th>
+                    <th>重试</th>
+                  </tr>
                 </thead>
                 <tbody>
                   <tr v-for="row in frontPerf.slowApi" :key="row.id">
                     <td>{{ row.method }}</td>
                     <td class="path">{{ row.path }}</td>
                     <td>{{ row.status }}</td>
-                    <td><span class="slow">{{ row.totalMs }}ms</span></td>
+                    <td>
+                      <span class="slow">{{ row.totalMs }}ms</span>
+                    </td>
                     <td>{{ row.networkMs }}ms</td>
                     <td>{{ row.parseMs }}ms</td>
                     <td>{{ row.retried ? '是' : '否' }}</td>
@@ -454,13 +588,11 @@ onMounted(load)
         </div>
         <div v-if="isPagedTab" class="pager-bar">
           <span class="pager">
-            <button class="action" :disabled="currentPage <= 1" @click="turnPage(-1)">上一页</button>
+            <button class="action" :disabled="currentPage <= 1" @click="turnPage(-1)">
+              上一页
+            </button>
             第 {{ currentPage }} 页 · 共 {{ data?.total || 0 }} 条 · 每页 {{ pageSize }} 条
-            <button
-              class="action"
-              :disabled="currentPage >= pageCount"
-              @click="turnPage(1)"
-            >
+            <button class="action" :disabled="currentPage >= pageCount" @click="turnPage(1)">
               下一页
             </button>
           </span>
@@ -483,7 +615,7 @@ onMounted(load)
                   <span
                     :class="{
                       status: c === 'status',
-                      slow: tab === 'requests' && c === 'durationMs' && row[c] >= 1000,
+                      slow: tab === 'requests' && c === 'durationMs' && Number(row[c]) >= 1000,
                     }"
                     >{{ typeof row[c] === 'object' ? JSON.stringify(row[c]) : row[c] }}</span
                   ><span v-if="c === 'status' && row.stale" class="stale-flag">（疑似中断）</span>

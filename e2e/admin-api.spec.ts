@@ -24,6 +24,8 @@ test('admin API authorization and contracts', async ({ request }) => {
     expect((await request.get(path, { headers })).ok(), path).toBeTruthy()
   const options = await request.get('/api/model-options?modality=video', { headers })
   expect(options.ok()).toBeTruthy()
-  expect((await options.json()).some((x: any) => x.id === 'doubao-seedance-2.0')).toBeTruthy()
+  expect(
+    (await options.json()).some((x: { id: string }) => x.id === 'doubao-seedance-2.0'),
+  ).toBeTruthy()
   expect((await request.get('/api/admin/dashboard')).status()).toBe(401)
 })

@@ -150,7 +150,8 @@ export async function openApiStream(
     })
   }
   if ((response.status === 401 || response.status === 403) && retry) {
-    if (!intentionalLogout && (await refreshAccess())) return openApiStream(path, signal, false, extraHeaders)
+    if (!intentionalLogout && (await refreshAccess()))
+      return openApiStream(path, signal, false, extraHeaders)
     if (intentionalLogout) throw new ApiError('已退出登录', response.status)
     forceLogout()
     throw reportApiError(new ApiError('登录已过期，请重新登录', response.status))

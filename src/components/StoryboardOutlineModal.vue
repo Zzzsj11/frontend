@@ -67,7 +67,7 @@ const regenerate = async () => {
       <!-- 场景总览 Tab -->
       <template v-if="tab === 'scenes'">
         <div v-if="store.activeStoryBible.scenePlan?.length" class="scene-list">
-          <div class="global-visual" v-if="store.activeStoryBible.globalVisual">
+          <div v-if="store.activeStoryBible.globalVisual" class="global-visual">
             <h4>全片视觉基调</h4>
             <dl>
               <template v-for="(v, k) in store.activeStoryBible.globalVisual" :key="k">

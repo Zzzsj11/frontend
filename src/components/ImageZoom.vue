@@ -3,6 +3,7 @@ import { onBeforeUnmount, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 
 const props = withDefaults(defineProps<{ src?: string; alt?: string; label?: string }>(), {
+  src: undefined,
   alt: '原图预览',
   label: '查看大图',
 })
