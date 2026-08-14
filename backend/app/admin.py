@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -22,10 +24,13 @@ from .models import (
     GenerationJobModel,
     LlmCallLogModel,
     ProjectModel,
+    PromptTemplateModel,
+    PromptVersionModel,
     TokenUsageModel,
     UserModel,
     utcnow,
 )
+from .prompts import DEFAULT_PROMPTS, invalidate, render_lenient, template_variables
 from .providers import ProviderError, list_video_models, query_provider_task, resume_generation, store_provider_result
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -358,6 +363,8 @@ def _llm_call_summary(x: LlmCallLogModel) -> dict:
         "projectTaskId": x.project_task_id,
         "storyboardLineId": x.storyboard_line_id,
         "generationJobId": x.generation_job_id,
+        "promptKey": x.prompt_key,
+        "promptVersion": x.prompt_version,
         "createdAt": iso(x.created_at),
     }
 
@@ -558,6 +565,194 @@ async def request_log_detail(log_id: str, user: CurrentUser, db: AsyncSession = 
 
 
 public_router = APIRouter(prefix="/api")
+
+
+# ── 提示词注册中心（版本化 + 发布/回滚 + 试渲染） ─────────────────────────────
+
+
+class PromptDraftIn(BaseModel):
+    content: str = Field(min_length=1)
+    change_note: str = ""
+
+
+class PromptPublishIn(BaseModel):
+    version_id: str
+
+
+class PromptPreviewIn(BaseModel):
+    content: str
+    variables: dict[str, Any] = {}
+
+
+def _prompt_version_summary(v: PromptVersionModel) -> dict:
+    return {
+        "id": v.id,
+        "version": v.version,
+        "status": v.status,
+        "changeNote": v.change_note,
+        "createdBy": v.created_by,
+        "publishedAt": iso(v.published_at),
+        "createdAt": iso(v.created_at),
+    }
+
+
+async def _get_prompt_template(db: AsyncSession, key: str) -> PromptTemplateModel:
+    template = (await db.execute(select(PromptTemplateModel).where(PromptTemplateModel.key == key, PromptTemplateModel.deleted_at.is_(None)))).scalar_one_or_none()
+    if not template:
+        raise HTTPException(404, "提示词模板不存在")
+    return template
+
+
+def _validate_prompt_content(template: PromptTemplateModel, content: str) -> None:
+    """发布前校验：安全片段必含、模板变量必须已声明、json 模板必须是字符串数组。"""
+    missing = [fragment for fragment in (template.required_fragments or []) if fragment not in content]
+    if missing:
+        raise HTTPException(422, f"缺少必含安全片段：{missing}")
+    undeclared = [name for name in template_variables(content) if name not in (template.variables or {})]
+    if undeclared:
+        raise HTTPException(422, f"模板变量未声明（代码不会为其传值）：{undeclared}")
+    if (template.format or "text") == "json":
+        try:
+            parsed = json.loads(content)
+        except ValueError as exc:
+            raise HTTPException(422, f"JSON 模板解析失败：{exc}") from exc
+        if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+            raise HTTPException(422, "JSON 模板必须是字符串数组")
+
+
+@router.get("/prompts")
+async def prompt_templates(user: CurrentUser, db: AsyncSession = Db):
+    """提示词模板列表：含当前已发布版本摘要。"""
+    require_admin(user)
+    rows = (await db.execute(select(PromptTemplateModel).where(PromptTemplateModel.deleted_at.is_(None)).order_by(PromptTemplateModel.engine, PromptTemplateModel.key))).scalars()
+    result = []
+    for item in rows:
+        current = await db.get(PromptVersionModel, item.current_version_id) if item.current_version_id else None
+        result.append(
+            {
+                "id": item.id,
+                "key": item.key,
+                "name": item.name,
+                "description": item.description,
+                "engine": item.engine,
+                "format": item.format,
+                "variables": item.variables or {},
+                "requiredFragments": item.required_fragments or [],
+                "currentVersion": _prompt_version_summary(current) if current and current.deleted_at is None else None,
+                "updatedAt": iso(item.updated_at),
+            }
+        )
+    return result
+
+
+@router.get("/prompts/{key}")
+async def prompt_template_detail(key: str, user: CurrentUser, db: AsyncSession = Db):
+    """模板详情：全部版本（新到旧）+ 内置默认内容（用于 diff 与一键恢复）。"""
+    require_admin(user)
+    template = await _get_prompt_template(db, key)
+    versions = (
+        await db.execute(
+            select(PromptVersionModel).where(PromptVersionModel.template_id == template.id, PromptVersionModel.deleted_at.is_(None)).order_by(PromptVersionModel.version.desc())
+        )
+    ).scalars()
+    default = DEFAULT_PROMPTS.get(key)
+    return {
+        "id": template.id,
+        "key": template.key,
+        "name": template.name,
+        "description": template.description,
+        "engine": template.engine,
+        "format": template.format or "text",
+        "variables": template.variables or {},
+        "requiredFragments": template.required_fragments or [],
+        "currentVersionId": template.current_version_id,
+        "versions": [{**_prompt_version_summary(v), "content": v.content} for v in versions],
+        "defaultContent": default["content"] if default else None,
+    }
+
+
+@router.post("/prompts/{key}/versions", status_code=201)
+async def prompt_create_draft(key: str, payload: PromptDraftIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    """新建草稿版本（版本号递增）；内容校验在发布时才强制执行，草稿允许暂存不完整内容。"""
+    require_admin(user)
+    template = await _get_prompt_template(db, key)
+    latest = (await db.execute(select(func.max(PromptVersionModel.version)).where(PromptVersionModel.template_id == template.id))).scalar_one()
+    draft = PromptVersionModel(
+        id=f"pv-{uuid.uuid4().hex}",
+        template_id=template.id,
+        version=int(latest or 0) + 1,
+        content=payload.content,
+        change_note=payload.change_note,
+        status="draft",
+        created_by=getattr(user, "username", "") or user.id,
+    )
+    db.add(draft)
+    await audit(db, request, user, "prompt.draft", "prompt_template", template.id, after={"key": key, "version": draft.version, "changeNote": payload.change_note})
+    await db.commit()
+    return {"id": draft.id, "version": draft.version}
+
+
+@router.post("/prompts/{key}/publish")
+async def prompt_publish(key: str, payload: PromptPublishIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    """发布指定版本；回滚 = 选择旧版本发布。发布前强制校验，发布后注册中心缓存立即失效。"""
+    require_admin(user)
+    template = await _get_prompt_template(db, key)
+    version = await db.get(PromptVersionModel, payload.version_id)
+    if not version or version.template_id != template.id or version.deleted_at is not None:
+        raise HTTPException(404, "提示词版本不存在")
+    _validate_prompt_content(template, version.content)
+    before = {"currentVersionId": template.current_version_id}
+    current = await db.get(PromptVersionModel, template.current_version_id) if template.current_version_id else None
+    if current and current.status == "published":
+        current.status = "archived"
+    version.status = "published"
+    version.published_at = utcnow()
+    template.current_version_id = version.id
+    await audit(db, request, user, "prompt.publish", "prompt_template", template.id, before, {"currentVersionId": version.id, "version": version.version})
+    await db.commit()
+    invalidate(key)
+    return {"ok": True, "version": version.version}
+
+
+@router.post("/prompts/{key}/preview")
+async def prompt_preview(key: str, payload: PromptPreviewIn, user: CurrentUser, db: AsyncSession = Db):
+    """试渲染：只替换已提供的变量，返回渲染结果与校验报告，不调用任何模型。"""
+    require_admin(user)
+    template = await _get_prompt_template(db, key)
+    used = template_variables(payload.content)
+    rendered = render_lenient(payload.content, payload.variables)
+    json_error = ""
+    if (template.format or "text") == "json":
+        try:
+            parsed = json.loads(rendered)
+            if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+                json_error = "JSON 模板必须是字符串数组"
+        except ValueError as exc:
+            json_error = str(exc)
+    return {
+        "rendered": rendered,
+        "usedVariables": used,
+        "missingVariables": [name for name in used if name not in payload.variables],
+        "undeclaredVariables": [name for name in used if name not in (template.variables or {})],
+        "missingFragments": [fragment for fragment in (template.required_fragments or []) if fragment not in payload.content],
+        "jsonError": json_error,
+    }
+
+
+@router.delete("/prompts/{key}/versions/{version_id}")
+async def prompt_delete_draft(key: str, version_id: str, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    """软删除草稿版本；published/archived 版本保留历史不可删除。"""
+    require_admin(user)
+    template = await _get_prompt_template(db, key)
+    version = await db.get(PromptVersionModel, version_id)
+    if not version or version.template_id != template.id or version.deleted_at is not None:
+        raise HTTPException(404, "提示词版本不存在")
+    if version.status != "draft":
+        raise HTTPException(409, "仅草稿版本可删除")
+    version.deleted_at = utcnow()
+    await audit(db, request, user, "prompt.discard", "prompt_template", template.id, {"version": version.version})
+    await db.commit()
+    return {"ok": True}
 
 
 @public_router.get("/model-options")

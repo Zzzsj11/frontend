@@ -311,6 +311,9 @@ class LlmCallLogModel(LifecycleMixin, Base):
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     request_messages: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     response_text: Mapped[str] = mapped_column(Text, default="")
+    # 本次调用命中的提示词模板版本（空串/0 表示内置兜底或未接入注册中心）
+    prompt_key: Mapped[str] = mapped_column(String(120), default="", index=True)
+    prompt_version: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class DailyUsageQuotaModel(LifecycleMixin, Base):
@@ -432,3 +435,34 @@ class ModelPriceVersionModel(LifecycleMixin, Base):
     output_price: Mapped[float] = mapped_column(Float, default=0)
     unit_price: Mapped[float] = mapped_column(Float, default=0)
     effective_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PromptTemplateModel(LifecycleMixin, Base):
+    """提示词模板：key 全局唯一；运行时只读 current_version_id 指向的已发布版本。"""
+
+    __tablename__ = "prompt_templates"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    key: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str] = mapped_column(Text, default="")
+    engine: Mapped[str] = mapped_column(String(32), default="llm", index=True)
+    format: Mapped[str] = mapped_column(String(16), default="text")
+    variables: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    required_fragments: Mapped[list[str]] = mapped_column(JSON, default=list)
+    current_version_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+
+
+class PromptVersionModel(LifecycleMixin, Base):
+    """提示词版本：published 后内容不可变；回滚 = 以旧版本内容新建版本再发布。"""
+
+    __tablename__ = "prompt_versions"
+    __table_args__ = (UniqueConstraint("template_id", "version", name="uq_prompt_versions_template_version"),)
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    template_id: Mapped[str] = mapped_column(ForeignKey("prompt_templates.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    change_note: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
+    created_by: Mapped[str] = mapped_column(String(80), default="")
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

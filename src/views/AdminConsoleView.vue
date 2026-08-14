@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { apiRequest } from '../api/client'
+import AdminPromptsPanel from '../components/AdminPromptsPanel.vue'
 import { perfSnapshot } from '../perf'
 
 /** 管理后台列表行：各 tab 返回列不一致，未建模的列由 columns 动态渲染 */
@@ -95,6 +96,7 @@ type Tab =
   | 'llm'
   | 'requests'
   | 'perf'
+  | 'prompts'
 const tab = ref<Tab>('dashboard'),
   loading = ref(false),
   error = ref(''),
@@ -106,6 +108,7 @@ const tabs: [Tab, string][] = [
   ['jobs', '生成任务'],
   ['usage', '费用用量'],
   ['models', '模型管理'],
+  ['prompts', '提示词'],
   ['errors', '错误日志'],
   ['audit', '操作审计'],
   ['llm', 'LLM 调用'],
@@ -123,6 +126,8 @@ const jobPage = ref(1)
 const jobPageSize = 50
 const notice = ref('')
 const syncing = ref('')
+/** 提示词 tab 自管数据，父级仅通过 token 递增触发其刷新 */
+const promptsReloadToken = ref(0)
 /** 通用 offset 分页：projects/errors/audit/llm/requests 共用，切 tab 重置 */
 const pageOffset = ref(0)
 const pageSize = 50
@@ -171,6 +176,7 @@ const endpoint = computed(
       llm: llmEndpoint.value,
       requests: reqEndpoint.value,
       perf: '',
+      prompts: '',
     })[tab.value],
 )
 const rows = computed<AdminRow[]>(() =>
@@ -179,6 +185,11 @@ const rows = computed<AdminRow[]>(() =>
 const load = async () => {
   // 性能页不走通用 endpoint（数据为后端聚合 + 本会话快照）
   if (tab.value === 'perf') return loadPerf()
+  // 提示词页由 AdminPromptsPanel 自管数据
+  if (tab.value === 'prompts') {
+    promptsReloadToken.value += 1
+    return
+  }
   loading.value = true
   error.value = ''
   try {
@@ -194,6 +205,7 @@ const select = async (value: Tab) => {
   pageOffset.value = 0
   if (value === 'requests') void loadReqRuns()
   if (value === 'perf') return void loadPerf()
+  if (value === 'prompts') return
   await load()
 }
 const reqEndpoint = computed(() => {
@@ -363,6 +375,7 @@ onMounted(load)
         </article>
       </section>
       <template v-else>
+        <AdminPromptsPanel v-if="tab === 'prompts'" :reload-token="promptsReloadToken" />
         <!-- 性能页：后端全量耗时（慢请求 TOP + 路径聚合） + 本浏览器会话观测 -->
         <div v-if="tab === 'perf'" class="perf">
           <section class="perf-group">
@@ -597,7 +610,7 @@ onMounted(load)
             </button>
           </span>
         </div>
-        <section v-if="tab !== 'perf'" class="table-wrap">
+        <section v-if="tab !== 'perf' && tab !== 'prompts'" class="table-wrap">
           <table>
             <thead>
               <tr>
