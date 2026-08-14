@@ -63,7 +63,15 @@ from .schemas import (
 )
 from .storage import download_public_url_to_path, get_storage, is_tos_url, safe_key
 from .story_bible import STORY_BIBLE_VERSION, build_ass_story_bible, build_general_story_bible, exact_durations
-from .storyboard_prompt import PROMPT_VERSION, SCHEMA_VERSION, finalize_shot_durations, generate_ass_story_outline, generate_general_story_outline, generate_storyboard_line, regenerate_ass_scene_segment
+from .storyboard_prompt import (
+    PROMPT_VERSION,
+    SCHEMA_VERSION,
+    finalize_shot_durations,
+    generate_ass_story_outline,
+    generate_general_story_outline,
+    generate_storyboard_line,
+    regenerate_ass_scene_segment,
+)
 from .token_usage import add_llm_call_log, add_token_usage, normalize_usage
 from .usage_quota import consume_daily_quota
 
@@ -197,7 +205,6 @@ async def delete_user(user_id: str, user: CurrentUser, db: AsyncSession = Db) ->
         await db.execute(update(ChatMessageModel).where(ChatMessageModel.session_id.in_(session_ids), ChatMessageModel.deleted_at.is_(None)).values(deleted_at=now))
     await db.commit()
     return {"ok": True}
-
 
 
 async def owned_project(db: AsyncSession, user_id: str, project_id: str) -> ProjectModel:
@@ -675,6 +682,8 @@ def _persist_llm_calls(
             duration_ms=int(call.get("durationMs") or 0),
             request_messages=call.get("requestMessages"),
             response_text=call.get("responseText") or "",
+            prompt_key=call.get("promptKey") or "",
+            prompt_version=int(call.get("promptVersion") or 0),
         )
 
 

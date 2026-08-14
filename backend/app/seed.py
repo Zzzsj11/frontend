@@ -15,15 +15,54 @@ from .models import (
     DigitalHumanModel,
     DigitalHumanStyleModel,
     GenerationJobModel,
+    PromptTemplateModel,
+    PromptVersionModel,
     SongEmotionProfileModel,
     StoryboardLineModel,
     UserAdminRoleModel,
     UserModel,
     utcnow,
 )
+from .prompts import DEFAULT_PROMPTS
 from .song_emotions import SONG_EMOTIONS
 from .storage import TosStorage
 from .system_humans import SYSTEM_HUMAN_ASSET_URLS, SYSTEM_HUMANS
+
+
+async def seed_prompts(session) -> None:
+    """内置提示词模板入库（幂等）：仅补缺；已存在的 key 不覆盖，保护后台已编辑内容。"""
+    for key, spec in DEFAULT_PROMPTS.items():
+        existing = (await session.execute(select(PromptTemplateModel).where(PromptTemplateModel.key == key))).scalar_one_or_none()
+        if existing:
+            continue
+        template_id = f"pt-{key}"
+        version_id = f"pv-{key}-v1"
+        session.add(
+            PromptVersionModel(
+                id=version_id,
+                template_id=template_id,
+                version=1,
+                content=spec["content"],
+                change_note="内置默认",
+                status="published",
+                created_by="system",
+                published_at=utcnow(),
+            )
+        )
+        session.add(
+            PromptTemplateModel(
+                id=template_id,
+                key=key,
+                name=spec["name"],
+                description=spec.get("description", ""),
+                engine=spec.get("engine", "llm"),
+                format=spec.get("format", "text"),
+                variables=spec.get("variables", {}),
+                required_fragments=spec.get("required_fragments", []),
+                current_version_id=version_id,
+                status="active",
+            )
+        )
 
 
 async def seed_system_data() -> None:
@@ -166,6 +205,7 @@ async def seed_system_data() -> None:
                 profile.deleted_at = None
                 for key, value in values.items():
                     setattr(profile, key, value)
+        await seed_prompts(session)
         await session.commit()
 
 

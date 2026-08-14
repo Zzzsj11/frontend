@@ -81,6 +81,8 @@ def add_llm_call_log(
     duration_ms: int = 0,
     request_messages: list[dict[str, Any]] | None = None,
     response_text: str = "",
+    prompt_key: str = "",
+    prompt_version: int = 0,
 ) -> LlmCallLogModel:
     """落一条分镜 LLM 调用的全量留痕：请求消息快照、返回原文、耗时与 token 用量。"""
     normalized = normalize_usage(usage)
@@ -104,6 +106,8 @@ def add_llm_call_log(
         total_tokens=normalized["totalTokens"],
         request_messages=request_messages or [],
         response_text=response_text,
+        prompt_key=prompt_key,
+        prompt_version=prompt_version,
     )
     db.add(item)
     return item
