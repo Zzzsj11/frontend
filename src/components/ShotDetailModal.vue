@@ -193,13 +193,10 @@ const cancel = () => store.closeEditor()
 
           <!-- 视频预览 -->
           <div class="pcard" :class="{ open: activeTab === 'shot' }">
-            <div class="pcard-media" title="点击播放当前片段" @click="onShotPreviewClick">
+            <div class="pcard-media" title="点击展开视频调整" @click="onShotPreviewClick">
               <img v-if="shotCover" :src="shotCover" alt="视频预览" />
               <video v-else-if="shotVideo" :src="shotVideo" preload="metadata" muted />
               <span v-else class="pcard-empty"><AppIcon name="movie" :size="24" />暂无视频</span>
-              <span v-if="shotVideo || shotCover" class="pcard-play"
-                ><AppIcon name="play" :size="16"
-              /></span>
               <ImageZoom :src="shotOriginalCover" alt="视频封面原图预览" />
               <span v-if="shotAssetTotal > 1" class="pcard-badge">{{ shotAssetTotal }} 版</span>
               <div v-if="store.editingLine.shot.status === 'generating'" class="pcard-loading">
@@ -568,21 +565,6 @@ const cancel = () => store.closeEditor()
 }
 .pcard-avatars img:first-child {
   margin-left: 0;
-}
-/* 分镜预览的播放角标 */
-.pcard-play {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  background: rgba(0, 0, 0, 0.28);
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.pcard-media:hover .pcard-play {
-  opacity: 1;
 }
 .pcard-badge {
   position: absolute;

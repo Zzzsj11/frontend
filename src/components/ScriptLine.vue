@@ -6,7 +6,6 @@ import { VIDEO_DURATION_CHOICES } from '../mediaConstraints'
 import AppIcon from './AppIcon.vue'
 import BaseIconButton from './base/BaseIconButton.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
-import ImageZoom from './ImageZoom.vue'
 import { confirmDialog } from '../composables/useConfirmDialog'
 
 const props = defineProps<{
@@ -22,10 +21,6 @@ const humans = computed(() => store.lineHumans(props.line))
 const video = computed(() => store.videoOf(props.line))
 /** 缩略图：视频封面 > 场景底图 */
 const cover = computed(() => store.coverOf(props.line))
-const originalCover = computed(() => {
-  const asset = props.line.shot.assets.find((item) => item.id === props.line.shot.currentAssetId)
-  return asset?.originalCoverUrl || props.line.scene.originalImageUrl || cover.value
-})
 /** 歌词非中文时的中文翻译 */
 const translation = computed(() => store.translationOf(props.line))
 const isGeneral = computed(() => props.line.source === 'general')
@@ -108,7 +103,6 @@ const onGenerateShot = async () => {
         :title="`${mediaError}\n点击查看原因并重新生成`"
         ><AppIcon name="alert" :size="11"
       /></span>
-      <ImageZoom :src="originalCover" alt="视频封面原图预览" />
     </div>
 
     <!-- 出演角色（叠放展示，空 = 空镜头） -->

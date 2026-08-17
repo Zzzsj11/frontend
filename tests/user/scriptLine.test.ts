@@ -35,6 +35,7 @@ describe('ScriptLine thumbnail playback', () => {
     expect(store.currentTime).toBe(0)
     expect(store.isPlaying).toBe(true)
     expect(store.editingLineId).toBeNull()
+    expect(wrapper.find('.image-zoom-trigger').exists()).toBe(false)
     store.pause()
   })
 })
