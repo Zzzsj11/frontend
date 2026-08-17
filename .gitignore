@@ -56,3 +56,4 @@ scripts/local/
 # 本地 code-agent 运维文件（Qoder session 恢复，仅本机可见，不随仓库发布）
 /QUEST-SESSION-RESTORE.md
 /restore_quest_tasks.py
+test-artifacts/verify-*.png

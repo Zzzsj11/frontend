@@ -64,7 +64,7 @@ flowchart LR
 
 - Vue 3、TypeScript、Vite
 - Pinia：项目、任务、分镜、媒体和播放状态
-- Vue Router：登录、主编辑器、密码修改、用户管理
+- Vue Router：登录、主编辑器、密码修改、管理后台（含用户管理）
 - 原生 Fetch API：统一 Access Token 注入、刷新和错误处理
 - Vitest + Vue Test Utils：单元与状态测试
 - Playwright：浏览器用户旅程与真实生成验收

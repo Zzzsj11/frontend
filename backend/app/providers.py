@@ -90,6 +90,10 @@ def _headers(api_key: str, *, x_api_key: bool = False) -> dict[str, str]:
 
 
 def _unwrap(body: dict[str, Any]) -> dict[str, Any]:
+    # V3 Seedance 视频任务报文无 code/data 包装（官方格式），原样返回；
+    # 素材接口与旧版任务接口均为 code/data 包装，且部分 V3 路由层错误也走包装（HTTP 200 + code=500）
+    if "code" not in body:
+        return body
     if body.get("code") != 200:
         raise ProviderError(translate_provider_error(body.get("msg") or f"上游接口返回错误：{body.get('code')}"))
     return body.get("data") or {}
@@ -118,18 +122,14 @@ async def create_real_face_asset(public_url: str, *, name: str) -> str:
     """
     base, headers = _video_config()
     headers["group_id"] = settings.aigc_asset_group_id
+    # V3 素材接口无 Moderation 参数（仅支持虚拟人像素材）
     payload = {
         "url": public_url,
         "name": name,
         "assetType": "Image",
-        "Moderation": {"Strategy": "Skip"},
     }
     async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.post(f"{base}/virtual/assets/create", headers=headers, json=payload)
-        # CN region 不支持 Moderation 参数（直接 400）：去掉后降级重试一次，其他区域保持原行为
-        if response.status_code == 400 and "Moderation" in response.text and "not supported" in response.text:
-            payload.pop("Moderation")
-            response = await client.post(f"{base}/virtual/assets/create", headers=headers, json=payload)
+        response = await client.post(f"{base}/v3/assets", headers=headers, json=payload)
         _raise_for_status(response)
         created = _unwrap(response.json())
         asset_id = created.get("id")
@@ -138,7 +138,7 @@ async def create_real_face_asset(public_url: str, *, name: str) -> str:
         deadline = time.monotonic() + ASSET_POLL_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             await asyncio.sleep(ASSET_POLL_INTERVAL_SECONDS)
-            detail_response = await client.post(f"{base}/virtual/assets/detail", headers=headers, json={"assetId": asset_id})
+            detail_response = await client.post(f"{base}/v3/assets/detail", headers=headers, json={"assetId": asset_id})
             _raise_for_status(detail_response)
             detail = _unwrap(detail_response.json())
             status = str(detail.get("status") or "")
@@ -191,10 +191,13 @@ async def _poll(
         consecutive_errors = 0
         status = str(data.get("status", "")).upper()
         await jobs.update_progress(job, int(data.get("progress") or job.progress + 2))
-        if status == "SUCCESS":
+        # 旧版任务报文成功为 SUCCESS，V3 Seedance 报文为 succeeded；失败原因分别在 failReason / error.message
+        if status in {"SUCCESS", "SUCCEEDED"}:
             return data
         if status in {"FAILED", "CANCELLED"} or "FAIL" in status:
-            raise ProviderError(translate_provider_error(data.get("failReason") or f"生成任务状态：{status}"))
+            error = data.get("error") if isinstance(data.get("error"), dict) else {}
+            reason = data.get("failReason") or error.get("message") or f"生成任务状态：{status}"
+            raise ProviderError(translate_provider_error(reason))
     raise ProviderError("生成任务超时，请稍后查询")
 
 
@@ -269,27 +272,32 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         "resolution": request.resolution,
         "duration": request.duration,
         "watermark": request.watermark,
+        # 让上游返回尾帧图做封面，免去本地 ffmpeg 抽帧
+        "return_last_frame": True,
     }
     async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.post(f"{base}/video/generation/tasks", headers=headers, json=payload)
+        response = await client.post(f"{base}/v3/video/tasks", headers=headers, json=payload)
         _raise_for_status(response)
         created = _unwrap(response.json())
-        task_id = created.get("taskId")
+        # V3 Seedance 官方报文：任务 ID 字段为 id（旧版为 taskId）
+        task_id = created.get("id")
         if not task_id:
-            raise ProviderError("视频接口未返回 taskId")
+            raise ProviderError("视频接口未返回任务 id")
         await jobs.set_provider_task(job, "yinghe", task_id, idempotency_key=headers.get("Idempotency-Key"))
-        data = await _poll(client, f"{base}/video/generation/tasks/{task_id}", headers, job, timeout_seconds=VIDEO_POLL_TIMEOUT_SECONDS)
+        data = await _poll(client, f"{base}/v3/video/tasks/{task_id}", headers, job, timeout_seconds=VIDEO_POLL_TIMEOUT_SECONDS)
     return await _store_video_result(job, task_id, data, created)
 
 
 async def _store_video_result(job: Job, task_id: str, data: dict[str, Any], created: dict[str, Any]) -> dict[str, Any]:
     request = job.request or {}
-    source_url = data.get("resultUrl")
+    # V3 Seedance 报文：结果在 content.video_url / content.last_frame_url
+    content = data.get("content") if isinstance(data.get("content"), dict) else {}
+    source_url = content.get("video_url")
     if not source_url:
         raise ProviderError("视频生成成功但未返回地址")
     owner_prefix = f"users/{job.user_id}/generated"
     stored_url = await import_remote(source_url, f"{owner_prefix}/videos", f"{task_id}.mp4")
-    cover_url = data.get("coverUrl") or data.get("firstFrameUrl")
+    cover_url = content.get("last_frame_url")
     stored_cover, stored_cover_thumbnail = (
         await import_remote_image(cover_url, f"{owner_prefix}/covers") if cover_url else await _video_first_frame(source_url, task_id, job.user_id)
     )
@@ -316,7 +324,7 @@ async def resume_generation(job: Job) -> dict[str, Any]:
         url, timeout = f"{base}/image/generation/tasks/{job.provider_task_id}", IMAGE_POLL_TIMEOUT_SECONDS
     elif job.kind == "video":
         base, headers = _video_config()
-        url, timeout = f"{base}/video/generation/tasks/{job.provider_task_id}", VIDEO_POLL_TIMEOUT_SECONDS
+        url, timeout = f"{base}/v3/video/tasks/{job.provider_task_id}", VIDEO_POLL_TIMEOUT_SECONDS
     else:
         raise ProviderError(f"不支持恢复的任务类型：{job.kind}")
     async with httpx.AsyncClient(timeout=60) as client:
@@ -331,7 +339,7 @@ async def query_provider_task(kind: str, task_id: str) -> dict[str, Any]:
         url = f"{base}/image/generation/tasks/{task_id}"
     elif kind == "video":
         base, headers = _video_config()
-        url = f"{base}/video/generation/tasks/{task_id}"
+        url = f"{base}/v3/video/tasks/{task_id}"
     else:
         raise ProviderError(f"不支持的任务类型：{kind}")
     async with httpx.AsyncClient(timeout=60) as client:

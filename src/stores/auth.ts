@@ -7,6 +7,14 @@ import {
   type AuthUser,
 } from '../api/client'
 import { useProjectStore } from './project'
+export interface KeyQuotaInfo {
+  keyMasked: string
+  keyName: string | null
+  quotaAmt: number | null
+  usedAmt: number | null
+  remaining: number | null
+  remainingDisplay: string
+}
 export interface AccountBalance {
   available: boolean
   balance: string | null
@@ -14,6 +22,7 @@ export interface AccountBalance {
   currency: string
   updatedAt: string
   message?: string | null
+  key?: KeyQuotaInfo | null
 }
 export const useAuthStore = defineStore('auth', {
   state: () => ({

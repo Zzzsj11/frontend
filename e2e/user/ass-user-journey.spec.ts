@@ -223,7 +223,7 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await expect(page.getByRole('link', { name: '返回镜序 MV 工作台' })).toBeVisible()
   await expect(page.getByRole('button', { name: /287\.39/ })).toBeVisible()
   await page.getByRole('button', { name: /管理员/ }).click()
-  await expect(page.getByRole('menuitem', { name: '用户管理' })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: '管理后台' })).toBeVisible()
   await page.getByRole('button', { name: /管理员/ }).click()
   await page.getByRole('button', { name: 'ASS 视频' }).first().click()
   await page.locator('input[type="file"][accept=".ass"]').setInputFiles({

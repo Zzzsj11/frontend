@@ -10,6 +10,19 @@ const menu = ref<HTMLElement | null>(null)
 const userName = computed(() => auth.user?.displayName || auth.user?.username || '用户')
 const userInitial = computed(() => userName.value.trim().charAt(0).toUpperCase() || 'U')
 const balanceText = computed(() => auth.balance?.balanceDisplay || '--')
+const keyText = computed(() => {
+  const key = auth.balance?.key
+  if (!key) return ''
+  return `${key.keyMasked} 余 ${key.remainingDisplay}`
+})
+const balanceTitle = computed(() => {
+  if (auth.balance?.message) return auth.balance.message
+  const key = auth.balance?.key
+  if (!key) return '点击刷新余额'
+  const name = key.keyName ? `（${key.keyName}）` : ''
+  const quota = key.quotaAmt == null ? '不限额' : key.quotaAmt
+  return `当前 Key ${key.keyMasked}${name} · 月度已用 ${key.usedAmt ?? '--'} / 限额 ${quota} · 点击刷新余额`
+})
 
 const logout = async () => {
   menuOpen.value = false
@@ -50,11 +63,12 @@ onBeforeUnmount(() => {
       <button
         class="balance-pill"
         :class="{ loading: auth.balanceLoading }"
-        :title="auth.balance?.message || '点击刷新余额'"
+        :title="balanceTitle"
         @click="refreshBalance"
       >
         <span class="balance-icon" aria-hidden="true">ϟ</span>
         <span class="balance-value">{{ balanceText }}</span>
+        <span v-if="keyText" class="balance-key" data-test="key-quota">{{ keyText }}</span>
       </button>
       <div ref="menu" class="user-menu">
         <button
@@ -75,9 +89,9 @@ onBeforeUnmount(() => {
           <RouterLink
             v-if="auth.user?.role === 'admin'"
             role="menuitem"
-            to="/admin/users"
+            to="/admin"
             @click="menuOpen = false"
-            >用户管理</RouterLink
+            >管理后台</RouterLink
           >
           <RouterLink role="menuitem" to="/account/password" @click="menuOpen = false"
             >修改密码</RouterLink
@@ -188,6 +202,14 @@ onBeforeUnmount(() => {
   font-size: 13px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
+}
+.balance-key {
+  padding-left: 7px;
+  border-left: 1px solid #f0e4d9;
+  color: #a09186;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .user-menu {
   position: relative;
@@ -302,6 +324,9 @@ onBeforeUnmount(() => {
   }
   .balance-value {
     min-width: 38px;
+  }
+  .balance-key {
+    display: none;
   }
 }
 </style>

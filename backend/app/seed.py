@@ -275,7 +275,7 @@ async def ensure_pending_asset_avatars() -> None:
         except Exception as exc:
             await log_background_error(
                 user_id=human.user_id,
-                path="/virtual/assets/create",
+                path="/v3/assets",
                 error_type="AssetError",
                 message=f"digital human asset create failed: {human.id}: {exc}",
             )

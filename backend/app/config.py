@@ -89,10 +89,12 @@ class Settings:
     video_model: str = os.getenv("VIDEO_MODEL", "doubao-seedance-2.0")
     # 虚拟资产（真人人脸素材）注册用的分组；资产创建后返回 asset:// 链接，生成视频时
     # 传 asset:// 引用可绕过上游对真实人物的直接检测（原始 TOS 路径保留用于展示）
-    aigc_asset_group_id: str = os.getenv("AIGC_ASSET_GROUP_ID", "2075418370583859201")
+    # V3 素材组（POST /v3/asset-groups 创建，按 API Key 所属账户隔离）
+    aigc_asset_group_id: str = os.getenv("AIGC_ASSET_GROUP_ID", "group-20260817142427-1cfe75")
     business_api_key: str = os.getenv("BUSINESS_API_KEY", "")
     business_user_id: str = os.getenv("BUSINESS_USER_ID", "")
     business_balance_url: str = os.getenv("BUSINESS_BALANCE_URL", "https://api-aigc.fzyinghe.com/business/reconcile/balance")
+    business_tokens_list_url: str = os.getenv("BUSINESS_TOKENS_LIST_URL", "https://api-aigc.fzyinghe.com/business/tokens/list")
     business_balance_timeout: float = float(os.getenv("BUSINESS_BALANCE_TIMEOUT", "10"))
     business_balance_cache_seconds: int = max(5, int(os.getenv("BUSINESS_BALANCE_CACHE_SECONDS", "30")))
     storage_backend: str = os.getenv("STORAGE_BACKEND", "tos").lower()

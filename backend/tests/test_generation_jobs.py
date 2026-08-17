@@ -428,7 +428,7 @@ def _fake_asset_client(detail_responses: list[str]) -> type:
 
         async def post(self, url: str, headers=None, json=None) -> httpx.Response:
             request = httpx.Request("POST", url)
-            if url.endswith("/virtual/assets/create"):
+            if url.endswith("/v3/assets"):
                 return httpx.Response(200, json={"code": 200, "data": {"id": "asset-test-1", "status": "Processing"}}, request=request)
             status = self._detail_states.pop(0) if self._detail_states else "Active"
             payload = {"code": 200, "data": {"id": "asset-test-1", "status": status}}
@@ -437,6 +437,108 @@ def _fake_asset_client(detail_responses: list[str]) -> type:
             return httpx.Response(200, json=payload, request=request)
 
     return FakeAssetClient
+
+
+def test_poll_translates_seedance_error() -> None:
+    """V3 Seedance 报文（无 code 包装）：failed 时从 error.message 取失败原因并翻译为中文。"""
+    import httpx
+
+    from app.jobs import Job
+    from app.providers import ProviderError, _poll
+
+    async def scenario() -> str:
+        calls = {"n": 0}
+
+        class FakeClient:
+            async def get(self, url: str, headers: dict[str, str]) -> httpx.Response:
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    return httpx.Response(200, json={"id": "cgt-1", "status": "running"}, request=httpx.Request("GET", url))
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": "cgt-1",
+                        "status": "failed",
+                        "error": {"message": "The request failed because the input image 'content[1]' may contain real person. Request id: def987654321"},
+                    },
+                    request=httpx.Request("GET", url),
+                )
+
+        job = Job(id="poll-v3-translate-test", kind="video", user_id="u1", request={})
+        try:
+            await _poll(FakeClient(), "https://provider.test/v3/video/tasks/cgt-1", {}, job, timeout_seconds=3600, interval_seconds=0.01)
+        except ProviderError as exc:
+            return str(exc)
+        raise AssertionError("expected ProviderError")
+
+    import asyncio
+
+    message = asyncio.run(scenario())
+    assert "疑似包含真实人物" in message
+    assert "请求ID：def987654321" in message
+
+
+async def test_generate_video_v3_seedance_flow(client, monkeypatch) -> None:
+    """V3 视频全链路：创建返回官方报文 id，轮询 succeeded 后从 content.video_url 落库，last_frame_url 做封面。"""
+    import httpx
+
+    from app import providers
+    from app.schemas import VideoGenerationCreate
+
+    class FakeV3VideoClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url: str, headers=None, json=None) -> httpx.Response:
+            assert url.endswith("/v3/video/tasks")
+            assert json.get("return_last_frame") is True
+            return httpx.Response(200, json={"id": "cgt-test-1", "status": "queued", "model": "doubao-seedance-2.0"}, request=httpx.Request("POST", url))
+
+        async def get(self, url: str, headers=None) -> httpx.Response:
+            assert url.endswith("/v3/video/tasks/cgt-test-1")
+            return httpx.Response(
+                200,
+                json={
+                    "id": "cgt-test-1",
+                    "status": "succeeded",
+                    "content": {"video_url": "https://upstream.test/v.mp4", "last_frame_url": "https://upstream.test/last.png"},
+                    "usage": {"completion_tokens": 60682, "total_tokens": 60682},
+                },
+                request=httpx.Request("GET", url),
+            )
+
+    async def fake_import_remote(url, prefix, name):
+        return f"https://tos.test/{prefix}/{name}"
+
+    async def fake_import_remote_image(url, prefix):
+        return (f"https://tos.test/{prefix}/cover.png", f"https://tos.test/{prefix}/thumb.png")
+
+    monkeypatch.setattr(providers, "_video_config", lambda: ("https://api-aigc.test", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeV3VideoClient)
+    monkeypatch.setattr(providers, "import_remote", fake_import_remote)
+    monkeypatch.setattr(providers, "import_remote_image", fake_import_remote_image)
+
+    _insert_job("job-v3-video", kind="video")
+    from app.jobs import jobs as job_manager
+
+    job = await job_manager.get("job-v3-video")
+    assert job is not None
+    job.user_id = "u1"
+    job.request = {"model": "doubao-seedance-2.0", "duration": 5, "ratio": "16:9"}
+    request = VideoGenerationCreate(prompt="测试提示词", image_urls=["asset://asset-1"], generate_audio=False, ratio="16:9", resolution="480p", duration=5, watermark=False)
+    result = await providers.generate_video(request, job)
+
+    assert result["providerTaskId"] == "cgt-test-1"
+    assert result["videoUrl"] == "https://tos.test/users/u1/generated/videos/cgt-test-1.mp4"
+    assert result["coverUrl"] == "https://tos.test/users/u1/generated/covers/cover.png"
+    assert result["sourceUrl"] == "https://upstream.test/v.mp4"
+    assert result["usage"]["total_tokens"] == 60682
 
 
 def test_create_real_face_asset_polls_to_active(client, monkeypatch) -> None:
@@ -450,8 +552,6 @@ def test_create_real_face_asset_polls_to_active(client, monkeypatch) -> None:
 
     asset_url = asyncio.run(providers.create_real_face_asset("https://tos.test/face.jpg", name="mv-001"))
     assert asset_url == "asset://asset-test-1"
-    # 请求带 group_id，且创建的 payload 走 Moderation Skip（人脸路径）
-    assert True
 
 
 def test_create_real_face_asset_rejected_raises_friendly_error(client, monkeypatch) -> None:
@@ -464,15 +564,15 @@ def test_create_real_face_asset_rejected_raises_friendly_error(client, monkeypat
         asyncio.run(providers.create_real_face_asset("https://tos.test/face.jpg", name="mv-001"))
 
 
-def test_create_real_face_asset_retries_without_moderation_for_cn_region(client, monkeypatch) -> None:
-    """CN region 不支持 Moderation 参数：首次 400 后去掉该参数降级重试（其他区域行为不变）。"""
+def test_create_real_face_asset_uses_v3_without_moderation(client, monkeypatch) -> None:
+    """V3 素材接口：请求走 /v3/assets，且不再携带 Moderation 参数（V3 仅支持虚拟人像素材）。"""
     import httpx
 
     from app import providers
 
     calls: list[dict] = []
 
-    class FakeCnClient:
+    class FakeV3Client:
         def __init__(self, *args, **kwargs):
             pass
 
@@ -484,20 +584,18 @@ def test_create_real_face_asset_retries_without_moderation_for_cn_region(client,
 
         async def post(self, url: str, headers=None, json=None) -> httpx.Response:
             request = httpx.Request("POST", url)
-            if url.endswith("/virtual/assets/create"):
+            if url.endswith("/v3/assets"):
                 calls.append(dict(json))
-                if "Moderation" in json:
-                    return httpx.Response(400, text="Moderation parameter is not supported for CN region", request=request)
                 return httpx.Response(200, json={"code": 200, "data": {"id": "asset-cn-1", "status": "Processing"}}, request=request)
             return httpx.Response(200, json={"code": 200, "data": {"id": "asset-cn-1", "status": "Active"}}, request=request)
 
     monkeypatch.setattr(providers, "_video_config", lambda: ("https://api-aigc.test", {"Authorization": "Bearer test"}))
-    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeCnClient)
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeV3Client)
 
     asset_url = asyncio.run(providers.create_real_face_asset("https://tos.test/face.jpg", name="mv-001"))
     assert asset_url == "asset://asset-cn-1"
-    assert "Moderation" in calls[0]
-    assert "Moderation" not in calls[1]
+    assert len(calls) == 1
+    assert "Moderation" not in calls[0]
 
 
 async def test_resolve_asset_avatar_urls_maps_human_tos_to_asset(client) -> None:

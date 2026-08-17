@@ -357,10 +357,47 @@ const syncJob = async (row: AdminRow) => {
     syncing.value = ''
   }
 }
+/** 用户 tab：创建用户表单 + 启用/禁用操作（原独立用户管理页合并至此） */
+const userForm = ref({ username: '', displayName: '', password: '' })
+const createUser = async () => {
+  error.value = ''
+  notice.value = ''
+  try {
+    await apiRequest('/admin/users', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: userForm.value.username,
+        password: userForm.value.password,
+        display_name: userForm.value.displayName,
+        role: 'user',
+      }),
+    })
+    userForm.value = { username: '', displayName: '', password: '' }
+    notice.value = '用户创建成功，首次登录需修改初始密码'
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '创建失败'
+  }
+}
+const toggleUser = async (row: AdminRow) => {
+  error.value = ''
+  try {
+    await apiRequest(`/admin/users/${row.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: row.status === 'active' ? 'disabled' : 'active' }),
+    })
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '操作失败'
+  }
+}
 const columns = computed(() =>
   rows.value.length
     ? Object.keys(rows.value[0]).filter(
-        (k) => !['capabilities', 'traceback', 'requestPayload', 'stale'].includes(k),
+        (k) =>
+          !['capabilities', 'traceback', 'requestPayload', 'stale', 'mustChangePassword'].includes(
+            k,
+          ),
       )
     : [],
 )
@@ -642,6 +679,18 @@ onMounted(load)
           </select>
           <button class="refresh" @click="load">查询</button>
         </div>
+        <form v-if="tab === 'users'" class="filters" @submit.prevent="createUser">
+          <input v-model="userForm.username" placeholder="用户名" required minlength="3" />
+          <input v-model="userForm.displayName" placeholder="显示名称" />
+          <input
+            v-model="userForm.password"
+            type="password"
+            placeholder="初始密码（至少 8 位）"
+            required
+            minlength="8"
+          />
+          <button class="refresh" type="submit">创建用户</button>
+        </form>
         <div v-if="isPagedTab" class="pager-bar">
           <span class="pager">
             <button class="action" :disabled="currentPage <= 1" @click="turnPage(-1)">
@@ -659,7 +708,13 @@ onMounted(load)
               <tr>
                 <th v-for="c in columns" :key="c">{{ c }}</th>
                 <th
-                  v-if="tab === 'models' || tab === 'llm' || tab === 'requests' || tab === 'jobs'"
+                  v-if="
+                    tab === 'models' ||
+                    tab === 'llm' ||
+                    tab === 'requests' ||
+                    tab === 'jobs' ||
+                    tab === 'users'
+                  "
                 >
                   操作
                 </th>
@@ -695,6 +750,11 @@ onMounted(load)
                     @click="syncJob(row)"
                   >
                     {{ syncing === row.id ? '同步中…' : '同步' }}
+                  </button>
+                </td>
+                <td v-if="tab === 'users'">
+                  <button class="action" @click="toggleUser(row)">
+                    {{ row.status === 'active' ? '禁用' : '启用' }}
                   </button>
                 </td>
               </tr>

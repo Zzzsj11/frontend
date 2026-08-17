@@ -21,23 +21,23 @@ The request failed because the input image 'content[1]' 'content[2]' may contain
 | asset:// 链接 | `asset://asset-xxxxxxxx`，AIGC 平台虚拟资产的引用形式；图片上传到平台后被平台托管（转移到平台自己的存储），生成视频时引用它不触发人脸检测 |
 | 字段映射      | `digital_humans.asset_avatar_url` 存 asset 链接，`avatar_url` / `avatar_thumbnail_url` 仍是 TOS 路径                                      |
 
-## 3. 虚拟资产注册 API（AIGC 平台）
+## 3. 虚拟资产注册 API（AIGC 平台 V3）
 
-两个接口（实现见 `backend/app/providers.py::create_real_face_asset`）：
+素材接口（实现见 `backend/app/providers.py::create_real_face_asset`）：
 
-1. **创建**：`POST {VIDEO_API_BASE_URL}/virtual/assets/create`
+0. **创建素材组**（一次性，换账户/key 时才需要）：`POST {VIDEO_API_BASE_URL}/v3/asset-groups`，body `{"name": "...", "description": "..."}`，返回 `data.groupId`。素材组按 API Key 所属账户隔离，上传/查询/删除素材时作为 `group_id` 请求头传入。
+1. **创建**：`POST {VIDEO_API_BASE_URL}/v3/assets`
    ```json
    {
      "url": "<图片公开URL>",
      "name": "mv-001",
-     "assetType": "Image",
-     "Moderation": { "Strategy": "Skip" }
+     "assetType": "Image"
    }
    ```
-   请求头除 `Authorization: Bearer {VIDEO_API_KEY}` 外，**必须带 `group_id: 2075463560011292673`**（配置项 `AIGC_ASSET_GROUP_ID`，chouka-tools 同款 group，实测本地 VIDEO_API_KEY 可直接创建）。返回 `data.id`（状态 Processing）。
-2. **轮询详情**：`POST /virtual/assets/detail`，body `{"assetId": "..."}`，间隔 3 秒轮询直到 `status == "Active"`；`Rejected` / `Failed` 视为审核失败；超过 180 秒判超时。
+   请求头除 `Authorization: Bearer {VIDEO_API_KEY}` 外，**必须带 `group_id: group-xxxxxxxx`**（配置项 `AIGC_ASSET_GROUP_ID`，当前为 `group-20260817142427-1cfe75`「Seedance 虚拟人物素材」）。返回 `data.id`（状态 Processing）。V3 仅支持虚拟人像素材，**无 Moderation 参数**（旧版 `/virtual/assets/create` 在 CN region 需降级重试的问题不复存在）。
+2. **轮询详情**：`POST /v3/assets/detail`，body `{"assetId": "..."}`，间隔 3 秒轮询直到 `status == "Active"`；`Rejected` / `Failed` 视为审核失败；超过 180 秒判超时。
 
-> 实测：mv-agent 的 VIDEO_API_KEY（`yh-qu78hnd...`）+ 上述 group_id 可正常创建资产，3-6 秒进入 Active。
+> 2026-08-17 迁移至 V3：旧版 `/virtual/assets/*` 与 `/video/generation/tasks/*` 已停用（素材通道按 key 授权，旧 key 未获 V3 授权）。当前使用 key `yh-ftbq...`（VIDEO_API_KEY/IMAGE_API_KEY），视频任务走 `POST /v3/video/tasks`（Seedance 官方报文：创建返回 `id`，轮询 `GET /v3/video/tasks/{id}`，结果在 `content.video_url` / `content.last_frame_url`，失败原因在 `error.message`），请求带 `return_last_frame: true` 直接拿尾帧做封面。两套体系的素材库不互通，换 key/迁 V3 后所有数字人必须重新注册资产。
 
 ## 4. 数据链路：三个入库路径 + 两层兜底
 
@@ -91,7 +91,7 @@ crontab 配置（**宿主机**上，每分钟）：
 | `backend/app/main.py`                           | `_resolve_asset_avatar_urls()` 视频生成 URL 映射                                                        |
 | `backend/app/seed.py`                           | `ensure_pending_asset_avatars()` 启动/手动兜底；seed_system_data 写入固化 asset                         |
 | `backend/app/system_humans.py`                  | `SYSTEM_HUMAN_ASSET_URLS` 32 个系统人物固化 asset 映射                                                  |
-| `backend/app/config.py`                         | `aigc_asset_group_id`（默认 `2075463560011292673`）                                                     |
+| `backend/app/config.py`                         | `aigc_asset_group_id`（默认 `group-20260817142427-1cfe75`，V3 素材组）                                  |
 | `backend/app/models.py`                         | `DigitalHumanModel.asset_avatar_url` 字段                                                               |
 | `backend/migrations/versions/d4f2b8e6a1c0_*.py` | 加列迁移（head：d4f2b8e6a1c0）                                                                          |
 | `backend/scripts/ensure_asset_avatars.py`       | cron 补扫脚本                                                                                           |
@@ -111,13 +111,14 @@ crontab 配置（**宿主机**上，每分钟）：
 1. **asset 跨环境通用**：asset 由平台托管，同一平台账号（VIDEO_API_KEY 同一 group）下本地/线上注册的链接通用，可固化进 seed
 2. **换图必须清旧 asset**：asset 绑定具体图片，形象重新生成后旧链接失效，update_human 已处理
 3. **注册失败只降级不阻断**：人物照常入库；期间生成视频可能重新出现"may contain real person"报错，cron 最多 1 分钟内补上
-4. **seed 覆盖行为**：每次启动 seed 会把系统人物的 `asset_avatar_url` 覆盖回固化值——若平台资产被删导致失效，需要更新 `SYSTEM_HUMAN_ASSET_URLS` 重新固化（或依赖 cron 补新值，但重启后会被还原）
+4. **seed 覆盖行为**：每次启动 seed 会把系统人物的 `asset_avatar_url` 覆盖回固化值——若平台资产被删导致失效，需要更新 `SYSTEM_HUMAN_ASSET_URLS` 重新固化（或依赖 cron 补新值，但重启后会被还原）。**全量换 key 的标准流程**：清空 `SYSTEM_HUMAN_ASSET_URLS` → 重建后端（seed 把系统人物置空）→ SQL 清空私有角色 `asset_avatar_url` → 跑 `ensure_pending_asset_avatars()` 全量重注册 → 把新链接写回 `SYSTEM_HUMAN_ASSET_URLS` → 再重建镜像（线上部署随 seed 自动同步）
 5. **macOS 打包坑**：tar 打包部署会混入 `._*` AppleDouble 文件（含 null 字节），导致容器内 python 编译报 `SyntaxError: source code string cannot contain null bytes`；部署后执行 `find app migrations -name '._*' -delete`
 6. **容器无 scripts 目录**：首次部署脚本需先 `docker exec ... mkdir -p /srv/mvagent/scripts`
 7. **cron 环境**：crontab 里 docker 需用绝对路径（本地 `/usr/local/bin/docker`，线上 `/usr/bin/docker`）
 
-## 10. 当前部署状态（2026-08-12）
+## 10. 当前部署状态（2026-08-17）
 
-- 本地 + 线上均已完成代码部署与数据重建
-- 线上数据已清空重建：保留 3 个初始用户（admin / dev01 / mv-test-01），32 个系统人物全部带 asset:// 链接
-- 本地 + 线上 crontab 均已配置并验证实际执行
+- 已全量迁移至 V3 接口（素材 `/v3/assets*`、视频 `/v3/video/tasks`），key 切换为 `yh-ftbq...`（素材通道已授权），素材组 `group-20260817142427-1cfe75`
+- 本地 32 个系统人物 + 5 个用户数字人已全部用 V3 重新注册，`SYSTEM_HUMAN_ASSET_URLS` 已固化新链接（线上部署后 seed 自动同步）
+- V3 端到端实测通过：创建任务 `id` → 轮询 `succeeded` → `content.video_url` 落 TOS → `last_frame_url` 直接做封面（免 ffmpeg 抽帧）
+- 本地 crontab 已配置；线上发布时需同步线上 `.env` 的 `VIDEO_API_KEY`/`IMAGE_API_KEY`/`AIGC_ASSET_GROUP_ID` 三项
