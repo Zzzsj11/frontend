@@ -2,7 +2,13 @@
 import { computed, onMounted, ref } from 'vue'
 import { apiRequest } from '../api/client'
 import AdminPromptsPanel from '../components/AdminPromptsPanel.vue'
+import AdminKlingPanel from '../components/AdminKlingPanel.vue'
+import AdminRunningHubPanel from '../components/AdminRunningHubPanel.vue'
+import AdminStoryboardOptionsPanel from '../components/AdminStoryboardOptionsPanel.vue'
+import AdminSideNav from '../components/AdminSideNav.vue'
+import BaseModal from '../components/base/BaseModal.vue'
 import { perfSnapshot } from '../perf'
+import type { AdminNavGroup } from '../types'
 
 /** 管理后台列表行：各 tab 返回列不一致，未建模的列由 columns 动态渲染 */
 interface AdminRow {
@@ -97,24 +103,61 @@ type Tab =
   | 'requests'
   | 'perf'
   | 'prompts'
+  | 'categories'
+  | 'runninghub'
+  | 'kling'
 const tab = ref<Tab>('dashboard'),
   loading = ref(false),
   error = ref(''),
   data = ref<AdminData | null>(null)
-const tabs: [Tab, string][] = [
-  ['dashboard', '仪表盘'],
-  ['users', '用户'],
-  ['projects', '项目'],
-  ['jobs', '生成任务'],
-  ['usage', '费用用量'],
-  ['models', '模型管理'],
-  ['prompts', '提示词'],
-  ['errors', '错误日志'],
-  ['audit', '操作审计'],
-  ['llm', 'LLM 调用'],
-  ['requests', '接口耗时'],
-  ['perf', '性能'],
+/** 侧边导航分组（同类项合并为两级菜单）；新增页面时挂到对应组即可 */
+const NAV_GROUPS: AdminNavGroup[] = [
+  { key: 'overview', label: '总览', items: [{ key: 'dashboard', label: '仪表盘' }] },
+  {
+    key: 'business',
+    label: '业务运营',
+    items: [
+      { key: 'projects', label: '项目' },
+      { key: 'users', label: '用户' },
+      { key: 'jobs', label: '生成任务' },
+      { key: 'usage', label: '费用用量' },
+    ],
+  },
+  {
+    key: 'content',
+    label: '内容配置',
+    items: [
+      { key: 'prompts', label: '提示词' },
+      { key: 'categories', label: '通用分类' },
+      { key: 'models', label: '模型管理' },
+    ],
+  },
+  {
+    key: 'lab',
+    label: '模型实验室',
+    items: [
+      { key: 'runninghub', label: 'H3 工作流' },
+      { key: 'kling', label: 'Kling 测试' },
+    ],
+  },
+  {
+    key: 'system',
+    label: '系统监控',
+    items: [
+      { key: 'errors', label: '错误日志' },
+      { key: 'audit', label: '操作审计' },
+      { key: 'llm', label: 'LLM 调用' },
+      { key: 'requests', label: '接口耗时' },
+      { key: 'perf', label: '性能' },
+    ],
+  },
 ]
+const tabTitle = computed(
+  () => NAV_GROUPS.flatMap((g) => g.items).find((i) => i.key === tab.value)?.label ?? '',
+)
+const groupTitle = computed(
+  () => NAV_GROUPS.find((g) => g.items.some((i) => i.key === tab.value))?.label ?? '',
+)
 const llmFilters = ref({ projectTaskId: '', operation: '', status: '' })
 const llmDetail = ref<LlmDetail | null>(null),
   detailLoading = ref(false)
@@ -177,6 +220,9 @@ const endpoint = computed(
       requests: reqEndpoint.value,
       perf: '',
       prompts: '',
+      categories: '',
+      runninghub: '',
+      kling: '',
     })[tab.value],
 )
 const rows = computed<AdminRow[]>(() =>
@@ -190,6 +236,8 @@ const load = async () => {
     promptsReloadToken.value += 1
     return
   }
+  // 通用分类/模型测试页由各自面板自管数据
+  if (tab.value === 'categories' || tab.value === 'runninghub' || tab.value === 'kling') return
   loading.value = true
   error.value = ''
   try {
@@ -200,12 +248,14 @@ const load = async () => {
     loading.value = false
   }
 }
-const select = async (value: Tab) => {
+const select = async (key: string) => {
+  const value = key as Tab
   tab.value = value
   pageOffset.value = 0
   if (value === 'requests') void loadReqRuns()
   if (value === 'perf') return void loadPerf()
-  if (value === 'prompts') return
+  if (value === 'prompts' || value === 'categories' || value === 'runninghub' || value === 'kling')
+    return
   await load()
 }
 const reqEndpoint = computed(() => {
@@ -318,22 +368,12 @@ onMounted(load)
 </script>
 <template>
   <div class="console">
-    <aside>
-      <div class="brand">映刻 MV<br /><small>管理控制台 v0.1</small></div>
-      <button
-        v-for="item in tabs"
-        :key="item[0]"
-        :class="{ on: tab === item[0] }"
-        @click="select(item[0])"
-      >
-        {{ item[1] }}</button
-      ><RouterLink to="/projects">← 返回工作台</RouterLink>
-    </aside>
+    <AdminSideNav :groups="NAV_GROUPS" :active="tab" @select="select" />
     <main>
       <header>
         <div>
-          <h1>{{ tabs.find((x) => x[0] === tab)?.[1] }}</h1>
-          <p>MV AI 生产平台运营与模型控制中心</p>
+          <p class="crumb">{{ groupTitle }}</p>
+          <h1>{{ tabTitle }}</h1>
         </div>
         <button class="refresh" @click="tab === 'perf' ? loadPerf() : load()">刷新</button>
       </header>
@@ -376,6 +416,9 @@ onMounted(load)
       </section>
       <template v-else>
         <AdminPromptsPanel v-if="tab === 'prompts'" :reload-token="promptsReloadToken" />
+        <AdminStoryboardOptionsPanel v-if="tab === 'categories'" />
+        <AdminRunningHubPanel v-if="tab === 'runninghub'" />
+        <AdminKlingPanel v-if="tab === 'kling'" />
         <!-- 性能页：后端全量耗时（慢请求 TOP + 路径聚合） + 本浏览器会话观测 -->
         <div v-if="tab === 'perf'" class="perf">
           <section class="perf-group">
@@ -661,16 +704,13 @@ onMounted(load)
         </section>
       </template>
     </main>
-    <div
-      v-if="reqDetail || (detailLoading && tab === 'requests')"
-      class="overlay"
-      @click.self="reqDetail = null"
+    <BaseModal
+      :open="!!reqDetail || (detailLoading && tab === 'requests')"
+      title="请求详情"
+      width="960px"
+      @close="reqDetail = null"
     >
-      <div class="detail">
-        <header>
-          <h2>请求详情</h2>
-          <button class="action" @click="reqDetail = null">关闭</button>
-        </header>
+      <div class="detail-body">
         <p v-if="detailLoading">加载中…</p>
         <template v-else-if="reqDetail">
           <p class="meta">
@@ -687,17 +727,14 @@ onMounted(load)
           <pre class="payload">{{ JSON.stringify(reqDetail.responseBody, null, 2) }}</pre>
         </template>
       </div>
-    </div>
-    <div
-      v-if="llmDetail || (detailLoading && tab === 'llm')"
-      class="overlay"
-      @click.self="llmDetail = null"
+    </BaseModal>
+    <BaseModal
+      :open="!!llmDetail || (detailLoading && tab === 'llm')"
+      title="LLM 调用详情"
+      width="960px"
+      @close="llmDetail = null"
     >
-      <div class="detail">
-        <header>
-          <h2>LLM 调用详情</h2>
-          <button class="action" @click="llmDetail = null">关闭</button>
-        </header>
+      <div class="detail-body">
         <p v-if="detailLoading">加载中…</p>
         <template v-else-if="llmDetail">
           <p class="meta">
@@ -716,71 +753,35 @@ onMounted(load)
           <pre class="payload">{{ llmDetail.responseText || '（空）' }}</pre>
         </template>
       </div>
-    </div>
+    </BaseModal>
   </div>
 </template>
 <style scoped>
 .console {
   min-height: 100vh;
-  background: #f6f7f9;
+  background: var(--bg);
   display: grid;
-  grid-template-columns: 220px 1fr;
-  color: #25262a;
-}
-aside {
-  background: #17191d;
-  color: #fff;
-  padding: 24px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-.brand {
-  font-size: 19px;
-  font-weight: 700;
-  padding: 8px 10px 25px;
-}
-.brand small {
-  font-size: 11px;
-  color: #999;
-  font-weight: 400;
-}
-aside button,
-aside a {
-  border: 0;
-  background: transparent;
-  color: #aaa;
-  text-align: left;
-  padding: 11px 13px;
-  border-radius: var(--radius-sm);
-  text-decoration: none;
-  cursor: pointer;
-}
-aside button.on,
-aside button:hover {
-  background: var(--primary);
-  color: #fff;
-}
-aside a {
-  margin-top: auto;
+  grid-template-columns: 236px 1fr;
+  color: var(--text);
 }
 main {
-  padding: 30px;
+  padding: 26px 32px 40px;
   min-width: 0;
 }
 header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 25px;
+  margin-bottom: 20px;
+}
+.crumb {
+  margin: 0 0 4px;
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
 }
 h1 {
   margin: 0;
-  font-size: 25px;
-}
-header p {
-  margin: 6px 0;
-  color: var(--text-secondary);
+  font-size: 22px;
 }
 .refresh,
 .action {
@@ -788,8 +789,14 @@ header p {
   border-radius: var(--radius-sm);
   background: var(--primary);
   color: #fff;
-  padding: 8px 14px;
+  padding: 7px 14px;
+  font-size: 13px;
   cursor: pointer;
+  transition: background 0.15s;
+}
+.refresh:hover,
+.action:hover:not(:disabled) {
+  background: var(--primary-hover);
 }
 .cards {
   display: grid;
@@ -797,12 +804,13 @@ header p {
   gap: 16px;
 }
 .cards article {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 22px;
+  padding: 20px 22px;
   display: flex;
   flex-direction: column;
+  box-shadow: var(--shadow-card);
 }
 .cards b {
   font-size: 30px;
@@ -817,9 +825,10 @@ header p {
 }
 .table-wrap {
   overflow: auto;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
 }
 table {
   width: 100%;
@@ -828,7 +837,7 @@ table {
 }
 th,
 td {
-  padding: 12px 14px;
+  padding: 11px 14px;
   border-bottom: 1px solid var(--border);
   text-align: left;
   white-space: nowrap;
@@ -839,33 +848,44 @@ td {
 th {
   background: var(--surface-muted);
   color: var(--text-secondary);
-}
-.status {
-  padding: 3px 7px;
-  background: #eef8ef;
-  border-radius: var(--radius-sm);
-}
-.slow {
-  color: #c2410c;
+  font-size: var(--font-sm);
   font-weight: 600;
 }
-.empty,
-.error {
-  padding: 20px;
+tbody tr:hover {
+  background: var(--surface-muted);
+}
+.status {
+  padding: 3px 8px;
+  background: var(--success-light);
+  color: var(--success);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-sm);
+}
+.slow {
+  color: var(--warning);
+  font-weight: 600;
+}
+.empty {
+  padding: 28px;
+  color: var(--text-secondary);
+  text-align: center;
 }
 .error {
+  padding: 10px 14px;
+  background: var(--danger-light);
+  border-radius: var(--radius-sm);
   color: var(--danger);
+  font-size: 13px;
 }
 .notice {
   padding: 10px 14px;
-  background: #eef8ef;
-  border: 1px solid #b7e0bd;
+  background: var(--success-light);
   border-radius: var(--radius-sm);
-  color: #166534;
+  color: var(--success);
   font-size: 13px;
 }
 .stale-flag {
-  color: #c2410c;
+  color: var(--warning);
   font-weight: 600;
 }
 .pager {
@@ -919,7 +939,7 @@ th {
 }
 .nav-timing {
   padding: 10px 14px;
-  background: #f8f5f0;
+  background: var(--surface-muted);
   border-radius: var(--radius-sm);
   font-size: 13px;
 }
@@ -938,39 +958,21 @@ th {
 .filters input,
 .filters select {
   padding: 8px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-dark);
   border-radius: var(--radius-sm);
   font-size: 13px;
   min-width: 200px;
 }
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 17, 21, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 60;
+.filters input:focus,
+.filters select:focus {
+  outline: none;
+  border-color: var(--primary);
 }
-.detail {
-  background: #fff;
-  border-radius: var(--radius-md);
-  width: min(960px, 92vw);
-  max-height: 86vh;
+.detail-body {
   overflow: auto;
-  padding: 24px;
+  padding: 20px 22px;
 }
-.detail header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-}
-.detail h2 {
-  margin: 0;
-  font-size: 18px;
-}
-.detail h3 {
+.detail-body h3 {
   margin: 18px 0 8px;
   font-size: 14px;
 }

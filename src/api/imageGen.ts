@@ -11,12 +11,16 @@ export interface ImageTaskOptions {
   n?: number
   /** 图片 URL（或数组）：传入即按图生图处理，不传为文生图 */
   image?: string | string[]
+  /** 数字人定妆照模式：prompt 由后端按注册中心模板拼装，此时 prompt 参数传空串 */
+  portrait?: { description: string; style: string }
 }
 
 interface GenerationJob {
   id: string
   status: string
   progress: number
+  /** 最终生效的提示词（portrait 模式由后端拼装返回） */
+  prompt?: string
   result?: { urls?: string[]; thumbnailUrls?: string[] }
   error?: string | null
 }
@@ -25,11 +29,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return apiRequest<T>(path, init)
 }
 
-/** 发起图片创建任务，返回 taskId */
+/** 发起图片创建任务，返回任务 id 与最终生效的提示词（portrait 模式由后端拼装） */
 export async function createImageTask(
   prompt: string,
   options: ImageTaskOptions = {},
-): Promise<string> {
+): Promise<{ id: string; prompt?: string }> {
   const data = await request<GenerationJob>('/generations/images', {
     method: 'POST',
     body: JSON.stringify({
@@ -38,12 +42,13 @@ export async function createImageTask(
       quality: options.quality ?? 'auto',
       n: options.n ?? 1,
       purpose: 'digital_human',
+      ...(options.portrait ? { portrait: options.portrait } : {}),
       ...(options.image
         ? { images: Array.isArray(options.image) ? options.image : [options.image] }
         : {}),
     }),
   })
-  return data.id
+  return { id: data.id, prompt: data.prompt }
 }
 
 export interface WaitForImageOptions {
@@ -75,27 +80,28 @@ export async function waitForImageAsset(
 
 /** 一步到位：发起任务并轮询取回图片地址 */
 export async function generateImage(prompt: string, options?: ImageTaskOptions): Promise<string> {
-  const taskId = await createImageTask(prompt, options)
-  return (await waitForImageAsset(taskId)).url
+  const task = await createImageTask(prompt, options)
+  return (await waitForImageAsset(task.id)).url
 }
 
 export async function generateImageAsset(
   prompt: string,
   options?: ImageTaskOptions,
   onTaskCreated?: (taskId: string) => void,
-): Promise<{ url: string; thumbnailUrl?: string }> {
-  const taskId = await createImageTask(prompt, options)
-  onTaskCreated?.(taskId)
-  return waitForImageAsset(taskId)
+): Promise<{ url: string; thumbnailUrl?: string; prompt?: string }> {
+  const task = await createImageTask(prompt, options)
+  onTaskCreated?.(task.id)
+  const asset = await waitForImageAsset(task.id)
+  return { ...asset, prompt: task.prompt }
 }
 
-/** 数字人定妆照提示词模板 */
-export function buildPortraitPrompt(description: string, style: string): string {
-  const parts: string[] = []
-  if (description) parts.push(`角色描述：${description}`)
-  if (style) parts.push(`画面风格：${style}`)
-  const extra = parts.length ? parts.join('。') + '。' : ''
-  return `参照第一张参考图的构图版式、光线风格和清晰度。将参考图中的人物，替换为上传照片中的人物，保持一模一样的人物外貌、服装和配饰。${extra}除此之外的光线、背景、排版、画面品质，完全与参考图保持一致。`
+/** 按后端注册中心模板拼装定妆照提示词（不调模型；草稿恢复与重生兜底用） */
+export async function fetchPortraitPrompt(description: string, style: string): Promise<string> {
+  const data = await request<{ prompt: string }>('/generations/images/portrait-prompt', {
+    method: 'POST',
+    body: JSON.stringify({ description, style }),
+  })
+  return data.prompt
 }
 
 /** 获取系统人物三视图模板（用于生成/重生的参考图） */

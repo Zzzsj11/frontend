@@ -105,6 +105,16 @@ class Settings:
     tos_reference_prefix: str = os.getenv("TOS_REFERENCE_PREFIX", "mv-agent/references").strip("/")
     tos_video_prefix: str = os.getenv("TOS_VIDEO_ARCHIVE_PREFIX", "mv-agent/generated-videos").strip("/")
     tos_public_domain: str = os.getenv("TOS_PUBLIC_BUCKET_DOMAIN", "").replace("https://", "").replace("http://", "").strip("/")
+    # RunningHub 云端 ComfyUI 工作流（管理后台测试页用）；key 只放后端，不回显前端
+    runninghub_api_key: str = os.getenv("RUNNINGHUB_API_KEY", "")
+    runninghub_base_url: str = os.getenv("RUNNINGHUB_BASE_URL", "https://www.runninghub.cn/openapi/v2").rstrip("/")
+    runninghub_workflow_id: str = os.getenv("RUNNINGHUB_WORKFLOW_ID", "2084514856253874178")
+    runninghub_timeout: float = float(os.getenv("RUNNINGHUB_TIMEOUT", "60"))
+    # Kling V3 Omni 视频模型（管理后台测试页）；默认复用英和 AIGC 网关，可用 KLING_* 覆盖
+    kling_api_base_url: str = (os.getenv("KLING_API_BASE_URL") or video_api_base_url).rstrip("/")
+    kling_api_key: str = os.getenv("KLING_API_KEY") or video_api_key
+    kling_model: str = os.getenv("KLING_MODEL", "kling-v3-omni")
+    kling_timeout: float = float(os.getenv("KLING_TIMEOUT", "60"))
 
 
 settings = Settings()

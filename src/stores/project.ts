@@ -26,6 +26,7 @@ import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL } from '../generationModels'
 import {
   PollingCancelledError,
   abortableSleep,
+  cancelAllTaskWatchers,
   cancelTaskWatchers,
   registerTaskWatcher,
 } from '../utils/generationPoller'
@@ -50,9 +51,13 @@ export const DEFAULT_SHOT_OPTIONS: ShotGenOptions = {
 
 let rafId = 0
 let lastTick = 0
+/** 当前播放中的视频元素（PlayerPanel 登记）；播放中主时钟以其 currentTime 回写，保证画面/游标一致 */
+let activeVideoEl: HTMLVideoElement | null = null
 /** 每行场景图重新生成次数（仅用于 mock 占位图换款） */
 const sceneVariants: Record<string, number> = {}
 const exportStreams = new Map<string, AbortController>()
+/** 导出进度时间爬升的 1s 时钟（有进行中导出时才运行；模块级单例，跨 store 实例共享） */
+let exportTicker: number | undefined
 /** 刷新恢复后正在续跑的媒体生成任务（防止重复恢复同一任务） */
 const resumedGenerationJobs = new Set<string>()
 /** 正在轮询「逐句提示词生成」孤儿任务的任务 ID */
@@ -116,6 +121,8 @@ export const useProjectStore = defineStore('project', {
     activeTaskId: null as string | null,
     /** 正在切换歌曲（载入脚本中） */
     songSwitching: false,
+    /** 工作区数据属主用户 id：loadSongProjects 发现账号变化时先清空上一账号现场 */
+    ownerUserId: '',
     /** 各子项目(任务)的脚本编辑现场缓存(按 taskId)，切回时不丢编辑状态 */
     taskScripts: {} as Record<string, { cast: string[]; lines: ScriptLine[] }>,
     /** 全局角色阵容：本 MV 选定的数字人（全片统一），分镜只能从阵容中挑选出演角色 */
@@ -152,6 +159,8 @@ export const useProjectStore = defineStore('project', {
     /** 正在重试的场景段序号（段级大纲重新生成） */
     segmentRetrying: {} as Record<number, boolean>,
     currentTime: 0,
+    /** 正在拖动时间轴/进度条：主时钟暂停视频回写（避免拖动被弹回），video 回设走节流 */
+    scrubbing: false,
     isPlaying: false,
     playMode: { single: false, loop: false },
     volume: 1,
@@ -166,6 +175,8 @@ export const useProjectStore = defineStore('project', {
     /** 编辑弹窗中正在重新生成形象的数字人 id（null 表示空闲） */
     dhRegeneratingId: null as string | null,
     exportsByTaskId: {} as Record<string, MaterialExport[]>,
+    /** 导出进度爬升用的响应式时间戳（exportTicker 每秒刷新） */
+    exportNow: 0,
   }),
 
   getters: {
@@ -272,9 +283,20 @@ export const useProjectStore = defineStore('project', {
     synthesis(state): SynthesisState {
       const latest = state.activeTaskId ? state.exportsByTaskId[state.activeTaskId]?.[0] : undefined
       if (!latest) return { status: 'idle', progress: 0 }
+      let progress = latest.progress
+      // 后端推送停滞期间按已耗时间缓慢爬升（0.4%/s，封顶 99），消除「假死」观感
+      if (
+        (latest.status === 'queued' || latest.status === 'running') &&
+        progress > 0 &&
+        progress < 99 &&
+        state.exportNow > 0
+      ) {
+        const stalledSec = Math.max(0, (state.exportNow - Date.parse(latest.updatedAt)) / 1000)
+        progress = Math.min(99, Math.max(progress, Math.floor(progress + stalledSec * 0.4)))
+      }
       return {
         status: latest.status,
-        progress: latest.progress,
+        progress,
         stage: latest.stage,
         videoUrl: latest.archiveUrl,
         error: latest.error,
@@ -298,9 +320,9 @@ export const useProjectStore = defineStore('project', {
         total: generated.length,
         completed: generated.filter((line) => line.generationStatus === 'succeeded').length,
         failed: generated.filter((line) => line.generationStatus === 'failed').length,
-        active: generated.some(
-          (line) => line.generationStatus === 'pending' || line.generationStatus === 'running',
-        ),
+        // pending 只表示「待生成」（含 429 被还原、切任务遗留的行），不代表队列在跑；
+        // 仅 running 说明统一队列正在执行——否则队列终止后残留的 pending 行会让批量生成入口永远禁用
+        active: generated.some((line) => line.generationStatus === 'running'),
       }
     },
 
@@ -311,9 +333,10 @@ export const useProjectStore = defineStore('project', {
       return state.outlineLoading && state.outlineTaskId === state.activeTaskId
     },
 
-    /** ASS 大纲阶段：pending=拆分完成待生成 / outlining=生成中 / failed=生成失败 */
+    /** 大纲阶段：pending=待生成 / outlining=生成中 / failed=生成失败（ASS 与通用分镜统一） */
     outlinePhase(state): 'none' | 'pending' | 'outlining' | 'failed' {
-      if (state.activeStoryboardType !== 'ass') return 'none'
+      if (state.activeStoryboardType !== 'ass' && state.activeStoryboardType !== 'general')
+        return 'none'
       if (this.outlineLocked || state.activeTaskStatus === 'outlining') return 'outlining'
       if (state.activeTaskStatus === 'outline_failed') return 'failed'
       if (state.activeTaskStatus === 'parsed') return 'pending'
@@ -340,6 +363,10 @@ export const useProjectStore = defineStore('project', {
     /** 载入歌曲项目列表（侧边栏挂载时调用） */
     async loadSongProjects() {
       if (this.songProjectsLoading) return
+      // 账号切换兜底：属主变化时先清上一账号的工作区现场（主动登出已在 logout 清理，此处覆盖异常路径）
+      const ownerUid = useAuthStore().user?.id || ''
+      if (this.ownerUserId !== ownerUid) this.resetWorkspace()
+      this.ownerUserId = ownerUid
       this.songProjectsLoading = true
       this.songProjectsError = null
       try {
@@ -393,6 +420,18 @@ export const useProjectStore = defineStore('project', {
         this.songSwitching = false
       }
       return song
+    },
+
+    /** 生成类操作前置：未选中任何项目时自动创建「未命名项目」（每次新建，允许重名） */
+    async ensureSongProjectForGeneration(): Promise<void> {
+      if (this.activeSongId) return
+      await this.createSongProject('未命名项目')
+    },
+
+    /** 登出/账号切换时清空工作区现场：取消全部轮询与 SSE 后重置状态，防止串号残留 */
+    resetWorkspace() {
+      cancelAllTaskWatchers()
+      this.$reset()
     },
 
     /** 把当前子项目(任务)的编辑现场写入缓存 */
@@ -508,6 +547,11 @@ export const useProjectStore = defineStore('project', {
             if (error instanceof ApiError && error.status === 409) {
               const current = this.lines.find((line) => line.id === lineId)
               if (current && this.activeTaskId === taskId) current.generationStatus = 'running'
+            } else if (error instanceof ApiError && error.status === 429) {
+              // 单账号并行上限：行还原为待生成并终止本轮队列（弹窗由 apiRequest 经 errorBus 统一上报）
+              const current = this.lines.find((line) => line.id === lineId)
+              if (current && this.activeTaskId === taskId) current.generationStatus = 'pending'
+              cursor = lineIds.length
             } else {
               const current = this.lines.find((line) => line.id === lineId)
               if (current && this.activeTaskId === taskId) {
@@ -534,6 +578,21 @@ export const useProjectStore = defineStore('project', {
       if (!this.activeTaskId) return
       const { lineIds } = await api.resetFailedStoryboardLines(this.activeTaskId)
       await this._generateStoryboardQueue(this.activeTaskId, lineIds, true)
+    },
+
+    /** 批量生成：收集当前任务大纲就绪且「未生成/失败」的分镜行走统一队列（并发 4 不变；单账号 100 上限由后端 429 兜底） */
+    async generateAllPendingStoryboardLines() {
+      const taskId = this.activeTaskId
+      if (!taskId) return
+      const lineIds = this.lines
+        .filter(
+          (line) =>
+            (line.generationStatus === 'pending' || line.generationStatus === 'failed') &&
+            this._outlineReady(line),
+        )
+        .map((line) => line.id)
+      if (!lineIds.length) return
+      await this._generateStoryboardQueue(taskId, lineIds)
     },
 
     /** 刷新/切任务后恢复仍在排队或执行中的媒体生成（场景图/视频）等待态；结果由后端落库，落定后重新拉取合并 */
@@ -1149,7 +1208,10 @@ export const useProjectStore = defineStore('project', {
           description: draft.description,
           avatar: generated.url,
           thumbnail: generated.thumbnailUrl,
-          avatarPrompt: imageGen.buildPortraitPrompt(draft.description || draft.name, draft.style),
+          avatarPrompt: await imageGen.fetchPortraitPrompt(
+            draft.description || draft.name,
+            draft.style,
+          ),
           source: draft.mode,
           styleId: draft.styleId,
         })
@@ -1170,17 +1232,17 @@ export const useProjectStore = defineStore('project', {
     }): Promise<DigitalHuman> {
       this.dhGenerating = true
       try {
-        const prompt = imageGen.buildPortraitPrompt(input.description, input.style)
         const id = nextId('dh')
         const template = imageGen.getTemplateAvatar()
         const userRef =
           input.referenceImage || this.digitalHumans.find((human) => human.readOnly)?.avatar
         const references = [template, userRef].filter(Boolean) as string[]
         const generated = await imageGen.generateImageAsset(
-          prompt,
+          '',
           {
             size: '1344x768',
             quality: 'medium',
+            portrait: { description: input.description, style: input.style },
             ...(references.length ? { image: references } : {}),
           },
           // 任务创建后先留草稿：页面刷新后可据此恢复等待态并补建数字人
@@ -1200,7 +1262,7 @@ export const useProjectStore = defineStore('project', {
           description: input.description,
           avatar,
           thumbnail: generated.thumbnailUrl,
-          avatarPrompt: prompt,
+          avatarPrompt: generated.prompt ?? '',
           source: 'generated',
         })
       } finally {
@@ -1226,15 +1288,15 @@ export const useProjectStore = defineStore('project', {
           this.dhStyleIds[input.style] = style.id
           if (!this.dhStyles.includes(input.style)) this.dhStyles.push(input.style)
         }
-        const prompt = imageGen.buildPortraitPrompt(input.description || input.name, input.style)
         const reference = await api.uploadDataUrl(input.avatar, `${nextId('reference')}.jpg`)
         this.dhGeneratingPhase = 'generating'
         const template = imageGen.getTemplateAvatar()
         const generated = await imageGen.generateImageAsset(
-          prompt,
+          '',
           {
             size: '1344x768',
             quality: 'medium',
+            portrait: { description: input.description || input.name, style: input.style },
             image: template ? [template, reference.url] : reference.url,
           },
           (jobId) =>
@@ -1253,7 +1315,7 @@ export const useProjectStore = defineStore('project', {
           description: input.description ?? '',
           avatar: generated.url,
           thumbnail: generated.thumbnailUrl,
-          avatarPrompt: prompt,
+          avatarPrompt: generated.prompt ?? '',
           source: 'uploaded',
           styleId,
         })
@@ -1371,7 +1433,7 @@ export const useProjectStore = defineStore('project', {
         const finalPrompt = (
           prompt ??
           dh.avatarPrompt ??
-          imageGen.buildPortraitPrompt(dh.description, dh.style)
+          (await imageGen.fetchPortraitPrompt(dh.description, dh.style))
         ).trim()
         const template = imageGen.getTemplateAvatar()
         const dhRef = dh.avatar
@@ -1426,6 +1488,8 @@ export const useProjectStore = defineStore('project', {
       this.generalStoryboardLoading = true
       this.generalStoryboardError = null
       try {
+        // 全新状态直接点「通用 MV 视频」：自动创建未命名项目承载本次生成
+        await this.ensureSongProjectForGeneration()
         const result = await api.generateGeneralStoryboard({ ...req, projectId: this.activeSongId })
         const lines: ScriptLine[] = result.lines.map((item) => ({
           id: item.id || nextId(),
@@ -1502,7 +1566,9 @@ export const useProjectStore = defineStore('project', {
       this.magicLoading = true
       this.magicError = null
       try {
-        if (!req || !this.activeSongId) throw new Error('请先选择歌曲项目')
+        if (!req) throw new Error('缺少 ASS 视频参数')
+        // 全新状态直接点「ASS 视频」：自动创建未命名项目承载本次生成
+        await this.ensureSongProjectForGeneration()
         const script = await api.generateMagicScript({ ...req, projectId: this.activeSongId })
         // 脚本自带统一的角色阵容
         const lines: ScriptLine[] = script.lines.map((item) => ({
@@ -1718,6 +1784,8 @@ export const useProjectStore = defineStore('project', {
       }
     },
 
+    /** 批量生成视频片段：提示词就绪且视频「未生成/失败」的行串行派发（与批量按钮计数同口径）；
+     *  单行失败不中断后续（失败原因入行内状态，429 单账号上限由后端兜底并统一弹窗） */
     async generateAllShots() {
       if (this.batchShooting) return
       this.batchShooting = true
@@ -1726,7 +1794,8 @@ export const useProjectStore = defineStore('project', {
         for (const line of [...this.lines]) {
           // 切换子项目后立即停止批量派发
           if (this.activeTaskId !== taskId) break
-          if (line.shot.status !== 'done') await this.generateShotFor(line.id)
+          if (line.generationStatus === 'succeeded' && line.shot.status !== 'done')
+            await this.generateShotFor(line.id)
         }
       } finally {
         this.batchShooting = false
@@ -1739,6 +1808,25 @@ export const useProjectStore = defineStore('project', {
       this.exportsByTaskId[item.taskId] = next.sort((left, right) =>
         right.createdAt.localeCompare(left.createdAt),
       )
+      this._syncExportTicker()
+    },
+
+    /** 有进行中导出时维持 1s 时钟驱动进度爬升；全部落定后停止 */
+    _syncExportTicker() {
+      const hasActive = Object.values(this.exportsByTaskId).some((items) =>
+        items.some((entry) => entry.status === 'queued' || entry.status === 'running'),
+      )
+      if (hasActive) {
+        this.exportNow = Date.now()
+        if (exportTicker === undefined) {
+          exportTicker = window.setInterval(() => {
+            this.exportNow = Date.now()
+          }, 1000)
+        }
+      } else if (exportTicker !== undefined) {
+        window.clearInterval(exportTicker)
+        exportTicker = undefined
+      }
     },
 
     async _watchMaterialExport(item: MaterialExport) {
@@ -1828,6 +1916,17 @@ export const useProjectStore = defineStore('project', {
         const dt = (now - lastTick) / 1000
         lastTick = now
         let t = this.currentTime + dt
+        // 主时钟：当前片段有在播视频时以其真实进度为准，消除估算漂移；拖动中不回写（以用户拖动位置为准）
+        const clip = this.currentClip
+        if (
+          !this.scrubbing &&
+          clip &&
+          activeVideoEl &&
+          activeVideoEl.readyState >= 2 &&
+          !activeVideoEl.paused
+        ) {
+          t = clip.start + activeVideoEl.currentTime
+        }
         const range = this.playRange
         if (t >= range.end) {
           if (this.playMode.loop) {
@@ -1860,6 +1959,11 @@ export const useProjectStore = defineStore('project', {
 
     seek(time: number) {
       this.currentTime = Math.min(Math.max(time, 0), this.totalDuration)
+    },
+
+    /** PlayerPanel 挂载/卸载视频元素时登记：播放中主时钟以视频真实进度为准 */
+    registerVideoEl(el: HTMLVideoElement | null) {
+      activeVideoEl = el
     },
 
     clampCurrentTime() {

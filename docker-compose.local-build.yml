@@ -1,6 +1,16 @@
+# 本机镜像加速覆盖：所有构建基础镜像与服务镜像统一走国内代理，本机不直连 docker.io。
+# 服务器部署不加载本文件；镜像内容与官方一致（frontend 基础镜像以官方 sha256 digest 锁定）。
 services:
   frontend:
     build:
       args:
         NODE_BASE_IMAGE: ${LOCAL_NODE_BASE_IMAGE:-docker.1ms.run/library/node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32}
         NGINX_BASE_IMAGE: ${LOCAL_NGINX_BASE_IMAGE:-docker.1ms.run/library/nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10}
+  backend:
+    build:
+      args:
+        BACKEND_BASE_IMAGE: ${LOCAL_BACKEND_BASE_IMAGE:-docker.1ms.run/library/python:3.12-slim}
+  postgres:
+    image: ${LOCAL_POSTGRES_IMAGE:-docker.1ms.run/library/postgres:16}
+  redis:
+    image: ${LOCAL_REDIS_IMAGE:-docker.1ms.run/library/redis:7-alpine}

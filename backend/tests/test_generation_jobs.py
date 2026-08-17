@@ -464,6 +464,42 @@ def test_create_real_face_asset_rejected_raises_friendly_error(client, monkeypat
         asyncio.run(providers.create_real_face_asset("https://tos.test/face.jpg", name="mv-001"))
 
 
+def test_create_real_face_asset_retries_without_moderation_for_cn_region(client, monkeypatch) -> None:
+    """CN region 不支持 Moderation 参数：首次 400 后去掉该参数降级重试（其他区域行为不变）。"""
+    import httpx
+
+    from app import providers
+
+    calls: list[dict] = []
+
+    class FakeCnClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url: str, headers=None, json=None) -> httpx.Response:
+            request = httpx.Request("POST", url)
+            if url.endswith("/virtual/assets/create"):
+                calls.append(dict(json))
+                if "Moderation" in json:
+                    return httpx.Response(400, text="Moderation parameter is not supported for CN region", request=request)
+                return httpx.Response(200, json={"code": 200, "data": {"id": "asset-cn-1", "status": "Processing"}}, request=request)
+            return httpx.Response(200, json={"code": 200, "data": {"id": "asset-cn-1", "status": "Active"}}, request=request)
+
+    monkeypatch.setattr(providers, "_video_config", lambda: ("https://api-aigc.test", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeCnClient)
+
+    asset_url = asyncio.run(providers.create_real_face_asset("https://tos.test/face.jpg", name="mv-001"))
+    assert asset_url == "asset://asset-cn-1"
+    assert "Moderation" in calls[0]
+    assert "Moderation" not in calls[1]
+
+
 async def test_resolve_asset_avatar_urls_maps_human_tos_to_asset(client) -> None:
     from app.database import session_factory
     from app.main import _resolve_asset_avatar_urls

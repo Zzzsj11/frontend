@@ -217,11 +217,13 @@ export interface OutlineFailedSegment {
   error: string
 }
 
-/** ASS 大纲后台生成的进度（SSE 事件与任务快照共用） */
+/** 大纲后台生成的进度（SSE 事件与任务快照共用；ASS 为分段多轮，通用为单轮 generating） */
 export interface OutlineProgress {
-  phase?: 'planning' | 'segments' | 'error'
+  phase?: 'planning' | 'segments' | 'generating' | 'error'
   segmentsDone?: number
   segmentsTotal?: number
+  shotsDone?: number
+  shotsTotal?: number
   startedAt?: string
   error?: string
 }
@@ -334,4 +336,17 @@ export interface MaterialExport {
   error?: string
   createdAt: string
   updatedAt: string
+}
+
+/** 管理后台侧边导航菜单项 */
+export interface AdminNavItem {
+  key: string
+  label: string
+}
+
+/** 管理后台侧边导航分组（两级结构：组 → 菜单项） */
+export interface AdminNavGroup {
+  key: string
+  label: string
+  items: AdminNavItem[]
 }

@@ -236,7 +236,7 @@ def test_material_exports_are_isolated_between_users(client, monkeypatch) -> Non
     from app import domain
 
     class Storage:
-        async def put_file(self, key, path, content_type=None):
+        async def put_file(self, key, path, content_type=None, progress_callback=None):
             return f"https://tos.test/{key}"
 
     monkeypatch.setattr(domain, "get_storage", lambda: Storage())
@@ -489,3 +489,74 @@ def test_private_humans_sort_before_system(client) -> None:
     private_ids = [item["id"] for item in humans if item["scope"] == "private"]
     assert private_ids.index(next(pid for pid in private_ids if pid.endswith("-new"))) < private_ids.index(next(pid for pid in private_ids if pid.endswith("-old")))
     assert any(item["id"] == "dh-system-001" for item in humans)
+
+
+def test_storyboard_line_generation_per_user_concurrency_limit(client, monkeypatch) -> None:
+    import asyncio
+    from datetime import datetime, timezone
+
+    from app import domain
+    from app.database import session_factory
+    from app.domain import uid
+    from app.models import StoryboardLineModel
+
+    async def fake_storyboard_line(**kwargs):
+        return {
+            "scenePrompt": "batched scene",
+            "shotPrompt": "batched shot",
+            "digitalHumanIds": [],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "requestId": "req-limit",
+        }
+
+    monkeypatch.setattr(domain, "generate_storyboard_line", fake_storyboard_line)
+
+    _, headers = create_and_login_user(client, "limit-owner")
+    _, other = create_and_login_user(client, "limit-other")
+    project = client.post("/api/projects", headers=headers, json={"name": "Limit"}).json()
+    storyboard = client.post(
+        f"/api/projects/{project['id']}/storyboards/general",
+        headers=headers,
+        json={
+            "genre": "流行歌曲",
+            "season": "春",
+            "gender": "女",
+            "age_group": "青年",
+            "visual_style": "电影写实",
+            "empty_shot_count": 1,
+            "character_shot_count": 0,
+            "total_duration": 5,
+        },
+    )
+    assert storyboard.status_code == 201
+    task_id = storyboard.json()["taskId"]
+    line_id = storyboard.json()["lines"][0]["id"]
+
+    other_project = client.post("/api/projects", headers=other, json={"name": "Other"}).json()
+    other_task = client.post(f"/api/projects/{other_project['id']}/tasks", headers=other, json={"title": "o"}).json()
+
+    async def insert_running(task: str, count: int) -> None:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        async with session_factory() as db:
+            for _ in range(count):
+                db.add(
+                    StoryboardLineModel(
+                        id=uid("line"),
+                        project_task_id=task,
+                        generation_status="running",
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+            await db.commit()
+
+    # 其他账号的 100 条 running 不占用本账号额度（按 user_id 隔离）
+    asyncio.run(insert_running(other_task["id"], 100))
+    ok = client.post(f"/api/tasks/{task_id}/storyboard-lines/{line_id}/generate", headers=headers, json={})
+    assert ok.status_code == 200, ok.text
+
+    # 本账号 running 达到 100：拒绝受理并返回 429
+    asyncio.run(insert_running(task_id, 100))
+    blocked = client.post(f"/api/tasks/{task_id}/storyboard-lines/{line_id}/generate", headers=headers, json={})
+    assert blocked.status_code == 429
+    assert "上限" in blocked.json()["detail"]

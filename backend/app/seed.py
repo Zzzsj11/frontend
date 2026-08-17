@@ -19,6 +19,7 @@ from .models import (
     PromptVersionModel,
     SongEmotionProfileModel,
     StoryboardLineModel,
+    StoryboardOptionItemModel,
     UserAdminRoleModel,
     UserModel,
     utcnow,
@@ -26,6 +27,13 @@ from .models import (
 from .prompts import DEFAULT_PROMPTS
 from .song_emotions import SONG_EMOTIONS
 from .storage import TosStorage
+from .storyboard_options import (
+    DEFAULT_AGE_GROUPS,
+    DEFAULT_GENRE_TREE,
+    DEFAULT_SEASONS,
+    DEFAULT_VISUAL_STYLES,
+    seed_item_id,
+)
 from .system_humans import SYSTEM_HUMAN_ASSET_URLS, SYSTEM_HUMANS
 
 
@@ -63,6 +71,33 @@ async def seed_prompts(session) -> None:
                 status="active",
             )
         )
+
+
+async def seed_storyboard_options(session) -> None:
+    """通用分镜选项入库（幂等）：仅补缺；记录已存在（含被后台软删）则跳过，保护后台编辑与删除。"""
+
+    async def add_item(kind: str, name: str, parent_id: str | None, path: str, sort_order: int) -> str:
+        item_id = seed_item_id(kind, path)
+        if not await session.get(StoryboardOptionItemModel, item_id):
+            session.add(StoryboardOptionItemModel(id=item_id, kind=kind, parent_id=parent_id, name=name, sort_order=sort_order))
+        return item_id
+
+    for index, name in enumerate(DEFAULT_SEASONS):
+        await add_item("season", name, None, name, index)
+    for index, name in enumerate(DEFAULT_AGE_GROUPS):
+        await add_item("age_group", name, None, name, index)
+    for index, name in enumerate(DEFAULT_VISUAL_STYLES):
+        await add_item("visual_style", name, None, name, index)
+
+    async def walk_genre(children: list, parent_id: str | None, parent_path: str) -> None:
+        for index, child in enumerate(children):
+            name, grandchildren = child if isinstance(child, tuple) else (child, [])
+            path = f"{parent_path}/{name}" if parent_path else name
+            child_id = await add_item("genre", name, parent_id, path, index)
+            if grandchildren:
+                await walk_genre(grandchildren, child_id, path)
+
+    await walk_genre(DEFAULT_GENRE_TREE, None, "")
 
 
 async def seed_system_data() -> None:
@@ -206,6 +241,7 @@ async def seed_system_data() -> None:
                 for key, value in values.items():
                     setattr(profile, key, value)
         await seed_prompts(session)
+        await seed_storyboard_options(session)
         await session.commit()
 
 

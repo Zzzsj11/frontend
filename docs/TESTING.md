@@ -8,6 +8,67 @@ make test-e2e    # 本地 Playwright（mock 链路）
 make preflight   # 发布前全流程校验
 ```
 
+前端测试按「用户侧 / 管理后台」分组存放，可独立运行以缩短反馈时间：
+
+```
+tests/
+  user/    # 用户侧组件/Store/工具单测
+  admin/   # 管理后台面板单测
+e2e/
+  user/    # 用户侧旅程、远程冒烟、真实生成全链路
+  admin/   # 管理后台 API 契约 + 控制台 UI
+```
+
+```bash
+npm run test:unit:user    # 仅用户侧单测
+npm run test:unit:admin   # 仅管理后台单测
+npm run test:e2e:user     # 仅用户侧 e2e（带开关的 spec 仍需对应环境变量）
+npm run test:admin        # 管理后台 e2e（API 契约 + 控制台 UI）
+```
+
+新增测试按归属放入对应子目录；`npm test` / `npm run test:e2e` 仍跑全量，`make preflight` 行为不变。
+
+## 耗时与针对性验证（本机实测）
+
+`make preflight` 全量约 3 分钟，各阶段实测：
+
+| 阶段 | 耗时 | 说明 |
+|---|---|---|
+| lint | 11s | 前端 prettier+eslint、后端 ruff |
+| migration-check | 3s | Alembic 迁移一致性 |
+| test-backend | 49s | pytest 143 用例（纯执行 31s）+ coverage 卡口（约 18s） |
+| test-frontend | 14s | vitest 118 用例，启动/transform 占大头 |
+| build | 8s | vue-tsc + vite |
+| docker-build | 87s | 缓存命中态，占全量约一半 |
+
+e2e 不在 preflight 内，按需触发：`test:e2e:user`（本地 mock 链路）约 6s；`test:admin` 约 10s；`test:remote:*` 分钟级；`test:e2e:real` 上限 90 分钟且产生真实费用。
+
+日常小改不必每次全量，按改动范围选最小验证集：
+
+| 改动范围 | 最小验证命令 | 耗时 |
+|---|---|---|
+| 前端单组件/composable | `npx vitest run tests/user/xxx.test.ts` | ~3s |
+| 前端用户侧 src | `npm run test:unit:user` | ~9s |
+| 前端管理后台 src | `npm run test:unit:admin` | ~6s |
+| 后端单模块 | `cd backend && .venv/bin/pytest -q tests/test_xxx.py` | 2~10s |
+| 权限/隔离/API 契约 | 上述 + `tests/test_multi_user.py` `tests/test_api.py` | ~10s |
+| models.py 或 migrations | `make migration-check` + 相关 pytest 文件 | ~15s |
+| 日常提交前 | `make preflight-lite`（跳过 docker-build） | ~85s |
+| 发布前 | `make preflight` 全量 + 相关 e2e | ~3min |
+| 用户旅程关键链路 | 追加 `npm run test:e2e:user` | ~6s |
+| 管理后台 UI/契约 | 追加 `npm run test:admin` | ~10s |
+| 供应商/提示词/生成链路 | 按需 `npm run test:e2e:real`（有成本） | 上限 90min |
+
+约束：新增后端功能必须补集成测试（对应 pytest 文件必跑）；涉及用户旅程、API、部署或权限的改动必须加跑对应 e2e；`make preflight` 是发布前唯一全量卡口，不得用 preflight-lite 替代发布验证。
+
+不适合自动化的点（需人工验收）：
+
+| 功能 | 原因 |
+| --- | --- |
+| 图片/视频生成质量 | 需要视觉判断 |
+| 拖拽排序动画、卡片动效 | CSS 动效，Playwright 难以验证 |
+| 数字人生成进度 | 依赖真实 AI 服务，耗时长 |
+
 新增功能必须优先补后端集成测试；关键页面再补 Playwright，避免只依靠脆弱的端到端测试。失败产物在 `test-results/`，远程截图在 `test-artifacts/remote/runs/`。
 
 ## e2e 凭据约定（强制）
@@ -37,7 +98,7 @@ make preflight   # 发布前全流程校验
   与整页加载计时。
 - 请求/响应体仅 JSON 且 ≤8KB 入库；SSE/流式/二进制只记元信息。密码等敏感字段自动脱敏为 `***`。
 - 回归测试：后端 `backend/tests/test_request_logging.py`（9 个：轮询跳过/minMs 过滤/
-  duration 排序/聚合/脱敏/权限），前端 `tests/perf.test.ts`（4 个：聚合计算/阈值过滤/
+  duration 排序/聚合/脱敏/权限），前端 `tests/user/perf.test.ts`（4 个：聚合计算/阈值过滤/
   标记识别/埋点集成）。
 
 ## 远程验收（对已部署环境）
@@ -56,7 +117,7 @@ REMOTE_REAL_GENERATION=1 npm run test:remote:api   # 含真实生成分支（产
 
 ## 真实生成全链路（有真实成本）
 
-`e2e/full-real-generation.spec.ts` 覆盖：登录 → 建项目 → ASS 上传/情感匹配/选角/逐条提示词 → 通用分镜 → 场景图 → 视频 → 播放器 → 素材 ZIP 导出，全程截图并断言无错误弹窗。默认跳过，`REAL_GENERATION_E2E=1` 才运行。
+`e2e/user/full-real-generation.spec.ts` 覆盖：登录 → 建项目 → ASS 上传/情感匹配/选角/逐条提示词 → 通用分镜 → 场景图 → 视频 → 播放器 → 素材 ZIP 导出，全程截图并断言无错误弹窗。默认跳过，`REAL_GENERATION_E2E=1` 才运行。
 
 ```bash
 npx playwright install chromium   # 首次
@@ -77,8 +138,8 @@ npm run test:e2e:real:export      # 复用已有通用视频，仅验播放器�
 
 ```bash
 cd backend && .venv/bin/pytest -q tests/test_admin_console.py   # 后端集成（独立 SQLite）
-ADMIN_API_E2E=1 npx playwright test e2e/admin-api.spec.ts       # 远程 API 契约
-ADMIN_CONSOLE_E2E=1 npx playwright test e2e/admin-console.spec.ts  # 远程 UI
+ADMIN_API_E2E=1 npx playwright test e2e/admin/admin-api.spec.ts       # 远程 API 契约
+ADMIN_CONSOLE_E2E=1 npx playwright test e2e/admin/admin-console.spec.ts  # 远程 UI
 ```
 
 测试不得修改或删除系统人物；模型启停类测试完成后恢复原状态。

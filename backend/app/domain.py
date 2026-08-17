@@ -63,6 +63,7 @@ from .schemas import (
 )
 from .storage import download_public_url_to_path, get_storage, is_tos_url, safe_key
 from .story_bible import STORY_BIBLE_VERSION, build_ass_story_bible, build_general_story_bible, exact_durations
+from .storyboard_options import load_general_storyboard_options
 from .storyboard_prompt import (
     PROMPT_VERSION,
     SCHEMA_VERSION,
@@ -412,6 +413,12 @@ async def create_task(project_id: str, payload: TaskCreate, user: CurrentUser, d
     return task_json(item)
 
 
+@router.get("/storyboards/general/options")
+async def general_storyboard_options(user: CurrentUser, db: AsyncSession = Db) -> dict:
+    """通用分镜生成弹窗选项：曲风三级树 + 季节/年龄段/画面风格/画幅（管理后台可配，软删生效）。"""
+    return await load_general_storyboard_options(db)
+
+
 @router.post("/projects/{project_id}/storyboards/general", status_code=201)
 async def create_general_storyboard(project_id: str, payload: GeneralStoryboardCreate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     await owned_project(db, user.id, project_id)
@@ -743,7 +750,7 @@ async def _run_ass_outline_generation(
             task.status = "outline_failed"
             await session.commit()
             return
-        story_bible = build_ass_story_bible(
+        story_bible = await build_ass_story_bible(
             segments=segments,
             emotion=emotion,
             role_ids=role_ids,
@@ -858,7 +865,7 @@ async def _run_general_outline_generation(
             task.status = "outline_failed"
             await session.commit()
             return
-        story_bible = build_general_story_bible(config=config, shots=outline["shots"], durations=durations)
+        story_bible = await build_general_story_bible(config=config, shots=outline["shots"], durations=durations)
         lines = list(
             (
                 await session.execute(
@@ -1093,7 +1100,7 @@ async def _run_segment_retry(
             "failedSegments": [item for item in (story_bible.get("failedSegments") or []) if item.get("sceneIndex") != scene_index],
             "shots": updated_shots,
         }
-        new_bible = build_ass_story_bible(
+        new_bible = await build_ass_story_bible(
             segments=segments,
             emotion=emotion,
             role_ids=role_ids,
@@ -1576,6 +1583,25 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
         raise HTTPException(422, "该分镜所在场景段尚未生成大纲，请先生成分镜大纲")
     if line.generation_status == "running":
         raise HTTPException(409, "该分镜正在生成")
+    # 单账号并行上限：统计该用户全部子项目中处于 running 的提示词生成行数，达到 100 拒绝受理
+    running_count = int(
+        (
+            await db.execute(
+                select(func.count(StoryboardLineModel.id))
+                .join(ProjectTaskModel, StoryboardLineModel.project_task_id == ProjectTaskModel.id)
+                .join(ProjectModel, ProjectTaskModel.project_id == ProjectModel.id)
+                .where(
+                    ProjectModel.user_id == user.id,
+                    ProjectModel.deleted_at.is_(None),
+                    ProjectTaskModel.deleted_at.is_(None),
+                    StoryboardLineModel.deleted_at.is_(None),
+                    StoryboardLineModel.generation_status == "running",
+                )
+            )
+        ).scalar_one()
+    )
+    if running_count >= 100:
+        raise HTTPException(429, "同时进行的提示词生成已达上限（100 条），请等待部分完成后再试")
     lines = list(
         (
             await db.execute(
@@ -1918,120 +1944,144 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
                 line_values = [
                     {"id": line.id, "lyrics": line.lyrics, "shot_type": line.shot_type, "scene_prompt": line.scene_prompt, "shot_prompt": line.shot_prompt} for line in lines
                 ]
-                asset_values = [{"id": asset.id, "line_id": asset.storyboard_line_id, "video_url": asset.video_url} for asset in shot_assets]
+                asset_values = [{"id": asset.id, "line_id": asset.storyboard_line_id, "video_url": asset.video_url, "is_current": asset.is_current} for asset in shot_assets]
                 human_values = [
                     {"id": human.id, "name": human.name, "asset_code": human.asset_code, "avatar_url": human.avatar_url}
                     for human_id in human_ids
                     if (human := humans_by_id.get(human_id)) and human.avatar_url
                 ]
-            by_line: dict[str, list[dict]] = {}
+            # 每镜只导出当前选中版（is_current）；无当前版的行回退到最新一版（asset_values 按创建时间升序，后者覆盖前者）
+            current_by_line: dict[str, dict] = {}
             for asset in asset_values:
-                by_line.setdefault(asset["line_id"], []).append(asset)
-            total_assets = len(asset_values) + len(human_values)
+                existing = current_by_line.get(asset["line_id"])
+                if not existing or asset["is_current"] or not existing["is_current"]:
+                    current_by_line[asset["line_id"]] = asset
+            downloads: list[dict] = []
+            for index, line in enumerate(line_values, start=1):
+                asset = current_by_line.get(line["id"])
+                if asset:
+                    downloads.append({"url": asset["video_url"], "arcname": f"videos/{index:02d}.mp4"})
+            human_filenames: list[tuple[dict, str]] = []
+            for index, human in enumerate(human_values, start=1):
+                source_suffix = Path(urlsplit(human["avatar_url"]).path).suffix.lower()
+                suffix = source_suffix if source_suffix in {".jpg", ".jpeg", ".png", ".webp"} else ".jpg"
+                filename = f"{index:02d}-{human['asset_code'] or human['id']}{suffix}"
+                human_filenames.append((human, filename))
+                downloads.append({"url": human["avatar_url"], "arcname": f"characters/{filename}"})
+            total_assets = len(downloads)
             await _set_export_progress(export_id, job, 5, "正在整理视频脚本与素材", total_assets=total_assets)
             markdown = [f"# {project_name} · {task_title}", "", "## 整体提示词", "", overall_prompt or "（未填写）", "", "## 分镜提示词", ""]
+            for index, line in enumerate(line_values, start=1):
+                markdown.extend(
+                    [
+                        f"### {index:02d}. {line['lyrics'] or line['shot_type'] or '分镜'}",
+                        "",
+                        f"- 场景：{line['scene_prompt']}",
+                        f"- 镜头：{line['shot_prompt']}",
+                        "",
+                    ]
+                )
+            if human_filenames:
+                markdown.extend(["## 人物素材", ""])
+            for human, filename in human_filenames:
+                markdown.extend([f"- {human['name']}：`characters/{filename}`", ""])
             processed_assets = processed_bytes = known_total_bytes = 0
             last_progress = 5
             with tempfile.TemporaryDirectory(prefix=f"mvagent-export-{export_id}-") as temporary_directory:
                 temporary_path = Path(temporary_directory)
                 archive_path = temporary_path / f"{export_id}.zip"
-                with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_STORED, allowZip64=True) as bundle:
-                    for index, line in enumerate(line_values, start=1):
-                        markdown.extend(
-                            [
-                                f"### {index:02d}. {line['lyrics'] or line['shot_type'] or '分镜'}",
-                                "",
-                                f"- 场景：{line['scene_prompt']}",
-                                f"- 镜头：{line['shot_prompt']}",
-                                "",
-                            ]
-                        )
-                        for version, asset in enumerate(by_line.get(line["id"], []), start=1):
-                            video_path = temporary_path / f"{index:02d}-v{version:02d}-{asset['id']}.mp4"
+                # 并发下载（4 路）到临时目录，完成后按清单顺序写入 ZIP，保证包内镜序稳定
+                in_flight: dict[int, float] = {}
+                download_slots = asyncio.Semaphore(4)
 
-                            async def on_download(current: int, declared: int | None) -> None:
-                                nonlocal last_progress
-                                fraction = current / declared if declared else 0
-                                progress = 5 + int(75 * (processed_assets + fraction) / max(1, total_assets))
-                                if progress > last_progress:
-                                    last_progress = progress
-                                    await _set_export_progress(
-                                        export_id,
-                                        job,
-                                        progress,
-                                        f"正在下载第 {processed_assets + 1}/{total_assets} 个视频",
-                                        processed_assets=processed_assets,
-                                        processed_bytes=processed_bytes + current,
-                                        total_bytes=known_total_bytes + (declared or 0),
-                                    )
+                async def download_one(position: int, item: dict) -> None:
+                    nonlocal processed_assets, processed_bytes, known_total_bytes, last_progress
+                    target = temporary_path / f"dl-{position:04d}"
 
-                            _, _, size = await download_public_url_to_path(asset["video_url"], video_path, progress_callback=on_download)
-                            bundle.write(video_path, f"videos/{video_path.name}")
-                            video_path.unlink(missing_ok=True)
-                            processed_assets += 1
-                            processed_bytes += size
-                            known_total_bytes += size
-                            progress = 5 + int(75 * processed_assets / max(1, total_assets))
-                            last_progress = max(last_progress, progress)
+                    async def on_download(current: int, declared: int | None) -> None:
+                        nonlocal last_progress
+                        in_flight[position] = current / declared if declared else 0.0
+                        progress = 5 + int(65 * (processed_assets + sum(in_flight.values())) / max(1, total_assets))
+                        if progress > last_progress:
+                            last_progress = progress
                             await _set_export_progress(
                                 export_id,
                                 job,
                                 progress,
-                                f"已处理 {processed_assets}/{total_assets} 个视频",
+                                f"正在下载素材 {processed_assets + 1}/{total_assets}",
+                                processed_assets=processed_assets,
+                                processed_bytes=processed_bytes + current,
+                                total_bytes=known_total_bytes + (declared or 0),
+                            )
+
+                    async with download_slots:
+                        _, _, size = await download_public_url_to_path(item["url"], target, progress_callback=on_download)
+                    in_flight.pop(position, None)
+                    item["path"] = target
+                    processed_assets += 1
+                    processed_bytes += size
+                    known_total_bytes += size
+                    progress = 5 + int(65 * processed_assets / max(1, total_assets))
+                    last_progress = max(last_progress, progress)
+                    await _set_export_progress(
+                        export_id,
+                        job,
+                        progress,
+                        f"已下载 {processed_assets}/{total_assets} 个素材",
+                        processed_assets=processed_assets,
+                        processed_bytes=processed_bytes,
+                        total_bytes=known_total_bytes,
+                    )
+
+                await asyncio.gather(*(download_one(position, item) for position, item in enumerate(downloads)))
+                # 打包 70–85%：按清单顺序写入（videos/01.mp4… 与镜序一致）
+                with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_STORED, allowZip64=True) as bundle:
+                    for written, item in enumerate(downloads, start=1):
+                        bundle.write(item["path"], item["arcname"])
+                        item["path"].unlink(missing_ok=True)
+                        progress = 70 + int(15 * written / max(1, total_assets))
+                        if progress > last_progress:
+                            last_progress = progress
+                            await _set_export_progress(
+                                export_id,
+                                job,
+                                progress,
+                                f"正在打包素材 {written}/{total_assets}",
                                 processed_assets=processed_assets,
                                 processed_bytes=processed_bytes,
                                 total_bytes=known_total_bytes,
                             )
-                    if human_values:
-                        markdown.extend(["## 人物素材", ""])
-                    for index, human in enumerate(human_values, start=1):
-                        source_suffix = Path(urlsplit(human["avatar_url"]).path).suffix.lower()
-                        suffix = source_suffix if source_suffix in {".jpg", ".jpeg", ".png", ".webp"} else ".jpg"
-                        filename = f"{index:02d}-{human['asset_code'] or human['id']}{suffix}"
-                        human_path = temporary_path / filename
+                    bundle.writestr("prompts.md", "\n".join(markdown).encode("utf-8"), compress_type=zipfile.ZIP_DEFLATED)
+                archive_size = archive_path.stat().st_size
+                await _set_export_progress(export_id, job, 85, "正在上传压缩包到 TOS", archive_size=archive_size)
+                # 上传 85–99%：TOS data_transfer_listener 在 worker 线程回报字节数，主协程轮询折算进度
+                upload_state = {"consumed": 0}
 
-                        async def on_human_download(current: int, declared: int | None) -> None:
-                            nonlocal last_progress
-                            fraction = current / declared if declared else 0
-                            progress = 5 + int(75 * (processed_assets + fraction) / max(1, total_assets))
-                            if progress > last_progress:
-                                last_progress = progress
-                                await _set_export_progress(
-                                    export_id,
-                                    job,
-                                    progress,
-                                    f"正在下载第 {processed_assets + 1}/{total_assets} 个人物素材",
-                                    processed_assets=processed_assets,
-                                    processed_bytes=processed_bytes + current,
-                                    total_bytes=known_total_bytes + (declared or 0),
-                                )
+                def on_upload(consumed: int, _total: int) -> None:
+                    upload_state["consumed"] = consumed
 
-                        _, _, size = await download_public_url_to_path(human["avatar_url"], human_path, progress_callback=on_human_download)
-                        bundle.write(human_path, f"characters/{filename}")
-                        human_path.unlink(missing_ok=True)
-                        markdown.extend([f"- {human['name']}：`characters/{filename}`", ""])
-                        processed_assets += 1
-                        processed_bytes += size
-                        known_total_bytes += size
-                        progress = 5 + int(75 * processed_assets / max(1, total_assets))
-                        last_progress = max(last_progress, progress)
+                upload_task = asyncio.create_task(
+                    get_storage().put_file(
+                        safe_key(f"users/{job.user_id}/exports/{job.project_task_id}", f"{export_id}.zip"),
+                        archive_path,
+                        "application/zip",
+                        progress_callback=on_upload,
+                    )
+                )
+                while not upload_task.done():
+                    await asyncio.sleep(1.5)
+                    fraction = min(1.0, upload_state["consumed"] / max(1, archive_size))
+                    progress = 85 + int(14 * fraction)
+                    if progress > last_progress:
+                        last_progress = progress
                         await _set_export_progress(
                             export_id,
                             job,
                             progress,
-                            f"已处理 {processed_assets}/{total_assets} 个素材",
-                            processed_assets=processed_assets,
-                            processed_bytes=processed_bytes,
-                            total_bytes=known_total_bytes,
+                            "正在上传压缩包到 TOS",
+                            archive_size=archive_size,
                         )
-                    bundle.writestr("prompts.md", "\n".join(markdown).encode("utf-8"), compress_type=zipfile.ZIP_DEFLATED)
-                archive_size = archive_path.stat().st_size
-                await _set_export_progress(export_id, job, 90, "正在上传压缩包到 TOS", archive_size=archive_size)
-                archive_url = await get_storage().put_file(
-                    safe_key(f"users/{job.user_id}/exports/{job.project_task_id}", f"{export_id}.zip"),
-                    archive_path,
-                    "application/zip",
-                )
+                archive_url = await upload_task
             async with session_factory() as session:
                 export = await session.get(MaterialExportModel, export_id)
                 export.status = "ready"

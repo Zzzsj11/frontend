@@ -237,6 +237,75 @@ async def test_generation_records_prompt_key_and_version(client, monkeypatch) ->
     assert record["promptVersion"] >= 1  # 测试库已 seed 发布版，留痕指向实际使用的版本
 
 
+# ── P2：story_bible 策略文案 / 定妆照提示词后端化 / chat 默认人设 ────────────
+
+
+async def test_story_bible_policies_come_from_registry(client) -> None:
+    """storyBible 的策略文案由注册中心渲染；or 缺省逻辑仍留在代码。"""
+    from app.story_bible import build_ass_story_bible, build_general_story_bible
+
+    outline = {"globalVisual": {}, "locations": [], "motifs": [], "shots": [{"shotType": "empty", "requiredCharacterIds": []}]}
+    bible = await build_ass_story_bible(
+        segments=[{"lyrics": "一句", "start": 0, "end": 5}],
+        emotion={"songName": "歌", "materialCategory": "流行"},
+        role_ids=[],
+        extra_requirement="",
+        outline=outline,
+    )
+    assert bible["logline"] == "歌 的情绪化 MV，以 流行 为叙事核心。"
+    assert bible["characterPolicy"] == DEFAULT_PROMPTS["story_bible.ass.character_policy"]["content"]
+    assert bible["technicalPolicy"]["negativeConstraints"] == json.loads(DEFAULT_PROMPTS["story_bible.ass.negative_constraints"]["content"])
+    assert bible["technicalPolicy"]["locationRule"] == DEFAULT_PROMPTS["story_bible.ass.location_rule"]["content"]
+    # 用户未填额外要求时 stylePriority 用注册中心默认文案
+    assert bible["visualContinuity"]["stylePriority"] == DEFAULT_PROMPTS["story_bible.ass.style_priority_default"]["content"]
+
+    general = await build_general_story_bible(config={"genre": "流行歌曲", "gender": "女"}, shots=[], durations=[])
+    assert general["logline"].startswith("流行歌曲 风格的完整 MV 视觉弧光")
+    assert general["characterPolicy"] == DEFAULT_PROMPTS["story_bible.general.character_policy"]["content"]
+
+
+def test_portrait_prompt_preview_and_create_validation(client) -> None:
+    """定妆照提示词由后端注册中心拼装：preview 不调模型，create 空 prompt+无 portrait 拒绝。"""
+    preview = client.post("/api/generations/images/portrait-prompt", json={"description": "青衣少女", "style": "古风"})
+    assert preview.status_code == 200
+    prompt = preview.json()["prompt"]
+    assert "参照第一张参考图" in prompt
+    assert "角色描述：青衣少女" in prompt and "画面风格：古风" in prompt
+
+    empty = client.post("/api/generations/images/portrait-prompt", json={})
+    assert "角色描述" not in empty.json()["prompt"] and "画面风格" not in empty.json()["prompt"]
+
+    rejected = client.post("/api/generations/images", json={"prompt": "  "})
+    assert rejected.status_code == 422
+
+    # portrait 模式：后端拼装 prompt 并随响应返回（供前端落库 avatarPrompt）
+    created = client.post("/api/generations/images", json={"portrait": {"description": "青衣少女", "style": "古风"}})
+    assert created.status_code == 202
+    assert "角色描述：青衣少女" in created.json()["prompt"]
+
+
+def test_chat_session_default_system_prompt_from_registry(client) -> None:
+    """创建会话不传 system_prompt 时，后端用注册中心的 chat.default_system 填充。"""
+    created = client.post("/api/chat/sessions", json={})
+    assert created.status_code == 201
+    session_id = created.json()["id"]
+
+    from app.database import session_factory
+    from app.models import ChatSessionModel
+
+    async def _stored_prompt() -> str:
+        async with session_factory() as session:
+            model = await session.get(ChatSessionModel, session_id)
+            return model.system_prompt if model else ""
+
+    assert asyncio.run(_stored_prompt()) == DEFAULT_PROMPTS["chat.default_system"]["content"]
+
+    # 显式指定的 system_prompt 不被默认值覆盖
+    custom = client.post("/api/chat/sessions", json={"system_prompt": "你是测试助手"}).json()
+    assert client.delete(f"/api/chat/{custom['id']}").json() == {"ok": True}
+    client.delete(f"/api/chat/{session_id}")
+
+
 def test_non_admin_cannot_manage_prompts(client) -> None:
     created = client.post("/api/admin/users", json={"username": "prompt-reader", "password": "secure-pass-123"}).json()
     login = client.post("/api/auth/login", json={"username": "prompt-reader", "password": "secure-pass-123"}).json()

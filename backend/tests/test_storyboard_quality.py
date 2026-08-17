@@ -244,8 +244,8 @@ def test_video_duration_accepts_full_provider_range_and_normalizes_plans() -> No
     assert normalize_video_duration(20) == 15
 
 
-def test_ass_story_bible_has_shared_arc_and_character_plan() -> None:
-    bible = build_ass_story_bible(
+async def test_ass_story_bible_has_shared_arc_and_character_plan() -> None:
+    bible = await build_ass_story_bible(
         segments=[{"lyrics": str(index)} for index in range(6)],
         emotion={"songCode": "10012204", "songName": "他不爱我", "materialCategory": "流行歌曲-爱情消极-失恋", "seasons": "冬", "atmosphere": "冷色调"},
         role_ids=["a", "b"],
@@ -261,7 +261,7 @@ def test_ass_story_bible_has_shared_arc_and_character_plan() -> None:
     assert bible["shots"][2]["sceneIndex"] == 1
     assert bible["shots"][2]["outlineStatus"] == "ready"
 
-    single = build_ass_story_bible(
+    single = await build_ass_story_bible(
         segments=[{"lyrics": "single"}],
         emotion={"songCode": "1"},
         role_ids=["a", "b"],
@@ -557,9 +557,9 @@ def test_general_storyboard_create_allows_missing_secondary_category() -> None:
     assert payload.secondary_category is None
 
 
-def test_general_story_bible_logline_skips_empty_secondary_category() -> None:
+async def test_general_story_bible_logline_skips_empty_secondary_category() -> None:
     """无二级分类时 logline 不得拼出空段（「戏曲 /  风格」式脏文案）。"""
-    bible = build_general_story_bible(
+    bible = await build_general_story_bible(
         config={"genre": "戏曲", "gender": "女", "season": "通用"},
         shots=[],
         durations=[],
@@ -568,9 +568,9 @@ def test_general_story_bible_logline_skips_empty_secondary_category() -> None:
     assert " / " not in bible["logline"]
 
 
-def test_general_story_bible_logline_joins_present_categories() -> None:
+async def test_general_story_bible_logline_joins_present_categories() -> None:
     """二级分类存在时保持「一级 / 二级」拼接。"""
-    bible = build_general_story_bible(
+    bible = await build_general_story_bible(
         config={"genre": "流行歌曲", "secondary_category": "爱情消极", "gender": "女", "season": "秋"},
         shots=[],
         durations=[],

@@ -97,8 +97,10 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
             self.objects[key] = content
             return f"https://tos.test/{key}"
 
-        async def put_file(self, key, path, content_type=None):
+        async def put_file(self, key, path, content_type=None, progress_callback=None):
             self.objects[key] = path.read_bytes()
+            if progress_callback:
+                progress_callback(len(self.objects[key]), len(self.objects[key]))
             return f"https://tos.test/{key}"
 
     storage = MemoryStorage()
@@ -243,7 +245,9 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     archive = next(value for key, value in storage.objects.items() if key.endswith(".zip"))
     with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
         assert "prompts.md" in bundle.namelist()
-        assert any(name.startswith("videos/") for name in bundle.namelist())
+        # 视频仅保留镜序命名（只导当前选中版）
+        assert "videos/01.mp4" in bundle.namelist()
+        assert not any("-v" in name for name in bundle.namelist())
         assert any(name.startswith("characters/") for name in bundle.namelist())
         assert "sunlit room" in bundle.read("prompts.md").decode()
         assert "人物素材" in bundle.read("prompts.md").decode()

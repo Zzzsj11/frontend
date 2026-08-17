@@ -1,10 +1,10 @@
 SHELL := /bin/bash
-.PHONY: setup dev stop lint lint-frontend lint-backend test test-backend test-frontend test-e2e migration-check build docker-build preflight remote-test
+.PHONY: setup dev stop lint lint-frontend lint-backend test test-backend test-frontend test-e2e migration-check build docker-build preflight preflight-lite remote-test
 setup:
 	npm ci
 	cd backend && .venv/bin/pip install -r requirements-dev.txt
 dev:
-	docker compose up -d
+	docker compose -f docker-compose.yml -f docker-compose.local-build.yml up -d
 stop:
 	docker compose down
 lint: lint-frontend lint-backend
@@ -28,5 +28,7 @@ build:
 docker-build:
 	docker compose -f docker-compose.yml -f docker-compose.local-build.yml build
 preflight: lint migration-check test build docker-build
+# 日常提交前快速卡口：跳过 Docker 构建（约省一半时间），发布前仍跑完整 preflight
+preflight-lite: lint migration-check test build
 remote-test:
 	npm run test:admin && npm run test:remote:all

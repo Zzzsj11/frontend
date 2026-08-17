@@ -71,9 +71,12 @@ const seekByEvent = (e: MouseEvent) => {
 }
 
 const onAreaDown = (e: MouseEvent) => {
+  store.scrubbing = true
   seekByEvent(e)
   const onMove = (ev: MouseEvent) => seekByEvent(ev)
-  const onUp = () => {
+  const onUp = (ev: MouseEvent) => {
+    seekByEvent(ev) // 松手位置精确对齐一次
+    store.scrubbing = false
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', onUp)
   }
@@ -84,6 +87,9 @@ const onAreaDown = (e: MouseEvent) => {
 const onClipClick = (lineId: string, e: MouseEvent) => {
   e.stopPropagation()
   store.selectLine(lineId)
+  // 点选片段卡片同时把游标对齐到片段起点（selectLine 仅在单镜模式下才 seek，这里无条件对齐）
+  const clip = store.timelineClips.find((c) => c.lineId === lineId)
+  if (clip) store.seek(clip.start)
 }
 
 const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
@@ -150,8 +156,8 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
             </div>
           </div>
 
-          <!-- 播放指针 -->
-          <div class="playhead" :style="{ left: playheadX + 'px' }">
+          <!-- 播放指针（transform 位移：只走合成器，避免每帧触发布局） -->
+          <div class="playhead" :style="{ transform: `translateX(${playheadX}px)` }">
             <span class="playhead-label" :style="playheadLabelStyle">{{
               formatTime(store.currentTime)
             }}</span>
@@ -286,6 +292,7 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
   position: absolute;
   top: 0;
   bottom: 0;
+  left: 0;
   width: 0;
   z-index: 5;
   pointer-events: none;

@@ -15,7 +15,6 @@ import type {
 import * as mediaGen from './mediaGen'
 import { apiRequest, openApiStream } from './client'
 import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL } from '../generationModels'
-import { SONG_CATEGORY_GENRES } from '../songCategories'
 
 /**
  * 领域 API 门面 —— 镜像后端 domain 路由（backend/app/domain.py）：
@@ -395,17 +394,9 @@ export const regenerateStoryboardOutlineSegment = (taskId: string, sceneIndex: n
     lines: OutlinePlannedLine[]
   }>(`/tasks/${taskId}/storyboard-outline/segments/${sceneIndex}/regenerate`, { method: 'POST' })
 
-const generalStoryboardOptions: GeneralStoryboardOptions = {
-  genres: SONG_CATEGORY_GENRES,
-  seasons: ['春', '夏', '秋', '冬', '通用'],
-  ageGroups: ['少儿', '青少年', '青年', '中年', '老年'],
-  visualStyles: ['电影写实', '动漫', '国风', '复古', '赛博朋克'],
-  ratios: ['16:9', '9:16', '4:3', '1:1'],
-}
-
-/** 通用分镜的可选项 —— 静态配置，后端暂无选项接口 */
+/** 通用分镜的可选项 —— 由后端组装（管理后台「通用分类」可配） */
 export async function fetchGeneralStoryboardOptions(): Promise<GeneralStoryboardOptions> {
-  return structuredClone(generalStoryboardOptions)
+  return apiRequest<GeneralStoryboardOptions>('/storyboards/general/options')
 }
 
 export async function generateGeneralStoryboard(
