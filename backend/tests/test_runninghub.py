@@ -142,9 +142,18 @@ def test_runninghub_task_submit_and_query(client, monkeypatch):
         uploads.append(content)
         return {"fileName": f"openapi/{filename}", "downloadUrl": "https://cos.test/in.png", "size": str(len(content))}
 
+    async def fake_import(url: str, category: str, filename: str | None = None):
+        return f"https://tos.test/{filename}"
+
+    class FakeStorage:
+        async def put_bytes(self, key: str, content: bytes, content_type: str | None = None):
+            return f"https://tos.test/{key}"
+
     monkeypatch.setattr(admin_module, "rh_submit_task", fake_submit)
     monkeypatch.setattr(admin_module, "rh_query_task", fake_query)
     monkeypatch.setattr(admin_module, "rh_upload_media", fake_upload)
+    monkeypatch.setattr(admin_module, "import_remote", fake_import)
+    monkeypatch.setattr(admin_module, "get_storage", lambda: FakeStorage())
 
     status = client.get("/api/admin/runninghub/status").json()
     assert status["configured"] is True and status["keyTail"] == "...1234"
@@ -168,12 +177,13 @@ def test_runninghub_task_submit_and_query(client, monkeypatch):
 
     result = client.post("/api/admin/runninghub/query", json={"taskId": "2013508786110730241"}).json()
     assert result["status"] == "SUCCESS"
-    assert result["results"][0]["url"] == "https://cos.test/out.mp4"
+    assert result["results"][0]["url"] == "https://tos.test/2013508786110730241-0.mp4"
     assert queries == ["2013508786110730241"]
 
     uploaded = client.post("/api/admin/runninghub/upload", files={"file": ("ref.png", b"fake-png")})
     assert uploaded.status_code == 200
     assert uploaded.json()["fileName"] == "openapi/ref.png"
+    assert uploaded.json()["tosUrl"].startswith("https://tos.test/")
     assert uploads == [b"fake-png"]
 
     actions = {x["action"] for x in client.get("/api/admin/audit-logs").json()["items"]}

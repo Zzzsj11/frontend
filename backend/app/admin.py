@@ -30,6 +30,7 @@ from .models import (
     ApiRequestLogModel,
     DigitalHumanModel,
     GenerationJobModel,
+    H3TestPresetModel,
     LlmCallLogModel,
     ProjectModel,
     PromptTemplateModel,
@@ -61,6 +62,7 @@ from .runninghub import submit_first_frame_task as rh_submit_first_frame_task
 from .runninghub import submit_task as rh_submit_task
 from .runninghub import submit_text_task as rh_submit_text_task
 from .runninghub import upload_media as rh_upload_media
+from .storage import get_storage, import_remote, safe_key
 from .storyboard_options import OPTION_KINDS
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -983,6 +985,37 @@ def _runninghub_error(exc: RunningHubError) -> HTTPException:
     return HTTPException(502, str(exc))
 
 
+def _h3_preset_json(item: H3TestPresetModel) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "name": item.name,
+        "mode": item.mode,
+        "prompt": item.prompt,
+        "duration": item.duration,
+        "aspectRatio": item.aspect_ratio,
+        "inputMedia": item.input_media,
+        "outputMedia": item.output_media,
+        "taskId": item.task_id,
+        "taskStatus": item.task_status,
+        "usage": item.usage_data,
+        "createdAt": iso(item.created_at),
+    }
+
+
+@router.get("/runninghub/presets")
+async def runninghub_presets(user: CurrentUser, db: AsyncSession = Db):
+    """读取当前管理员自己的持久化 H3 测试输入和 TOS 输出。"""
+    require_admin(user)
+    rows = (
+        await db.execute(
+            select(H3TestPresetModel)
+            .where(H3TestPresetModel.user_id == user.id, H3TestPresetModel.deleted_at.is_(None))
+            .order_by(H3TestPresetModel.sort_order, H3TestPresetModel.created_at.desc())
+        )
+    ).scalars()
+    return {"items": [_h3_preset_json(item) for item in rows]}
+
+
 @router.get("/runninghub/status")
 async def runninghub_status(user: CurrentUser):
     """测试页初始化信息：key 是否已配置（只回显尾号）、工作流 ID、可选参数。"""
@@ -1007,16 +1040,21 @@ async def runninghub_status(user: CurrentUser):
 
 @router.post("/runninghub/upload")
 async def runninghub_upload(file: UploadFile, user: CurrentUser):
-    """转发参考图到 RunningHub，返回 fileName（提交任务时填入 LoadImage 节点）。"""
+    """同一份测试媒体同时持久化到 TOS、上传 RunningHub。"""
     require_admin(user)
     _runninghub_guard()
     content = await file.read()
-    if len(content) > 20 * 1024 * 1024:
-        raise HTTPException(422, "文件超过 20MB 限制")
+    if len(content) > 100 * 1024 * 1024:
+        raise HTTPException(422, "文件超过 100MB 限制")
     try:
-        return await rh_upload_media(content, file.filename or "upload.png")
+        filename = file.filename or "upload.bin"
+        runninghub = await rh_upload_media(content, filename)
+        tos_url = await get_storage().put_bytes(safe_key("h3-tests/inputs", filename), content, file.content_type)
+        return {**runninghub, "tosUrl": tos_url}
     except RunningHubError as exc:
         raise _runninghub_error(exc) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
 
 
 class RunningHubTaskIn(BaseModel):
@@ -1091,6 +1129,22 @@ async def runninghub_task_create(payload: RunningHubTaskIn, request: Request, us
             "firstFrameMegapixels": payload.first_frame_megapixels,
         },
     )
+    db.add(
+        H3TestPresetModel(
+            id=f"h3test-{uuid.uuid4().hex}",
+            user_id=user.id,
+            name={"reference": "多参考生成", "text": "纯文本生成", "first_frame": "首帧生成"}[payload.mode],
+            mode=payload.mode,
+            prompt=payload.prompt,
+            duration=payload.duration,
+            aspect_ratio=payload.aspect_ratio,
+            input_media=[{"type": "image", "runningHubFileName": value, "url": value if value.startswith("https://") else ""} for value in payload.images],
+            output_media=[],
+            task_id=task_id,
+            task_status=result.get("status", "QUEUED"),
+            usage_data={},
+        )
+    )
     await db.commit()
     return {"taskId": task_id, "status": result.get("status", "")}
 
@@ -1102,14 +1156,39 @@ class RunningHubQueryIn(BaseModel):
 
 
 @router.post("/runninghub/query")
-async def runninghub_task_query(payload: RunningHubQueryIn, user: CurrentUser):
+async def runninghub_task_query(payload: RunningHubQueryIn, user: CurrentUser, db: AsyncSession = Db):
     """查询任务状态，透传 status/results/usage/errorMessage。"""
     require_admin(user)
     _runninghub_guard()
     try:
-        return await rh_query_task(payload.task_id)
+        result = await rh_query_task(payload.task_id)
     except RunningHubError as exc:
         raise _runninghub_error(exc) from exc
+    preset = (
+        await db.execute(
+            select(H3TestPresetModel).where(
+                H3TestPresetModel.user_id == user.id,
+                H3TestPresetModel.task_id == payload.task_id,
+                H3TestPresetModel.deleted_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if preset:
+        preset.task_status = result.get("status", preset.task_status)
+        preset.usage_data = result.get("usage") or {}
+        if result.get("status") == "SUCCESS" and not preset.output_media:
+            archived = []
+            for index, output in enumerate(result.get("results") or []):
+                source_url = output.get("url", "")
+                if not source_url:
+                    continue
+                tos_url = await import_remote(source_url, f"h3-tests/videos/{user.id}", f"{payload.task_id}-{index}.mp4")
+                archived.append({**output, "sourceUrl": source_url, "url": tos_url})
+            preset.output_media = archived
+        if preset.output_media:
+            result["results"] = preset.output_media
+        await db.commit()
+    return result
 
 
 # ---------------------------------------------------------------------------

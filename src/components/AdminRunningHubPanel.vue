@@ -2,11 +2,13 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import {
   fetchRunningHubStatus,
+  fetchRunningHubPresets,
   queryRunningHubTask,
   submitRunningHubTask,
   uploadRunningHubImage,
   type RunningHubStatus,
   type RunningHubTaskResult,
+  type H3TestPreset,
 } from '../api/adminRunningHub'
 
 /** 工作流默认示例：医生诊室三主体场景（来源：工作流 node 83 Text 默认值） */
@@ -91,6 +93,7 @@ const current = ref<{
   error: string
 } | null>(null)
 const history = ref<HistoryEntry[]>([])
+const presets = ref<H3TestPreset[]>([])
 
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -122,7 +125,12 @@ const canSubmit = computed(
 const loadStatus = async () => {
   statusError.value = ''
   try {
-    status.value = await fetchRunningHubStatus()
+    const [loadedStatus, loadedPresets] = await Promise.all([
+      fetchRunningHubStatus(),
+      fetchRunningHubPresets(),
+    ])
+    status.value = loadedStatus
+    presets.value = loadedPresets.items
     if (status.value.aspectRatios.length && !status.value.aspectRatios.includes(aspectRatio.value))
       aspectRatio.value = status.value.aspectRatios[0]
     const [defaultStage1, defaultStage2] = status.value.megapixelsDefault
@@ -130,9 +138,23 @@ const loadStatus = async () => {
     stage2Mp.value = defaultStage2
     textMp.value = status.value.textMegapixelsDefault
     firstFrameMp.value = status.value.firstFrameMegapixelsDefault
+    applyPreset(presets.value.find((item) => item.mode === mode.value))
   } catch (e) {
     statusError.value = e instanceof Error ? e.message : '状态加载失败'
   }
+}
+
+const applyPreset = (preset?: H3TestPreset) => {
+  if (!preset) return
+  prompt.value = preset.prompt
+  duration.value = preset.duration
+  aspectRatio.value = preset.aspectRatio
+  const images = preset.inputMedia.filter((item) => item.type === 'image')
+  slots.forEach((slot, index) => {
+    const media = images[index]
+    slot.value = media?.runningHubFileName || media?.url || ''
+    slot.preview = media?.url || ''
+  })
 }
 
 const loadHistory = () => {
@@ -199,6 +221,12 @@ const changeMode = (nextMode: GenerationMode) => {
         ? status.value?.firstFrameAspectRatios
         : status.value?.aspectRatios
   if (ratios?.length && !ratios.includes(aspectRatio.value)) aspectRatio.value = ratios[0]
+  applyPreset(presets.value.find((item) => item.mode === nextMode))
+}
+
+const selectPreset = (preset: H3TestPreset) => {
+  changeMode(preset.mode)
+  applyPreset(preset)
 }
 
 const stopPoll = () => {
@@ -545,6 +573,58 @@ const statusTone = (value: string) =>
       <p v-if="current.error" class="bad-text">{{ current.error }}</p>
     </div>
 
+    <section v-if="presets.length" class="rh-presets">
+      <div class="row preset-title">
+        <span class="form-label">TOS 默认测试数据</span>
+        <span class="hint">输入素材、提示词与生成结果均从数据库读取，输出链接长期有效</span>
+      </div>
+      <article v-for="preset in presets" :key="preset.id" class="preset-card">
+        <div class="row preset-head">
+          <strong>{{ preset.name }}</strong>
+          <span class="badge" :class="statusTone(preset.taskStatus)">{{ preset.taskStatus }}</span>
+          <code v-if="preset.taskId">{{ preset.taskId }}</code>
+          <button type="button" class="ghost-btn" @click="selectPreset(preset)">
+            设为当前输入
+          </button>
+        </div>
+        <div v-if="preset.inputMedia.length" class="media-grid">
+          <div
+            v-for="(media, index) in preset.inputMedia"
+            :key="`${preset.id}-in-${index}`"
+            class="media-item"
+          >
+            <img v-if="media.type === 'image' && media.url" :src="media.url" alt="H3 默认参考图" />
+            <video
+              v-else-if="media.type === 'video' && media.url"
+              :src="media.url"
+              controls
+              playsinline
+            ></video>
+            <audio
+              v-else-if="media.type === 'audio' && media.url"
+              :src="media.url"
+              controls
+            ></audio>
+            <span v-else class="hint">{{
+              media.name || media.runningHubFileName || '媒体待归档'
+            }}</span>
+          </div>
+        </div>
+        <div v-if="preset.outputMedia.length" class="media-grid outputs">
+          <video
+            v-for="(media, index) in preset.outputMedia"
+            :key="`${preset.id}-out-${index}`"
+            :src="media.url"
+            controls
+            playsinline
+          ></video>
+        </div>
+        <p v-if="preset.usage?.consumeCoins" class="hint">
+          {{ preset.usage.consumeCoins }} RH 币 · {{ preset.usage.taskCostTime || '-' }} 秒
+        </p>
+      </article>
+    </section>
+
     <div v-if="history.length" class="rh-history">
       <div class="row">
         <span class="form-label">历史记录</span>
@@ -607,6 +687,41 @@ const statusTone = (value: string) =>
   flex-direction: column;
   gap: 16px;
   box-shadow: var(--shadow-card);
+}
+.rh-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.preset-title,
+.preset-head {
+  justify-content: space-between;
+}
+.preset-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  background: var(--surface-muted);
+}
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.media-grid img,
+.media-grid video {
+  width: 100%;
+  max-height: 180px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  background: #111;
+}
+.media-grid audio {
+  width: 100%;
+}
+.media-grid.outputs video {
+  max-height: 260px;
 }
 .rh-head {
   display: flex;

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   fetchRunningHubStatus,
+  fetchRunningHubPresets,
   queryRunningHubTask,
   submitRunningHubTask,
   uploadRunningHubImage,
@@ -11,6 +12,7 @@ import AdminRunningHubPanel from '../../src/components/AdminRunningHubPanel.vue'
 
 vi.mock('../../src/api/adminRunningHub', () => ({
   fetchRunningHubStatus: vi.fn(),
+  fetchRunningHubPresets: vi.fn(),
   uploadRunningHubImage: vi.fn(),
   submitRunningHubTask: vi.fn(),
   queryRunningHubTask: vi.fn(),
@@ -44,6 +46,8 @@ const buttonByText = (wrapper: ReturnType<typeof mount>, text: string) => {
 describe('admin runninghub panel', () => {
   beforeEach(() => {
     vi.mocked(fetchRunningHubStatus).mockReset()
+    vi.mocked(fetchRunningHubPresets).mockReset()
+    vi.mocked(fetchRunningHubPresets).mockResolvedValue({ items: [] })
     vi.mocked(uploadRunningHubImage).mockReset()
     vi.mocked(submitRunningHubTask).mockReset()
     vi.mocked(queryRunningHubTask).mockReset()

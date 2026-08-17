@@ -410,6 +410,25 @@ class AiProviderModel(LifecycleMixin, Base):
     status: Mapped[str] = mapped_column(String(32), default="active", index=True)
 
 
+class H3TestPresetModel(LifecycleMixin, Base):
+    """管理员个人的 H3 测试输入与已归档输出。"""
+
+    __tablename__ = "h3_test_presets"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    mode: Mapped[str] = mapped_column(String(32), index=True)
+    prompt: Mapped[str] = mapped_column(Text, default="")
+    duration: Mapped[float] = mapped_column(Float, default=8)
+    aspect_ratio: Mapped[str] = mapped_column(String(80), default="16:9 (Widescreen)")
+    input_media: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    output_media: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    task_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    task_status: Mapped[str] = mapped_column(String(32), default="READY", index=True)
+    usage_data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)
+
+
 class AiModelModel(LifecycleMixin, Base):
     __tablename__ = "ai_models"
     id: Mapped[str] = mapped_column(String(80), primary_key=True)

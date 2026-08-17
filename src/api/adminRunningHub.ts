@@ -28,12 +28,39 @@ export interface RunningHubTaskResult {
   usage?: { consumeCoins?: string | null; taskCostTime?: string | null } | null
 }
 
+export interface H3TestMedia {
+  type: 'image' | 'video' | 'audio'
+  url: string
+  sourceUrl?: string
+  runningHubFileName?: string
+  name?: string
+  outputType?: string
+}
+
+export interface H3TestPreset {
+  id: string
+  name: string
+  mode: 'reference' | 'text' | 'first_frame'
+  prompt: string
+  duration: number
+  aspectRatio: string
+  inputMedia: H3TestMedia[]
+  outputMedia: H3TestMedia[]
+  taskId?: string | null
+  taskStatus: string
+  usage: { consumeCoins?: string | null; taskCostTime?: string | null }
+  createdAt: string
+}
+
 export const fetchRunningHubStatus = () => apiRequest<RunningHubStatus>('/admin/runninghub/status')
+
+export const fetchRunningHubPresets = () =>
+  apiRequest<{ items: H3TestPreset[] }>('/admin/runninghub/presets')
 
 export const uploadRunningHubImage = (file: File) => {
   const form = new FormData()
   form.append('file', file)
-  return apiRequest<{ fileName: string; downloadUrl: string; size: string }>(
+  return apiRequest<{ fileName: string; downloadUrl: string; size: string; tosUrl: string }>(
     '/admin/runninghub/upload',
     {
       method: 'POST',
