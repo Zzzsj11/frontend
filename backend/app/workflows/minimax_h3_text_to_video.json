@@ -1,0 +1,339 @@
+{
+  "4": {
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "CLIP加载器"
+    }
+  },
+  "5": {
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_int8_convrot.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "VAE加载器"
+    }
+  },
+  "6": {
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "VAE加载器"
+    }
+  },
+  "8": {
+    "inputs": {
+      "unet_name": "minimax_h3_fl2va_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNET加载器"
+    }
+  },
+  "9": {
+    "inputs": {
+      "unet_name": "minimax_h3_ref2va_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNET加载器"
+    }
+  },
+  "22": {
+    "inputs": {
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+      "values.a": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Math Expression"
+    }
+  },
+  "23": {
+    "inputs": {
+      "aspect_ratio": "9:16 (Portrait Widescreen)",
+      "megapixels": 0.9,
+      "multiple": 32
+    },
+    "class_type": "ResolutionSelector",
+    "_meta": {
+      "title": "分辨率选择器"
+    }
+  },
+  "24": {
+    "inputs": {
+      "prompt": [
+        "25",
+        0
+      ],
+      "width": [
+        "23",
+        0
+      ],
+      "height": [
+        "23",
+        1
+      ],
+      "length": [
+        "22",
+        1
+      ],
+      "clip": [
+        "4",
+        0
+      ],
+      "vae": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ImageToVideo",
+    "_meta": {
+      "title": "MiniMax H3 Image to Video"
+    }
+  },
+  "25": {
+    "inputs": {
+      "text": "integrated_multimodal_description: [Shot 1] Live-action, cinematic, high-fashion editorial, a medium-wide shot frames a tall Asian female model with sleek long black hair, sculpted cheekbones, and flawless glossy makeup, wearing a crisp white high-end silk blouse with the top buttons loosely undone, a bright red mini skirt, sheer nude stockings, and white pointed high heels, her long bare legs emphasized by the thigh-length skirt. She stands against a seamless dark-grey studio backdrop with large softbox lighting from the front and a cool rim light tracing her silhouette, a faint haze drifting through the light beams. The camera pushes in with small amplitude at slow speed as she slowly turns her body toward the lens, one hand sliding down to her hip, the silk blouse and skirt catching the light with each subtle movement. [Shot 2] At 00:02.000, the camera cuts to a medium close-up of her torso, legs, and face as she tosses her hair back with one hand, tilting her head slightly and shifting her weight to one hip, the red mini skirt swaying and the white heels lifting her posture. The camera arcs around her with small amplitude at slow speed while she runs her fingertips along the collar of the blouse, her gaze following the camera with a confident, composed expression. [Shot 3] At 00:04.000, the camera cuts to a close-up of her face and shoulders as she lifts her chin, fixes her eyes directly into the lens, and lets a subtle, knowing smile form at the corners of her lips. The camera pushes in slowly with very small amplitude, then holds a static shot as she brushes a strand of hair from her cheek and holds the final editorial pose until the end of the video.\n\noverall_soundscape: Quiet studio ambience with a low ventilation hum underneath, soft fabric rustling gently as she moves, and a faint airy whoosh from the studio fan passing through the frame.\n\nnon_diegetic_music: A minimalist electronic fashion-runway track at a moderate tempo with a steady four-on-the-floor kick, deep pulsing bass, airy synth pads, and crisp hi-hat accents; the energy rises subtly in the middle and ends with a clean, confident stop as she holds the final pose."
+    },
+    "class_type": "Text",
+    "_meta": {
+      "title": "文本"
+    }
+  },
+  "27": {
+    "inputs": {
+      "value": 6
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "视频时长（秒）"
+    }
+  },
+  "186": {
+    "inputs": {
+      "lora_name": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+      "strength_model": 0.7500000000000001,
+      "model": [
+        "391",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器(仅模型)"
+    }
+  },
+  "187": {
+    "inputs": {
+      "lora_name": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+      "strength_model": 0.7500000000000001,
+      "model": [
+        "392",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器(仅模型)"
+    }
+  },
+  "227": {
+    "inputs": {
+      "noise": [
+        "228",
+        0
+      ],
+      "guider": [
+        "230",
+        0
+      ],
+      "sampler": [
+        "231",
+        0
+      ],
+      "sigmas": [
+        "232",
+        0
+      ],
+      "latent_image": [
+        "24",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "自定义采样器(高级)"
+    }
+  },
+  "228": {
+    "inputs": {
+      "noise_seed": 559956095584975
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "随机噪波"
+    }
+  },
+  "230": {
+    "inputs": {
+      "model": [
+        "186",
+        0
+      ],
+      "conditioning": [
+        "24",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "基础引导"
+    }
+  },
+  "231": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "K采样器选择"
+    }
+  },
+  "232": {
+    "inputs": {
+      "scheduler": "beta",
+      "steps": 8,
+      "denoise": 1,
+      "model": [
+        "186",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "基础调度器"
+    }
+  },
+  "358": {
+    "inputs": {
+      "samples": [
+        "227",
+        0
+      ],
+      "vae": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "359": {
+    "inputs": {
+      "samples": [
+        "227",
+        0
+      ],
+      "vae": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio",
+    "_meta": {
+      "title": "VAE解码_Audio"
+    }
+  },
+  "390": {
+    "inputs": {
+      "frame_rate": 24,
+      "loop_count": 0,
+      "filename_prefix": "H3_T2V",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "no_preview": false,
+      "images": [
+        "358",
+        0
+      ],
+      "audio": [
+        "359",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "合并为视频"
+    }
+  },
+  "391": {
+    "inputs": {
+      "model": [
+        "395",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3MemoryEfficientSageAttentionPatch",
+    "_meta": {
+      "title": "MiniMax H3 Memory Efficient Sage Attention Patch"
+    }
+  },
+  "392": {
+    "inputs": {
+      "model": [
+        "396",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3MemoryEfficientSageAttentionPatch",
+    "_meta": {
+      "title": "MiniMax H3 Memory Efficient Sage Attention Patch"
+    }
+  },
+  "395": {
+    "inputs": {
+      "attention": "pytorch attention",
+      "model": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "ModelAttentionBackend",
+    "_meta": {
+      "title": "ModelAttentionBackend"
+    }
+  },
+  "396": {
+    "inputs": {
+      "attention": "pytorch attention",
+      "model": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "ModelAttentionBackend",
+    "_meta": {
+      "title": "ModelAttentionBackend"
+    }
+  }
+}

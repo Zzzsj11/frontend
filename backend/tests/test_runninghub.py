@@ -6,7 +6,7 @@ import pytest
 
 from app import admin as admin_module
 from app.config import settings
-from app.runninghub import RunningHubError, build_node_info_list
+from app.runninghub import RunningHubError, build_node_info_list, build_text_node_info_list
 
 
 def bearer(token: str) -> dict[str, str]:
@@ -66,6 +66,25 @@ def test_runninghub_node_info_list_validation():
         build_node_info_list(prompt="x", duration=8, aspect_ratio="16:9 (Widescreen)", images=["a.png"], stage1_megapixels=3.0)
     with pytest.raises(RunningHubError, match="二阶段分辨率"):
         build_node_info_list(prompt="x", duration=8, aspect_ratio="16:9 (Widescreen)", images=["a.png"], stage2_megapixels=0.1)
+
+
+def test_runninghub_text_node_info_list():
+    nodes = build_text_node_info_list(
+        prompt="A fox in a misty forest",
+        duration=6,
+        aspect_ratio="9:16 (Portrait Widescreen)",
+        seed=77,
+        megapixels=0.9,
+    )
+    by_node = {}
+    for item in nodes:
+        by_node.setdefault(item["nodeId"], {})[item["fieldName"]] = item["fieldValue"]
+    assert by_node == {
+        "25": {"text": "A fox in a misty forest"},
+        "27": {"value": 6},
+        "23": {"aspect_ratio": "9:16 (Portrait Widescreen)", "megapixels": 0.9},
+        "228": {"noise_seed": 77},
+    }
 
 
 def test_runninghub_endpoints_require_api_key(client, monkeypatch):

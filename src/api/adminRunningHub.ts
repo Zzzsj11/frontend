@@ -5,12 +5,15 @@ export interface RunningHubStatus {
   configured: boolean
   keyTail: string
   workflowId: string
+  modes: Array<'reference' | 'text'>
   aspectRatios: string[]
+  textAspectRatios: string[]
   durationRange: [number, number]
   /** 一/二阶段共用的 megapixels 档位（size 为 16:9 输出分辨率） */
   megapixelsPresets: Array<{ value: number; size: string }>
   /** 工作流默认 [一采, 二采] megapixels */
   megapixelsDefault: [number, number]
+  textMegapixelsDefault: number
 }
 
 /** RunningHub 任务查询响应（透传上游） */
@@ -38,6 +41,7 @@ export const uploadRunningHubImage = (file: File) => {
 }
 
 export const submitRunningHubTask = (input: {
+  mode: 'reference' | 'text'
   prompt: string
   duration: number
   aspectRatio: string
@@ -45,10 +49,12 @@ export const submitRunningHubTask = (input: {
   seed?: number | null
   stage1Megapixels?: number
   stage2Megapixels?: number
+  textMegapixels?: number
 }) =>
   apiRequest<{ taskId: string; status: string }>('/admin/runninghub/tasks', {
     method: 'POST',
     body: JSON.stringify({
+      mode: input.mode,
       prompt: input.prompt,
       duration: input.duration,
       aspectRatio: input.aspectRatio,
@@ -56,6 +62,7 @@ export const submitRunningHubTask = (input: {
       seed: input.seed ?? null,
       stage1Megapixels: input.stage1Megapixels,
       stage2Megapixels: input.stage2Megapixels,
+      textMegapixels: input.textMegapixels,
     }),
   })
 

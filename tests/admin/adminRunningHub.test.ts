@@ -20,7 +20,9 @@ const configuredStatus = {
   configured: true,
   keyTail: '...c817',
   workflowId: '2084514856253874178',
+  modes: ['reference', 'text'] as Array<'reference' | 'text'>,
   aspectRatios: ['16:9 (Widescreen)', '9:16 (Portrait)'],
+  textAspectRatios: ['16:9 (Widescreen)', '9:16 (Portrait Widescreen)'],
   durationRange: [4, 15] as [number, number],
   megapixelsPresets: [
     { value: 0.4, size: '864×480' },
@@ -28,6 +30,7 @@ const configuredStatus = {
     { value: 2.0, size: '1920×1088' },
   ],
   megapixelsDefault: [0.4, 0.9] as [number, number],
+  textMegapixelsDefault: 0.9,
 }
 
 const buttonByText = (wrapper: ReturnType<typeof mount>, text: string) => {
@@ -87,6 +90,7 @@ describe('admin runninghub panel', () => {
       await vi.advanceTimersByTimeAsync(0)
 
       expect(submitRunningHubTask).toHaveBeenCalledWith({
+        mode: 'reference',
         prompt: expect.stringContaining('subject_definitions:'),
         duration: 8,
         aspectRatio: '16:9 (Widescreen)',
@@ -113,6 +117,33 @@ describe('admin runninghub panel', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('submits text-to-video without requiring a reference image', async () => {
+    vi.mocked(fetchRunningHubStatus).mockResolvedValue(configuredStatus)
+    vi.mocked(submitRunningHubTask).mockResolvedValue({ taskId: 'task-text-1', status: 'QUEUED' })
+    const wrapper = mount(AdminRunningHubPanel)
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Key 已配置'))
+
+    await buttonByText(wrapper, '纯文本生成').trigger('click')
+    await wrapper.vm.$nextTick()
+    await buttonByText(wrapper, '填入示例模板').trigger('click')
+    expect(wrapper.findAll('.slot-input')).toHaveLength(0)
+    expect(wrapper.find('.submit-btn').attributes('disabled')).toBeUndefined()
+    await wrapper.find('.submit-btn').trigger('click')
+
+    await vi.waitFor(() =>
+      expect(submitRunningHubTask).toHaveBeenCalledWith({
+        mode: 'text',
+        prompt: expect.stringContaining('small red fox'),
+        duration: 8,
+        aspectRatio: '16:9 (Widescreen)',
+        images: [],
+        seed: null,
+        textMegapixels: 0.9,
+      }),
+    )
+    wrapper.unmount()
   })
 
   it('uploads a local image and fills the slot with returned fileName', async () => {

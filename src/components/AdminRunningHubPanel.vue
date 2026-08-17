@@ -35,6 +35,11 @@ The soft rustle of paper pages flipping, light keyboard clicks from the backgrou
 non_diegetic_music:
 N/A`
 
+const TEXT_EXAMPLE_PROMPT = `integrated_multimodal_description:
+[Shot 1] Live-action cinematic footage at sunrise. A small red fox walks slowly through a misty pine forest, dew sparkling on the grass. The camera tracks alongside at a low angle with stable, natural movement. Warm sunlight passes through the trees while distant birds and soft footsteps create a calm forest soundscape. No text, no watermark.`
+
+type GenerationMode = 'reference' | 'text'
+
 interface ImageSlot {
   value: string
   uploading: boolean
@@ -47,6 +52,7 @@ interface HistoryEntry {
   duration: number
   aspectRatio: string
   imageCount: number
+  mode?: GenerationMode
   status: string
   videoUrl: string
 }
@@ -57,12 +63,14 @@ const POLL_INTERVAL_MS = 5000
 const status = ref<RunningHubStatus | null>(null)
 const statusError = ref('')
 const prompt = ref('')
+const mode = ref<GenerationMode>('reference')
 const duration = ref(8)
 const aspectRatio = ref('16:9 (Widescreen)')
 const seedRaw = ref('')
 /** 一采（低清参考生成）/二采（放大精修）分辨率档位，工作流默认 0.4/0.9 MP */
 const stage1Mp = ref(0.4)
 const stage2Mp = ref(0.9)
+const textMp = ref(0.9)
 const slots = reactive<ImageSlot[]>([
   { value: '', uploading: false, preview: '' },
   { value: '', uploading: false, preview: '' },
@@ -83,12 +91,17 @@ let pollTimer: ReturnType<typeof setTimeout> | null = null
 
 const ready = computed(() => !!status.value?.configured)
 const filledImages = computed(() => slots.map((s) => s.value.trim()).filter(Boolean))
+const availableAspectRatios = computed(() =>
+  mode.value === 'text'
+    ? (status.value?.textAspectRatios ?? [])
+    : (status.value?.aspectRatios ?? []),
+)
 const canSubmit = computed(
   () =>
     ready.value &&
     !busy.value &&
     !!prompt.value.trim() &&
-    filledImages.value.length > 0 &&
+    (mode.value === 'text' || filledImages.value.length > 0) &&
     !slots.some((s) => s.uploading),
 )
 
@@ -101,6 +114,7 @@ const loadStatus = async () => {
     const [defaultStage1, defaultStage2] = status.value.megapixelsDefault
     stage1Mp.value = defaultStage1
     stage2Mp.value = defaultStage2
+    textMp.value = status.value.textMegapixelsDefault
   } catch (e) {
     statusError.value = e instanceof Error ? e.message : '状态加载失败'
   }
@@ -153,7 +167,13 @@ const onFileChange = async (index: number, event: Event) => {
 }
 
 const fillTemplate = () => {
-  prompt.value = EXAMPLE_PROMPT
+  prompt.value = mode.value === 'text' ? TEXT_EXAMPLE_PROMPT : EXAMPLE_PROMPT
+}
+
+const changeMode = (nextMode: GenerationMode) => {
+  mode.value = nextMode
+  const ratios = nextMode === 'text' ? status.value?.textAspectRatios : status.value?.aspectRatios
+  if (ratios?.length && !ratios.includes(aspectRatio.value)) aspectRatio.value = ratios[0]
 }
 
 const stopPoll = () => {
@@ -204,13 +224,15 @@ const submit = async () => {
   try {
     const seed = seedRaw.value.trim() === '' ? null : Number(seedRaw.value)
     const created = await submitRunningHubTask({
+      mode: mode.value,
       prompt: prompt.value,
       duration: duration.value,
       aspectRatio: aspectRatio.value,
       images: filledImages.value,
       seed: seed !== null && Number.isFinite(seed) && seed >= 0 ? seed : null,
-      stage1Megapixels: stage1Mp.value,
-      stage2Megapixels: stage2Mp.value,
+      ...(mode.value === 'text'
+        ? { textMegapixels: textMp.value }
+        : { stage1Megapixels: stage1Mp.value, stage2Megapixels: stage2Mp.value }),
     })
     current.value = {
       taskId: created.taskId,
@@ -224,6 +246,7 @@ const submit = async () => {
       duration: duration.value,
       aspectRatio: aspectRatio.value,
       imageCount: filledImages.value.length,
+      mode: mode.value,
       status: created.status || 'QUEUED',
       videoUrl: '',
     })
@@ -264,7 +287,7 @@ const statusTone = (value: string) =>
     <div class="rh-head">
       <div>
         <h3>RunningHub 工作流测试</h3>
-        <p class="rh-sub">MiniMax H3 多合一：多图参考生成（一采）→ 放大精修（二采）成片</p>
+        <p class="rh-sub">MiniMax H3：支持多图参考生成和纯文本生成带声音视频</p>
       </div>
       <div v-if="status" class="rh-meta">
         <span class="badge" :class="ready ? 'ok' : 'bad'">{{
@@ -281,6 +304,26 @@ const statusTone = (value: string) =>
     </p>
 
     <div class="rh-form" :class="{ dim: !ready }">
+      <div class="mode-switch" role="group" aria-label="生成模式">
+        <button
+          type="button"
+          class="mode-btn"
+          :class="{ active: mode === 'reference' }"
+          :disabled="!ready"
+          @click="changeMode('reference')"
+        >
+          多图参考生成
+        </button>
+        <button
+          type="button"
+          class="mode-btn"
+          :class="{ active: mode === 'text' }"
+          :disabled="!ready"
+          @click="changeMode('text')"
+        >
+          纯文本生成
+        </button>
+      </div>
       <div class="row prompt-row">
         <label class="form-label">提示词</label>
         <button type="button" class="ghost-btn" :disabled="!ready" @click="fillTemplate">
@@ -292,7 +335,11 @@ const statusTone = (value: string) =>
         class="prompt-input"
         rows="12"
         :disabled="!ready"
-        placeholder="结构化模板：subject_definitions / summary / retention_analysis / detailed_description（[Shot N] 分镜 + <d>[Chinese] 台词）/ overall_soundscape"
+        :placeholder="
+          mode === 'text'
+            ? '描述画面、主体动作、镜头运动、光线和声音；无需上传参考图'
+            : '结构化模板：subject_definitions / summary / retention_analysis / detailed_description（[Shot N] 分镜 + <d>[Chinese] 台词）/ overall_soundscape'
+        "
       ></textarea>
 
       <div class="row params">
@@ -308,7 +355,7 @@ const statusTone = (value: string) =>
         />
         <label class="form-label">宽高比</label>
         <select v-model="aspectRatio" class="num-input" :disabled="!ready">
-          <option v-for="item in status?.aspectRatios ?? [aspectRatio]" :key="item" :value="item">
+          <option v-for="item in availableAspectRatios" :key="item" :value="item">
             {{ item }}
           </option>
         </select>
@@ -323,7 +370,7 @@ const statusTone = (value: string) =>
         />
       </div>
 
-      <div class="row params">
+      <div v-if="mode === 'reference'" class="row params">
         <label class="form-label">一采分辨率</label>
         <select v-model.number="stage1Mp" class="num-input wide" :disabled="!ready">
           <option
@@ -345,12 +392,26 @@ const statusTone = (value: string) =>
           </option>
         </select>
       </div>
-      <p class="hint">
+      <p v-if="mode === 'reference'" class="hint">
         一采是低清参考生成（默认 0.4 MP），二采是放大精修出片（默认 0.9 MP）；尺寸标注按 16:9
         参考，其他比例由节点等比换算。
       </p>
 
-      <div class="row slots">
+      <div v-else class="row params">
+        <label class="form-label">输出分辨率</label>
+        <select v-model.number="textMp" class="num-input wide" :disabled="!ready">
+          <option
+            v-for="preset in status?.megapixelsPresets ?? []"
+            :key="preset.value"
+            :value="preset.value"
+          >
+            {{ preset.value }} MP（16:9 约 {{ preset.size }}）
+          </option>
+        </select>
+        <span class="hint">纯文本工作流为单阶段 8 步生成，输出包含音频。</span>
+      </div>
+
+      <div v-if="mode === 'reference'" class="row slots">
         <div v-for="(slot, index) in slots" :key="index" class="slot">
           <div class="slot-head">
             <span class="form-label">参考图 {{ index + 1 }}</span>
@@ -384,7 +445,7 @@ const statusTone = (value: string) =>
           />
         </div>
       </div>
-      <p class="hint">
+      <p v-if="mode === 'reference'" class="hint">
         图位对应提示词中的 Picture 1/2/3；不足 3 张时后端自动用最后一张补齐槽位。上传文件 24
         小时内有效。
       </p>
@@ -447,7 +508,7 @@ const statusTone = (value: string) =>
             </td>
             <td>
               {{ entry.duration }}s · {{ entry.aspectRatio.split(' ')[0] }} ·
-              {{ entry.imageCount }} 图
+              {{ entry.mode === 'text' ? '纯文本' : `${entry.imageCount} 图` }}
             </td>
             <td>
               <span class="badge" :class="statusTone(entry.status)">{{ entry.status }}</span>
@@ -508,6 +569,30 @@ const statusTone = (value: string) =>
 .dim {
   opacity: 0.55;
   pointer-events: none;
+}
+.mode-switch {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+}
+.mode-btn {
+  border: 0;
+  border-radius: var(--radius-pill);
+  padding: 7px 16px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+.mode-btn.active {
+  color: #fff;
+  background: var(--primary-gradient);
+  box-shadow: 0 2px 8px rgba(255, 90, 44, 0.25);
+}
+.mode-btn:disabled {
+  cursor: not-allowed;
 }
 .row {
   display: flex;

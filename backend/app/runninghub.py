@@ -7,7 +7,9 @@
 
 from __future__ import annotations
 
+import json
 import uuid
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -21,6 +23,22 @@ NODE_STAGE1_RESOLUTION = "105"  # 一采（ref2va 低清）ResolutionSelector
 NODE_STAGE2_RESOLUTION = "297"  # 二采（fl2va 放大精修）ResolutionSelector
 NODE_REF_IMAGES = ("97", "101", "132")  # 3 个 LoadImage 参考图槽位（Subject 1/2/3）
 NODE_SEEDS = ("243", "300")  # 一采/二采 RandomNoise 种子
+
+# 纯文生视频工作流（用户提供的 111.json）。该工作流没有图片输入，直接提交完整
+# workflow JSON，避免依赖另一个需要人工发布和维护的 workflowId。
+TEXT_WORKFLOW_PATH = Path(__file__).parent / "workflows" / "minimax_h3_text_to_video.json"
+TEXT_NODE_PROMPT = "25"
+TEXT_NODE_DURATION = "27"
+TEXT_NODE_RESOLUTION = "23"
+TEXT_NODE_SEED = "228"
+TEXT_ASPECT_RATIOS: tuple[str, ...] = (
+    "16:9 (Widescreen)",
+    "9:16 (Portrait Widescreen)",
+    "1:1 (Square)",
+    "4:3 (Classic)",
+    "3:4 (Portrait)",
+)
+DEFAULT_TEXT_MEGAPIXELS = 0.9
 
 # ResolutionSelector（LayerUtility）的合法宽高比字符串；"16:9 (Widescreen)" 已经工作流默认验证
 ASPECT_RATIOS: tuple[str, ...] = (
@@ -116,6 +134,34 @@ def build_node_info_list(
     return node_info
 
 
+def build_text_node_info_list(
+    *,
+    prompt: str,
+    duration: float,
+    aspect_ratio: str,
+    seed: int | None = None,
+    megapixels: float = DEFAULT_TEXT_MEGAPIXELS,
+) -> list[dict[str, Any]]:
+    """组装纯文生视频工作流的动态节点参数。"""
+    prompt = prompt.strip()
+    if not prompt:
+        raise RunningHubError("提示词不能为空")
+    if not MIN_DURATION <= duration <= MAX_DURATION:
+        raise RunningHubError(f"视频时长需在 {MIN_DURATION:g}~{MAX_DURATION:g} 秒之间")
+    if aspect_ratio not in TEXT_ASPECT_RATIOS:
+        raise RunningHubError(f"纯文生视频不支持的宽高比：{aspect_ratio}")
+    _check_megapixels(megapixels, "输出")
+    nodes: list[dict[str, Any]] = [
+        {"nodeId": TEXT_NODE_PROMPT, "fieldName": "text", "fieldValue": prompt},
+        {"nodeId": TEXT_NODE_DURATION, "fieldName": "value", "fieldValue": duration},
+        {"nodeId": TEXT_NODE_RESOLUTION, "fieldName": "aspect_ratio", "fieldValue": aspect_ratio},
+        {"nodeId": TEXT_NODE_RESOLUTION, "fieldName": "megapixels", "fieldValue": megapixels},
+    ]
+    if seed is not None:
+        nodes.append({"nodeId": TEXT_NODE_SEED, "fieldName": "noise_seed", "fieldValue": seed})
+    return nodes
+
+
 async def _post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     url = f"{settings.runninghub_base_url}{path}"
     try:
@@ -160,6 +206,64 @@ async def submit_task(
     if not result.get("taskId"):
         raise RunningHubError(f"RunningHub 未返回 taskId：{result}")
     return result
+
+
+async def submit_text_task(
+    *,
+    prompt: str,
+    duration: float,
+    aspect_ratio: str,
+    seed: int | None = None,
+    megapixels: float = DEFAULT_TEXT_MEGAPIXELS,
+) -> dict[str, Any]:
+    """使用完整 workflow JSON 提交 H3 纯文生视频任务。"""
+    node_info = build_text_node_info_list(
+        prompt=prompt,
+        duration=duration,
+        aspect_ratio=aspect_ratio,
+        seed=seed,
+        megapixels=megapixels,
+    )
+    try:
+        workflow = TEXT_WORKFLOW_PATH.read_text(encoding="utf-8")
+        json.loads(workflow)
+    except (OSError, ValueError) as exc:
+        raise RunningHubError(f"H3 纯文生视频工作流读取失败：{exc}") from exc
+
+    # RunningHub 的高级 ComfyUI 接口允许直接提交完整工作流；返回结构为
+    # {code, msg, data:{taskId, taskStatus}}，与 /openapi/v2/run/workflow 不同。
+    origin = settings.runninghub_base_url.removesuffix("/openapi/v2")
+    url = f"{origin}/task/openapi/create"
+    payload = {
+        "apiKey": settings.runninghub_api_key,
+        # 高级接口的校验仍要求 workflowId 非空；传入 workflow 时完整 JSON 优先。
+        "workflowId": settings.runninghub_workflow_id,
+        "workflow": workflow,
+        "nodeInfoList": node_info,
+        "addMetadata": True,
+        "instanceType": "default",
+        "usePersonalQueue": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=settings.runninghub_timeout) as client:
+            response = await client.post(url, headers=_headers(), json=payload)
+    except httpx.HTTPError as exc:
+        raise RunningHubError(f"RunningHub 纯文生视频请求失败：{exc}") from exc
+    if response.status_code == 401:
+        raise RunningHubError("RunningHub API Key 校验失败，请检查 RUNNINGHUB_API_KEY")
+    if response.status_code != 200:
+        raise RunningHubError(f"RunningHub 纯文生视频返回 HTTP {response.status_code}：{response.text[:300]}")
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise RunningHubError(f"RunningHub 纯文生视频响应解析失败：{response.text[:300]}") from exc
+    if body.get("code") != 0 or not isinstance(body.get("data"), dict):
+        raise RunningHubError(f"RunningHub 纯文生视频提交失败：{body.get('msg') or body.get('message') or body}")
+    data = body["data"]
+    task_id = data.get("taskId")
+    if not task_id:
+        raise RunningHubError(f"RunningHub 纯文生视频未返回 taskId：{data}")
+    return {"taskId": str(task_id), "status": data.get("taskStatus", "")}
 
 
 async def query_task(task_id: str) -> dict[str, Any]:

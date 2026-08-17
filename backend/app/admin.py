@@ -45,15 +45,18 @@ from .runninghub import (
     ASPECT_RATIOS,
     DEFAULT_STAGE1_MEGAPIXELS,
     DEFAULT_STAGE2_MEGAPIXELS,
+    DEFAULT_TEXT_MEGAPIXELS,
     MAX_DURATION,
     MEGAPIXELS_MAX,
     MEGAPIXELS_MIN,
     MEGAPIXELS_PRESETS_16X9,
     MIN_DURATION,
+    TEXT_ASPECT_RATIOS,
     RunningHubError,
 )
 from .runninghub import query_task as rh_query_task
 from .runninghub import submit_task as rh_submit_task
+from .runninghub import submit_text_task as rh_submit_text_task
 from .runninghub import upload_media as rh_upload_media
 from .storyboard_options import OPTION_KINDS
 
@@ -986,11 +989,14 @@ async def runninghub_status(user: CurrentUser):
         "configured": bool(key),
         "keyTail": f"...{key[-4:]}" if len(key) >= 4 else "",
         "workflowId": settings.runninghub_workflow_id,
+        "modes": ["reference", "text"],
         "aspectRatios": list(ASPECT_RATIOS),
+        "textAspectRatios": list(TEXT_ASPECT_RATIOS),
         "durationRange": [MIN_DURATION, MAX_DURATION],
         # 一/二阶段共用同一张 megapixels → 16:9 分辨率表
         "megapixelsPresets": [{"value": value, "size": size} for value, size in MEGAPIXELS_PRESETS_16X9],
         "megapixelsDefault": [DEFAULT_STAGE1_MEGAPIXELS, DEFAULT_STAGE2_MEGAPIXELS],
+        "textMegapixelsDefault": DEFAULT_TEXT_MEGAPIXELS,
     }
 
 
@@ -1009,6 +1015,7 @@ async def runninghub_upload(file: UploadFile, user: CurrentUser):
 
 
 class RunningHubTaskIn(BaseModel):
+    mode: str = Field(default="reference", pattern="^(reference|text)$")
     prompt: str = Field(min_length=1, max_length=8000)
     duration: float = Field(default=8, ge=MIN_DURATION, le=MAX_DURATION)
     aspect_ratio: str = Field(default="16:9 (Widescreen)", alias="aspectRatio")
@@ -1016,6 +1023,7 @@ class RunningHubTaskIn(BaseModel):
     seed: int | None = Field(default=None, ge=0)
     stage1_megapixels: float = Field(default=DEFAULT_STAGE1_MEGAPIXELS, ge=MEGAPIXELS_MIN, le=MEGAPIXELS_MAX, alias="stage1Megapixels")
     stage2_megapixels: float = Field(default=DEFAULT_STAGE2_MEGAPIXELS, ge=MEGAPIXELS_MIN, le=MEGAPIXELS_MAX, alias="stage2Megapixels")
+    text_megapixels: float = Field(default=DEFAULT_TEXT_MEGAPIXELS, ge=MEGAPIXELS_MIN, le=MEGAPIXELS_MAX, alias="textMegapixels")
 
     model_config = {"populate_by_name": True}
 
@@ -1026,15 +1034,24 @@ async def runninghub_task_create(payload: RunningHubTaskIn, request: Request, us
     require_admin(user)
     _runninghub_guard()
     try:
-        result = await rh_submit_task(
-            prompt=payload.prompt,
-            duration=payload.duration,
-            aspect_ratio=payload.aspect_ratio,
-            images=payload.images,
-            seed=payload.seed,
-            stage1_megapixels=payload.stage1_megapixels,
-            stage2_megapixels=payload.stage2_megapixels,
-        )
+        if payload.mode == "text":
+            result = await rh_submit_text_task(
+                prompt=payload.prompt,
+                duration=payload.duration,
+                aspect_ratio=payload.aspect_ratio,
+                seed=payload.seed,
+                megapixels=payload.text_megapixels,
+            )
+        else:
+            result = await rh_submit_task(
+                prompt=payload.prompt,
+                duration=payload.duration,
+                aspect_ratio=payload.aspect_ratio,
+                images=payload.images,
+                seed=payload.seed,
+                stage1_megapixels=payload.stage1_megapixels,
+                stage2_megapixels=payload.stage2_megapixels,
+            )
     except RunningHubError as exc:
         raise _runninghub_error(exc) from exc
     task_id = str(result.get("taskId"))
@@ -1047,11 +1064,13 @@ async def runninghub_task_create(payload: RunningHubTaskIn, request: Request, us
         task_id,
         None,
         {
+            "mode": payload.mode,
             "duration": payload.duration,
             "aspectRatio": payload.aspect_ratio,
             "imageCount": len(payload.images),
             "stage1Megapixels": payload.stage1_megapixels,
             "stage2Megapixels": payload.stage2_megapixels,
+            "textMegapixels": payload.text_megapixels,
         },
     )
     await db.commit()
