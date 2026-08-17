@@ -6,6 +6,7 @@ import {
   restoreSession,
   type AuthUser,
 } from '../api/client'
+import { useProjectStore } from './project'
 export interface AccountBalance {
   available: boolean
   balance: string | null
@@ -63,6 +64,8 @@ export const useAuthStore = defineStore('auth', {
         localStorage.removeItem(`mv_sidebar_task_${uid}`)
       }
       localStorage.removeItem('mv:pending-dh')
+      // 清空工作区内存现场（项目列表/分镜/角色/缓存），防止下一账号看到上一账号数据
+      useProjectStore().resetWorkspace()
     },
   },
 })

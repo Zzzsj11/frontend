@@ -43,10 +43,11 @@ from .error_logging import record_api_error, request_payload
 from .jobs import jobs
 from .media_constraints import normalize_video_duration
 from .models import AiModelModel, DigitalHumanModel, GenerationJobModel, ProjectCastModel, ProjectTaskModel, SongEmotionProfileModel, StoryboardLineModel, UserModel
+from .prompts import get_prompt
 from .providers import generate_image, generate_video, resume_generation
 from .redis_store import close_redis, redis_ok
 from .request_logging import api_request_log_middleware
-from .schemas import ChatMessageCreate, ChatSessionCreate, ImageGenerationCreate, LoginCreate, PasswordChange, RemoteImportCreate, VideoGenerationCreate
+from .schemas import ChatMessageCreate, ChatSessionCreate, ImageGenerationCreate, LoginCreate, PasswordChange, PortraitPromptParams, RemoteImportCreate, VideoGenerationCreate
 from .seed import recover_stale_storyboard_generation, seed_system_data
 from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
 from .usage_quota import consume_daily_quota
@@ -410,8 +411,29 @@ async def _check_concurrency(db: AsyncSession, user_id: str, kind: str, limit: i
         raise HTTPException(429, f"同时进行的{label}生成已达上限（{limit}个），请等待部分任务完成后再提交")
 
 
+async def _portrait_prompt(description: str, style: str) -> str:
+    """数字人定妆照提示词：模板在提示词注册中心（portrait.digital_human_ref），描述/风格的条件拼接逻辑留在代码。"""
+    parts = []
+    if description.strip():
+        parts.append(f"角色描述：{description.strip()}")
+    if style.strip():
+        parts.append(f"画面风格：{style.strip()}")
+    extra = "。".join(parts) + "。" if parts else ""
+    return (await get_prompt("portrait.digital_human_ref")).render(extra=extra)
+
+
+@app.post("/api/generations/images/portrait-prompt")
+async def preview_portrait_prompt(payload: PortraitPromptParams, user: CurrentUser) -> dict:
+    """按当前注册中心模板拼装定妆照提示词（不调模型、不落库）；前端用于草稿恢复与重生兜底。"""
+    return {"prompt": await _portrait_prompt(payload.description, payload.style)}
+
+
 @app.post("/api/generations/images", status_code=202)
 async def create_image_generation(payload: ImageGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
+    if payload.portrait is not None:
+        payload.prompt = await _portrait_prompt(payload.portrait.description, payload.portrait.style)
+    if not payload.prompt.strip():
+        raise HTTPException(422, "prompt 与 portrait 至少提供其一")
     await require_active_model(db, payload.model or settings.image_model, "image")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
     await _check_concurrency(db, user.id, "image", 20)
@@ -425,7 +447,8 @@ async def create_image_generation(payload: ImageGenerationCreate, user: CurrentU
         project_task_id=task_id,
         storyboard_line_id=line_id,
     )
-    return job.public()
+    # 响应携带最终生效的 prompt（portrait 模式由后端拼装），供前端落库 avatarPrompt
+    return {**job.public(), "prompt": payload.prompt}
 
 
 async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str]) -> list[str]:
@@ -531,7 +554,8 @@ async def list_chat_sessions(user: CurrentUser) -> list[dict]:
 
 @app.post("/api/chat/sessions", status_code=201)
 async def create_chat_session(payload: ChatSessionCreate, user: CurrentUser) -> dict:
-    return (await chat_manager.create(user.id, payload.system_prompt)).summary()
+    system_prompt = payload.system_prompt.strip() or (await get_prompt("chat.default_system")).render()
+    return (await chat_manager.create(user.id, system_prompt)).summary()
 
 
 async def chat_or_404(user_id: str, session_id: str):

@@ -5,7 +5,7 @@ import uuid
 from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,14 @@ from .auth import CurrentUser
 from .config import settings
 from .database import database_session
 from .jobs import jobs as job_manager
+from .kling import ASPECT_RATIOS as KLING_ASPECT_RATIOS
+from .kling import IMAGE_TYPES as KLING_IMAGE_TYPES
+from .kling import MAX_DURATION as KLING_MAX_DURATION
+from .kling import MIN_DURATION as KLING_MIN_DURATION
+from .kling import MODES as KLING_MODES
+from .kling import KlingError
+from .kling import create_task as kling_create_task
+from .kling import query_task as kling_query_task
 from .models import (
     AdminOperationLogModel,
     AiModelModel,
@@ -26,12 +34,28 @@ from .models import (
     ProjectModel,
     PromptTemplateModel,
     PromptVersionModel,
+    StoryboardOptionItemModel,
     TokenUsageModel,
     UserModel,
     utcnow,
 )
 from .prompts import DEFAULT_PROMPTS, invalidate, render_lenient, template_variables
 from .providers import ProviderError, list_video_models, query_provider_task, resume_generation, store_provider_result
+from .runninghub import (
+    ASPECT_RATIOS,
+    DEFAULT_STAGE1_MEGAPIXELS,
+    DEFAULT_STAGE2_MEGAPIXELS,
+    MAX_DURATION,
+    MEGAPIXELS_MAX,
+    MEGAPIXELS_MIN,
+    MEGAPIXELS_PRESETS_16X9,
+    MIN_DURATION,
+    RunningHubError,
+)
+from .runninghub import query_task as rh_query_task
+from .runninghub import submit_task as rh_submit_task
+from .runninghub import upload_media as rh_upload_media
+from .storyboard_options import OPTION_KINDS
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 Db = Depends(database_session)
@@ -782,3 +806,383 @@ async def aigc_provider_models(user: CurrentUser):
         "count": len(models),
         "models": models,
     }
+
+
+# ---------- 通用分镜选项（曲风分类树 / 季节 / 年龄段 / 画面风格） ----------
+
+
+class StoryboardOptionIn(BaseModel):
+    kind: str
+    parent_id: str | None = None
+    name: str
+    sort_order: int | None = None
+
+
+class StoryboardOptionPatch(BaseModel):
+    name: str | None = None
+    sort_order: int | None = None
+
+
+def _option_summary(x: StoryboardOptionItemModel) -> dict:
+    return {"id": x.id, "kind": x.kind, "parentId": x.parent_id, "name": x.name, "sortOrder": x.sort_order}
+
+
+def _validate_option_name(name: str) -> str:
+    value = name.strip()
+    if not value:
+        raise HTTPException(422, "名称不能为空")
+    if len(value) > 60:
+        raise HTTPException(422, "名称过长（最多 60 字）")
+    return value
+
+
+async def _option_depth(db: AsyncSession, item: StoryboardOptionItemModel) -> int:
+    depth = 1
+    current = item
+    while current.parent_id:
+        parent = await db.get(StoryboardOptionItemModel, current.parent_id)
+        if not parent or parent.deleted_at is not None:
+            break
+        depth += 1
+        current = parent
+    return depth
+
+
+def _sibling_where(kind: str, parent_id: str | None):
+    base = StoryboardOptionItemModel.parent_id.is_(None) if parent_id is None else StoryboardOptionItemModel.parent_id == parent_id
+    return (
+        StoryboardOptionItemModel.kind == kind,
+        base,
+        StoryboardOptionItemModel.deleted_at.is_(None),
+    )
+
+
+@router.get("/storyboard-options")
+async def storyboard_options_list(kind: str, user: CurrentUser, db: AsyncSession = Db):
+    """平铺列表（未删除），前端按 parentId 组树；管理端需要看到完整结构而非仅树。"""
+    require_admin(user)
+    if kind not in OPTION_KINDS:
+        raise HTTPException(422, "未知的选项类型")
+    rows = (
+        (
+            await db.execute(
+                select(StoryboardOptionItemModel)
+                .where(StoryboardOptionItemModel.kind == kind, StoryboardOptionItemModel.deleted_at.is_(None))
+                .order_by(StoryboardOptionItemModel.sort_order, StoryboardOptionItemModel.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [_option_summary(x) for x in rows]
+
+
+@router.post("/storyboard-options", status_code=201)
+async def storyboard_option_create(payload: StoryboardOptionIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    require_admin(user)
+    if payload.kind not in OPTION_KINDS:
+        raise HTTPException(422, "未知的选项类型")
+    name = _validate_option_name(payload.name)
+    parent = None
+    if payload.parent_id:
+        if payload.kind != "genre":
+            raise HTTPException(422, "仅曲风分类支持子级")
+        parent = await db.get(StoryboardOptionItemModel, payload.parent_id)
+        if not parent or parent.kind != "genre" or parent.deleted_at is not None:
+            raise HTTPException(422, "上级分类不存在")
+        if await _option_depth(db, parent) >= 3:
+            raise HTTPException(422, "曲风分类最多三级")
+    parent_id = parent.id if parent else None
+    duplicate = (await db.execute(select(StoryboardOptionItemModel).where(*_sibling_where(payload.kind, parent_id), StoryboardOptionItemModel.name == name))).scalar_one_or_none()
+    if duplicate:
+        raise HTTPException(409, "同级已存在同名选项")
+    if payload.sort_order is not None:
+        sort_order = payload.sort_order
+    else:
+        sort_order = (
+            int((await db.execute(select(func.coalesce(func.max(StoryboardOptionItemModel.sort_order), -1)).where(*_sibling_where(payload.kind, parent_id)))).scalar_one()) + 1
+        )
+    item = StoryboardOptionItemModel(id=f"soi-{uuid.uuid4().hex[:16]}", kind=payload.kind, parent_id=parent_id, name=name, sort_order=sort_order)
+    db.add(item)
+    await audit(db, request, user, "storyboard_option.create", "storyboard_option_item", item.id, None, _option_summary(item))
+    await db.commit()
+    return _option_summary(item)
+
+
+@router.patch("/storyboard-options/{item_id}")
+async def storyboard_option_update(item_id: str, payload: StoryboardOptionPatch, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    require_admin(user)
+    item = await db.get(StoryboardOptionItemModel, item_id)
+    if not item or item.deleted_at is not None:
+        raise HTTPException(404, "选项不存在")
+    before = _option_summary(item)
+    if payload.name is not None:
+        name = _validate_option_name(payload.name)
+        duplicate = (
+            await db.execute(
+                select(StoryboardOptionItemModel).where(
+                    *_sibling_where(item.kind, item.parent_id),
+                    StoryboardOptionItemModel.name == name,
+                    StoryboardOptionItemModel.id != item.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if duplicate:
+            raise HTTPException(409, "同级已存在同名选项")
+        item.name = name
+    if payload.sort_order is not None:
+        item.sort_order = payload.sort_order
+    await audit(db, request, user, "storyboard_option.update", "storyboard_option_item", item.id, before, _option_summary(item))
+    await db.commit()
+    return _option_summary(item)
+
+
+@router.delete("/storyboard-options/{item_id}")
+async def storyboard_option_delete(item_id: str, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    """软删除；genre 级联软删除子孙，避免树断链孤儿。历史项目 config 存中文名不受影响。"""
+    require_admin(user)
+    item = await db.get(StoryboardOptionItemModel, item_id)
+    if not item or item.deleted_at is not None:
+        raise HTTPException(404, "选项不存在")
+    now = utcnow()
+    targets = [item]
+    if item.kind == "genre":
+        frontier = [item.id]
+        while frontier:
+            children = list(
+                (await db.execute(select(StoryboardOptionItemModel).where(StoryboardOptionItemModel.parent_id.in_(frontier), StoryboardOptionItemModel.deleted_at.is_(None))))
+                .scalars()
+                .all()
+            )
+            targets.extend(children)
+            frontier = [child.id for child in children]
+    for target in targets:
+        target.deleted_at = now
+    await audit(db, request, user, "storyboard_option.delete", "storyboard_option_item", item.id, _option_summary(item), {"cascadeCount": len(targets) - 1})
+    await db.commit()
+    return {"ok": True, "cascadeCount": len(targets) - 1}
+
+
+# ---------------------------------------------------------------------------
+# RunningHub 云端工作流测试（MiniMax H3 多合一）
+# ---------------------------------------------------------------------------
+
+
+def _runninghub_guard() -> None:
+    if not settings.runninghub_api_key:
+        raise HTTPException(503, "RunningHub API Key 未配置，请在 backend/.env 设置 RUNNINGHUB_API_KEY 后重启后端")
+
+
+def _runninghub_error(exc: RunningHubError) -> HTTPException:
+    return HTTPException(502, str(exc))
+
+
+@router.get("/runninghub/status")
+async def runninghub_status(user: CurrentUser):
+    """测试页初始化信息：key 是否已配置（只回显尾号）、工作流 ID、可选参数。"""
+    require_admin(user)
+    key = settings.runninghub_api_key
+    return {
+        "configured": bool(key),
+        "keyTail": f"...{key[-4:]}" if len(key) >= 4 else "",
+        "workflowId": settings.runninghub_workflow_id,
+        "aspectRatios": list(ASPECT_RATIOS),
+        "durationRange": [MIN_DURATION, MAX_DURATION],
+        # 一/二阶段共用同一张 megapixels → 16:9 分辨率表
+        "megapixelsPresets": [{"value": value, "size": size} for value, size in MEGAPIXELS_PRESETS_16X9],
+        "megapixelsDefault": [DEFAULT_STAGE1_MEGAPIXELS, DEFAULT_STAGE2_MEGAPIXELS],
+    }
+
+
+@router.post("/runninghub/upload")
+async def runninghub_upload(file: UploadFile, user: CurrentUser):
+    """转发参考图到 RunningHub，返回 fileName（提交任务时填入 LoadImage 节点）。"""
+    require_admin(user)
+    _runninghub_guard()
+    content = await file.read()
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(422, "文件超过 20MB 限制")
+    try:
+        return await rh_upload_media(content, file.filename or "upload.png")
+    except RunningHubError as exc:
+        raise _runninghub_error(exc) from exc
+
+
+class RunningHubTaskIn(BaseModel):
+    prompt: str = Field(min_length=1, max_length=8000)
+    duration: float = Field(default=8, ge=MIN_DURATION, le=MAX_DURATION)
+    aspect_ratio: str = Field(default="16:9 (Widescreen)", alias="aspectRatio")
+    images: list[str] = Field(default_factory=list, max_length=3)
+    seed: int | None = Field(default=None, ge=0)
+    stage1_megapixels: float = Field(default=DEFAULT_STAGE1_MEGAPIXELS, ge=MEGAPIXELS_MIN, le=MEGAPIXELS_MAX, alias="stage1Megapixels")
+    stage2_megapixels: float = Field(default=DEFAULT_STAGE2_MEGAPIXELS, ge=MEGAPIXELS_MIN, le=MEGAPIXELS_MAX, alias="stage2Megapixels")
+
+    model_config = {"populate_by_name": True}
+
+
+@router.post("/runninghub/tasks", status_code=201)
+async def runninghub_task_create(payload: RunningHubTaskIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    """提交 MiniMax H3 工作流任务（nodeInfoList 覆盖提示词/时长/宽高比/参考图/种子）。"""
+    require_admin(user)
+    _runninghub_guard()
+    try:
+        result = await rh_submit_task(
+            prompt=payload.prompt,
+            duration=payload.duration,
+            aspect_ratio=payload.aspect_ratio,
+            images=payload.images,
+            seed=payload.seed,
+            stage1_megapixels=payload.stage1_megapixels,
+            stage2_megapixels=payload.stage2_megapixels,
+        )
+    except RunningHubError as exc:
+        raise _runninghub_error(exc) from exc
+    task_id = str(result.get("taskId"))
+    await audit(
+        db,
+        request,
+        user,
+        "runninghub_task.submit",
+        "runninghub_task",
+        task_id,
+        None,
+        {
+            "duration": payload.duration,
+            "aspectRatio": payload.aspect_ratio,
+            "imageCount": len(payload.images),
+            "stage1Megapixels": payload.stage1_megapixels,
+            "stage2Megapixels": payload.stage2_megapixels,
+        },
+    )
+    await db.commit()
+    return {"taskId": task_id, "status": result.get("status", "")}
+
+
+class RunningHubQueryIn(BaseModel):
+    task_id: str = Field(min_length=1, alias="taskId")
+
+    model_config = {"populate_by_name": True}
+
+
+@router.post("/runninghub/query")
+async def runninghub_task_query(payload: RunningHubQueryIn, user: CurrentUser):
+    """查询任务状态，透传 status/results/usage/errorMessage。"""
+    require_admin(user)
+    _runninghub_guard()
+    try:
+        return await rh_query_task(payload.task_id)
+    except RunningHubError as exc:
+        raise _runninghub_error(exc) from exc
+
+
+# ---------------------------------------------------------------------------
+# Kling V3 Omni 视频模型测试
+# ---------------------------------------------------------------------------
+
+
+def _kling_guard() -> None:
+    if not settings.kling_api_key:
+        raise HTTPException(503, "Kling API Key 未配置，请设置 KLING_API_KEY（或 VIDEO_API_KEY/共享 AIGC_TOKEN）后重启后端")
+
+
+def _kling_error(exc: KlingError) -> HTTPException:
+    return HTTPException(502, str(exc))
+
+
+@router.get("/kling/status")
+async def kling_status(user: CurrentUser):
+    """测试页初始化信息：key 是否已配置（只回显尾号）、模型与可选参数。"""
+    require_admin(user)
+    key = settings.kling_api_key
+    return {
+        "configured": bool(key),
+        "keyTail": f"...{key[-4:]}" if len(key) >= 4 else "",
+        "baseUrl": settings.kling_api_base_url,
+        "model": settings.kling_model,
+        "modes": list(KLING_MODES),
+        "aspectRatios": list(KLING_ASPECT_RATIOS),
+        "imageTypes": list(KLING_IMAGE_TYPES),
+        "durationRange": [KLING_MIN_DURATION, KLING_MAX_DURATION],
+    }
+
+
+class KlingImageIn(BaseModel):
+    image_url: str = Field(min_length=1, alias="imageUrl")
+    type: str = "reference"
+
+    model_config = {"populate_by_name": True}
+
+
+class KlingVideoIn(BaseModel):
+    video_url: str = Field(min_length=1, alias="videoUrl")
+    refer_type: str | None = Field(default=None, alias="referType")
+    keep_original_sound: str | None = Field(default=None, alias="keepOriginalSound")
+
+    model_config = {"populate_by_name": True}
+
+
+class KlingTaskIn(BaseModel):
+    prompt: str = Field(default="", max_length=8000)
+    negative_prompt: str = Field(default="", max_length=2000, alias="negativePrompt")
+    images: list[KlingImageIn] = Field(default_factory=list, max_length=4)
+    videos: list[KlingVideoIn] = Field(default_factory=list, max_length=2)
+    element_ids: list[str] = Field(default_factory=list, max_length=4, alias="elementIds")
+    duration: float = Field(default=5, ge=KLING_MIN_DURATION, le=KLING_MAX_DURATION)
+    mode: str = "pro"
+    aspect_ratio: str = Field(default="16:9", alias="aspectRatio")
+    sound: str = "off"
+    cfg_scale: float = Field(default=0.5, ge=0, le=1, alias="cfgScale")
+
+    model_config = {"populate_by_name": True}
+
+
+@router.post("/kling/tasks", status_code=201)
+async def kling_task_create(payload: KlingTaskIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    """创建 Kling V3 Omni 生成任务（文生/图生/首尾帧/多模态参考）。"""
+    require_admin(user)
+    _kling_guard()
+    try:
+        result = await kling_create_task(
+            prompt=payload.prompt,
+            negative_prompt=payload.negative_prompt,
+            images=[item.model_dump(by_alias=True) for item in payload.images],
+            videos=[item.model_dump(by_alias=True, exclude_none=True) for item in payload.videos],
+            element_ids=payload.element_ids,
+            duration=payload.duration,
+            mode=payload.mode,
+            aspect_ratio=payload.aspect_ratio,
+            sound=payload.sound,
+            cfg_scale=payload.cfg_scale,
+        )
+    except KlingError as exc:
+        raise _kling_error(exc) from exc
+    await audit(
+        db,
+        request,
+        user,
+        "kling_task.submit",
+        "kling_task",
+        result["taskId"],
+        None,
+        {
+            "duration": payload.duration,
+            "mode": payload.mode,
+            "aspectRatio": payload.aspect_ratio,
+            "sound": payload.sound,
+            "imageCount": len(payload.images),
+            "videoCount": len(payload.videos),
+        },
+    )
+    await db.commit()
+    return result
+
+
+@router.get("/kling/tasks/{task_id}")
+async def kling_task_query(task_id: str, user: CurrentUser):
+    """查询任务状态，透传 task_status/task_result/task_status_msg。"""
+    require_admin(user)
+    _kling_guard()
+    try:
+        return await kling_query_task(task_id)
+    except KlingError as exc:
+        raise _kling_error(exc) from exc

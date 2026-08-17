@@ -165,7 +165,7 @@ cd backend && .venv/bin/pytest tests/test_request_logging.py -q
 | `test_filters_by_path_and_status` | 列表筛选 |
 | `test_request_logs_require_admin` | 权限控制 |
 
-### 6.2 前端（tests/perf.test.ts，4 个）
+### 6.2 前端（tests/user/perf.test.ts，4 个）
 
 ```bash
 npm test

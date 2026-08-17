@@ -20,7 +20,13 @@ from .config import settings
 class Storage(Protocol):
     async def put_bytes(self, key: str, content: bytes, content_type: str | None = None) -> str: ...
 
-    async def put_file(self, key: str, path: str | Path, content_type: str | None = None) -> str: ...
+    async def put_file(
+        self,
+        key: str,
+        path: str | Path,
+        content_type: str | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> str: ...
 
 
 def safe_key(category: str, filename: str) -> str:
@@ -94,16 +100,28 @@ class TosStorage:
         await asyncio.to_thread(upload)
         return self._public_url(bucket, object_key)
 
-    async def put_file(self, key: str, path: str | Path, content_type: str | None = None) -> str:
+    async def put_file(
+        self,
+        key: str,
+        path: str | Path,
+        content_type: str | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> str:
         bucket, object_key = self._bucket_for(key)
         file_path = str(path)
 
         def upload() -> None:
+            # TOS SDK 的 data_transfer_listener 为 (consumed, total, rw_once, type) 同步回调，
+            # 统一包装成 (consumed, total) 供上层估算上传进度
+            listener = None
+            if progress_callback:
+                listener = lambda consumed, total, _rw, _type: progress_callback(consumed, total)  # noqa: E731
             self.client.put_object_from_file(
                 bucket,
                 object_key,
                 file_path,
                 content_type=content_type or "application/octet-stream",
+                data_transfer_listener=listener,
             )
 
         await asyncio.to_thread(upload)

@@ -180,6 +180,11 @@ export function cancelTaskWatchers(taskId: string): void {
   for (const controller of [...set]) controller.abort()
 }
 
+/** 取消所有子项目的 watcher（登出/账号切换时调用）：旧账号的轮询与 SSE 全部停止 */
+export function cancelAllTaskWatchers(): void {
+  for (const taskId of [...taskWatchers.keys()]) cancelTaskWatchers(taskId)
+}
+
 /** 可中断的 sleep：signal aborted 时立即返回（由调用方检查上下文后退出循环） */
 export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {

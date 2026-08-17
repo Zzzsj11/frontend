@@ -126,6 +126,10 @@ async def create_real_face_asset(public_url: str, *, name: str) -> str:
     }
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(f"{base}/virtual/assets/create", headers=headers, json=payload)
+        # CN region 不支持 Moderation 参数（直接 400）：去掉后降级重试一次，其他区域保持原行为
+        if response.status_code == 400 and "Moderation" in response.text and "not supported" in response.text:
+            payload.pop("Moderation")
+            response = await client.post(f"{base}/virtual/assets/create", headers=headers, json=payload)
         _raise_for_status(response)
         created = _unwrap(response.json())
         asset_id = created.get("id")

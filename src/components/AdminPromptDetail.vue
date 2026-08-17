@@ -194,10 +194,11 @@ onMounted(load)
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 16px;
+  padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  box-shadow: var(--shadow-card);
 }
 h2 {
   margin: 0;
@@ -248,6 +249,11 @@ textarea {
   padding: 10px;
   resize: vertical;
 }
+textarea:focus,
+.bar input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
 .bar {
   display: flex;
   gap: 8px;
@@ -267,6 +273,15 @@ button {
   border-radius: var(--radius-sm);
   padding: 7px 12px;
   cursor: pointer;
+  transition:
+    border-color 0.15s,
+    color 0.15s,
+    background 0.15s;
+}
+button:hover:not(:disabled):not(.primary):not(.danger) {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-light);
 }
 button:disabled {
   opacity: 0.5;
@@ -277,9 +292,15 @@ button.primary {
   border-color: var(--primary);
   color: #fff;
 }
+button.primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
 button.danger {
   color: var(--danger);
   border-color: var(--danger-border);
+}
+button.danger:hover:not(:disabled) {
+  background: var(--danger-light);
 }
 table {
   width: 100%;
@@ -294,7 +315,7 @@ td {
 }
 th {
   color: var(--text-secondary);
-  font-weight: 500;
+  font-weight: 600;
 }
 .badge {
   display: inline-block;

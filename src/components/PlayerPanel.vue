@@ -25,14 +25,24 @@ const currentImage = computed(() => {
   return line ? store.coverOf(line) : undefined
 })
 
-/** 同步视频元素：播放状态/切片时对齐片段内偏移并播放或暂停 */
-const syncVideo = () => {
+/** 拖动期间 video.currentTime 回设的节流时间戳（~120ms） */
+let lastScrubSeekAt = 0
+
+/** 同步视频元素：播放状态/切片时对齐片段内偏移并播放或暂停；force 用于拖动松手后的精确对齐 */
+const syncVideo = (force = false) => {
   const video = videoRef.value
   if (!video) return
   const clip = store.currentClip
   if (clip) {
     const offset = Math.max(0, store.currentTime - clip.start)
-    if (Math.abs(video.currentTime - offset) > 0.5) video.currentTime = offset
+    if (Math.abs(video.currentTime - offset) > 0.15) {
+      const now = performance.now()
+      // 拖动中连续 seek 会触发解码风暴：~120ms 节流；松手（force）或正常播放立即对齐
+      if (!store.scrubbing || force || now - lastScrubSeekAt >= 120) {
+        video.currentTime = offset
+        lastScrubSeekAt = now
+      }
+    }
   }
   video.muted = store.muted
   video.volume = store.volume
@@ -42,6 +52,17 @@ const syncVideo = () => {
     video.pause()
   }
 }
+
+// 视频元素挂载/卸载（v-if 切换）时向 store 登记：播放中主时钟以视频真实进度回写
+watch(videoRef, (el) => store.registerVideoEl(el ?? null), { flush: 'post' })
+
+// 拖动松手后精确对齐一次视频画面帧
+watch(
+  () => store.scrubbing,
+  (scrubbing, was) => {
+    if (was && !scrubbing) syncVideo(true)
+  },
+)
 
 watch(
   () => [store.isPlaying, currentVideoUrl.value] as const,
@@ -101,9 +122,12 @@ const seekByEvent = (e: MouseEvent, el: HTMLElement) => {
 }
 const onProgressDown = (e: MouseEvent) => {
   const el = e.currentTarget as HTMLElement
+  store.scrubbing = true
   seekByEvent(e, el)
   const onMove = (ev: MouseEvent) => seekByEvent(ev, el)
-  const onUp = () => {
+  const onUp = (ev: MouseEvent) => {
+    seekByEvent(ev, el) // 松手位置精确对齐一次
+    store.scrubbing = false
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', onUp)
   }
@@ -132,9 +156,12 @@ const seekFsByEvent = (e: MouseEvent, el: HTMLElement) => {
 }
 const onFsProgressDown = (e: MouseEvent) => {
   const el = e.currentTarget as HTMLElement
+  store.scrubbing = true
   seekFsByEvent(e, el)
   const onMove = (ev: MouseEvent) => seekFsByEvent(ev, el)
-  const onUp = () => {
+  const onUp = (ev: MouseEvent) => {
+    seekFsByEvent(ev, el)
+    store.scrubbing = false
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', onUp)
   }
@@ -163,6 +190,7 @@ const onFsChange = () => {
 onMounted(() => document.addEventListener('fullscreenchange', onFsChange))
 onBeforeUnmount(() => {
   document.removeEventListener('fullscreenchange', onFsChange)
+  store.registerVideoEl(null)
   // 若卸载时仍在全屏，恢复播放模式，避免残留强制单分镜
   if (isFullscreen.value) store.setPlayMode('single', prevSingle)
 })
@@ -192,7 +220,7 @@ const toggleFullscreen = () => {
         :src="currentVideoUrl"
         class="preview-img"
         playsinline
-        @loadeddata="syncVideo"
+        @loadeddata="syncVideo()"
       />
       <img v-else-if="currentImage" :src="currentImage" alt="视频预览" class="preview-img" />
       <p v-else class="preview-placeholder">生成视频后在此查看预览</p>

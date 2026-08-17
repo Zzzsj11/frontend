@@ -4,7 +4,7 @@
 
 当前版本：`v0.9.1 web 内测版初版`。
 
-维护入口：[`AGENTS.md`](AGENTS.md)（Code Agent 约定）、[`ARCHITECTURE.md`](docs/ARCHITECTURE.md)、[`LOCAL-DEVELOPMENT.md`](docs/LOCAL-DEVELOPMENT.md)、[`TESTING.md`](docs/TESTING.md)、[`DEPLOYMENT.md`](docs/DEPLOYMENT.md)、[`ROLLBACK.md`](docs/ROLLBACK.md)、[`BACKUP-RESTORE.md`](docs/BACKUP-RESTORE.md) 和 [`SECURITY.md`](docs/SECURITY.md)。
+维护入口：[`AGENTS.md`](AGENTS.md)（Code Agent 约定）、[`ARCHITECTURE.md`](docs/ARCHITECTURE.md)、[`LOCAL-DEVELOPMENT.md`](docs/LOCAL-DEVELOPMENT.md)、[`TESTING.md`](docs/TESTING.md)、[`DEPLOYMENT.md`](docs/DEPLOYMENT.md)、[`ROLLBACK.md`](docs/ROLLBACK.md)、[`BACKUP-RESTORE.md`](docs/BACKUP-RESTORE.md) 和 [`SECURITY.md`](docs/SECURITY.md)。专题文档（`docs/`）：前端规范 `FRONTEND-GUIDELINES.md`、性能观测 `PERFORMANCE-MONITORING.md`、数字人资产链路 `ASSET-AVATAR.md`、歌曲分类数据 `SONG-CATEGORIES.md`、模型扩展待办 `TODO_MODEL_EXPANSION.md`。
 
 ## 核心能力
 
@@ -13,7 +13,8 @@
 - 渐进式生成：单次 API 只生成一条分镜提示词，前端以受控并发完成全量任务，减少首条结果等待时间。
 - 角色库：内置成人与儿童系统角色，按“男 / 女 / 儿童”三个只读默认分类展示，所有用户可见；用户上传或生成的私有角色及媒体彼此隔离。
 - 媒体生成：场景图与视频异步生成，视频时长支持 4–15 秒整数，画幅支持 16:9、9:16、4:3、1:1。
-- 生成配置：ASS 与通用分镜均保存画幅、清晰度、图片模型和视频模型；可用模型由管理后台注册中心动态下发。
+- 生成配置：ASS 与通用分镜均保存画幅、清晰度、图片模型和视频模型；可用模型由管理后台注册中心（`/api/model-options`）动态下发。
+- 管理控制台：仪表盘、项目/用户/生成任务/费用用量、提示词管理、通用分类全量自定义（树形 CRUD + 种子迁移）、模型注册中心启停、Kling 与 RunningHub H3 工作流测试面板、错误日志/操作审计/LLM 调用/接口耗时/性能页；侧边导航按「总览 / 业务运营 / 内容配置 / 模型实验室 / 系统监控」五组两级分组。
 - 素材导出：将子项目内的视频片段与整体提示词 Markdown 以低内存流式方式打包到 TOS；每个子项目拥有独立异步导出任务，SSE 实时显示阶段和进度。
 - 多用户与鉴权：短期 Access Token + Refresh Token，管理员和普通用户的数据按所有权隔离。
 - 数据审计：所有业务删除均为软删除；模型调用记录输入、输出及缓存 Token；后端 API 错误脱敏后入库。
@@ -71,7 +72,7 @@ flowchart LR
 
 ### 后端
 
-- Python 3.13、FastAPI、Pydantic
+- Python 3.12、FastAPI、Pydantic
 - SQLAlchemy Async + asyncpg：PostgreSQL 异步数据访问
 - Alembic：数据库迁移
 - Redis：生成任务热状态、SSE 事件和跨进程发布订阅
@@ -103,9 +104,15 @@ PostgreSQL 是持久化事实来源，主要保存用户、刷新令牌、项目
 │   ├── app/                     FastAPI、领域服务、任务、存储和种子数据
 │   ├── migrations/              Alembic 迁移
 │   └── tests/                   后端自动化测试
-├── e2e/                         Playwright 用户旅程
+├── e2e/                         Playwright 端到端测试
+│   ├── user/                    用户侧旅程、远程冒烟与真实生成全链路
+│   ├── admin/                   管理后台 API 契约与控制台 UI
+│   └── env.ts                   共享凭据与目标环境
 ├── tests/                       前端单元测试
-├── docs/                        验收报告与测试使用文档
+│   ├── user/                    用户侧组件/Store/工具
+│   ├── admin/                   管理后台面板
+│   └── setup.ts                 Vitest 共享 setup
+├── docs/                        专题文档（架构/测试/部署/安全/性能/资产链路等）
 ├── test-artifacts/full-journey/ 固化 ASS 输入与全链路基准截图
 └── docker-compose.yml           完整环境编排
 ```
@@ -121,7 +128,7 @@ PostgreSQL 是持久化事实来源，主要保存用户、刷新令牌、项目
 本地开发额外需要：
 
 - Node.js 22+ 与 npm
-- Python 3.13+
+- Python ≥ 3.11（容器内为 3.12）
 - PostgreSQL 16
 - Redis 7
 
@@ -148,9 +155,11 @@ cp backend/.env.example backend/.env
 ## Docker 启动
 
 ```bash
-docker compose up -d --build
+make dev            # 组合加载 local-build 覆盖（镜像加速）后 docker compose up -d
 docker compose ps
 ```
+
+本机所有 compose 入口均固定加载 `docker-compose.local-build.yml` 走国内镜像代理，不直连 docker.io；手动执行 compose 命令时必须带 `-f docker-compose.yml -f docker-compose.local-build.yml`，详见 [`LOCAL-DEVELOPMENT.md`](docs/LOCAL-DEVELOPMENT.md)。
 
 服务地址：
 
@@ -179,7 +188,7 @@ docker compose down
 先启动数据服务：
 
 ```bash
-docker compose up -d postgres redis
+docker compose -f docker-compose.yml -f docker-compose.local-build.yml up -d postgres redis
 ```
 
 启动后端：
@@ -204,19 +213,18 @@ Vite 开发服务器会将 `/api` 代理到后端。
 
 ## 测试
 
+前端与管理后台测试按目录分组，可独立运行：
+
 ```bash
-# 前端单元测试
-npm test
-
-# 后端测试
-cd backend && .venv/bin/pytest -q
-
-# 普通 Playwright（真实生成用例默认跳过）
-npm run test:e2e
-
-# 前端单元测试 + 普通 Playwright
-npm run test:all
+npm run test:unit:user    # 用户侧单测
+npm run test:unit:admin   # 管理后台单测
+npm test                  # 全量单测
+npm run test:e2e:user     # 用户侧 e2e（本地 mock 链路）
+npm run test:admin        # 管理后台 e2e（远程 API 契约 + 控制台 UI）
+cd backend && .venv/bin/pytest -q   # 后端测试
 ```
+
+日常提交前跑 `make preflight-lite`（约 70s，跳过 Docker 构建）；发布前跑完整 `make preflight`（约 90s）。按改动范围选择最小验证集的耗时矩阵见 [`docs/TESTING.md`](docs/TESTING.md)。
 
 真实 ASS + 通用分镜测试会调用付费模型和媒体供应商，必须显式开启：
 

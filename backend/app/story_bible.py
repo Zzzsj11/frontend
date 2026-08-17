@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .media_constraints import MAX_VIDEO_DURATION, MIN_VIDEO_DURATION, normalize_video_duration
+from .prompts import get_prompt
 
 STORY_BIBLE_VERSION = "story-bible-v5"
 
@@ -24,7 +25,13 @@ def _stage(index: int, total: int) -> str:
     return "留白、回应与收束"
 
 
-def build_ass_story_bible(*, segments: list[dict[str, Any]], emotion: dict[str, Any], role_ids: list[str], extra_requirement: str, outline: dict[str, Any]) -> dict[str, Any]:
+async def build_ass_story_bible(*, segments: list[dict[str, Any]], emotion: dict[str, Any], role_ids: list[str], extra_requirement: str, outline: dict[str, Any]) -> dict[str, Any]:
+    # 策略文案由提示词注册中心提供（后台可编辑/回滚）；or 缺省逻辑留在代码
+    logline_prompt = await get_prompt("story_bible.ass.logline")
+    style_priority_prompt = await get_prompt("story_bible.ass.style_priority_default")
+    character_policy_prompt = await get_prompt("story_bible.ass.character_policy")
+    negative_constraints_prompt = await get_prompt("story_bible.ass.negative_constraints")
+    location_rule_prompt = await get_prompt("story_bible.ass.location_rule")
     total = len(segments)
     shots = [
         {
@@ -49,7 +56,7 @@ def build_ass_story_bible(*, segments: list[dict[str, Any]], emotion: dict[str, 
     ]
     return {
         "version": STORY_BIBLE_VERSION,
-        "logline": f"{emotion.get('songName') or emotion.get('songCode')} 的情绪化 MV，以 {emotion.get('materialCategory') or '歌曲情感'} 为叙事核心。",
+        "logline": logline_prompt.render(song_name=emotion.get("songName") or emotion.get("songCode"), material_category=emotion.get("materialCategory") or "歌曲情感"),
         "globalVisual": outline["globalVisual"],
         "locations": outline["locations"],
         "motifs": outline["motifs"],
@@ -58,24 +65,26 @@ def build_ass_story_bible(*, segments: list[dict[str, Any]], emotion: dict[str, 
         "visualContinuity": {
             "season": emotion.get("seasons"),
             "atmosphere": emotion.get("atmosphere"),
-            "stylePriority": extra_requirement or "统一时间、天气、色彩与人物服装，通过合理空间移动形成场景变化",
+            "stylePriority": extra_requirement or style_priority_prompt.render(),
         },
-        "characterPolicy": "逐镜类型、人物、地点与动作均由全局大纲确定。单条生成必须严格沿用预分配角色、镜头类型、地点与人物动作；视频中的人物必须与参考图中的角色保持严格一致——面容、发型、服装、配饰完全一致，不得改变任何外貌细节。不得临时改为空镜、替换人物、引入其他人物或改变人物身份服装。",
+        "characterPolicy": character_policy_prompt.render(),
         "technicalPolicy": {
-            "negativeConstraints": ["无字幕", "无水印", "无 Logo", "不得出现未指定人物", "不得改变人物服装与身份"],
-            "locationRule": "同一故事世界允许跨多个关联地点推进；一致性来自时间、天气、色彩、服装和空间衔接，而非所有镜头固定在同一地点。",
+            "negativeConstraints": negative_constraints_prompt.render_json(),
+            "locationRule": location_rule_prompt.render(),
         },
         "shots": shots,
     }
 
 
-def build_general_story_bible(*, config: dict[str, Any], shots: list[dict[str, Any]], durations: list[float]) -> dict[str, Any]:
+async def build_general_story_bible(*, config: dict[str, Any], shots: list[dict[str, Any]], durations: list[float]) -> dict[str, Any]:
+    logline_prompt = await get_prompt("story_bible.general.logline")
+    character_policy_prompt = await get_prompt("story_bible.general.character_policy")
     total = len(shots)
     # 部分曲风（戏曲、中文喊麦）没有二级分类，拼接风格路径时跳过空段
     category_path = " / ".join(part for part in (config.get("genre"), config.get("secondary_category")) if part)
     return {
         "version": STORY_BIBLE_VERSION,
-        "logline": f"{category_path} 风格的完整 MV 视觉弧光，出镜人物性别构成：{config.get('gender') or '女'}。",
+        "logline": logline_prompt.render(category_path=category_path, gender=config.get("gender") or "女"),
         "visualContinuity": {
             "season": config.get("season"),
             "singerGender": config.get("gender"),
@@ -83,7 +92,7 @@ def build_general_story_bible(*, config: dict[str, Any], shots: list[dict[str, A
             "ratio": config.get("ratio"),
             "overallPrompt": config.get("overall_prompt"),
         },
-        "characterPolicy": "空镜严禁人物；人物镜必须完整使用本镜预分配角色，角色顺序不得改变。",
+        "characterPolicy": character_policy_prompt.render(),
         "shots": [
             {
                 "index": index,

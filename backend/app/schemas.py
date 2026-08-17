@@ -154,21 +154,32 @@ class StoryboardLineGenerate(BaseModel):
 
 
 class ChatSessionCreate(BaseModel):
-    system_prompt: str = "你是 MV 制作助手，帮助用户规划分镜、场景、角色和视频生成提示词。"
+    """system_prompt 留空时由后端以提示词注册中心的 chat.default_system 填充。"""
+
+    system_prompt: str = Field(default="", max_length=30_000)
 
 
 class ChatMessageCreate(BaseModel):
     text: str = Field(min_length=1, max_length=20_000)
 
 
+class PortraitPromptParams(BaseModel):
+    """数字人定妆照模式：prompt 由后端按注册中心模板拼装，前端只传原始参数。"""
+
+    description: str = Field(default="", max_length=2_000)
+    style: str = Field(default="", max_length=200)
+
+
 class ImageGenerationCreate(BaseModel):
-    prompt: str = Field(min_length=1, max_length=20_000)
+    # prompt 允许为空：portrait 模式下由后端用注册中心模板拼装（二者至少其一，端点内校验）
+    prompt: str = Field(default="", max_length=20_000)
     size: str = "1024x1024"
     quality: Literal["auto", "low", "medium", "high"] = "auto"
     n: int = Field(default=1, ge=1, le=4)
     images: list[str] = Field(default_factory=list)
     model: str | None = Field(default=None, max_length=160)
     purpose: Literal["scene", "digital_human", "other"] = "other"
+    portrait: PortraitPromptParams | None = None
     project_task_id: str | None = None
     storyboard_line_id: str | None = None
 

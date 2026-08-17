@@ -466,3 +466,17 @@ class PromptVersionModel(LifecycleMixin, Base):
     status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
     created_by: Mapped[str] = mapped_column(String(80), default="")
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class StoryboardOptionItemModel(LifecycleMixin, Base):
+    """通用分镜选项：genre 为三级分类树（parent_id 自引用），season/age_group/visual_style 为平铺列表。
+
+    管理后台维护；删除为软删除，已生成项目 storyboard_config 存中文名不受影响。
+    """
+
+    __tablename__ = "storyboard_option_items"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), index=True)
+    parent_id: Mapped[str | None] = mapped_column(ForeignKey("storyboard_option_items.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)

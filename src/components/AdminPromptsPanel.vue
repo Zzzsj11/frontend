@@ -88,6 +88,7 @@ onMounted(loadList)
   border-radius: var(--radius-md);
   overflow: auto;
   max-height: calc(100vh - 180px);
+  box-shadow: var(--shadow-card);
 }
 table {
   width: 100%;
@@ -102,7 +103,7 @@ td {
 }
 th {
   color: var(--text-secondary);
-  font-weight: 500;
+  font-weight: 600;
   font-size: var(--font-sm);
 }
 tbody tr {
