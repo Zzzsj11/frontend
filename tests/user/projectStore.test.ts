@@ -928,6 +928,35 @@ describe('batch shot video generation', () => {
     expect(store.lines.find((line) => line.id === 'l-draft')?.shot.status).toBe('none')
   })
 
+  it('runs up to twenty video generations concurrently', async () => {
+    const store = useProjectStore()
+    store.activeTaskId = 'task-1'
+    store.lines = Array.from({ length: 21 }, (_, index) =>
+      shotLine(`l-${index + 1}`, 'succeeded', 'none'),
+    )
+    let active = 0
+    let peak = 0
+    const releases: Array<() => void> = []
+    vi.spyOn(store, 'generateShotFor').mockImplementation(async () => {
+      active += 1
+      peak = Math.max(peak, active)
+      await new Promise<void>((resolve) => releases.push(resolve))
+      active -= 1
+    })
+
+    const run = store.generateAllShots()
+    await vi.waitFor(() => expect(active).toBe(20))
+    expect(peak).toBe(20)
+    expect(releases).toHaveLength(20)
+
+    releases.shift()?.()
+    await vi.waitFor(() => expect(releases).toHaveLength(20))
+    expect(peak).toBe(20)
+    releases.splice(0).forEach((release) => release())
+    await run
+    expect(store.batchShooting).toBe(false)
+  })
+
   it('keeps dispatching after a line hits the 429 concurrency cap', async () => {
     const store = useProjectStore()
     store.activeTaskId = 'task-1'
@@ -1037,10 +1066,10 @@ describe('batch shot video generation', () => {
 
       const run = store.generateAllShots()
       await vi.advanceTimersByTimeAsync(2000)
-      // 生成中的行尚未落定：不能抢先派发下一行（串行语义）
-      expect(posted).toEqual([])
+      // 恢复中的行占用一个 worker，空闲 worker 立即派发下一行。
+      expect(posted).toEqual(['l-idle'])
       expect(store.batchShooting).toBe(true)
-      // 等待态 watcher 把在途行更新为完成后，续跑才继续派发剩余行（30s 覆盖后续派发+轮询间隔）
+      // 等待态 watcher 把在途行更新为完成后，整个批次才结束。
       generating.shot.status = 'done'
       await vi.advanceTimersByTimeAsync(30000)
       await run

@@ -39,6 +39,8 @@ const sidebarKeys = (userId: string) => ({
 
 /** 「批量生成视频」进行中标记持久化 key（按用户+任务隔离）：刷新/切走子任务中断后，回到该任务时续跑 */
 const batchShotKey = (userId: string, taskId: string) => `mv_batch_shot_${userId}_${taskId}`
+/** 与后端单用户视频生成上限一致，避免第 21 个请求被 429 拒绝。 */
+const BATCH_SHOT_CONCURRENCY = 20
 
 /** 无配音时的占位时长（秒） */
 export const DEFAULT_CLIP_DURATION = 5
@@ -461,7 +463,7 @@ export const useProjectStore = defineStore('project', {
       if (taskId) {
         void this.restoreMaterialExports(taskId)
         void this.resumeActiveGenerations(taskId)
-        // 刷新/切走前批量生成未跑完：恢复进行中状态并续跑剩余行（串行语义见 generateAllShots）
+        // 刷新/切走前批量生成未跑完：恢复进行中状态并续跑剩余行
         if (auth.user && localStorage.getItem(batchShotKey(auth.user.id, taskId)))
           void this.generateAllShots()
         if (
@@ -1787,7 +1789,7 @@ export const useProjectStore = defineStore('project', {
       }
     },
 
-    /** 批量生成视频片段：提示词就绪且视频「未生成/失败」的行串行派发（与批量按钮计数同口径）；
+    /** 批量生成视频片段：提示词就绪且视频「未生成/失败」的行最多 20 路并发（与后端单用户上限一致）；
      *  单行失败不中断后续（失败原因入行内状态，429 单账号上限由后端兜底并统一弹窗）；
      *  「批量进行中」标记按任务持久化：刷新/切换子任务中断后，回到该任务自动续跑剩余行 */
     async generateAllShots() {
@@ -1801,16 +1803,23 @@ export const useProjectStore = defineStore('project', {
       const interrupted = () => this.activeTaskId !== taskId || Boolean(watcher?.signal.aborted)
       const needsShot = (line: ScriptLine) =>
         line.generationStatus === 'succeeded' && line.shot.status !== 'done'
-      try {
-        for (const line of [...this.lines]) {
-          // 切换子项目后立即停止批量派发（标记保留，切回该任务时自动续跑）
-          if (interrupted()) break
-          if (!needsShot(line)) continue
-          // 恢复续跑时可能仍有行在生成中（等待态由 resumeActiveGenerations 重建）：等它落定再派发，维持串行
+      const pending = [...this.lines].filter(needsShot)
+      let cursor = 0
+      const worker = async () => {
+        while (!interrupted()) {
+          const line = pending[cursor]
+          cursor += 1
+          if (!line) return
+          // 刷新恢复时，已在后端生成的行等待落定；其他 worker 继续使用剩余并发槽位。
           await this._awaitShotSettled(line, watcher?.signal)
-          if (interrupted()) break
+          if (interrupted()) return
           if (needsShot(line)) await this.generateShotFor(line.id)
         }
+      }
+      try {
+        await Promise.all(
+          Array.from({ length: Math.min(BATCH_SHOT_CONCURRENCY, pending.length) }, worker),
+        )
       } catch (error) {
         if (!(error instanceof PollingCancelledError)) throw error
       } finally {
