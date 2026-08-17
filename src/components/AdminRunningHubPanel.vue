@@ -38,7 +38,11 @@ N/A`
 const TEXT_EXAMPLE_PROMPT = `integrated_multimodal_description:
 [Shot 1] Live-action cinematic footage at sunrise. A small red fox walks slowly through a misty pine forest, dew sparkling on the grass. The camera tracks alongside at a low angle with stable, natural movement. Warm sunlight passes through the trees while distant birds and soft footsteps create a calm forest soundscape. No text, no watermark.`
 
-type GenerationMode = 'reference' | 'text'
+const FIRST_FRAME_EXAMPLE_PROMPT = `For the target video, at 0.00 seconds into the target video, <Picture 1> is fully referenced.
+
+integrated_multimodal_description: [Shot 1] Live-action cinematic footage begins exactly from <Picture 1>, preserving the subject, composition, lighting and background. The subject slowly turns toward the camera while a gentle breeze creates subtle natural movement. The camera makes a stable, slow push-in. Realistic texture, coherent motion, no text, no watermark.`
+
+type GenerationMode = 'reference' | 'text' | 'first_frame'
 
 interface ImageSlot {
   value: string
@@ -71,6 +75,7 @@ const seedRaw = ref('')
 const stage1Mp = ref(0.4)
 const stage2Mp = ref(0.9)
 const textMp = ref(0.9)
+const firstFrameMp = ref(0.9)
 const slots = reactive<ImageSlot[]>([
   { value: '', uploading: false, preview: '' },
   { value: '', uploading: false, preview: '' },
@@ -91,17 +96,26 @@ let pollTimer: ReturnType<typeof setTimeout> | null = null
 
 const ready = computed(() => !!status.value?.configured)
 const filledImages = computed(() => slots.map((s) => s.value.trim()).filter(Boolean))
+const submittedImages = computed(() =>
+  mode.value === 'text'
+    ? []
+    : mode.value === 'first_frame'
+      ? filledImages.value.slice(0, 1)
+      : filledImages.value,
+)
 const availableAspectRatios = computed(() =>
   mode.value === 'text'
     ? (status.value?.textAspectRatios ?? [])
-    : (status.value?.aspectRatios ?? []),
+    : mode.value === 'first_frame'
+      ? (status.value?.firstFrameAspectRatios ?? [])
+      : (status.value?.aspectRatios ?? []),
 )
 const canSubmit = computed(
   () =>
     ready.value &&
     !busy.value &&
     !!prompt.value.trim() &&
-    (mode.value === 'text' || filledImages.value.length > 0) &&
+    (mode.value === 'text' || submittedImages.value.length > 0) &&
     !slots.some((s) => s.uploading),
 )
 
@@ -115,6 +129,7 @@ const loadStatus = async () => {
     stage1Mp.value = defaultStage1
     stage2Mp.value = defaultStage2
     textMp.value = status.value.textMegapixelsDefault
+    firstFrameMp.value = status.value.firstFrameMegapixelsDefault
   } catch (e) {
     statusError.value = e instanceof Error ? e.message : '状态加载失败'
   }
@@ -167,12 +182,22 @@ const onFileChange = async (index: number, event: Event) => {
 }
 
 const fillTemplate = () => {
-  prompt.value = mode.value === 'text' ? TEXT_EXAMPLE_PROMPT : EXAMPLE_PROMPT
+  prompt.value =
+    mode.value === 'text'
+      ? TEXT_EXAMPLE_PROMPT
+      : mode.value === 'first_frame'
+        ? FIRST_FRAME_EXAMPLE_PROMPT
+        : EXAMPLE_PROMPT
 }
 
 const changeMode = (nextMode: GenerationMode) => {
   mode.value = nextMode
-  const ratios = nextMode === 'text' ? status.value?.textAspectRatios : status.value?.aspectRatios
+  const ratios =
+    nextMode === 'text'
+      ? status.value?.textAspectRatios
+      : nextMode === 'first_frame'
+        ? status.value?.firstFrameAspectRatios
+        : status.value?.aspectRatios
   if (ratios?.length && !ratios.includes(aspectRatio.value)) aspectRatio.value = ratios[0]
 }
 
@@ -228,11 +253,13 @@ const submit = async () => {
       prompt: prompt.value,
       duration: duration.value,
       aspectRatio: aspectRatio.value,
-      images: filledImages.value,
+      images: submittedImages.value,
       seed: seed !== null && Number.isFinite(seed) && seed >= 0 ? seed : null,
       ...(mode.value === 'text'
         ? { textMegapixels: textMp.value }
-        : { stage1Megapixels: stage1Mp.value, stage2Megapixels: stage2Mp.value }),
+        : mode.value === 'first_frame'
+          ? { firstFrameMegapixels: firstFrameMp.value }
+          : { stage1Megapixels: stage1Mp.value, stage2Megapixels: stage2Mp.value }),
     })
     current.value = {
       taskId: created.taskId,
@@ -245,7 +272,7 @@ const submit = async () => {
       time: new Date().toLocaleString(),
       duration: duration.value,
       aspectRatio: aspectRatio.value,
-      imageCount: filledImages.value.length,
+      imageCount: submittedImages.value.length,
       mode: mode.value,
       status: created.status || 'QUEUED',
       videoUrl: '',
@@ -287,7 +314,7 @@ const statusTone = (value: string) =>
     <div class="rh-head">
       <div>
         <h3>RunningHub 工作流测试</h3>
-        <p class="rh-sub">MiniMax H3：支持多图参考生成和纯文本生成带声音视频</p>
+        <p class="rh-sub">MiniMax H3：支持多图参考、纯文本和首帧生成带声音视频</p>
       </div>
       <div v-if="status" class="rh-meta">
         <span class="badge" :class="ready ? 'ok' : 'bad'">{{
@@ -323,6 +350,15 @@ const statusTone = (value: string) =>
         >
           纯文本生成
         </button>
+        <button
+          type="button"
+          class="mode-btn"
+          :class="{ active: mode === 'first_frame' }"
+          :disabled="!ready"
+          @click="changeMode('first_frame')"
+        >
+          首帧生成
+        </button>
       </div>
       <div class="row prompt-row">
         <label class="form-label">提示词</label>
@@ -338,7 +374,9 @@ const statusTone = (value: string) =>
         :placeholder="
           mode === 'text'
             ? '描述画面、主体动作、镜头运动、光线和声音；无需上传参考图'
-            : '结构化模板：subject_definitions / summary / retention_analysis / detailed_description（[Shot N] 分镜 + <d>[Chinese] 台词）/ overall_soundscape'
+            : mode === 'first_frame'
+              ? '描述从首帧开始的主体动作、镜头运动、光线和声音'
+              : '结构化模板：subject_definitions / summary / retention_analysis / detailed_description（[Shot N] 分镜 + <d>[Chinese] 台词）/ overall_soundscape'
         "
       ></textarea>
 
@@ -397,7 +435,7 @@ const statusTone = (value: string) =>
         参考，其他比例由节点等比换算。
       </p>
 
-      <div v-else class="row params">
+      <div v-else-if="mode === 'text'" class="row params">
         <label class="form-label">输出分辨率</label>
         <select v-model.number="textMp" class="num-input wide" :disabled="!ready">
           <option
@@ -411,10 +449,30 @@ const statusTone = (value: string) =>
         <span class="hint">纯文本工作流为单阶段 8 步生成，输出包含音频。</span>
       </div>
 
-      <div v-if="mode === 'reference'" class="row slots">
-        <div v-for="(slot, index) in slots" :key="index" class="slot">
+      <div v-else class="row params">
+        <label class="form-label">输出分辨率</label>
+        <select v-model.number="firstFrameMp" class="num-input wide" :disabled="!ready">
+          <option
+            v-for="preset in status?.megapixelsPresets ?? []"
+            :key="preset.value"
+            :value="preset.value"
+          >
+            {{ preset.value }} MP（16:9 约 {{ preset.size }}）
+          </option>
+        </select>
+        <span class="hint">首帧工作流为单阶段 8 步生成，输出包含音频。</span>
+      </div>
+
+      <div v-if="mode !== 'text'" class="row slots">
+        <div
+          v-for="(slot, index) in slots.slice(0, mode === 'first_frame' ? 1 : 3)"
+          :key="index"
+          class="slot"
+        >
           <div class="slot-head">
-            <span class="form-label">参考图 {{ index + 1 }}</span>
+            <span class="form-label">{{
+              mode === 'first_frame' ? '首帧图片' : `参考图 ${index + 1}`
+            }}</span>
             <button
               type="button"
               class="ghost-btn"
@@ -445,9 +503,12 @@ const statusTone = (value: string) =>
           />
         </div>
       </div>
-      <p v-if="mode === 'reference'" class="hint">
-        图位对应提示词中的 Picture 1/2/3；不足 3 张时后端自动用最后一张补齐槽位。上传文件 24
-        小时内有效。
+      <p v-if="mode !== 'text'" class="hint">
+        {{
+          mode === 'first_frame'
+            ? '图片对应提示词中的 Picture 1，并作为视频 0 秒画面。上传文件 24 小时内有效。'
+            : '图位对应提示词中的 Picture 1/2/3；不足 3 张时后端自动用最后一张补齐槽位。上传文件 24 小时内有效。'
+        }}
       </p>
 
       <div class="row submit-row">
@@ -508,7 +569,13 @@ const statusTone = (value: string) =>
             </td>
             <td>
               {{ entry.duration }}s · {{ entry.aspectRatio.split(' ')[0] }} ·
-              {{ entry.mode === 'text' ? '纯文本' : `${entry.imageCount} 图` }}
+              {{
+                entry.mode === 'text'
+                  ? '纯文本'
+                  : entry.mode === 'first_frame'
+                    ? '首帧'
+                    : `${entry.imageCount} 图`
+              }}
             </td>
             <td>
               <span class="badge" :class="statusTone(entry.status)">{{ entry.status }}</span>

@@ -5,8 +5,9 @@ export interface RunningHubStatus {
   configured: boolean
   keyTail: string
   workflowId: string
-  modes: Array<'reference' | 'text'>
+  modes: Array<'reference' | 'text' | 'first_frame'>
   aspectRatios: string[]
+  firstFrameAspectRatios: string[]
   textAspectRatios: string[]
   durationRange: [number, number]
   /** 一/二阶段共用的 megapixels 档位（size 为 16:9 输出分辨率） */
@@ -14,6 +15,7 @@ export interface RunningHubStatus {
   /** 工作流默认 [一采, 二采] megapixels */
   megapixelsDefault: [number, number]
   textMegapixelsDefault: number
+  firstFrameMegapixelsDefault: number
 }
 
 /** RunningHub 任务查询响应（透传上游） */
@@ -41,7 +43,7 @@ export const uploadRunningHubImage = (file: File) => {
 }
 
 export const submitRunningHubTask = (input: {
-  mode: 'reference' | 'text'
+  mode: 'reference' | 'text' | 'first_frame'
   prompt: string
   duration: number
   aspectRatio: string
@@ -50,6 +52,7 @@ export const submitRunningHubTask = (input: {
   stage1Megapixels?: number
   stage2Megapixels?: number
   textMegapixels?: number
+  firstFrameMegapixels?: number
 }) =>
   apiRequest<{ taskId: string; status: string }>('/admin/runninghub/tasks', {
     method: 'POST',
@@ -63,6 +66,7 @@ export const submitRunningHubTask = (input: {
       stage1Megapixels: input.stage1Megapixels,
       stage2Megapixels: input.stage2Megapixels,
       textMegapixels: input.textMegapixels,
+      firstFrameMegapixels: input.firstFrameMegapixels,
     }),
   })
 

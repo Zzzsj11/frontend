@@ -1,0 +1,390 @@
+{
+  "4": {
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "CLIP加载器"
+    }
+  },
+  "5": {
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_int8_convrot.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "VAE加载器"
+    }
+  },
+  "6": {
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "VAE加载器"
+    }
+  },
+  "8": {
+    "inputs": {
+      "unet_name": "minimax_h3_fl2va_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNET加载器"
+    }
+  },
+  "9": {
+    "inputs": {
+      "unet_name": "minimax_h3_ref2va_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNET加载器"
+    }
+  },
+  "55": {
+    "inputs": {
+      "text": "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.\n\nintegrated_multimodal_description: [Shot 1] Cinematic, live-action, a high-end Chinese classical fashion-film look with a dreamy surreal atmosphere, a near shot begins exactly from <Picture 1>: the young woman with a high black bun tied with a flowing red silk ribbon, long red tassel earrings, and a translucent wine-red to orange-red gradient silk Hanfu with wide sleeves, framed by blooming pink cherry-blossom branches against a dusk sky fading from deep blue to pink-purple. She keeps her original pose, expression, lighting, and composition, one hand raised near her chest with fingertips gently curved. The camera pushes in with small amplitude at slow speed as a soft breeze lifts the red ribbon and the tassels sway; she slowly turns her gaze from the side toward the lens. [Shot 2] At 00:02.000, the camera cuts to a close-up of her face, the cherry blossoms softly blurred behind her. She tilts her head slightly and brushes a strand of hair from her cheek, her dark eyes looking into the lens with a quiet, thoughtful expression, the red silk ribbon drifting across her shoulder. The camera holds a static shot as her lips part slightly. [Shot 3] At 00:04.500, the camera cuts to a full-body wide shot revealing her entire figure standing beneath the cherry blossoms, the layered Hanfu skirt and wide sleeves flowing in the breeze as she takes one graceful step forward and turns her body. The camera pulls out with small amplitude at slow speed while cherry petals spiral down around her, the red ribbon streaming behind her against the twilight sky. [Shot 4] At 00:06.500, the camera cuts to a medium close-up of her face and shoulders as she lifts her chin, fixes her eyes directly into the lens, and lets a faint, elegant smile form at the corners of her lips. The camera pushes in slowly with very small amplitude, then holds a static shot as a single petal drifts across the foreground and she holds the final pose until the end of the video.\n\noverall_soundscape: A gentle breeze passes through the cherry blossoms with a soft rustle of silk as she moves, and a few petals whisper through the air; the tassels sway almost silently in the twilight.\n\nnon_diegetic_music: A guofeng R&B track at a laid-back moderate tempo, combining plucked guzheng and pipa phrases with a smooth R&B groove built on a soft kick, swung hi-hats, and warm sub-bass; the rhythm stays relaxed and groovy throughout, with the plucked strings becoming more prominent in the final shot and ending on a sustained, fading note."
+    },
+    "class_type": "Text",
+    "_meta": {
+      "title": "文本"
+    }
+  },
+  "56": {
+    "inputs": {
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+      "values.a": [
+        "58",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Math Expression"
+    }
+  },
+  "58": {
+    "inputs": {
+      "value": 8
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "视频时长（秒）"
+    }
+  },
+  "59": {
+    "inputs": {
+      "aspect_ratio": "3:4 (Portrait Standard)",
+      "megapixels": 0.9,
+      "multiple": 32
+    },
+    "class_type": "ResolutionSelector",
+    "_meta": {
+      "title": "分辨率选择器"
+    }
+  },
+  "61": {
+    "inputs": {
+      "image": "f7025e3c4b7cfc53b04a23ca5fff80871f652e0e8626bb9e0d654b44fbd7b005.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "62": {
+    "inputs": {
+      "images": [
+        "63",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "63": {
+    "inputs": {
+      "aspect_ratio": "original",
+      "proportional_width": 1,
+      "proportional_height": 1,
+      "fit": "crop",
+      "method": "lanczos",
+      "round_to_multiple": "32",
+      "scale_to_side": "total_pixel(kilo pixel)",
+      "scale_to_length": 1536,
+      "background_color": "#000000",
+      "image": [
+        "61",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageScaleByAspectRatio V2",
+    "_meta": {
+      "title": "按宽高比缩放_V2"
+    }
+  },
+  "186": {
+    "inputs": {
+      "lora_name": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+      "strength_model": 0.7500000000000001,
+      "model": [
+        "391",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器(仅模型)"
+    }
+  },
+  "187": {
+    "inputs": {
+      "lora_name": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+      "strength_model": 0.7500000000000001,
+      "model": [
+        "392",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器(仅模型)"
+    }
+  },
+  "235": {
+    "inputs": {
+      "noise_seed": 334882497493432
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "随机噪波"
+    }
+  },
+  "238": {
+    "inputs": {
+      "model": [
+        "186",
+        0
+      ],
+      "conditioning": [
+        "329",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "基础引导"
+    }
+  },
+  "239": {
+    "inputs": {
+      "noise": [
+        "235",
+        0
+      ],
+      "guider": [
+        "238",
+        0
+      ],
+      "sampler": [
+        "241",
+        0
+      ],
+      "sigmas": [
+        "240",
+        0
+      ],
+      "latent_image": [
+        "329",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "自定义采样器(高级)"
+    }
+  },
+  "240": {
+    "inputs": {
+      "scheduler": "beta",
+      "steps": 8,
+      "denoise": 1,
+      "model": [
+        "186",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "基础调度器"
+    }
+  },
+  "241": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "K采样器选择"
+    }
+  },
+  "329": {
+    "inputs": {
+      "prompt": [
+        "55",
+        0
+      ],
+      "width": [
+        "59",
+        0
+      ],
+      "height": [
+        "59",
+        1
+      ],
+      "length": [
+        "56",
+        1
+      ],
+      "ref_image_size": "max",
+      "clip": [
+        "4",
+        0
+      ],
+      "vae": [
+        "5",
+        0
+      ],
+      "audio_vae": [
+        "6",
+        0
+      ],
+      "ref_images.ref_image_0": [
+        "63",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "_meta": {
+      "title": "MiniMax H3 Reference to Video"
+    }
+  },
+  "360": {
+    "inputs": {
+      "samples": [
+        "239",
+        0
+      ],
+      "vae": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio",
+    "_meta": {
+      "title": "VAE解码_Audio"
+    }
+  },
+  "361": {
+    "inputs": {
+      "samples": [
+        "239",
+        0
+      ],
+      "vae": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "389": {
+    "inputs": {
+      "frame_rate": 24,
+      "loop_count": 0,
+      "filename_prefix": "H3_I2V",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "no_preview": false,
+      "images": [
+        "361",
+        0
+      ],
+      "audio": [
+        "360",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "合并为视频"
+    }
+  },
+  "391": {
+    "inputs": {
+      "model": [
+        "395",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3MemoryEfficientSageAttentionPatch",
+    "_meta": {
+      "title": "MiniMax H3 Memory Efficient Sage Attention Patch"
+    }
+  },
+  "392": {
+    "inputs": {
+      "model": [
+        "396",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3MemoryEfficientSageAttentionPatch",
+    "_meta": {
+      "title": "MiniMax H3 Memory Efficient Sage Attention Patch"
+    }
+  },
+  "395": {
+    "inputs": {
+      "attention": "pytorch attention",
+      "model": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "ModelAttentionBackend",
+    "_meta": {
+      "title": "ModelAttentionBackend"
+    }
+  },
+  "396": {
+    "inputs": {
+      "attention": "pytorch attention",
+      "model": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "ModelAttentionBackend",
+    "_meta": {
+      "title": "ModelAttentionBackend"
+    }
+  }
+}

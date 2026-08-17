@@ -20,8 +20,9 @@ const configuredStatus = {
   configured: true,
   keyTail: '...c817',
   workflowId: '2084514856253874178',
-  modes: ['reference', 'text'] as Array<'reference' | 'text'>,
+  modes: ['reference', 'text', 'first_frame'] as Array<'reference' | 'text' | 'first_frame'>,
   aspectRatios: ['16:9 (Widescreen)', '9:16 (Portrait)'],
+  firstFrameAspectRatios: ['16:9 (Widescreen)', '3:4 (Portrait Standard)'],
   textAspectRatios: ['16:9 (Widescreen)', '9:16 (Portrait Widescreen)'],
   durationRange: [4, 15] as [number, number],
   megapixelsPresets: [
@@ -31,6 +32,7 @@ const configuredStatus = {
   ],
   megapixelsDefault: [0.4, 0.9] as [number, number],
   textMegapixelsDefault: 0.9,
+  firstFrameMegapixelsDefault: 0.9,
 }
 
 const buttonByText = (wrapper: ReturnType<typeof mount>, text: string) => {
@@ -141,6 +143,32 @@ describe('admin runninghub panel', () => {
         images: [],
         seed: null,
         textMegapixels: 0.9,
+      }),
+    )
+    wrapper.unmount()
+  })
+
+  it('submits first-frame video with exactly one image', async () => {
+    vi.mocked(fetchRunningHubStatus).mockResolvedValue(configuredStatus)
+    vi.mocked(submitRunningHubTask).mockResolvedValue({ taskId: 'task-first-1', status: 'RUNNING' })
+    const wrapper = mount(AdminRunningHubPanel)
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Key 已配置'))
+
+    await wrapper.findAll('.slot-input')[1].setValue('openapi/stale.png')
+    await buttonByText(wrapper, '首帧生成').trigger('click')
+    await buttonByText(wrapper, '填入示例模板').trigger('click')
+    await wrapper.find('.slot-input').setValue('openapi/first.png')
+    await wrapper.find('.submit-btn').trigger('click')
+
+    await vi.waitFor(() =>
+      expect(submitRunningHubTask).toHaveBeenCalledWith({
+        mode: 'first_frame',
+        prompt: expect.stringContaining('0.00 seconds'),
+        duration: 8,
+        aspectRatio: '16:9 (Widescreen)',
+        images: ['openapi/first.png'],
+        seed: null,
+        firstFrameMegapixels: 0.9,
       }),
     )
     wrapper.unmount()

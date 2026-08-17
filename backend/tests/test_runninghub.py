@@ -6,7 +6,7 @@ import pytest
 
 from app import admin as admin_module
 from app.config import settings
-from app.runninghub import RunningHubError, build_node_info_list, build_text_node_info_list
+from app.runninghub import RunningHubError, build_first_frame_node_info_list, build_node_info_list, build_text_node_info_list
 
 
 def bearer(token: str) -> dict[str, str]:
@@ -84,6 +84,27 @@ def test_runninghub_text_node_info_list():
         "27": {"value": 6},
         "23": {"aspect_ratio": "9:16 (Portrait Widescreen)", "megapixels": 0.9},
         "228": {"noise_seed": 77},
+    }
+
+
+def test_runninghub_first_frame_node_info_list():
+    nodes = build_first_frame_node_info_list(
+        prompt="Start exactly from Picture 1",
+        duration=8,
+        aspect_ratio="3:4 (Portrait Standard)",
+        image="openapi/first.png",
+        seed=88,
+        megapixels=0.9,
+    )
+    by_node = {}
+    for item in nodes:
+        by_node.setdefault(item["nodeId"], {})[item["fieldName"]] = item["fieldValue"]
+    assert by_node == {
+        "55": {"text": "Start exactly from Picture 1"},
+        "58": {"value": 8},
+        "59": {"aspect_ratio": "3:4 (Portrait Standard)", "megapixels": 0.9},
+        "61": {"image": "openapi/first.png"},
+        "235": {"noise_seed": 88},
     }
 
 

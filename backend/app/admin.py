@@ -43,9 +43,11 @@ from .prompts import DEFAULT_PROMPTS, invalidate, render_lenient, template_varia
 from .providers import ProviderError, list_video_models, query_provider_task, resume_generation, store_provider_result
 from .runninghub import (
     ASPECT_RATIOS,
+    DEFAULT_FIRST_FRAME_MEGAPIXELS,
     DEFAULT_STAGE1_MEGAPIXELS,
     DEFAULT_STAGE2_MEGAPIXELS,
     DEFAULT_TEXT_MEGAPIXELS,
+    FIRST_FRAME_ASPECT_RATIOS,
     MAX_DURATION,
     MEGAPIXELS_MAX,
     MEGAPIXELS_MIN,
@@ -55,6 +57,7 @@ from .runninghub import (
     RunningHubError,
 )
 from .runninghub import query_task as rh_query_task
+from .runninghub import submit_first_frame_task as rh_submit_first_frame_task
 from .runninghub import submit_task as rh_submit_task
 from .runninghub import submit_text_task as rh_submit_text_task
 from .runninghub import upload_media as rh_upload_media
@@ -989,14 +992,16 @@ async def runninghub_status(user: CurrentUser):
         "configured": bool(key),
         "keyTail": f"...{key[-4:]}" if len(key) >= 4 else "",
         "workflowId": settings.runninghub_workflow_id,
-        "modes": ["reference", "text"],
+        "modes": ["reference", "text", "first_frame"],
         "aspectRatios": list(ASPECT_RATIOS),
+        "firstFrameAspectRatios": list(FIRST_FRAME_ASPECT_RATIOS),
         "textAspectRatios": list(TEXT_ASPECT_RATIOS),
         "durationRange": [MIN_DURATION, MAX_DURATION],
         # 一/二阶段共用同一张 megapixels → 16:9 分辨率表
         "megapixelsPresets": [{"value": value, "size": size} for value, size in MEGAPIXELS_PRESETS_16X9],
         "megapixelsDefault": [DEFAULT_STAGE1_MEGAPIXELS, DEFAULT_STAGE2_MEGAPIXELS],
         "textMegapixelsDefault": DEFAULT_TEXT_MEGAPIXELS,
+        "firstFrameMegapixelsDefault": DEFAULT_FIRST_FRAME_MEGAPIXELS,
     }
 
 
@@ -1015,7 +1020,7 @@ async def runninghub_upload(file: UploadFile, user: CurrentUser):
 
 
 class RunningHubTaskIn(BaseModel):
-    mode: str = Field(default="reference", pattern="^(reference|text)$")
+    mode: str = Field(default="reference", pattern="^(reference|text|first_frame)$")
     prompt: str = Field(min_length=1, max_length=8000)
     duration: float = Field(default=8, ge=MIN_DURATION, le=MAX_DURATION)
     aspect_ratio: str = Field(default="16:9 (Widescreen)", alias="aspectRatio")
@@ -1024,6 +1029,7 @@ class RunningHubTaskIn(BaseModel):
     stage1_megapixels: float = Field(default=DEFAULT_STAGE1_MEGAPIXELS, ge=MEGAPIXELS_MIN, le=MEGAPIXELS_MAX, alias="stage1Megapixels")
     stage2_megapixels: float = Field(default=DEFAULT_STAGE2_MEGAPIXELS, ge=MEGAPIXELS_MIN, le=MEGAPIXELS_MAX, alias="stage2Megapixels")
     text_megapixels: float = Field(default=DEFAULT_TEXT_MEGAPIXELS, ge=MEGAPIXELS_MIN, le=MEGAPIXELS_MAX, alias="textMegapixels")
+    first_frame_megapixels: float = Field(default=DEFAULT_FIRST_FRAME_MEGAPIXELS, ge=MEGAPIXELS_MIN, le=MEGAPIXELS_MAX, alias="firstFrameMegapixels")
 
     model_config = {"populate_by_name": True}
 
@@ -1034,7 +1040,18 @@ async def runninghub_task_create(payload: RunningHubTaskIn, request: Request, us
     require_admin(user)
     _runninghub_guard()
     try:
-        if payload.mode == "text":
+        if payload.mode == "first_frame":
+            if not payload.images:
+                raise RunningHubError("首帧生视频至少需要 1 张图片")
+            result = await rh_submit_first_frame_task(
+                prompt=payload.prompt,
+                duration=payload.duration,
+                aspect_ratio=payload.aspect_ratio,
+                image=payload.images[0],
+                seed=payload.seed,
+                megapixels=payload.first_frame_megapixels,
+            )
+        elif payload.mode == "text":
             result = await rh_submit_text_task(
                 prompt=payload.prompt,
                 duration=payload.duration,
@@ -1071,6 +1088,7 @@ async def runninghub_task_create(payload: RunningHubTaskIn, request: Request, us
             "stage1Megapixels": payload.stage1_megapixels,
             "stage2Megapixels": payload.stage2_megapixels,
             "textMegapixels": payload.text_megapixels,
+            "firstFrameMegapixels": payload.first_frame_megapixels,
         },
     )
     await db.commit()
