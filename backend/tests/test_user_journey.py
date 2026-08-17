@@ -226,7 +226,7 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     assert usage["summary"]["outputTokens"] == 40
     assert {item["operation"] for item in usage["records"]} == {"ass_story_outline", "storyboard_line", "generation_image", "generation_video"}
 
-    async def fake_download_to_path(url, destination, max_bytes=500 * 1024 * 1024, progress_callback=None):
+    async def fake_download_to_path(url, destination, max_bytes=500 * 1024 * 1024, progress_callback=None, client=None):
         destination.write_bytes(b"video-bytes")
         if progress_callback:
             await progress_callback(len(b"video-bytes"), len(b"video-bytes"))

@@ -59,18 +59,8 @@ const mediaError = computed(() => {
   return errors.join('\n')
 })
 
-/** 缩略图可能来自场景图，也可能是在无场景图时由视频首帧/封面占位；失败时直达对应编辑页重试 */
-const openThumbnailEditor = () => {
-  const tab =
-    props.line.shot.status === 'failed'
-      ? 'shot'
-      : props.line.scene.status === 'failed'
-        ? 'scene'
-        : !props.line.scene.imageUrl && props.line.shot.assets.length
-          ? 'shot'
-          : 'scene'
-  store.openEditor(props.line.id, tab)
-}
+/** 缩略图作为时间轴播放入口；编辑操作继续由提示词文字和右侧按钮承载。 */
+const playThumbnailVideo = () => store.playLineFromStart(props.line.id)
 
 /** 修改该行视频生成时长：写回 shotOptions 后，点击生成视频即按所选时长生成 */
 const onDurationChange = (event: Event) => {
@@ -102,11 +92,7 @@ const onGenerateShot = async () => {
     <span class="line-index">{{ index + 1 }}</span>
 
     <!-- 分镜缩略图 -->
-    <div
-      class="shot-thumb"
-      :title="!line.scene.imageUrl && line.shot.assets.length ? '编辑视频' : '编辑场景'"
-      @click.stop="openThumbnailEditor"
-    >
+    <div class="shot-thumb" title="选中对应时间轴片段并从头播放" @click.stop="playThumbnailVideo">
       <!-- 缩略图固定用封面图，不为每行挂载 video 元素 -->
       <img v-if="cover" :src="cover" alt="视频缩略图" />
       <span v-else class="thumb-placeholder"><AppIcon name="image" :size="18" /></span>

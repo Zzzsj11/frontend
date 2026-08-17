@@ -11,3 +11,7 @@ def test_shared_provider_configuration_is_kept_as_one_group(monkeypatch) -> None
     assert api_key == "shared-token"
     assert base_url == "https://shared.example/v1"
     assert model == "shared-model"
+
+
+def test_material_export_downloads_allow_twenty_parallel_files() -> None:
+    assert config.settings.export_download_concurrency == 20

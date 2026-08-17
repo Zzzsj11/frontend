@@ -75,6 +75,10 @@ class Settings:
     storyboard_generation_concurrency: int = max(1, min(8, int(os.getenv("STORYBOARD_GENERATION_CONCURRENCY", "4"))))
     export_concurrency: int = max(1, min(8, int(os.getenv("EXPORT_CONCURRENCY", "4"))))
     export_per_user_concurrency: int = max(1, min(4, int(os.getenv("EXPORT_PER_USER_CONCURRENCY", "2"))))
+    # 单个素材导出任务最多同时拉取 20 个源文件；下载过程按 1 MiB 分块落盘，不整文件驻留内存。
+    export_download_concurrency: int = max(1, min(20, int(os.getenv("EXPORT_DOWNLOAD_CONCURRENCY", "20"))))
+    export_upload_concurrency: int = max(1, min(8, int(os.getenv("EXPORT_UPLOAD_CONCURRENCY", "4"))))
+    export_upload_part_size_mb: int = max(5, min(64, int(os.getenv("EXPORT_UPLOAD_PART_SIZE_MB", "16"))))
     # 默认只记录带 X-Test-Run-Id 头的测试流量；置 true 后全量请求入库（排查用，注意数据量）
     api_request_log_all: bool = os.getenv("API_REQUEST_LOG_ALL", "false").lower() == "true"
     daily_quota_timezone: str = os.getenv("DAILY_QUOTA_TIMEZONE", "Asia/Shanghai")

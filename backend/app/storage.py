@@ -116,11 +116,15 @@ class TosStorage:
             listener = None
             if progress_callback:
                 listener = lambda consumed, total, _rw, _type: progress_callback(consumed, total)  # noqa: E731
-            self.client.put_object_from_file(
+            # 大文件使用 SDK 的分片并发上传；相比 put_object_from_file 单路上传，能更充分利用带宽。
+            self.client.upload_file(
                 bucket,
                 object_key,
                 file_path,
                 content_type=content_type or "application/octet-stream",
+                part_size=settings.export_upload_part_size_mb * 1024 * 1024,
+                task_num=settings.export_upload_concurrency,
+                enable_checkpoint=False,
                 data_transfer_listener=listener,
             )
 
@@ -218,14 +222,17 @@ async def download_public_url_to_path(
     destination: str | Path,
     max_bytes: int = 500 * 1024 * 1024,
     progress_callback: Callable[[int, int | None], Awaitable[None]] | None = None,
+    client: httpx.AsyncClient | None = None,
 ) -> tuple[str, str, int]:
     """Stream a public HTTPS object to disk instead of retaining it in memory."""
     current = url
     target = Path(destination)
-    async with httpx.AsyncClient(timeout=180, follow_redirects=False) as client:
+    owned_client = client is None
+    active_client = client or httpx.AsyncClient(timeout=180, follow_redirects=False)
+    try:
         for _ in range(4):
             await _validate_public_url(current)
-            async with client.stream("GET", current) as response:
+            async with active_client.stream("GET", current) as response:
                 if response.is_redirect:
                     location = response.headers.get("location")
                     if not location:
@@ -239,7 +246,7 @@ async def download_public_url_to_path(
                 size = 0
                 total = declared or None
                 with target.open("wb") as output:
-                    async for chunk in response.aiter_bytes():
+                    async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
                         size += len(chunk)
                         if size > max_bytes:
                             raise ValueError("远程文件超过允许大小")
@@ -248,4 +255,7 @@ async def download_public_url_to_path(
                             await progress_callback(size, total)
                 content_type = response.headers.get("content-type", "application/octet-stream").split(";", 1)[0]
                 return current, content_type, size
-    raise ValueError("远程地址重定向次数过多")
+        raise ValueError("远程地址重定向次数过多")
+    finally:
+        if owned_client:
+            await active_client.aclose()

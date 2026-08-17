@@ -20,6 +20,44 @@ describe('project user journey state', () => {
     expect(store.playMode.single).toBe(false)
   })
 
+  it('selects a line, seeks to its clip start, and starts playback from a thumbnail', () => {
+    const store = useProjectStore()
+    store.lines = [
+      {
+        id: 'line-1',
+        generationStatus: 'succeeded',
+        digitalHumanIds: [],
+        voice: { status: 'none' },
+        scene: { status: 'none' },
+        shot: {
+          status: 'done',
+          assets: [{ id: 'asset-1', videoUrl: '/one.mp4', duration: 4, isCurrent: true }],
+          currentAssetId: 'asset-1',
+        },
+      },
+      {
+        id: 'line-2',
+        generationStatus: 'succeeded',
+        digitalHumanIds: [],
+        voice: { status: 'none' },
+        scene: { status: 'none' },
+        shot: {
+          status: 'done',
+          assets: [{ id: 'asset-2', videoUrl: '/two.mp4', duration: 6, isCurrent: true }],
+          currentAssetId: 'asset-2',
+        },
+      },
+    ] as ScriptLine[]
+    store.currentTime = 1
+
+    store.playLineFromStart('line-2')
+
+    expect(store.selectedLineId).toBe('line-2')
+    expect(store.currentTime).toBe(4)
+    expect(store.isPlaying).toBe(true)
+    store.pause()
+  })
+
   it('persists digital-human style changes through the API, not localStorage', async () => {
     const store = useProjectStore()
     const request = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -912,6 +950,108 @@ describe('batch shot video generation', () => {
     expect(store.lines.find((line) => line.id === 'l-a')?.shot.status).toBe('failed')
     expect(store.lines.find((line) => line.id === 'l-b')?.shot.status).toBe('done')
   })
+
+  it('clears the persisted batch flag after the batch finishes naturally', async () => {
+    const auth = useAuthStore()
+    auth.user = {
+      id: 'u-1',
+      username: 'u-1',
+      displayName: 'U',
+      role: 'user',
+      mustChangePassword: false,
+    }
+    const store = useProjectStore()
+    store.activeTaskId = 'task-1'
+    store.lines = [shotLine('l-a', 'succeeded', 'none')]
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (String(input) === '/api/generations/videos')
+        return json({ id: 'job-1', status: 'queued', progress: 0 })
+      return succeededJob()
+    })
+
+    await store.generateAllShots()
+
+    // 自然跑完：标记清除，刷新后不会误续跑
+    expect(localStorage.getItem('mv_batch_shot_u-1_task-1')).toBeNull()
+    expect(store.batchShooting).toBe(false)
+  })
+
+  it('keeps the persisted batch flag when switching tasks interrupts the batch', async () => {
+    const auth = useAuthStore()
+    auth.user = {
+      id: 'u-1',
+      username: 'u-1',
+      displayName: 'U',
+      role: 'user',
+      mustChangePassword: false,
+    }
+    const store = useProjectStore()
+    store.activeTaskId = 'task-1'
+    store.lines = [shotLine('l-a', 'succeeded', 'none'), shotLine('l-b', 'succeeded', 'none')]
+    const posted: string[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      if (String(input) === '/api/generations/videos') {
+        const lineId = String(JSON.parse(String(init?.body)).storyboard_line_id)
+        posted.push(lineId)
+        // 模拟派发第一行期间用户切走子任务：批量循环应在第二行前中断
+        if (lineId === 'l-a') store.activeTaskId = 'task-2'
+        return json({ id: 'job-1', status: 'queued', progress: 0 })
+      }
+      return succeededJob()
+    })
+
+    await store.generateAllShots()
+
+    expect(posted).toEqual(['l-a'])
+    // 中断不清标记：切回/刷新后由 _loadTask 检测标记续跑
+    expect(localStorage.getItem('mv_batch_shot_u-1_task-1')).toBe('1')
+    expect(store.batchShooting).toBe(false)
+  })
+
+  it('resume waits for a restored generating line to settle before dispatching the next', async () => {
+    vi.useFakeTimers()
+    try {
+      const auth = useAuthStore()
+      auth.user = {
+        id: 'u-1',
+        username: 'u-1',
+        displayName: 'U',
+        role: 'user',
+        mustChangePassword: false,
+      }
+      const store = useProjectStore()
+      store.activeTaskId = 'task-1'
+      const generating = shotLine('l-busy', 'succeeded', 'generating')
+      const idle = shotLine('l-idle', 'succeeded', 'none')
+      store.lines = [generating, idle]
+      // 模拟刷新前已点批量：标记仍在，由 _loadTask 触发续跑
+      localStorage.setItem('mv_batch_shot_u-1_task-1', '1')
+      const posted: string[] = []
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        if (String(input) === '/api/generations/videos') {
+          posted.push(String(JSON.parse(String(init?.body)).storyboard_line_id))
+          return json({ id: 'job-1', status: 'queued', progress: 0 })
+        }
+        return succeededJob()
+      })
+
+      const run = store.generateAllShots()
+      await vi.advanceTimersByTimeAsync(2000)
+      // 生成中的行尚未落定：不能抢先派发下一行（串行语义）
+      expect(posted).toEqual([])
+      expect(store.batchShooting).toBe(true)
+      // 等待态 watcher 把在途行更新为完成后，续跑才继续派发剩余行（30s 覆盖后续派发+轮询间隔）
+      generating.shot.status = 'done'
+      await vi.advanceTimersByTimeAsync(30000)
+      await run
+
+      expect(posted).toEqual(['l-idle'])
+      expect(localStorage.getItem('mv_batch_shot_u-1_task-1')).toBeNull()
+      expect(store.batchShooting).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('workspace owner guard on account switch', () => {
@@ -955,12 +1095,12 @@ describe('workspace owner guard on account switch', () => {
   })
 })
 
-describe('export progress creep while backend is stalled', () => {
+describe('material export progress display', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
   })
 
-  it('creeps the export progress towards 99% while the backend is stalled', () => {
+  it('keeps the persisted progress while the backend is stalled', () => {
     const store = useProjectStore()
     store.activeTaskId = 'task-1'
     store._upsertMaterialExport({
@@ -975,10 +1115,36 @@ describe('export progress creep while backend is stalled', () => {
       totalBytes: 20,
       processedBytes: 10,
       createdAt: new Date(Date.now() - 30_000).toISOString(),
-      // 25 秒未收到后端推送：40 + 25 * 0.4 = 50
+      // 即使 25 秒未收到后端推送，也不虚构进度，避免下一次真实快照到达时数字倒退。
       updatedAt: new Date(Date.now() - 25_000).toISOString(),
     })
-    expect(store.synthesis.progress).toBe(50)
+    expect(store.synthesis.progress).toBe(40)
+  })
+
+  it('does not move backwards when an older or lower progress snapshot arrives', () => {
+    const store = useProjectStore()
+    store.activeTaskId = 'task-1'
+    const snapshot = (progress: number, updatedAt: string): MaterialExport => ({
+      id: 'exp-monotonic',
+      taskId: 'task-1',
+      jobId: 'job-exp-monotonic',
+      status: 'running',
+      progress,
+      stage: '正在下载素材',
+      totalAssets: 19,
+      processedAssets: 8,
+      totalBytes: 74_000_000,
+      processedBytes: 32_000_000,
+      createdAt: '2026-08-17T09:13:34Z',
+      updatedAt,
+    })
+
+    store._upsertMaterialExport(snapshot(58, '2026-08-17T09:14:10Z'))
+    store._upsertMaterialExport(snapshot(42, '2026-08-17T09:14:09Z'))
+    expect(store.synthesis.progress).toBe(58)
+
+    store._upsertMaterialExport(snapshot(45, '2026-08-17T09:14:11Z'))
+    expect(store.synthesis.progress).toBe(58)
   })
 
   it('does not creep a finished export', () => {

@@ -37,6 +37,9 @@ const sidebarKeys = (userId: string) => ({
   task: `mv_sidebar_task_${userId}`,
 })
 
+/** 「批量生成视频」进行中标记持久化 key（按用户+任务隔离）：刷新/切走子任务中断后，回到该任务时续跑 */
+const batchShotKey = (userId: string, taskId: string) => `mv_batch_shot_${userId}_${taskId}`
+
 /** 无配音时的占位时长（秒） */
 export const DEFAULT_CLIP_DURATION = 5
 
@@ -56,8 +59,6 @@ let activeVideoEl: HTMLVideoElement | null = null
 /** 每行场景图重新生成次数（仅用于 mock 占位图换款） */
 const sceneVariants: Record<string, number> = {}
 const exportStreams = new Map<string, AbortController>()
-/** 导出进度时间爬升的 1s 时钟（有进行中导出时才运行；模块级单例，跨 store 实例共享） */
-let exportTicker: number | undefined
 /** 刷新恢复后正在续跑的媒体生成任务（防止重复恢复同一任务） */
 const resumedGenerationJobs = new Set<string>()
 /** 正在轮询「逐句提示词生成」孤儿任务的任务 ID */
@@ -175,8 +176,6 @@ export const useProjectStore = defineStore('project', {
     /** 编辑弹窗中正在重新生成形象的数字人 id（null 表示空闲） */
     dhRegeneratingId: null as string | null,
     exportsByTaskId: {} as Record<string, MaterialExport[]>,
-    /** 导出进度爬升用的响应式时间戳（exportTicker 每秒刷新） */
-    exportNow: 0,
   }),
 
   getters: {
@@ -283,20 +282,10 @@ export const useProjectStore = defineStore('project', {
     synthesis(state): SynthesisState {
       const latest = state.activeTaskId ? state.exportsByTaskId[state.activeTaskId]?.[0] : undefined
       if (!latest) return { status: 'idle', progress: 0 }
-      let progress = latest.progress
-      // 后端推送停滞期间按已耗时间缓慢爬升（0.4%/s，封顶 99），消除「假死」观感
-      if (
-        (latest.status === 'queued' || latest.status === 'running') &&
-        progress > 0 &&
-        progress < 99 &&
-        state.exportNow > 0
-      ) {
-        const stalledSec = Math.max(0, (state.exportNow - Date.parse(latest.updatedAt)) / 1000)
-        progress = Math.min(99, Math.max(progress, Math.floor(progress + stalledSec * 0.4)))
-      }
       return {
         status: latest.status,
-        progress,
+        // 只展示后端持久化的真实进度；按时间虚拟爬升会在下一次 SSE 快照到达时产生倒退。
+        progress: latest.progress,
         stage: latest.stage,
         videoUrl: latest.archiveUrl,
         error: latest.error,
@@ -472,6 +461,9 @@ export const useProjectStore = defineStore('project', {
       if (taskId) {
         void this.restoreMaterialExports(taskId)
         void this.resumeActiveGenerations(taskId)
+        // 刷新/切走前批量生成未跑完：恢复进行中状态并续跑剩余行（串行语义见 generateAllShots）
+        if (auth.user && localStorage.getItem(batchShotKey(auth.user.id, taskId)))
+          void this.generateAllShots()
         if (
           script.storyboardType === 'ass' &&
           (script.status === 'parsed' || script.status === 'outlining')
@@ -997,6 +989,8 @@ export const useProjectStore = defineStore('project', {
       await api.deleteSongTask(taskId)
       delete this.taskScripts[taskId]
       cancelTaskWatchers(taskId)
+      const auth = useAuthStore()
+      if (auth.user) localStorage.removeItem(batchShotKey(auth.user.id, taskId))
       if (taskId !== this.activeTaskId) return
       const next = song.tasks[idx] ?? song.tasks[idx - 1]
       this.songSwitching = true
@@ -1120,6 +1114,15 @@ export const useProjectStore = defineStore('project', {
       // 单个分镜模式下，选中后把指针移到片段起点
       const clip = this.timelineClips.find((c) => c.lineId === lineId)
       if (clip && this.playMode.single) this.seek(clip.start)
+    },
+
+    /** 从提示词缩略图定位对应时间轴片段，并立即从片段起点播放。 */
+    playLineFromStart(lineId: string) {
+      this.selectLine(lineId)
+      const clip = this.timelineClips.find((item) => item.lineId === lineId)
+      if (!clip) return
+      this.seek(clip.start)
+      this.play()
     },
 
     openEditor(lineId: string, tab: 'cast' | 'shot' | 'scene' | null = null) {
@@ -1785,48 +1788,62 @@ export const useProjectStore = defineStore('project', {
     },
 
     /** 批量生成视频片段：提示词就绪且视频「未生成/失败」的行串行派发（与批量按钮计数同口径）；
-     *  单行失败不中断后续（失败原因入行内状态，429 单账号上限由后端兜底并统一弹窗） */
+     *  单行失败不中断后续（失败原因入行内状态，429 单账号上限由后端兜底并统一弹窗）；
+     *  「批量进行中」标记按任务持久化：刷新/切换子任务中断后，回到该任务自动续跑剩余行 */
     async generateAllShots() {
       if (this.batchShooting) return
       this.batchShooting = true
       const taskId = this.activeTaskId
+      const auth = useAuthStore()
+      const flagKey = taskId && auth.user ? batchShotKey(auth.user.id, taskId) : null
+      if (flagKey) localStorage.setItem(flagKey, '1')
+      const watcher = taskId ? registerTaskWatcher(taskId) : null
+      const interrupted = () => this.activeTaskId !== taskId || Boolean(watcher?.signal.aborted)
+      const needsShot = (line: ScriptLine) =>
+        line.generationStatus === 'succeeded' && line.shot.status !== 'done'
       try {
         for (const line of [...this.lines]) {
-          // 切换子项目后立即停止批量派发
-          if (this.activeTaskId !== taskId) break
-          if (line.generationStatus === 'succeeded' && line.shot.status !== 'done')
-            await this.generateShotFor(line.id)
+          // 切换子项目后立即停止批量派发（标记保留，切回该任务时自动续跑）
+          if (interrupted()) break
+          if (!needsShot(line)) continue
+          // 恢复续跑时可能仍有行在生成中（等待态由 resumeActiveGenerations 重建）：等它落定再派发，维持串行
+          await this._awaitShotSettled(line, watcher?.signal)
+          if (interrupted()) break
+          if (needsShot(line)) await this.generateShotFor(line.id)
         }
+      } catch (error) {
+        if (!(error instanceof PollingCancelledError)) throw error
       } finally {
         this.batchShooting = false
+        // 自然跑完才清除标记；被刷新/切换中断时保留，待下次载入该任务续跑
+        if (flagKey && !interrupted()) localStorage.removeItem(flagKey)
+      }
+    },
+
+    /** 等待某行视频生成落定（done/failed），切换子任务可立即打断；超时兜底防止等待态重建失败时卡死后续派发 */
+    async _awaitShotSettled(line: ScriptLine, signal?: AbortSignal) {
+      for (
+        let tick = 0;
+        tick < 300 && line.shot.status === 'generating' && !signal?.aborted;
+        tick += 1
+      ) {
+        await abortableSleep(2000, signal)
       }
     },
 
     _upsertMaterialExport(item: MaterialExport) {
       const items = this.exportsByTaskId[item.taskId] || []
-      const next = [item, ...items.filter((current) => current.id !== item.id)]
+      const current = items.find((entry) => entry.id === item.id)
+      // SSE 重连后的快照与连接末尾 GET 可能乱序到达；同一任务只接受更新的快照，且进度不得倒退。
+      if (current && Date.parse(item.updatedAt) < Date.parse(current.updatedAt)) return
+      const merged =
+        current && ['queued', 'running'].includes(item.status) && item.progress < current.progress
+          ? { ...item, progress: current.progress }
+          : item
+      const next = [merged, ...items.filter((entry) => entry.id !== item.id)]
       this.exportsByTaskId[item.taskId] = next.sort((left, right) =>
         right.createdAt.localeCompare(left.createdAt),
       )
-      this._syncExportTicker()
-    },
-
-    /** 有进行中导出时维持 1s 时钟驱动进度爬升；全部落定后停止 */
-    _syncExportTicker() {
-      const hasActive = Object.values(this.exportsByTaskId).some((items) =>
-        items.some((entry) => entry.status === 'queued' || entry.status === 'running'),
-      )
-      if (hasActive) {
-        this.exportNow = Date.now()
-        if (exportTicker === undefined) {
-          exportTicker = window.setInterval(() => {
-            this.exportNow = Date.now()
-          }, 1000)
-        }
-      } else if (exportTicker !== undefined) {
-        window.clearInterval(exportTicker)
-        exportTicker = undefined
-      }
     },
 
     async _watchMaterialExport(item: MaterialExport) {

@@ -545,6 +545,14 @@ const toggleFullscreen = () => {
 .synth-btn {
   margin-left: auto;
 }
+.synth-btn:disabled {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+  font-weight: 600;
+  opacity: 1;
+  cursor: wait;
+}
 .export-group {
   display: flex;
   gap: 8px;

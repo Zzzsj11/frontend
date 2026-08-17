@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -80,6 +81,7 @@ router = APIRouter(prefix="/api")
 Db = Depends(database_session)
 storyboard_generation_slots = asyncio.Semaphore(settings.storyboard_generation_concurrency)
 export_slots = asyncio.Semaphore(settings.export_concurrency)
+export_progress_locks: dict[str, asyncio.Lock] = {}
 
 
 @router.get("/admin/api-errors")
@@ -1849,20 +1851,22 @@ async def _set_export_progress(
     stage: str,
     **values,
 ) -> None:
-    progress = max(job.progress, min(progress, 99))
-    async with session_factory() as session:
-        item = await session.get(MaterialExportModel, export_id)
-        if not item or item.deleted_at is not None:
-            raise RuntimeError("导出任务不存在")
-        item.status = "running"
-        item.progress = progress
-        item.stage = stage
-        if item.started_at is None:
-            item.started_at = utcnow()
-        for key, value in values.items():
-            setattr(item, key, value)
-        await session.commit()
-    await jobs.update_progress(job, progress)
+    lock = export_progress_locks.setdefault(export_id, asyncio.Lock())
+    async with lock:
+        async with session_factory() as session:
+            item = await session.get(MaterialExportModel, export_id)
+            if not item or item.deleted_at is not None:
+                raise RuntimeError("导出任务不存在")
+            progress = max(item.progress, job.progress, min(progress, 99))
+            item.status = "running"
+            item.progress = progress
+            item.stage = stage
+            if item.started_at is None:
+                item.started_at = utcnow()
+            for key, value in values.items():
+                setattr(item, key, value)
+            await session.commit()
+        await jobs.update_progress(job, progress)
 
 
 async def _run_material_export(export_id: str, job: Job) -> dict:
@@ -1990,9 +1994,10 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
             with tempfile.TemporaryDirectory(prefix=f"mvagent-export-{export_id}-") as temporary_directory:
                 temporary_path = Path(temporary_directory)
                 archive_path = temporary_path / f"{export_id}.zip"
-                # 并发下载（4 路）到临时目录，完成后按清单顺序写入 ZIP，保证包内镜序稳定
+                # 并发下载到临时目录，完成后按清单顺序写入 ZIP，保证包内镜序稳定。
+                # 共用 AsyncClient 复用 TLS/HTTP 连接；文件仍流式落盘，提升并发不会线性放大内存。
                 in_flight: dict[int, float] = {}
-                download_slots = asyncio.Semaphore(4)
+                download_slots = asyncio.Semaphore(settings.export_download_concurrency)
 
                 async def download_one(position: int, item: dict) -> None:
                     nonlocal processed_assets, processed_bytes, known_total_bytes, last_progress
@@ -2015,7 +2020,12 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
                             )
 
                     async with download_slots:
-                        _, _, size = await download_public_url_to_path(item["url"], target, progress_callback=on_download)
+                        _, _, size = await download_public_url_to_path(
+                            item["url"],
+                            target,
+                            progress_callback=on_download,
+                            client=download_client,
+                        )
                     in_flight.pop(position, None)
                     item["path"] = target
                     processed_assets += 1
@@ -2033,7 +2043,12 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
                         total_bytes=known_total_bytes,
                     )
 
-                await asyncio.gather(*(download_one(position, item) for position, item in enumerate(downloads)))
+                limits = httpx.Limits(
+                    max_connections=settings.export_download_concurrency,
+                    max_keepalive_connections=settings.export_download_concurrency,
+                )
+                async with httpx.AsyncClient(timeout=180, follow_redirects=False, limits=limits) as download_client:
+                    await asyncio.gather(*(download_one(position, item) for position, item in enumerate(downloads)))
                 # 打包 70–85%：按清单顺序写入（videos/01.mp4… 与镜序一致）
                 with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_STORED, allowZip64=True) as bundle:
                     for written, item in enumerate(downloads, start=1):
@@ -2102,6 +2117,8 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
                 export.finished_at = utcnow()
                 await session.commit()
         raise
+    finally:
+        export_progress_locks.pop(export_id, None)
 
 
 @router.post("/tasks/{task_id}/material-exports", status_code=202)
