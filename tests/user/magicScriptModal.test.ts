@@ -37,4 +37,23 @@ describe('magic script defaults', () => {
     expect(document.body.querySelector('input[type="file"][accept=".ass"]')).toBeTruthy()
     wrapper.unmount()
   })
+
+  it('does not carry the active task cast into a newly opened form', async () => {
+    const store = useProjectStore()
+    store.castIds = ['dh-1']
+    store.digitalHumans = [
+      {
+        id: 'dh-1',
+        name: '测试人物',
+        style: '写实',
+        avatar: 'https://example.test/avatar.jpg',
+        description: '',
+      },
+    ]
+    store.magicOpen = true
+    const wrapper = mount(MagicScriptModal, { attachTo: document.body })
+    await vi.waitFor(() => expect(document.body.querySelector('.role-card')).not.toBeNull())
+    expect(document.body.querySelectorAll('.role-card.selected')).toHaveLength(0)
+    wrapper.unmount()
+  })
 })

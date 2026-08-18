@@ -81,4 +81,30 @@ describe('general storyboard defaults', () => {
     expect(submit.disabled).toBe(false)
     wrapper.unmount()
   })
+
+  it('does not carry the active task cast into a newly opened form', async () => {
+    const store = useProjectStore()
+    store.castIds = ['dh-1']
+    store.digitalHumans = [
+      {
+        id: 'dh-1',
+        name: '测试人物',
+        style: '写实',
+        avatar: 'https://example.test/avatar.jpg',
+        description: '',
+      },
+    ]
+    store.generalStoryboardOptions = {
+      genres: [{ value: 'pop', label: '流行歌曲' }],
+      seasons: ['秋'],
+      ageGroups: ['青年'],
+      visualStyles: ['电影写实'],
+      ratios: ['16:9'],
+    }
+    store.generalStoryboardOpen = true
+    const wrapper = mount(GeneralStoryboardModal, { attachTo: document.body })
+    await vi.waitFor(() => expect(document.body.querySelector('.cast-item')).not.toBeNull())
+    expect(document.body.querySelectorAll('.cast-item.active')).toHaveLength(0)
+    wrapper.unmount()
+  })
 })

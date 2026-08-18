@@ -32,7 +32,7 @@ const canSubmit = computed(() => songId.value.trim() !== '' && assFile.value !==
 const resetForm = () => {
   songId.value = ''
   assFile.value = null
-  selectedHumanIds.value = [...store.castIds]
+  selectedHumanIds.value = []
   extraRequirement.value = ''
   ratio.value = '16:9'
   resolution.value = '480p'

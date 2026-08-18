@@ -82,7 +82,7 @@ const reset = () => {
   characterShotCount.value = 17
   totalDuration.value = 210
   extraRequirement.value = ''
-  selectedHumanIds.value = [...store.castIds]
+  selectedHumanIds.value = []
 }
 
 // immediate：弹层懒挂载（P3d）后挂载即打开，靠 immediate 完成表单初始化
