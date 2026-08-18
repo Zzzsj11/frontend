@@ -60,12 +60,22 @@ export interface H3ComparisonSource {
   projectName: string
   taskId: string
   taskTitle: string
+  referenceCandidates?: Array<{
+    id: string
+    label: string
+    url: string
+    kind: 'cover' | 'character'
+    humanId?: string
+    assetAvatarUrl?: string
+    avatarUrl?: string
+  }>
 }
 
 export interface H3TestPreset {
   id: string
   name: string
   mode: 'reference' | 'text' | 'first_frame'
+  comparisonMode?: 'reference' | 'multi_reference' | 'first_frame'
   prompt: string
   duration: number
   aspectRatio: string
@@ -89,6 +99,20 @@ export const submitRunningHubComparison = (lineId: string) =>
   apiRequest<H3TestPreset>('/admin/runninghub/comparisons', {
     method: 'POST',
     body: JSON.stringify({ lineId }),
+  })
+
+export const submitRunningHubComparisonWithRefs = (input: {
+  lineId: string
+  referenceUrls: string[]
+  comparisonMode: 'multi_reference' | 'first_frame'
+}) =>
+  apiRequest<H3TestPreset>('/admin/runninghub/comparisons', {
+    method: 'POST',
+    body: JSON.stringify({
+      lineId: input.lineId,
+      referenceUrls: input.referenceUrls,
+      comparisonMode: input.comparisonMode,
+    }),
   })
 
 export const uploadRunningHubImage = (file: File) => {

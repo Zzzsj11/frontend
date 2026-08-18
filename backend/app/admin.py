@@ -1516,6 +1516,7 @@ def _h3_preset_json(item: H3TestPresetModel) -> dict[str, Any]:
         "id": item.id,
         "name": item.name,
         "mode": item.mode,
+        "comparisonMode": (item.usage_data or {}).get("comparisonMode", item.mode),
         "prompt": item.prompt,
         "duration": item.duration,
         "aspectRatio": item.aspect_ratio,
@@ -1580,11 +1581,13 @@ async def runninghub_comparison_sources(user: CurrentUser, db: AsyncSession = Db
     require_admin(user)
     rows = (
         await db.execute(
-            select(UserModel, ProjectModel, ProjectTaskModel, StoryboardLineModel, ShotAssetModel)
+            select(UserModel, ProjectModel, ProjectTaskModel, StoryboardLineModel, ShotAssetModel, DigitalHumanModel)
             .join(ProjectModel, ProjectModel.user_id == UserModel.id)
             .join(ProjectTaskModel, ProjectTaskModel.project_id == ProjectModel.id)
             .join(StoryboardLineModel, StoryboardLineModel.project_task_id == ProjectTaskModel.id)
             .join(ShotAssetModel, ShotAssetModel.storyboard_line_id == StoryboardLineModel.id)
+            .join(ProjectCastModel, ProjectCastModel.project_task_id == ProjectTaskModel.id, isouter=True)
+            .join(DigitalHumanModel, DigitalHumanModel.id == ProjectCastModel.digital_human_id, isouter=True)
             .where(
                 UserModel.deleted_at.is_(None),
                 ProjectModel.deleted_at.is_(None),
@@ -1602,10 +1605,27 @@ async def runninghub_comparison_sources(user: CurrentUser, db: AsyncSession = Db
     ).all()
     items = []
     seen: set[str] = set()
-    for owner, project, task, line, asset in rows:
+    for owner, project, task, line, asset, human in rows:
         if line.id in seen or (line.shot_options or {}).get("videoModel") != "doubao-seedance-2.0":
             continue
         seen.add(line.id)
+        references = [
+            {
+                "id": f"{line.id}:seedance-cover",
+                "label": "首帧",
+                "url": asset.cover_url,
+                "kind": "cover",
+            }
+        ]
+        if human and human.avatar_url:
+            references.append(
+                {
+                    "id": f"{line.id}:cast:{human.id}",
+                    "label": human.name,
+                    "url": human.asset_avatar_url or human.avatar_url,
+                    "kind": "character",
+                }
+            )
         items.append(
             {
                 "lineId": line.id,
@@ -1621,6 +1641,7 @@ async def runninghub_comparison_sources(user: CurrentUser, db: AsyncSession = Db
                 "projectName": project.name,
                 "taskId": task.id,
                 "taskTitle": task.title,
+                "referenceCandidates": references,
             }
         )
     return {"items": items}
@@ -1628,6 +1649,8 @@ async def runninghub_comparison_sources(user: CurrentUser, db: AsyncSession = Db
 
 class RunningHubComparisonIn(BaseModel):
     line_id: str = Field(min_length=1, alias="lineId")
+    reference_urls: list[str] = Field(default_factory=list, alias="referenceUrls")
+    comparison_mode: str = Field(default="multi_reference", pattern="^(multi_reference|first_frame)$", alias="comparisonMode")
 
     model_config = {"populate_by_name": True}
 
@@ -1639,7 +1662,7 @@ async def runninghub_comparison_create(
     user: CurrentUser,
     db: AsyncSession = Db,
 ):
-    """复用现有 Seedance 镜头的提示词和首帧创建 H3 对比任务。"""
+    """复用现有 Seedance 镜头的提示词和参考图创建 H3 对比任务。"""
     require_admin(user)
     _runninghub_guard()
     row = (
@@ -1671,33 +1694,95 @@ async def runninghub_comparison_create(
     prompt = f"{line.scene_prompt.strip()}\n\n{line.shot_prompt.strip()}"
     duration = min(MAX_DURATION, max(MIN_DURATION, asset.duration))
     aspect_ratio = _h3_first_frame_ratio((line.shot_options or {}).get("ratio", "16:9"))
-    try:
-        result = await rh_submit_first_frame_task(
-            prompt=prompt,
-            duration=duration,
-            aspect_ratio=aspect_ratio,
-            image=asset.cover_url,
-            seed=None,
-            megapixels=DEFAULT_FIRST_FRAME_MEGAPIXELS,
+    references: list[dict[str, Any]] = [
+        {
+            "type": "image",
+            "url": asset.cover_url,
+            "name": "Seedance 首帧",
+            "role": "comparison_cover",
+        }
+    ]
+    cast_rows = (
+        await db.execute(
+            select(DigitalHumanModel)
+            .join(ProjectCastModel, ProjectCastModel.digital_human_id == DigitalHumanModel.id)
+            .where(
+                ProjectCastModel.project_task_id == task.id,
+                ProjectCastModel.deleted_at.is_(None),
+                DigitalHumanModel.deleted_at.is_(None),
+                DigitalHumanModel.avatar_url.isnot(None),
+                DigitalHumanModel.avatar_url != "",
+            )
+            .order_by(ProjectCastModel.sort_order, DigitalHumanModel.sort_order, DigitalHumanModel.created_at.desc())
         )
+    ).scalars().all()
+    for human in cast_rows:
+        if len(references) >= 3:
+            break
+        references.append(
+            {
+                "type": "image",
+                "url": human.asset_avatar_url or human.avatar_url,
+                "name": human.name,
+                "role": "cast_reference",
+                "humanId": human.id,
+                "assetAvatarUrl": human.asset_avatar_url,
+                "avatarUrl": human.avatar_url,
+            }
+        )
+    selected_urls = [url.strip() for url in payload.reference_urls if url.strip()]
+    if selected_urls:
+        lookup = {item["url"]: item for item in references}
+        ordered: list[dict[str, Any]] = []
+        for url in selected_urls:
+            item = lookup.get(url)
+            if item and item not in ordered:
+                ordered.append(item)
+        references = ordered or references[:1]
+    if payload.comparison_mode == "first_frame":
+        references = references[:1]
+    if not references:
+        raise HTTPException(422, "没有可用于对比的参考图")
+    mode = "first_frame" if len(references) == 1 else "reference"
+    prompt_with_refs = "\n".join(
+        ["请严格参考下列图片并保持人物、场景和镜头风格一致："]
+        + [f"<Picture {index + 1}> {item['name']}" for index, item in enumerate(references)]
+        + [""]
+        + [prompt]
+    )
+    try:
+        if mode == "first_frame":
+            result = await rh_submit_first_frame_task(
+                prompt=prompt_with_refs,
+                duration=duration,
+                aspect_ratio=aspect_ratio,
+                image=references[0]["url"],
+                seed=None,
+                megapixels=DEFAULT_FIRST_FRAME_MEGAPIXELS,
+            )
+        else:
+            result = await rh_submit_task(
+                prompt=prompt_with_refs,
+                duration=duration,
+                aspect_ratio=aspect_ratio,
+                images=[item["url"] for item in references],
+                seed=None,
+                stage1_megapixels=DEFAULT_STAGE1_MEGAPIXELS,
+                stage2_megapixels=DEFAULT_STAGE2_MEGAPIXELS,
+            )
     except RunningHubError as exc:
         raise _runninghub_error(exc) from exc
     task_id = str(result.get("taskId"))
     preset = H3TestPresetModel(
         id=f"h3test-{uuid.uuid4().hex}",
         user_id=user.id,
-        name=f"对比 · {owner.username} · {task.title} · 镜头 {line.sort_order + 1}",
-        mode="first_frame",
-        prompt=prompt,
+        name=f"对比 · {owner.username} · {task.title} · 镜头 {line.sort_order + 1} · {mode}",
+        mode=mode,
+        prompt=prompt_with_refs,
         duration=duration,
         aspect_ratio=aspect_ratio,
-        input_media=[
-            {
-                "type": "image",
-                "url": asset.cover_url,
-                "name": "共同参考首帧",
-                "role": "comparison_cover",
-            },
+        input_media=references
+        + [
             {
                 "type": "video",
                 "url": asset.video_url,
@@ -1716,7 +1801,12 @@ async def runninghub_comparison_create(
         output_media=[],
         task_id=task_id,
         task_status=result.get("status", "QUEUED"),
-        usage_data={"comparison": True},
+        usage_data={
+            "comparison": True,
+            "comparisonMode": mode,
+            "referenceCount": len(references),
+            "referenceUrls": [item["url"] for item in references],
+        },
     )
     db.add(preset)
     await audit(

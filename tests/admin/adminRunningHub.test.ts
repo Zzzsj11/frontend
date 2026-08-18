@@ -6,7 +6,7 @@ import {
   fetchRunningHubStatus,
   fetchRunningHubPresets,
   queryRunningHubTask,
-  submitRunningHubComparison,
+  submitRunningHubComparisonWithRefs,
   submitRunningHubTask,
   uploadRunningHubImage,
 } from '../../src/api/adminRunningHub'
@@ -19,7 +19,7 @@ vi.mock('../../src/api/adminRunningHub', () => ({
   uploadRunningHubImage: vi.fn(),
   submitRunningHubTask: vi.fn(),
   queryRunningHubTask: vi.fn(),
-  submitRunningHubComparison: vi.fn(),
+  submitRunningHubComparisonWithRefs: vi.fn(),
 }))
 
 const configuredStatus = {
@@ -57,7 +57,7 @@ describe('admin runninghub panel', () => {
     vi.mocked(uploadRunningHubImage).mockReset()
     vi.mocked(submitRunningHubTask).mockReset()
     vi.mocked(queryRunningHubTask).mockReset()
-    vi.mocked(submitRunningHubComparison).mockReset()
+    vi.mocked(submitRunningHubComparisonWithRefs).mockReset()
     localStorage.clear()
   })
 
@@ -79,17 +79,34 @@ describe('admin runninghub panel', () => {
           projectName: '测试项目',
           taskId: 'story-task-1',
           taskTitle: '通用分镜',
+          referenceCandidates: [
+            { id: 'ref-cover', label: '首帧', url: 'https://tos.test/cover.jpg', kind: 'cover' },
+            { id: 'ref-char', label: '人物A', url: 'https://tos.test/char.jpg', kind: 'character' },
+          ],
         },
       ],
     })
-    vi.mocked(submitRunningHubComparison).mockResolvedValue({
+    vi.mocked(submitRunningHubComparisonWithRefs).mockResolvedValue({
       id: 'comparison-1',
-      name: '对比 · dev01 · 通用分镜 · 镜头 3',
-      mode: 'first_frame',
-      prompt: '人物沿着海边缓慢行走',
+      name: '对比 · dev01 · 通用分镜 · 镜头 3 · reference',
+      mode: 'reference',
+      comparisonMode: 'reference',
+      prompt: '请严格参考下列图片并保持人物、场景和镜头风格一致：\n<Picture 1> 首帧\n<Picture 2> 人物A\n\n人物沿着海边缓慢行走',
       duration: 8,
       aspectRatio: '16:9 (Widescreen)',
       inputMedia: [
+        {
+          type: 'image',
+          url: 'https://tos.test/cover.jpg',
+          name: 'Seedance 首帧',
+          role: 'comparison_cover',
+        },
+        {
+          type: 'image',
+          url: 'https://tos.test/char.jpg',
+          name: '人物A',
+          role: 'cast_reference',
+        },
         {
           type: 'video',
           url: 'https://tos.test/seedance.mp4',
@@ -113,7 +130,13 @@ describe('admin runninghub panel', () => {
     expect(wrapper.text()).toContain('镜头 3')
 
     await buttonByText(wrapper, '使用 H3 生成对比').trigger('click')
-    await vi.waitFor(() => expect(submitRunningHubComparison).toHaveBeenCalledWith('line-1'))
+    await vi.waitFor(() =>
+      expect(submitRunningHubComparisonWithRefs).toHaveBeenCalledWith({
+        lineId: 'line-1',
+        referenceUrls: ['https://tos.test/cover.jpg', 'https://tos.test/char.jpg'],
+        comparisonMode: 'multi_reference',
+      }),
+    )
     expect(wrapper.text()).toContain('Seedance 2.0 原视频')
     expect(wrapper.text()).toContain('MiniMax H3 生成视频')
     wrapper.unmount()

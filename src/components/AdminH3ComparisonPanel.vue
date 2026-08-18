@@ -4,7 +4,7 @@ import {
   fetchRunningHubComparisonSources,
   fetchRunningHubPresets,
   queryRunningHubTask,
-  submitRunningHubComparison,
+  submitRunningHubComparisonWithRefs,
   type H3ComparisonSource,
   type H3TestMedia,
   type H3TestPreset,
@@ -16,11 +16,13 @@ const sources = ref<H3ComparisonSource[]>([])
 const comparisons = ref<H3TestPreset[]>([])
 const selectedUser = ref('')
 const selectedTask = ref('')
+const comparisonMode = ref<'multi_reference' | 'first_frame'>('multi_reference')
 const loading = ref(true)
 const submittingLineId = ref('')
 const refreshingTaskId = ref('')
 const error = ref('')
 const pollTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const selectedRefsByLineId = ref<Record<string, string[]>>({})
 
 const isComparison = (preset: H3TestPreset) =>
   preset.inputMedia.some((media) => media.role === 'seedance_source')
@@ -40,8 +42,44 @@ const visibleSources = computed(() =>
   userSources.value.filter((source) => source.taskId === selectedTask.value),
 )
 
+const referenceUrlsFor = (source: H3ComparisonSource) => {
+  const current = selectedRefsByLineId.value[source.lineId]
+  if (current?.length) return current
+  const defaults =
+    source.referenceCandidates?.slice(0, comparisonMode.value === 'first_frame' ? 1 : 3) ??
+    []
+  return defaults.length ? defaults.map((item) => item.url) : [source.coverUrl]
+}
+
+const isSelectedRef = (source: H3ComparisonSource, url: string) =>
+  referenceUrlsFor(source).includes(url)
+
+const setReference = (source: H3ComparisonSource, url: string) => {
+  const current = new Set(referenceUrlsFor(source))
+  if (comparisonMode.value === 'first_frame') {
+    selectedRefsByLineId.value = { ...selectedRefsByLineId.value, [source.lineId]: [url] }
+    return
+  }
+  if (current.has(url)) current.delete(url)
+  else if (current.size < 3) current.add(url)
+  const next = [...current]
+  selectedRefsByLineId.value = {
+    ...selectedRefsByLineId.value,
+    [source.lineId]: next.length ? next : [source.coverUrl],
+  }
+}
+
+const resetReferences = (source: H3ComparisonSource) => {
+  delete selectedRefsByLineId.value[source.lineId]
+  selectedRefsByLineId.value = { ...selectedRefsByLineId.value }
+}
+
 watch(selectedUser, () => {
   selectedTask.value = tasks.value[0]?.taskId ?? ''
+})
+
+watch(comparisonMode, () => {
+  selectedRefsByLineId.value = {}
 })
 
 const sourceVideo = (preset: H3TestPreset) =>
@@ -105,7 +143,11 @@ const submitComparison = async (source: H3ComparisonSource) => {
   submittingLineId.value = source.lineId
   error.value = ''
   try {
-    const created = await submitRunningHubComparison(source.lineId)
+    const created = await submitRunningHubComparisonWithRefs({
+      lineId: source.lineId,
+      referenceUrls: referenceUrlsFor(source),
+      comparisonMode: comparisonMode.value,
+    })
     comparisons.value.unshift(created)
     if (created.taskId) poll(created.taskId)
   } catch (reason) {
@@ -139,7 +181,7 @@ onBeforeUnmount(() => pollTimers.forEach((timer) => clearTimeout(timer)))
     <div class="comparison-head">
       <div>
         <h4>H3 × Seedance 固定对比</h4>
-        <p>选择用户已经生成的 Seedance 2.0 镜头，复用同一提示词和首帧生成 H3 视频。</p>
+        <p>选择用户已经生成的 Seedance 2.0 镜头，按首帧或多参考图方式生成 H3 对比视频。</p>
       </div>
       <button type="button" class="secondary-btn" :disabled="loading" @click="load">
         刷新数据
@@ -166,6 +208,13 @@ onBeforeUnmount(() => pollTimers.forEach((timer) => clearTimeout(timer)))
             </option>
           </select>
         </label>
+        <label>
+          对比模式
+          <select v-model="comparisonMode">
+            <option value="multi_reference">多参考图</option>
+            <option value="first_frame">首帧对比</option>
+          </select>
+        </label>
       </div>
       <p v-else class="empty-text">暂无具备公网首帧和成片的 Seedance 2.0 通用分镜。</p>
 
@@ -179,6 +228,26 @@ onBeforeUnmount(() => pollTimers.forEach((timer) => clearTimeout(timer)))
               <span>{{ source.duration }} 秒</span>
             </div>
             <p>{{ source.prompt }}</p>
+            <div v-if="source.referenceCandidates?.length" class="reference-box">
+              <div class="reference-head">
+                <span>可选参考图</span>
+                <button type="button" class="text-btn" @click="resetReferences(source)">
+                  重置
+                </button>
+              </div>
+              <div class="reference-list">
+                <button
+                  v-for="ref in source.referenceCandidates"
+                  :key="ref.id"
+                  type="button"
+                  class="reference-pill"
+                  :class="{ active: isSelectedRef(source, ref.url) }"
+                  @click="setReference(source, ref.url)"
+                >
+                  {{ ref.label }}
+                </button>
+              </div>
+            </div>
             <button
               type="button"
               class="primary-btn"
@@ -200,7 +269,8 @@ onBeforeUnmount(() => pollTimers.forEach((timer) => clearTimeout(timer)))
             <strong>{{ preset.name }}</strong>
             <p>
               {{ sourceMeta(preset)?.projectName }} · {{ sourceMeta(preset)?.taskTitle }} ·
-              {{ sourceMeta(preset)?.shotType === 'empty' ? '空镜' : '人物镜' }}
+              {{ sourceMeta(preset)?.shotType === 'empty' ? '空镜' : '人物镜' }} ·
+              {{ preset.comparisonMode === 'first_frame' ? '首帧对比' : '多参考图对比' }}
             </p>
           </div>
           <span class="status" :class="statusTone(preset.taskStatus)">{{ preset.taskStatus }}</span>
@@ -224,13 +294,18 @@ onBeforeUnmount(() => pollTimers.forEach((timer) => clearTimeout(timer)))
           </figure>
         </div>
         <details>
-          <summary>查看提示词与共同参考首帧</summary>
+          <summary>查看提示词与参考图</summary>
           <div class="prompt-detail">
             <img
               v-if="sourceCover(preset)?.url"
               :src="sourceCover(preset)?.url"
-              alt="共同参考首帧"
+              alt="参考首帧"
             />
+            <div class="reference-detail">
+              <span v-for="media in preset.inputMedia.filter((item) => item.type === 'image')" :key="media.url">
+                {{ media.name || media.url }}
+              </span>
+            </div>
             <pre>{{ preset.prompt }}</pre>
           </div>
         </details>
@@ -353,6 +428,45 @@ select {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
+.reference-box {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+.reference-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+}
+.text-btn {
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  cursor: pointer;
+  padding: 0;
+}
+.reference-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.reference-pill {
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text-secondary);
+  padding: 6px 10px;
+  font-size: var(--font-sm);
+}
+.reference-pill.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+}
 .primary-btn,
 .secondary-btn {
   border-radius: var(--radius-sm);
@@ -436,6 +550,18 @@ summary {
   grid-template-columns: 180px minmax(0, 1fr);
   gap: 10px;
   margin-top: 8px;
+}
+.reference-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.reference-detail span {
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  padding: 4px 8px;
+  font-size: var(--font-sm);
 }
 .prompt-detail img {
   width: 100%;
