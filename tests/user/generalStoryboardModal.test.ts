@@ -15,7 +15,7 @@ describe('general storyboard defaults', () => {
     expect(DEFAULT_SHOT_OPTIONS.ratio).toBe('16:9')
   })
 
-  it('defaults the modal resolution select to 480p', async () => {
+  it('defaults the modal resolution select to 720p', async () => {
     // loadGenerationModels 拉取失败会静默回退内置默认模型，无需 mock fetch
     const store = useProjectStore()
     // 模板里的 select 依赖 generalStoryboardOptions 渲染，直接注入最小选项集
@@ -36,11 +36,11 @@ describe('general storyboard defaults', () => {
     const selects = Array.from(document.body.querySelectorAll('select'))
     const resolutionSelect = selects.find((select) => select.querySelector('option[value="1080p"]'))
     expect(resolutionSelect, '未找到清晰度下拉框').toBeDefined()
-    expect(resolutionSelect!.value).toBe('480p')
+    expect(resolutionSelect!.value).toBe('720p')
     wrapper.unmount()
   })
 
-  it('defaults the generation scale to 1+1 shots over 8 seconds', async () => {
+  it('defaults the generation scale to 4+17 shots over 210 seconds', async () => {
     const store = useProjectStore()
     store.generalStoryboardOptions = {
       genres: [{ value: 'pop', label: '流行歌曲' }],
@@ -59,7 +59,7 @@ describe('general storyboard defaults', () => {
       document.body.querySelectorAll('input[type="number"]'),
     ) as HTMLInputElement[]
     // 空镜数量 / 人物镜数量 / 总时长（秒）
-    expect(numbers.map((el) => el.value)).toEqual(['1', '1', '8'])
+    expect(numbers.map((el) => el.value)).toEqual(['4', '17', '210'])
     wrapper.unmount()
   })
 

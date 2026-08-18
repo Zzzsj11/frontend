@@ -25,12 +25,12 @@ const gender = ref<GeneralGender>('女')
 const ageGroup = ref('青年')
 const visualStyle = ref('电影写实')
 const ratio = ref<ShotGenOptions['ratio']>('16:9')
-const resolution = ref<ShotGenOptions['resolution']>('480p')
+const resolution = ref<ShotGenOptions['resolution']>('720p')
 const imageModel = ref(DEFAULT_IMAGE_MODEL)
 const videoModel = ref(DEFAULT_VIDEO_MODEL)
-const emptyShotCount = ref(1)
-const characterShotCount = ref(1)
-const totalDuration = ref(8)
+const emptyShotCount = ref(4)
+const characterShotCount = ref(17)
+const totalDuration = ref(210)
 const extraRequirement = ref('')
 const selectedHumanIds = ref<string[]>([])
 
@@ -74,13 +74,13 @@ const reset = () => {
     ? '电影写实'
     : (options?.visualStyles[0] ?? '')
   ratio.value = options?.ratios[0] ?? '16:9'
-  resolution.value = '480p'
+  resolution.value = '720p'
   imageModel.value = DEFAULT_IMAGE_MODEL
   videoModel.value = DEFAULT_VIDEO_MODEL
   gender.value = '女'
-  emptyShotCount.value = 1
-  characterShotCount.value = 1
-  totalDuration.value = 8
+  emptyShotCount.value = 4
+  characterShotCount.value = 17
+  totalDuration.value = 210
   extraRequirement.value = ''
   selectedHumanIds.value = [...store.castIds]
 }
