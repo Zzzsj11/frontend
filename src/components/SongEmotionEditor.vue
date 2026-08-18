@@ -121,6 +121,8 @@ watch(() => props.options, initializeDefaults, { immediate: true })
       </div>
     </fieldset>
 
+    <label>歌词<textarea v-model="model.lyrics" rows="8" placeholder="歌曲完整歌词" /></label>
+
     <label class="atmosphere-field"
       >氛围基调<textarea
         v-model="model.atmosphere"
@@ -128,6 +130,14 @@ watch(() => props.options, initializeDefaults, { immediate: true })
         placeholder="例如：柔和暖色调 | 青春校园场景 | 带有距离感的镜头"
       />
     </label>
+    <label
+      >人物设定<textarea
+        v-model="model.characterSetting"
+        rows="4"
+        placeholder="例如：年龄、形象、情感特征；无需人物时填写“无需人物”"
+      />
+    </label>
+    <label>状态<input v-model.number="model.status" type="number" step="1" required /> </label>
     <div class="footer">
       <button type="button" :disabled="busy" @click="emit('cancel')">取消</button
       ><button class="primary" type="submit" :disabled="busy">

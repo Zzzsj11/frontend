@@ -88,117 +88,121 @@ onBeforeUnmount(close)
     </button>
 
     <Teleport to="body">
-      <div
-        v-if="open"
-        id="shot-generation-options"
-        ref="popover"
-        class="options-popover"
-        :style="popoverStyle"
-      >
-        <fieldset class="option-group">
-          <legend>{{ mode === 'shot' ? '选择视频模型' : '选择图片模型' }}</legend>
-          <label class="model-select-wrap">
-            <select
-              v-if="mode === 'shot'"
-              class="model-select"
-              :value="modelValue.videoModel"
-              aria-label="视频模型"
-              @change="updateOption('videoModel', ($event.target as HTMLSelectElement).value)"
-            >
-              <option v-for="item in VIDEO_MODEL_OPTIONS" :key="item.value" :value="item.value">
-                {{ item.label }}
-              </option>
-            </select>
-            <select
-              v-else
-              class="model-select"
-              :value="modelValue.imageModel"
-              aria-label="图片模型"
-              @change="updateOption('imageModel', ($event.target as HTMLSelectElement).value)"
-            >
-              <option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">
-                {{ item.label }}
-              </option>
-            </select>
-            <span class="select-caret">⌄</span>
-          </label>
-        </fieldset>
+      <div v-if="open" class="options-overlay" @click.self="close">
+        <div
+          id="shot-generation-options"
+          ref="popover"
+          class="options-popover"
+          :style="popoverStyle"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="mode === 'shot' ? '视频生成参数' : '图片生成参数'"
+        >
+          <fieldset class="option-group">
+            <legend>{{ mode === 'shot' ? '选择视频模型' : '选择图片模型' }}</legend>
+            <label class="model-select-wrap">
+              <select
+                v-if="mode === 'shot'"
+                class="model-select"
+                :value="modelValue.videoModel"
+                aria-label="视频模型"
+                @change="updateOption('videoModel', ($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="item in VIDEO_MODEL_OPTIONS" :key="item.value" :value="item.value">
+                  {{ item.label }}
+                </option>
+              </select>
+              <select
+                v-else
+                class="model-select"
+                :value="modelValue.imageModel"
+                aria-label="图片模型"
+                @change="updateOption('imageModel', ($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">
+                  {{ item.label }}
+                </option>
+              </select>
+              <span class="select-caret">⌄</span>
+            </label>
+          </fieldset>
 
-        <fieldset class="option-group">
-          <legend>选择画幅</legend>
-          <div class="segment-grid ratio-grid">
+          <fieldset class="option-group">
+            <legend>选择画幅</legend>
+            <div class="segment-grid ratio-grid">
+              <button
+                v-for="ratio in ratioChoices"
+                :key="ratio"
+                type="button"
+                class="segment-option"
+                :class="{ active: modelValue.ratio === ratio }"
+                :aria-pressed="modelValue.ratio === ratio"
+                @click="updateOption('ratio', ratio)"
+              >
+                <span class="ratio-shape" :class="`ratio-${ratio.replace(':', '-')}`" />
+                {{ ratio }}
+              </button>
+            </div>
+          </fieldset>
+
+          <fieldset class="option-group">
+            <legend>选择清晰度</legend>
+            <div class="segment-grid">
+              <button
+                v-for="resolution in resolutionChoices"
+                :key="resolution"
+                type="button"
+                class="segment-option text-only"
+                :class="{ active: modelValue.resolution === resolution }"
+                :aria-pressed="modelValue.resolution === resolution"
+                @click="updateOption('resolution', resolution)"
+              >
+                {{ resolution.toUpperCase() }}
+              </button>
+            </div>
+          </fieldset>
+
+          <fieldset v-if="mode === 'shot'" class="option-group">
+            <legend>选择时长</legend>
+            <div class="segment-grid duration-grid">
+              <button
+                v-for="duration in durationChoices"
+                :key="duration"
+                type="button"
+                class="segment-option text-only"
+                :class="{ active: modelValue.duration === duration }"
+                :aria-pressed="modelValue.duration === duration"
+                @click="updateOption('duration', duration)"
+              >
+                {{ duration }}s
+              </button>
+            </div>
+          </fieldset>
+
+          <fieldset v-if="mode === 'shot'" class="option-group switch-group">
+            <legend>视频附加选项</legend>
             <button
-              v-for="ratio in ratioChoices"
-              :key="ratio"
               type="button"
-              class="segment-option"
-              :class="{ active: modelValue.ratio === ratio }"
-              :aria-pressed="modelValue.ratio === ratio"
-              @click="updateOption('ratio', ratio)"
+              class="switch-option"
+              :class="{ active: modelValue.generateAudio }"
+              :aria-pressed="!!modelValue.generateAudio"
+              @click="updateOption('generateAudio', !modelValue.generateAudio)"
             >
-              <span class="ratio-shape" :class="`ratio-${ratio.replace(':', '-')}`" />
-              {{ ratio }}
+              <span class="switch-control"><span /></span>
+              <span><strong>生成背景音</strong><small>为视频生成环境音或配乐</small></span>
             </button>
-          </div>
-        </fieldset>
-
-        <fieldset class="option-group">
-          <legend>选择清晰度</legend>
-          <div class="segment-grid">
             <button
-              v-for="resolution in resolutionChoices"
-              :key="resolution"
               type="button"
-              class="segment-option text-only"
-              :class="{ active: modelValue.resolution === resolution }"
-              :aria-pressed="modelValue.resolution === resolution"
-              @click="updateOption('resolution', resolution)"
+              class="switch-option"
+              :class="{ active: modelValue.watermark }"
+              :aria-pressed="!!modelValue.watermark"
+              @click="updateOption('watermark', !modelValue.watermark)"
             >
-              {{ resolution.toUpperCase() }}
+              <span class="switch-control"><span /></span>
+              <span><strong>添加水印</strong><small>使用模型供应商提供的水印</small></span>
             </button>
-          </div>
-        </fieldset>
-
-        <fieldset v-if="mode === 'shot'" class="option-group">
-          <legend>选择时长</legend>
-          <div class="segment-grid duration-grid">
-            <button
-              v-for="duration in durationChoices"
-              :key="duration"
-              type="button"
-              class="segment-option text-only"
-              :class="{ active: modelValue.duration === duration }"
-              :aria-pressed="modelValue.duration === duration"
-              @click="updateOption('duration', duration)"
-            >
-              {{ duration }}s
-            </button>
-          </div>
-        </fieldset>
-
-        <fieldset v-if="mode === 'shot'" class="option-group switch-group">
-          <legend>视频附加选项</legend>
-          <button
-            type="button"
-            class="switch-option"
-            :class="{ active: modelValue.generateAudio }"
-            :aria-pressed="!!modelValue.generateAudio"
-            @click="updateOption('generateAudio', !modelValue.generateAudio)"
-          >
-            <span class="switch-control"><span /></span>
-            <span><strong>生成背景音</strong><small>为视频生成环境音或配乐</small></span>
-          </button>
-          <button
-            type="button"
-            class="switch-option"
-            :class="{ active: modelValue.watermark }"
-            :aria-pressed="!!modelValue.watermark"
-            @click="updateOption('watermark', !modelValue.watermark)"
-          >
-            <span class="switch-control"><span /></span>
-            <span><strong>添加水印</strong><small>使用模型供应商提供的水印</small></span>
-          </button>
-        </fieldset>
+          </fieldset>
+        </div>
       </div>
     </Teleport>
   </div>
@@ -239,9 +243,14 @@ onBeforeUnmount(close)
   width: 17px;
   height: 11px;
 }
+.options-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal-nested);
+  background: rgba(0, 0, 0, 0.48);
+}
 .options-popover {
   position: fixed;
-  z-index: var(--z-modal-nested);
   width: min(420px, calc(100vw - 80px));
   overflow-y: auto;
   padding: 16px;

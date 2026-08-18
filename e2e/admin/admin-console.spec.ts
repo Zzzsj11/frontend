@@ -32,6 +32,13 @@ test('administrator can inspect dashboard, models, errors and audit logs', async
   await expect(
     page.locator('tbody').getByText('doubao-seedance-2.0', { exact: true }).first(),
   ).toBeVisible()
+  await page.getByRole('button', { name: 'Chat 模型对比' }).click()
+  await expect(page.getByRole('heading', { name: '通用 MV 大纲对比' })).toBeVisible()
+  await expect(page.getByText('gpt-5.5', { exact: true })).toBeVisible()
+  await expect(page.getByText('claude-opus-4-8', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '开始业务对比' })).toBeEnabled()
+  await page.getByRole('button', { name: '自由提示词' }).click()
+  await expect(page.getByRole('heading', { name: '同提示词多模型对比' })).toBeVisible()
   await page.getByRole('button', { name: '歌曲情感库' }).click()
   await expect(page.getByRole('heading', { name: '歌曲情感库' })).toBeVisible()
   await expect(page.getByLabel('搜索歌曲情感库')).toBeVisible()

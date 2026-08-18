@@ -35,6 +35,31 @@ export interface H3TestMedia {
   runningHubFileName?: string
   name?: string
   outputType?: string
+  role?: 'comparison_cover' | 'seedance_source'
+  lineId?: string
+  lineOrder?: number
+  shotType?: 'empty' | 'character'
+  username?: string
+  projectId?: string
+  projectName?: string
+  taskId?: string
+  taskTitle?: string
+}
+
+export interface H3ComparisonSource {
+  lineId: string
+  lineOrder: number
+  shotType: 'empty' | 'character'
+  prompt: string
+  coverUrl: string
+  seedanceUrl: string
+  duration: number
+  username: string
+  userId: string
+  projectId: string
+  projectName: string
+  taskId: string
+  taskTitle: string
 }
 
 export interface H3TestPreset {
@@ -56,6 +81,15 @@ export const fetchRunningHubStatus = () => apiRequest<RunningHubStatus>('/admin/
 
 export const fetchRunningHubPresets = () =>
   apiRequest<{ items: H3TestPreset[] }>('/admin/runninghub/presets')
+
+export const fetchRunningHubComparisonSources = () =>
+  apiRequest<{ items: H3ComparisonSource[] }>('/admin/runninghub/comparison-sources')
+
+export const submitRunningHubComparison = (lineId: string) =>
+  apiRequest<H3TestPreset>('/admin/runninghub/comparisons', {
+    method: 'POST',
+    body: JSON.stringify({ lineId }),
+  })
 
 export const uploadRunningHubImage = (file: File) => {
   const form = new FormData()

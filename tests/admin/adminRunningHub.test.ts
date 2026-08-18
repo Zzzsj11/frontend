@@ -2,20 +2,24 @@ import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  fetchRunningHubComparisonSources,
   fetchRunningHubStatus,
   fetchRunningHubPresets,
   queryRunningHubTask,
+  submitRunningHubComparison,
   submitRunningHubTask,
   uploadRunningHubImage,
 } from '../../src/api/adminRunningHub'
 import AdminRunningHubPanel from '../../src/components/AdminRunningHubPanel.vue'
 
 vi.mock('../../src/api/adminRunningHub', () => ({
+  fetchRunningHubComparisonSources: vi.fn(),
   fetchRunningHubStatus: vi.fn(),
   fetchRunningHubPresets: vi.fn(),
   uploadRunningHubImage: vi.fn(),
   submitRunningHubTask: vi.fn(),
   queryRunningHubTask: vi.fn(),
+  submitRunningHubComparison: vi.fn(),
 }))
 
 const configuredStatus = {
@@ -45,13 +49,74 @@ const buttonByText = (wrapper: ReturnType<typeof mount>, text: string) => {
 
 describe('admin runninghub panel', () => {
   beforeEach(() => {
+    vi.mocked(fetchRunningHubComparisonSources).mockReset()
+    vi.mocked(fetchRunningHubComparisonSources).mockResolvedValue({ items: [] })
     vi.mocked(fetchRunningHubStatus).mockReset()
     vi.mocked(fetchRunningHubPresets).mockReset()
     vi.mocked(fetchRunningHubPresets).mockResolvedValue({ items: [] })
     vi.mocked(uploadRunningHubImage).mockReset()
     vi.mocked(submitRunningHubTask).mockReset()
     vi.mocked(queryRunningHubTask).mockReset()
+    vi.mocked(submitRunningHubComparison).mockReset()
     localStorage.clear()
+  })
+
+  it('selects a generated Seedance shot and submits an H3 comparison', async () => {
+    vi.mocked(fetchRunningHubStatus).mockResolvedValue(configuredStatus)
+    vi.mocked(fetchRunningHubComparisonSources).mockResolvedValue({
+      items: [
+        {
+          lineId: 'line-1',
+          lineOrder: 2,
+          shotType: 'character',
+          prompt: '人物沿着海边缓慢行走',
+          coverUrl: 'https://tos.test/cover.jpg',
+          seedanceUrl: 'https://tos.test/seedance.mp4',
+          duration: 8,
+          username: 'dev01',
+          userId: 'user-1',
+          projectId: 'project-1',
+          projectName: '测试项目',
+          taskId: 'story-task-1',
+          taskTitle: '通用分镜',
+        },
+      ],
+    })
+    vi.mocked(submitRunningHubComparison).mockResolvedValue({
+      id: 'comparison-1',
+      name: '对比 · dev01 · 通用分镜 · 镜头 3',
+      mode: 'first_frame',
+      prompt: '人物沿着海边缓慢行走',
+      duration: 8,
+      aspectRatio: '16:9 (Widescreen)',
+      inputMedia: [
+        {
+          type: 'video',
+          url: 'https://tos.test/seedance.mp4',
+          role: 'seedance_source',
+          username: 'dev01',
+          projectName: '测试项目',
+          taskTitle: '通用分镜',
+          shotType: 'character',
+        },
+      ],
+      outputMedia: [],
+      taskId: null,
+      taskStatus: 'QUEUED',
+      usage: {},
+      createdAt: '2026-08-18T00:00:00Z',
+    })
+
+    const wrapper = mount(AdminRunningHubPanel)
+    await vi.waitFor(() => expect(wrapper.text()).toContain('H3 × Seedance 固定对比'))
+    expect(wrapper.text()).toContain('dev01')
+    expect(wrapper.text()).toContain('镜头 3')
+
+    await buttonByText(wrapper, '使用 H3 生成对比').trigger('click')
+    await vi.waitFor(() => expect(submitRunningHubComparison).toHaveBeenCalledWith('line-1'))
+    expect(wrapper.text()).toContain('Seedance 2.0 原视频')
+    expect(wrapper.text()).toContain('MiniMax H3 生成视频')
+    wrapper.unmount()
   })
 
   it('shows setup hint and disables submit when api key is not configured', async () => {
@@ -226,7 +291,7 @@ describe('admin runninghub panel', () => {
     const wrapper = mount(AdminRunningHubPanel)
     await vi.waitFor(() => expect(wrapper.text()).toContain('task-old-9'.slice(-8)))
 
-    await buttonByText(wrapper, '刷新').trigger('click')
+    await wrapper.get('.rh-table .ghost-btn').trigger('click')
     await vi.waitFor(() => expect(queryRunningHubTask).toHaveBeenCalledWith('task-old-9'))
     await new Promise((resolve) => setTimeout(resolve))
 

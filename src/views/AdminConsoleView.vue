@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { apiRequest } from '../api/client'
+import AdminModelComparisonPanel from '../components/AdminModelComparisonPanel.vue'
 import AdminPromptsPanel from '../components/AdminPromptsPanel.vue'
 import AdminKlingPanel from '../components/AdminKlingPanel.vue'
 import AdminRunningHubPanel from '../components/AdminRunningHubPanel.vue'
@@ -117,6 +118,7 @@ type Tab =
   | 'song-emotions'
   | 'runninghub'
   | 'kling'
+  | 'chat-comparison'
 const auth = useAuthStore()
 const tab = ref<Tab>(auth.user?.isSuperAdmin ? 'dashboard' : 'song-emotions'),
   loading = ref(false),
@@ -149,6 +151,7 @@ const ALL_NAV_GROUPS: AdminNavGroup[] = [
     key: 'lab',
     label: '模型实验室',
     items: [
+      { key: 'chat-comparison', label: 'Chat 模型对比' },
       { key: 'runninghub', label: 'H3 工作流' },
       { key: 'kling', label: 'Kling 测试' },
     ],
@@ -256,6 +259,7 @@ const endpoint = computed(
       'song-emotions': '',
       runninghub: '',
       kling: '',
+      'chat-comparison': '',
     })[tab.value],
 )
 const rows = computed<AdminRow[]>(() =>
@@ -275,6 +279,7 @@ const load = async () => {
     tab.value === 'song-emotions' ||
     tab.value === 'runninghub' ||
     tab.value === 'kling' ||
+    tab.value === 'chat-comparison' ||
     tab.value === 'server'
   )
     return
@@ -300,6 +305,7 @@ const select = async (key: string) => {
     value === 'song-emotions' ||
     value === 'runninghub' ||
     value === 'kling' ||
+    value === 'chat-comparison' ||
     value === 'server'
   )
     return
@@ -572,6 +578,7 @@ onMounted(load)
           <AdminSongEmotionProfilesPanel v-if="tab === 'song-emotions'" />
           <AdminRunningHubPanel v-if="tab === 'runninghub'" />
           <AdminKlingPanel v-if="tab === 'kling'" />
+          <AdminModelComparisonPanel v-if="tab === 'chat-comparison'" />
           <AdminServerMonitoringPanel v-if="tab === 'server'" />
           <!-- 性能页：后端全量耗时（慢请求 TOP + 路径聚合） + 本浏览器会话观测 -->
           <div v-if="tab === 'perf'" class="perf">
@@ -843,6 +850,7 @@ onMounted(load)
                 'song-emotions',
                 'runninghub',
                 'kling',
+                'chat-comparison',
                 'server',
               ].includes(tab)
             "

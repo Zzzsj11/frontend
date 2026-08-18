@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createSongEmotion,
   deleteSongEmotion,
+  importSongEmotions,
   listSongEmotions,
   updateSongEmotion,
 } from '../../src/api/adminSongEmotions'
@@ -36,17 +37,21 @@ vi.mock('../../src/api/adminSongEmotions', () => ({
   createSongEmotion: vi.fn(),
   updateSongEmotion: vi.fn(),
   deleteSongEmotion: vi.fn(),
+  importSongEmotions: vi.fn(),
 }))
 const item = {
   songCode: '00000780',
   songName: '姐姐真漂亮',
   artists: 'SHINEE',
+  lyrics: '测试歌词',
   primaryCategory: '流行歌曲',
   secondaryCategory: '爱情消极',
   tertiaryCategory: '爱而不得',
   materialCategory: '流行歌曲-爱情消极-爱而不得',
   seasons: '秋/冬',
   atmosphere: '暖色调',
+  characterSetting: '无需人物',
+  status: 2,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 }
@@ -59,6 +64,7 @@ describe('admin song emotion profiles panel', () => {
     vi.mocked(createSongEmotion).mockReset().mockResolvedValue(item)
     vi.mocked(updateSongEmotion).mockReset().mockResolvedValue(item)
     vi.mocked(deleteSongEmotion).mockReset().mockResolvedValue({ ok: true })
+    vi.mocked(importSongEmotions).mockReset().mockResolvedValue({ ok: true, imported: 5 })
   })
   it('lists and searches profiles', async () => {
     const wrapper = mount(AdminSongEmotionProfilesPanel)
@@ -88,6 +94,19 @@ describe('admin song emotion profiles panel', () => {
     expect(wrapper.get<HTMLInputElement>('input[aria-label="搜索歌曲情感库"]').element.value).toBe(
       '',
     )
+  })
+  it('imports an xlsx file and reloads the first page', async () => {
+    const wrapper = mount(AdminSongEmotionProfilesPanel)
+    await vi.waitFor(() => expect(wrapper.text()).toContain('姐姐真漂亮'))
+    const file = new File(['xlsx'], 'songs.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    const input = wrapper.get<HTMLInputElement>('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
+    await input.trigger('change')
+    await vi.waitFor(() => expect(importSongEmotions).toHaveBeenCalledWith(file))
+    await vi.waitFor(() => expect(wrapper.text()).toContain('成功导入 5 条'))
+    expect(vi.mocked(listSongEmotions).mock.calls.at(-1)![0].get('offset')).toBe('0')
   })
   it('selects a page from both pagination controls', async () => {
     vi.mocked(listSongEmotions).mockResolvedValue({ total: 120, items: [item] })

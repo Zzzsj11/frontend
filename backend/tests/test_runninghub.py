@@ -1,11 +1,16 @@
 """RunningHub 工作流测试页：nodeInfoList 组装纯函数 + 管理端点（鉴权/key 门禁/代理转发）。"""
 
+import asyncio
 import dataclasses
+import uuid
 
 import pytest
+from sqlalchemy import select
 
 from app import admin as admin_module
 from app.config import settings
+from app.database import session_factory
+from app.models import ProjectModel, ProjectTaskModel, ShotAssetModel, StoryboardLineModel, UserModel
 from app.runninghub import RunningHubError, build_first_frame_node_info_list, build_node_info_list, build_text_node_info_list
 
 
@@ -201,6 +206,75 @@ def test_runninghub_upstream_error_mapped_to_502(client, monkeypatch):
     response = client.post("/api/admin/runninghub/query", json={"taskId": "t-err"})
     assert response.status_code == 502
     assert "429" in response.json()["detail"]
+
+
+def test_runninghub_seedance_comparison_source_and_submit(client, monkeypatch):
+    configured = dataclasses.replace(settings, runninghub_api_key="rh-test-key")
+    monkeypatch.setattr(admin_module, "settings", configured)
+    suffix = uuid.uuid4().hex
+    line_id = f"line-{suffix}"
+
+    async def seed_source():
+        async with session_factory() as db:
+            owner = (await db.execute(select(UserModel).where(UserModel.username == "admin"))).scalar_one()
+            project = ProjectModel(id=f"project-{suffix}", user_id=owner.id, name="H3 对比项目")
+            task = ProjectTaskModel(
+                id=f"task-{suffix}",
+                project_id=project.id,
+                title="通用分镜测试",
+                storyboard_type="general",
+                status="ready",
+            )
+            line = StoryboardLineModel(
+                id=line_id,
+                project_task_id=task.id,
+                source="general",
+                shot_type="empty",
+                sort_order=1,
+                scene_prompt="清晨草原",
+                shot_prompt="无人空镜，镜头缓慢推进",
+                shot_options={"videoModel": "doubao-seedance-2.0", "ratio": "16:9"},
+            )
+            asset = ShotAssetModel(
+                id=f"shot-{suffix}",
+                storyboard_line_id=line.id,
+                cover_url="https://tos.test/comparison-cover.jpg",
+                video_url="https://tos.test/seedance.mp4",
+                duration=8,
+                ratio="16:9",
+                is_current=True,
+            )
+            db.add_all([project, task, line, asset])
+            await db.commit()
+
+    asyncio.run(seed_source())
+    submitted = {}
+
+    async def fake_submit(**kwargs):
+        submitted.update(kwargs)
+        return {"taskId": "h3-comparison-task", "status": "RUNNING"}
+
+    monkeypatch.setattr(admin_module, "rh_submit_first_frame_task", fake_submit)
+
+    listed = client.get("/api/admin/runninghub/comparison-sources")
+    assert listed.status_code == 200
+    source = next(item for item in listed.json()["items"] if item["lineId"] == line_id)
+    assert source["shotType"] == "empty"
+    assert source["seedanceUrl"] == "https://tos.test/seedance.mp4"
+
+    created = client.post("/api/admin/runninghub/comparisons", json={"lineId": line_id})
+    assert created.status_code == 201
+    payload = created.json()
+    assert payload["taskId"] == "h3-comparison-task"
+    assert payload["inputMedia"][1]["role"] == "seedance_source"
+    assert submitted == {
+        "prompt": "清晨草原\n\n无人空镜，镜头缓慢推进",
+        "duration": 8.0,
+        "aspect_ratio": "16:9 (Widescreen)",
+        "image": "https://tos.test/comparison-cover.jpg",
+        "seed": None,
+        "megapixels": 0.9,
+    }
 
 
 def test_runninghub_endpoints_require_admin(client):

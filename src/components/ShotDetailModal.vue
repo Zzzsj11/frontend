@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { DEFAULT_SHOT_OPTIONS, useProjectStore } from '../stores/project'
 import type { ShotAsset, ShotGenOptions } from '../types'
 import AppIcon from './AppIcon.vue'
@@ -18,6 +18,8 @@ void loadGenerationModels()
 const lyricsDraft = ref('')
 const scenePromptDraft = ref('')
 const shotPromptDraft = ref('')
+const scenePromptInput = ref<HTMLTextAreaElement | null>(null)
+const shotPromptInput = ref<HTMLTextAreaElement | null>(null)
 
 // 当前展开的调整面板：默认全部折叠，只展示人物 / 分镜 / 场景三个预览
 type TabKey = 'cast' | 'shot' | 'scene'
@@ -76,6 +78,18 @@ const shotAssetTotal = computed(() => {
 const previewAsset = ref<ShotAsset | null>(null)
 const previewIndex = ref(0)
 
+/** 提示词优先完整展开；超出弹框 90vh 后交由弹框主体统一滚动。 */
+const resizePromptInput = (input: HTMLTextAreaElement | null) => {
+  if (!input) return
+  input.style.height = 'auto'
+  input.style.height = `${input.scrollHeight}px`
+}
+
+const resizeVisiblePrompt = async () => {
+  await nextTick()
+  resizePromptInput(activeTab.value === 'shot' ? shotPromptInput.value : scenePromptInput.value)
+}
+
 const pickAsset = (asset: ShotAsset, index: number) => {
   const line = store.editingLine
   if (!line) return
@@ -115,6 +129,8 @@ watch(
   },
   { immediate: true },
 )
+
+watch([activeTab, scenePromptDraft, shotPromptDraft], resizeVisiblePrompt, { flush: 'post' })
 
 /** 生成 / 重新生成场景（仅场景提示词）；已有场景图时二次确认（会被覆盖） */
 const regenScene = async () => {
@@ -168,6 +184,7 @@ const cancel = () => store.closeEditor()
   <BaseModal
     :open="!!store.editingLine"
     width="620px"
+    max-height="90vh"
     mask-variant="emphasized"
     aria-label="编辑视频内容"
     @close="cancel"
@@ -344,10 +361,12 @@ const cancel = () => store.closeEditor()
           <p class="panel-title mt">视频提示词</p>
           <div class="prompt-editor">
             <textarea
+              ref="shotPromptInput"
               v-model="shotPromptDraft"
               class="prompt-input prompt-shot"
               rows="6"
               placeholder="描述镜头运动与角色表演，将与场景、出演角色一起生成视频片段…"
+              @input="resizePromptInput(shotPromptInput)"
             />
             <p
               v-if="store.editingLine.shot.status === 'failed'"
@@ -378,10 +397,12 @@ const cancel = () => store.closeEditor()
           <p class="panel-title">场景提示词</p>
           <div class="prompt-editor">
             <textarea
+              ref="scenePromptInput"
               v-model="scenePromptDraft"
-              class="prompt-input"
-              rows="3"
+              class="prompt-input prompt-scene"
+              rows="6"
               placeholder="描述这段视频的背景场景：环境、光线、色调、氛围…"
+              @input="resizePromptInput(scenePromptInput)"
             />
             <p
               v-if="store.editingLine.scene.status === 'failed'"
@@ -792,7 +813,9 @@ const cancel = () => store.closeEditor()
   color: var(--text-secondary);
 }
 .prompt-input {
-  resize: vertical;
+  field-sizing: content;
+  overflow-y: hidden;
+  resize: none;
   min-height: 72px;
   display: block;
 }
@@ -836,6 +859,9 @@ const cancel = () => store.closeEditor()
 }
 /* 分镜提示词框加大，方便编写较长的镜头描述 */
 .prompt-input.prompt-shot {
+  min-height: 168px;
+}
+.prompt-input.prompt-scene {
   min-height: 168px;
 }
 

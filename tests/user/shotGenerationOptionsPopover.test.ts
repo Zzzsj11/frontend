@@ -28,6 +28,12 @@ describe('ShotGenerationOptionsPopover', () => {
 
     ;(document.querySelector('button[aria-pressed="false"]') as HTMLButtonElement).click()
     expect(wrapper.emitted('update:modelValue')).toBeTruthy()
+
+    const overlay = document.querySelector('.options-overlay') as HTMLElement
+    expect(overlay).not.toBeNull()
+    overlay.click()
+    await wrapper.vm.$nextTick()
+    expect(document.querySelector('.options-overlay')).toBeNull()
     wrapper.unmount()
   })
 

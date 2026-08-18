@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import {
   createSongEmotion,
   deleteSongEmotion,
+  importSongEmotions,
   listSongEmotions,
   updateSongEmotion,
   type SongEmotionInput,
@@ -17,12 +18,15 @@ const emptyForm = (): SongEmotionInput => ({
   songCode: '',
   songName: '',
   artists: '',
+  lyrics: '',
   primaryCategory: null,
   secondaryCategory: null,
   tertiaryCategory: null,
   materialCategory: '',
   seasons: '',
   atmosphere: '',
+  characterSetting: '',
+  status: 2,
 })
 const items = ref<SongEmotionProfile[]>([])
 const total = ref(0)
@@ -32,6 +36,8 @@ const keyword = ref('')
 const loading = ref(false)
 const busy = ref(false)
 const error = ref('')
+const notice = ref('')
+const importInput = ref<HTMLInputElement | null>(null)
 const open = ref(false)
 const editing = ref(false)
 const confirmingCode = ref('')
@@ -90,6 +96,26 @@ const showCreate = () => {
   form.value = emptyForm()
   editing.value = false
   open.value = true
+}
+const chooseImport = () => importInput.value?.click()
+const importXlsx = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  busy.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const result = await importSongEmotions(file)
+    notice.value = `成功导入 ${result.imported} 条歌曲情感数据`
+    page.value = 1
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '导入失败'
+  } finally {
+    busy.value = false
+    input.value = ''
+  }
 }
 const showEdit = (item: SongEmotionProfile) => {
   form.value = { ...item }
@@ -160,7 +186,20 @@ const remove = async (songCode: string) => {
         </div>
         <button type="submit">查询</button>
       </form>
-      <button class="primary" type="button" @click="showCreate">新增歌曲</button>
+      <div class="toolbar-actions">
+        <input
+          ref="importInput"
+          class="file-input"
+          type="file"
+          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          aria-label="选择歌曲情感库 XLSX 文件"
+          @change="importXlsx"
+        />
+        <button type="button" :disabled="busy" @click="chooseImport">
+          {{ busy ? '处理中…' : '导入 XLSX' }}
+        </button>
+        <button class="primary" type="button" @click="showCreate">新增歌曲</button>
+      </div>
     </div>
     <div class="list-meta">
       <span>歌曲情感数据</span>
@@ -180,6 +219,7 @@ const remove = async (songCode: string) => {
       </div>
     </div>
     <p v-if="error" class="error">{{ error }}</p>
+    <p v-if="notice" class="notice">{{ notice }}</p>
     <p v-if="loading">加载中…</p>
     <div v-else class="table-scroll">
       <table>
@@ -190,6 +230,7 @@ const remove = async (songCode: string) => {
             <th>歌手</th>
             <th>分类</th>
             <th>季节</th>
+            <th>状态</th>
             <th>更新时间</th>
             <th>操作</th>
           </tr>
@@ -207,6 +248,7 @@ const remove = async (songCode: string) => {
               }}
             </td>
             <td>{{ item.seasons || '-' }}</td>
+            <td>{{ item.status }}</td>
             <td>{{ new Date(item.updatedAt).toLocaleString() }}</td>
             <td class="actions">
               <button type="button" @click="showEdit(item)">编辑</button>
@@ -227,7 +269,7 @@ const remove = async (songCode: string) => {
             </td>
           </tr>
           <tr v-if="!items.length">
-            <td colspan="7" class="empty">暂无数据</td>
+            <td colspan="8" class="empty">暂无数据</td>
           </tr>
         </tbody>
       </table>
@@ -267,6 +309,7 @@ const remove = async (songCode: string) => {
 
 <style scoped>
 .toolbar,
+.toolbar-actions,
 .search,
 .pager,
 .actions {
@@ -287,6 +330,9 @@ const remove = async (songCode: string) => {
 }
 .toolbar {
   justify-content: space-between;
+}
+.file-input {
+  display: none;
 }
 .search-input {
   position: relative;
@@ -373,5 +419,8 @@ td {
 }
 .error {
   color: var(--danger);
+}
+.notice {
+  color: var(--success);
 }
 </style>

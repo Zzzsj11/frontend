@@ -33,6 +33,110 @@ def test_admin_read_models_projects_jobs_usage_and_errors(client):
         assert response.status_code == 200
 
 
+def test_admin_chat_comparison_lists_models_and_records_results(client, monkeypatch):
+    async def fake_compare_chat_models(**kwargs):
+        assert kwargs["models"] == ["gpt-5.5", "claude-opus-4-8"]
+        assert kwargs["prompt"] == "同一个测试问题"
+        return [
+            {
+                "model": "gpt-5.5",
+                "name": "GPT 5.5",
+                "protocol": "openai",
+                "status": "ok",
+                "text": "GPT 回答",
+                "error": "",
+                "durationMs": 1200,
+                "requestId": "req-gpt",
+                "usage": {"inputTokens": 10, "outputTokens": 20, "cachedInputTokens": 0, "totalTokens": 30, "raw": {"input_tokens": 10, "output_tokens": 20}},
+            },
+            {
+                "model": "claude-opus-4-8",
+                "name": "Claude Opus 4.8",
+                "protocol": "anthropic",
+                "status": "error",
+                "text": "",
+                "error": "测试失败",
+                "durationMs": 800,
+                "requestId": None,
+                "usage": {"inputTokens": 0, "outputTokens": 0, "cachedInputTokens": 0, "totalTokens": 0, "raw": {}},
+            },
+        ]
+
+    monkeypatch.setattr("app.admin.compare_chat_models", fake_compare_chat_models)
+    options = client.get("/api/admin/chat-comparison/models")
+    assert options.status_code == 200
+    assert {item["code"] for item in options.json()} >= {"gpt-5.5", "claude-opus-4-8"}
+
+    response = client.post(
+        "/api/admin/chat-comparison/run",
+        json={"system_prompt": "保持简短", "prompt": "同一个测试问题", "models": ["gpt-5.5", "claude-opus-4-8"], "temperature": 0.2, "max_tokens": 512},
+    )
+    assert response.status_code == 200
+    assert [item["status"] for item in response.json()["results"]] == ["ok", "error"]
+    logs = client.get("/api/admin/llm-calls", params={"operation": "admin_chat_comparison"}).json()["items"]
+    assert {item["model"] for item in logs} >= {"gpt-5.5", "claude-opus-4-8"}
+
+
+def test_admin_chat_comparison_rejects_unknown_model(client):
+    response = client.post(
+        "/api/admin/chat-comparison/run",
+        json={"prompt": "test", "models": ["unknown-model"]},
+    )
+    assert response.status_code == 422
+
+
+def test_admin_general_outline_comparison_uses_manual_config_without_persisting_task(client, monkeypatch):
+    async def fake_compare_general_outlines(**kwargs):
+        assert kwargs["config"]["empty_shot_count"] == 1
+        assert kwargs["config"]["character_shot_count"] == 1
+        assert kwargs["selected_humans"][0]["name"] == "林夏"
+        return [
+            {
+                "model": "gpt-5.5",
+                "name": "GPT 5.5",
+                "protocol": "openai",
+                "status": "ok",
+                "error": "",
+                "totalDurationMs": 1500,
+                "attempts": 1,
+                "usage": {"inputTokens": 10, "outputTokens": 20, "cachedInputTokens": 0, "totalTokens": 30, "raw": {"input_tokens": 10, "output_tokens": 20}},
+                "shots": [{"index": 0, "shotType": "empty"}, {"index": 1, "shotType": "character"}],
+                "calls": [
+                    {
+                        "operation": "general_story_outline",
+                        "status": "ok",
+                        "durationMs": 1400,
+                        "requestMessages": [{"role": "user", "content": "snapshot"}],
+                        "responseText": '{"shots":[]}',
+                        "usage": {"input_tokens": 10, "output_tokens": 20},
+                        "requestId": "req-general",
+                        "promptKey": "general.story_outline.system",
+                        "promptVersion": 1,
+                    }
+                ],
+            }
+        ]
+
+    monkeypatch.setattr("app.admin.compare_general_outlines", fake_compare_general_outlines)
+    response = client.post(
+        "/api/admin/chat-comparison/general-outline",
+        json={
+            "models": ["gpt-5.5"],
+            "genre": "流行抒情",
+            "empty_shot_count": 1,
+            "character_shot_count": 1,
+            "total_duration": 20,
+            "character_name": "林夏",
+        },
+    )
+    assert response.status_code == 200
+    result = response.json()["results"][0]
+    assert result["status"] == "ok"
+    assert len(result["shots"]) == 2
+    assert result["callMetrics"] == [{"operation": "general_story_outline", "status": "ok", "durationMs": 1400}]
+    assert "calls" not in result
+
+
 def test_admin_lists_are_paginated_with_offset_and_total(client):
     """projects/audit-logs/api-errors 分页契约：{total, items} + offset 生效 + limit 上限封顶。"""
     projects = client.get("/api/admin/projects").json()

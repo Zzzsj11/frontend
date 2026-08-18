@@ -21,6 +21,7 @@ STRUCTURAL_TYPES = {"intro", "interlude", "outro"}
 
 # 大纲生成进度回调：{"phase": "planning" | "segments", "segmentsDone": int, "segmentsTotal": int}
 ProgressCallback = Callable[[dict[str, Any]], Awaitable[None]]
+LlmCallOverride = Callable[..., Awaitable[str]]
 
 
 def _empty_ratio_rule(lyric_total: int) -> str:
@@ -745,6 +746,7 @@ async def generate_general_story_outline(
     config: dict[str, Any],
     selected_humans: list[dict[str, Any]],
     on_progress: ProgressCallback | None = None,
+    call_override: LlmCallOverride | None = None,
 ) -> dict[str, Any]:
     """通用分镜大纲生成：单轮 LLM 调用，根据曲风/季节/人物/镜头数量规划完整 MV 分镜。"""
     if not settings.llm_api_key:
@@ -805,7 +807,8 @@ async def generate_general_story_outline(
         if on_progress and attempt > 0:
             await on_progress({"phase": "retry", "shotsDone": 0, "shotsTotal": expected_count, "attempt": attempt + 1})
         try:
-            text = await _call(client, messages, 4000, usage_records=usage_records, operation=operation, prompt_key=system_prompt.key, prompt_version=system_prompt.version)
+            call = call_override or _call
+            text = await call(client, messages, 4000, usage_records=usage_records, operation=operation, prompt_key=system_prompt.key, prompt_version=system_prompt.version)
         except Exception as exc:
             raise StoryboardPromptError(str(exc), usage_records=usage_records) from exc
         try:

@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import timedelta
+from io import BytesIO
 from typing import Any
+from zipfile import BadZipFile
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import CurrentUser
 from .config import settings
 from .database import database_session
+from .general_outline_comparison import compare_general_outlines
 from .jobs import jobs as job_manager
 from .kling import ASPECT_RATIOS as KLING_ASPECT_RATIOS
 from .kling import IMAGE_TYPES as KLING_IMAGE_TYPES
@@ -22,6 +27,7 @@ from .kling import MODES as KLING_MODES
 from .kling import KlingError
 from .kling import create_task as kling_create_task
 from .kling import query_task as kling_query_task
+from .llm_comparison import CHAT_TEST_MODELS, compare_chat_models
 from .models import (
     AdminOperationLogModel,
     AiModelModel,
@@ -33,10 +39,13 @@ from .models import (
     H3TestPresetModel,
     LlmCallLogModel,
     ProjectModel,
+    ProjectTaskModel,
     PromptTemplateModel,
     PromptVersionModel,
     ServerMaintenanceRunModel,
+    ShotAssetModel,
     SongEmotionProfileModel,
+    StoryboardLineModel,
     StoryboardOptionItemModel,
     TokenUsageModel,
     UserModel,
@@ -75,6 +84,7 @@ from .runninghub import upload_media as rh_upload_media
 from .server_monitoring import monitoring_summary
 from .storage import get_storage, import_remote, safe_key
 from .storyboard_options import OPTION_KINDS, load_general_storyboard_options
+from .token_usage import add_llm_call_log, add_token_usage
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 Db = Depends(database_session)
@@ -101,6 +111,153 @@ async def audit(db, request, user, action, target_type, target_id=None, before=N
             client_ip=request.client.host if request.client else None,
         )
     )
+
+
+class ChatComparisonIn(BaseModel):
+    system_prompt: str = Field(default="", max_length=12000)
+    prompt: str = Field(min_length=1, max_length=30000)
+    models: list[str] = Field(min_length=1, max_length=6)
+    temperature: float = Field(default=0.2, ge=0, le=2)
+    max_tokens: int = Field(default=2048, ge=1, le=8192)
+
+
+class GeneralOutlineComparisonIn(BaseModel):
+    models: list[str] = Field(min_length=1, max_length=6)
+    genre: str = Field(min_length=1, max_length=120)
+    secondary_category: str = Field(default="", max_length=120)
+    tertiary_category: str = Field(default="", max_length=120)
+    season: str = Field(default="", max_length=80)
+    gender: str = Field(default="", max_length=32)
+    age_group: str = Field(default="", max_length=80)
+    visual_style: str = Field(default="", max_length=1000)
+    empty_shot_count: int = Field(ge=0, le=30)
+    character_shot_count: int = Field(ge=0, le=30)
+    total_duration: float = Field(gt=0, le=600)
+    extra_requirement: str = Field(default="", max_length=4000)
+    overall_prompt: str = Field(default="", max_length=8000)
+    character_name: str = Field(default="测试人物", min_length=1, max_length=120)
+    character_age: str = Field(default="", max_length=120)
+    character_appearance: str = Field(default="", max_length=1000)
+    character_clothing: str = Field(default="", max_length=1000)
+
+
+@router.get("/chat-comparison/models")
+async def chat_comparison_models(user: CurrentUser):
+    require_admin(user)
+    return [{"code": item.code, "name": item.name, "protocol": item.protocol} for item in CHAT_TEST_MODELS]
+
+
+@router.post("/chat-comparison/run")
+async def run_chat_comparison(payload: ChatComparisonIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    require_admin(user)
+    models = list(dict.fromkeys(payload.models))
+    allowed = {item.code for item in CHAT_TEST_MODELS}
+    unknown = [model for model in models if model not in allowed]
+    if unknown:
+        raise HTTPException(422, f"不支持的 Chat 模型：{', '.join(unknown)}")
+    messages = ([{"role": "system", "content": payload.system_prompt}] if payload.system_prompt else []) + [{"role": "user", "content": payload.prompt}]
+    results = await compare_chat_models(
+        models=models,
+        system_prompt=payload.system_prompt,
+        prompt=payload.prompt,
+        temperature=payload.temperature,
+        max_tokens=payload.max_tokens,
+    )
+    for result in results:
+        usage = result["usage"].get("raw") or {}
+        add_token_usage(
+            db,
+            operation="admin_chat_comparison",
+            provider=result["protocol"],
+            model=result["model"],
+            usage=usage,
+            user_id=user.id,
+            request_id=result.get("requestId"),
+        )
+        add_llm_call_log(
+            db,
+            operation="admin_chat_comparison",
+            provider=result["protocol"],
+            model=result["model"],
+            usage=usage,
+            user_id=user.id,
+            request_id=result.get("requestId"),
+            status=result["status"],
+            error=result["error"],
+            duration_ms=result["durationMs"],
+            request_messages=messages,
+            response_text=result["text"],
+        )
+    await audit(db, request, user, "chat_comparison.run", "llm_comparison", after={"models": models, "temperature": payload.temperature, "maxTokens": payload.max_tokens})
+    await db.commit()
+    return {"results": results}
+
+
+@router.post("/chat-comparison/general-outline")
+async def run_general_outline_comparison(payload: GeneralOutlineComparisonIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    require_admin(user)
+    if payload.empty_shot_count + payload.character_shot_count < 1:
+        raise HTTPException(422, "镜头总数至少为 1")
+    models = list(dict.fromkeys(payload.models))
+    allowed = {item.code for item in CHAT_TEST_MODELS}
+    unknown = [model for model in models if model not in allowed]
+    if unknown:
+        raise HTTPException(422, f"不支持的 Chat 模型：{', '.join(unknown)}")
+    config = payload.model_dump(exclude={"models", "character_name", "character_age", "character_appearance", "character_clothing"})
+    selected_humans = []
+    if payload.character_shot_count:
+        selected_humans = [
+            {
+                "id": "comparison-character-1",
+                "name": payload.character_name,
+                "ageDescription": payload.character_age,
+                "appearanceStyle": payload.character_appearance,
+                "clothingDescription": payload.character_clothing,
+            }
+        ]
+    results = await compare_general_outlines(models=models, config=config, selected_humans=selected_humans)
+    for result in results:
+        for call in result["calls"]:
+            add_token_usage(
+                db,
+                operation="admin_general_outline_comparison",
+                provider=result["protocol"],
+                model=result["model"],
+                usage=call.get("usage"),
+                user_id=user.id,
+                request_id=call.get("requestId"),
+            )
+            add_llm_call_log(
+                db,
+                operation="admin_general_outline_comparison",
+                provider=result["protocol"],
+                model=result["model"],
+                usage=call.get("usage"),
+                user_id=user.id,
+                request_id=call.get("requestId"),
+                status=call["status"],
+                error=call.get("error", ""),
+                duration_ms=call["durationMs"],
+                request_messages=call["requestMessages"],
+                response_text=call["responseText"],
+                prompt_key=call.get("promptKey", ""),
+                prompt_version=call.get("promptVersion", 0),
+            )
+    await audit(
+        db,
+        request,
+        user,
+        "general_outline_comparison.run",
+        "llm_comparison",
+        after={"models": models, "emptyShotCount": payload.empty_shot_count, "characterShotCount": payload.character_shot_count},
+    )
+    await db.commit()
+    public_results = [
+        {key: value for key, value in result.items() if key != "calls"}
+        | {"callMetrics": [{"operation": call["operation"], "status": call["status"], "durationMs": call["durationMs"]} for call in result["calls"]]}
+        for result in results
+    ]
+    return {"results": public_results}
 
 
 @router.get("/dashboard")
@@ -879,23 +1036,29 @@ class SongEmotionProfileIn(BaseModel):
     song_code: str = Field(min_length=5, max_length=80, pattern=r"^\d+$")
     song_name: str = Field(default="", max_length=255)
     artists: str = Field(default="", max_length=2000)
+    lyrics: str = Field(default="", max_length=100000)
     primary_category: str | None = Field(default=None, max_length=255)
     secondary_category: str | None = Field(default=None, max_length=255)
     tertiary_category: str | None = Field(default=None, max_length=255)
     material_category: str = Field(default="", max_length=2000)
     seasons: str = Field(default="", max_length=120)
     atmosphere: str = Field(default="", max_length=8000)
+    character_setting: str = Field(default="", max_length=8000)
+    status: int = 2
 
 
 class SongEmotionProfilePatch(BaseModel):
     song_name: str | None = Field(default=None, max_length=255)
     artists: str | None = Field(default=None, max_length=2000)
+    lyrics: str | None = Field(default=None, max_length=100000)
     primary_category: str | None = Field(default=None, max_length=255)
     secondary_category: str | None = Field(default=None, max_length=255)
     tertiary_category: str | None = Field(default=None, max_length=255)
     material_category: str | None = Field(default=None, max_length=2000)
     seasons: str | None = Field(default=None, max_length=120)
     atmosphere: str | None = Field(default=None, max_length=8000)
+    character_setting: str | None = Field(default=None, max_length=8000)
+    status: int | None = None
 
 
 def _clean_optional(value: str | None) -> str | None:
@@ -906,12 +1069,15 @@ def _song_payload(item: SongEmotionProfileModel) -> dict:
     return {
         "歌名": item.song_name,
         "歌星": item.artists,
+        "歌词": item.lyrics,
         "一级分类": item.primary_category,
         "二级分类": item.secondary_category,
         "三级分类": item.tertiary_category,
         "素材分类": item.material_category,
         "季节": item.seasons,
         "氛围基调": item.atmosphere,
+        "人物设定": item.character_setting,
+        "状态": item.status,
     }
 
 
@@ -920,12 +1086,15 @@ def _song_summary(item: SongEmotionProfileModel) -> dict:
         "songCode": item.song_code,
         "songName": item.song_name,
         "artists": item.artists,
+        "lyrics": item.lyrics,
         "primaryCategory": item.primary_category,
         "secondaryCategory": item.secondary_category,
         "tertiaryCategory": item.tertiary_category,
         "materialCategory": item.material_category,
         "seasons": item.seasons,
         "atmosphere": item.atmosphere,
+        "characterSetting": item.character_setting,
+        "status": item.status,
         "createdAt": iso(item.created_at),
         "updatedAt": iso(item.updated_at),
     }
@@ -940,8 +1109,8 @@ def _apply_song_values(item: SongEmotionProfileModel, values: dict) -> None:
     item.source_payload = _song_payload(item)
 
 
-async def _validate_song_taxonomy(db: AsyncSession, item: SongEmotionProfileModel) -> None:
-    options = await load_general_storyboard_options(db)
+async def _validate_song_taxonomy(db: AsyncSession, item: SongEmotionProfileModel, options: dict | None = None) -> None:
+    options = options or await load_general_storyboard_options(db)
     primary = next((x for x in options["genres"] if x["value"] == item.primary_category), None)
     if not primary:
         raise HTTPException(422, "请选择有效的一级分类")
@@ -995,6 +1164,128 @@ async def song_emotion_profiles_list(
     total = int((await db.execute(select(func.count()).select_from(SongEmotionProfileModel).where(*filters))).scalar_one())
     rows = list((await db.execute(select(SongEmotionProfileModel).where(*filters).order_by(SongEmotionProfileModel.song_code.desc()).limit(limit).offset(offset))).scalars().all())
     return {"total": total, "items": [_song_summary(item) for item in rows]}
+
+
+SONG_EMOTION_XLSX_HEADERS = [
+    "编号",
+    "歌名",
+    "歌星",
+    "歌词",
+    "一级分类",
+    "二级分类",
+    "三级分类",
+    "素材分类",
+    "季节",
+    "氛围基调",
+    "人物设定",
+    "状态",
+]
+
+
+def _xlsx_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
+@router.post("/song-emotion-profiles/import-xlsx")
+async def song_emotion_profiles_import(
+    request: Request,
+    user: CurrentUser,
+    db: AsyncSession = Db,
+    file: UploadFile = File(...),
+):
+    require_permission(user, SONG_EMOTIONS_MANAGE)
+    if not (file.filename or "").lower().endswith(".xlsx"):
+        raise HTTPException(422, "仅支持 .xlsx 文件")
+    content = await file.read(10 * 1024 * 1024 + 1)
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(413, "XLSX 文件不能超过 10MB")
+    try:
+        workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
+        sheet = workbook.active
+        rows = sheet.iter_rows(values_only=True)
+        headers = [_xlsx_text(value) for value in next(rows)]
+    except (BadZipFile, InvalidFileException, OSError, ValueError, StopIteration) as exc:
+        raise HTTPException(422, "无法读取 XLSX 文件或文件内容为空") from exc
+    if headers != SONG_EMOTION_XLSX_HEADERS:
+        raise HTTPException(422, f"表头必须依次为：{'、'.join(SONG_EMOTION_XLSX_HEADERS)}")
+
+    records: list[tuple[int, dict[str, str]]] = []
+    for row_number, values in enumerate(rows, start=2):
+        cells = list(values[: len(headers)])
+        if not any(value is not None and _xlsx_text(value) for value in cells):
+            continue
+        cells.extend([None] * (len(headers) - len(cells)))
+        records.append((row_number, dict(zip(headers, map(_xlsx_text, cells), strict=True))))
+    workbook.close()
+    if not records:
+        raise HTTPException(422, "XLSX 中没有可导入的数据")
+
+    errors: list[str] = []
+    codes: list[str] = []
+    seen: set[str] = set()
+    for row_number, record in records:
+        code = record["编号"]
+        if not code.isdigit() or len(code) < 5:
+            errors.append(f"第 {row_number} 行：编号必须是至少5位数字")
+        elif code in seen:
+            errors.append(f"第 {row_number} 行：编号 {code} 在文件内重复")
+        else:
+            seen.add(code)
+            codes.append(code)
+        if not record["歌名"]:
+            errors.append(f"第 {row_number} 行：歌名不能为空")
+
+    existing = set((await db.execute(select(SongEmotionProfileModel.song_code).where(SongEmotionProfileModel.song_code.in_(codes)))).scalars().all())
+    if existing:
+        errors.append(f"以下编号已存在于数据库：{', '.join(sorted(existing))}")
+    if errors:
+        raise HTTPException(409, "；".join(errors[:20]))
+
+    options = await load_general_storyboard_options(db)
+    imported: list[SongEmotionProfileModel] = []
+    for row_number, record in records:
+        try:
+            status = int(record["状态"] or "2")
+        except ValueError as exc:
+            raise HTTPException(422, f"第 {row_number} 行：状态必须是整数") from exc
+        item = SongEmotionProfileModel(
+            song_code=record["编号"],
+            song_name=record["歌名"],
+            artists=record["歌星"],
+            lyrics=record["歌词"],
+            primary_category=_clean_optional(record["一级分类"]),
+            secondary_category=_clean_optional(record["二级分类"]),
+            tertiary_category=_clean_optional(record["三级分类"]),
+            material_category=record["素材分类"],
+            seasons=record["季节"],
+            atmosphere=record["氛围基调"],
+            character_setting=record["人物设定"],
+            status=status,
+        )
+        try:
+            await _validate_song_taxonomy(db, item, options)
+        except HTTPException as exc:
+            raise HTTPException(422, f"第 {row_number} 行：{exc.detail}") from exc
+        imported.append(item)
+
+    db.add_all(imported)
+    await db.flush()
+    await audit(
+        db,
+        request,
+        user,
+        "song_emotion_profile.import",
+        "song_emotion_profile",
+        file.filename,
+        None,
+        {"count": len(imported), "songCodes": [item.song_code for item in imported]},
+    )
+    await db.commit()
+    return {"ok": True, "imported": len(imported)}
 
 
 @router.get("/song-emotion-profiles/{song_code}")
@@ -1237,6 +1528,16 @@ def _h3_preset_json(item: H3TestPresetModel) -> dict[str, Any]:
     }
 
 
+def _h3_first_frame_ratio(ratio: str) -> str:
+    return {
+        "16:9": "16:9 (Widescreen)",
+        "9:16": "9:16 (Portrait Widescreen)",
+        "1:1": "1:1 (Square)",
+        "4:3": "4:3 (Classic)",
+        "3:4": "3:4 (Portrait Standard)",
+    }.get(ratio, "16:9 (Widescreen)")
+
+
 @router.get("/runninghub/presets")
 async def runninghub_presets(user: CurrentUser, db: AsyncSession = Db):
     """读取当前管理员自己的持久化 H3 测试输入和 TOS 输出。"""
@@ -1271,6 +1572,165 @@ async def runninghub_status(user: CurrentUser):
         "textMegapixelsDefault": DEFAULT_TEXT_MEGAPIXELS,
         "firstFrameMegapixelsDefault": DEFAULT_FIRST_FRAME_MEGAPIXELS,
     }
+
+
+@router.get("/runninghub/comparison-sources")
+async def runninghub_comparison_sources(user: CurrentUser, db: AsyncSession = Db):
+    """列出所有用户已生成 Seedance 2.0 成片且具备公网首帧的通用分镜镜头。"""
+    require_admin(user)
+    rows = (
+        await db.execute(
+            select(UserModel, ProjectModel, ProjectTaskModel, StoryboardLineModel, ShotAssetModel)
+            .join(ProjectModel, ProjectModel.user_id == UserModel.id)
+            .join(ProjectTaskModel, ProjectTaskModel.project_id == ProjectModel.id)
+            .join(StoryboardLineModel, StoryboardLineModel.project_task_id == ProjectTaskModel.id)
+            .join(ShotAssetModel, ShotAssetModel.storyboard_line_id == StoryboardLineModel.id)
+            .where(
+                UserModel.deleted_at.is_(None),
+                ProjectModel.deleted_at.is_(None),
+                ProjectTaskModel.deleted_at.is_(None),
+                ProjectTaskModel.storyboard_type == "general",
+                StoryboardLineModel.deleted_at.is_(None),
+                ShotAssetModel.deleted_at.is_(None),
+                ShotAssetModel.is_current.is_(True),
+                ShotAssetModel.cover_url != "",
+                ShotAssetModel.video_url != "",
+            )
+            .order_by(UserModel.username, ProjectTaskModel.created_at.desc(), StoryboardLineModel.sort_order)
+            .limit(500)
+        )
+    ).all()
+    items = []
+    seen: set[str] = set()
+    for owner, project, task, line, asset in rows:
+        if line.id in seen or (line.shot_options or {}).get("videoModel") != "doubao-seedance-2.0":
+            continue
+        seen.add(line.id)
+        items.append(
+            {
+                "lineId": line.id,
+                "lineOrder": line.sort_order,
+                "shotType": line.shot_type or ("empty" if line.shot_prompt.strip().startswith(("无人", "空镜")) else "character"),
+                "prompt": f"{line.scene_prompt.strip()}\n\n{line.shot_prompt.strip()}",
+                "coverUrl": asset.cover_url,
+                "seedanceUrl": asset.video_url,
+                "duration": asset.duration,
+                "username": owner.username,
+                "userId": owner.id,
+                "projectId": project.id,
+                "projectName": project.name,
+                "taskId": task.id,
+                "taskTitle": task.title,
+            }
+        )
+    return {"items": items}
+
+
+class RunningHubComparisonIn(BaseModel):
+    line_id: str = Field(min_length=1, alias="lineId")
+
+    model_config = {"populate_by_name": True}
+
+
+@router.post("/runninghub/comparisons", status_code=201)
+async def runninghub_comparison_create(
+    payload: RunningHubComparisonIn,
+    request: Request,
+    user: CurrentUser,
+    db: AsyncSession = Db,
+):
+    """复用现有 Seedance 镜头的提示词和首帧创建 H3 对比任务。"""
+    require_admin(user)
+    _runninghub_guard()
+    row = (
+        await db.execute(
+            select(UserModel, ProjectModel, ProjectTaskModel, StoryboardLineModel, ShotAssetModel)
+            .join(ProjectModel, ProjectModel.user_id == UserModel.id)
+            .join(ProjectTaskModel, ProjectTaskModel.project_id == ProjectModel.id)
+            .join(StoryboardLineModel, StoryboardLineModel.project_task_id == ProjectTaskModel.id)
+            .join(ShotAssetModel, ShotAssetModel.storyboard_line_id == StoryboardLineModel.id)
+            .where(
+                StoryboardLineModel.id == payload.line_id,
+                UserModel.deleted_at.is_(None),
+                ProjectModel.deleted_at.is_(None),
+                ProjectTaskModel.deleted_at.is_(None),
+                ProjectTaskModel.storyboard_type == "general",
+                StoryboardLineModel.deleted_at.is_(None),
+                ShotAssetModel.deleted_at.is_(None),
+                ShotAssetModel.is_current.is_(True),
+            )
+            .order_by(ShotAssetModel.created_at.desc())
+            .limit(1)
+        )
+    ).one_or_none()
+    if not row:
+        raise HTTPException(404, "没有找到可对比的通用分镜视频")
+    owner, project, task, line, asset = row
+    if (line.shot_options or {}).get("videoModel") != "doubao-seedance-2.0" or not asset.cover_url or not asset.video_url:
+        raise HTTPException(422, "该镜头不是具备首帧的 Seedance 2.0 成片")
+    prompt = f"{line.scene_prompt.strip()}\n\n{line.shot_prompt.strip()}"
+    duration = min(MAX_DURATION, max(MIN_DURATION, asset.duration))
+    aspect_ratio = _h3_first_frame_ratio((line.shot_options or {}).get("ratio", "16:9"))
+    try:
+        result = await rh_submit_first_frame_task(
+            prompt=prompt,
+            duration=duration,
+            aspect_ratio=aspect_ratio,
+            image=asset.cover_url,
+            seed=None,
+            megapixels=DEFAULT_FIRST_FRAME_MEGAPIXELS,
+        )
+    except RunningHubError as exc:
+        raise _runninghub_error(exc) from exc
+    task_id = str(result.get("taskId"))
+    preset = H3TestPresetModel(
+        id=f"h3test-{uuid.uuid4().hex}",
+        user_id=user.id,
+        name=f"对比 · {owner.username} · {task.title} · 镜头 {line.sort_order + 1}",
+        mode="first_frame",
+        prompt=prompt,
+        duration=duration,
+        aspect_ratio=aspect_ratio,
+        input_media=[
+            {
+                "type": "image",
+                "url": asset.cover_url,
+                "name": "共同参考首帧",
+                "role": "comparison_cover",
+            },
+            {
+                "type": "video",
+                "url": asset.video_url,
+                "name": "Seedance 2.0 原视频",
+                "role": "seedance_source",
+                "lineId": line.id,
+                "lineOrder": line.sort_order,
+                "shotType": line.shot_type or ("empty" if line.shot_prompt.strip().startswith(("无人", "空镜")) else "character"),
+                "username": owner.username,
+                "projectId": project.id,
+                "projectName": project.name,
+                "taskId": task.id,
+                "taskTitle": task.title,
+            },
+        ],
+        output_media=[],
+        task_id=task_id,
+        task_status=result.get("status", "QUEUED"),
+        usage_data={"comparison": True},
+    )
+    db.add(preset)
+    await audit(
+        db,
+        request,
+        user,
+        "runninghub_comparison.submit",
+        "h3_test_preset",
+        preset.id,
+        None,
+        {"lineId": line.id, "sourceUserId": owner.id, "runningHubTaskId": task_id},
+    )
+    await db.commit()
+    return _h3_preset_json(preset)
 
 
 @router.post("/runninghub/upload")

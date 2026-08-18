@@ -263,12 +263,15 @@ async def seed_system_data() -> None:
             values = {
                 "song_name": payload.get("歌名") or "",
                 "artists": payload.get("歌星") or "",
+                "lyrics": payload.get("歌词") or "",
                 "primary_category": payload.get("一级分类"),
                 "secondary_category": payload.get("二级分类"),
                 "tertiary_category": payload.get("三级分类"),
                 "material_category": payload.get("素材分类") or "",
                 "seasons": payload.get("季节") or "",
                 "atmosphere": payload.get("氛围基调") or "",
+                "character_setting": payload.get("人物设定") or "",
+                "status": int(payload.get("状态") or 2),
                 "source_payload": payload,
             }
             # 曲库在首次部署时由静态文件初始化；一旦入库即由管理后台维护。

@@ -10,6 +10,7 @@ import {
   type RunningHubTaskResult,
   type H3TestPreset,
 } from '../api/adminRunningHub'
+import AdminH3ComparisonPanel from './AdminH3ComparisonPanel.vue'
 
 /** 工作流默认示例：医生诊室三主体场景（来源：工作流 node 83 Text 默认值） */
 const EXAMPLE_PROMPT = `subject_definitions:
@@ -94,6 +95,11 @@ const current = ref<{
 } | null>(null)
 const history = ref<HistoryEntry[]>([])
 const presets = ref<H3TestPreset[]>([])
+const defaultPresets = computed(() =>
+  presets.value.filter(
+    (preset) => !preset.inputMedia.some((media) => media.role === 'seedance_source'),
+  ),
+)
 
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -138,7 +144,7 @@ const loadStatus = async () => {
     stage2Mp.value = defaultStage2
     textMp.value = status.value.textMegapixelsDefault
     firstFrameMp.value = status.value.firstFrameMegapixelsDefault
-    applyPreset(presets.value.find((item) => item.mode === mode.value))
+    applyPreset(defaultPresets.value.find((item) => item.mode === mode.value))
   } catch (e) {
     statusError.value = e instanceof Error ? e.message : '状态加载失败'
   }
@@ -221,7 +227,7 @@ const changeMode = (nextMode: GenerationMode) => {
         ? status.value?.firstFrameAspectRatios
         : status.value?.aspectRatios
   if (ratios?.length && !ratios.includes(aspectRatio.value)) aspectRatio.value = ratios[0]
-  applyPreset(presets.value.find((item) => item.mode === nextMode))
+  applyPreset(defaultPresets.value.find((item) => item.mode === nextMode))
 }
 
 const selectPreset = (preset: H3TestPreset) => {
@@ -357,6 +363,8 @@ const statusTone = (value: string) =>
       RunningHub API Key 未配置：请在 backend/.env 写入 RUNNINGHUB_API_KEY
       并重启后端容器后刷新本页。
     </p>
+
+    <AdminH3ComparisonPanel v-if="ready" />
 
     <div class="rh-form" :class="{ dim: !ready }">
       <div class="mode-switch" role="group" aria-label="生成模式">
@@ -573,12 +581,12 @@ const statusTone = (value: string) =>
       <p v-if="current.error" class="bad-text">{{ current.error }}</p>
     </div>
 
-    <section v-if="presets.length" class="rh-presets">
+    <section v-if="defaultPresets.length" class="rh-presets">
       <div class="row preset-title">
         <span class="form-label">TOS 默认测试数据</span>
         <span class="hint">输入素材、提示词与生成结果均从数据库读取，输出链接长期有效</span>
       </div>
-      <article v-for="preset in presets" :key="preset.id" class="preset-card">
+      <article v-for="preset in defaultPresets" :key="preset.id" class="preset-card">
         <div class="row preset-head">
           <strong>{{ preset.name }}</strong>
           <span class="badge" :class="statusTone(preset.taskStatus)">{{ preset.taskStatus }}</span>

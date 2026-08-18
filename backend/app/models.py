@@ -65,12 +65,15 @@ class SongEmotionProfileModel(LifecycleMixin, Base):
     song_code: Mapped[str] = mapped_column(String(80), primary_key=True)
     song_name: Mapped[str] = mapped_column(String(255), default="")
     artists: Mapped[str] = mapped_column(Text, default="")
+    lyrics: Mapped[str] = mapped_column(Text, default="")
     primary_category: Mapped[str | None] = mapped_column(String(255), nullable=True)
     secondary_category: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tertiary_category: Mapped[str | None] = mapped_column(String(255), nullable=True)
     material_category: Mapped[str] = mapped_column(Text, default="")
     seasons: Mapped[str] = mapped_column(String(120), default="")
     atmosphere: Mapped[str] = mapped_column(Text, default="")
+    character_setting: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[int] = mapped_column(Integer, default=2, index=True)
     source_payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 

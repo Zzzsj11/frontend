@@ -1,7 +1,9 @@
 """ASS 歌曲情感库管理接口与种子保护。"""
 
 import asyncio
+from io import BytesIO
 
+from openpyxl import Workbook
 from sqlalchemy import select
 
 
@@ -14,12 +16,15 @@ def sample(code: str = "98765432") -> dict:
         "song_code": code,
         "song_name": "测试歌曲",
         "artists": "测试歌手",
+        "lyrics": "第一句\n第二句",
         "primary_category": "流行歌曲",
         "secondary_category": "通用积极",
         "tertiary_category": "生活",
         "material_category": "流行歌曲-通用积极-生活",
         "seasons": "春",
         "atmosphere": "明亮 | 温暖",
+        "character_setting": "无需人物",
+        "status": 2,
     }
 
 
@@ -38,6 +43,9 @@ def test_song_emotion_profile_admin_crud(client):
 
     detail = client.get("/api/admin/song-emotion-profiles/98765432")
     assert detail.json()["songName"] == "测试歌曲"
+    assert detail.json()["lyrics"] == "第一句\n第二句"
+    assert detail.json()["characterSetting"] == "无需人物"
+    assert detail.json()["status"] == 2
     updated = client.patch(
         "/api/admin/song-emotion-profiles/98765432",
         json={"song_name": "后台修改歌曲", "atmosphere": "冷色调"},
@@ -121,3 +129,50 @@ def test_song_emotion_seed_does_not_overwrite_or_restore():
             await session.commit()
 
     asyncio.run(exercise())
+
+
+def xlsx_file(rows: list[list]) -> BytesIO:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["编号", "歌名", "歌星", "歌词", "一级分类", "二级分类", "三级分类", "素材分类", "季节", "氛围基调", "人物设定", "状态"])
+    for row in rows:
+        sheet.append(row)
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return output
+
+
+def test_song_emotion_xlsx_import_is_atomic_and_rejects_duplicates(client):
+    row = [
+        "98765991",
+        "导入歌曲",
+        "导入歌手",
+        "导入歌词",
+        "流行歌曲",
+        "通用积极",
+        "生活",
+        "流行歌曲-通用积极-生活",
+        "春",
+        "明亮",
+        "无需人物",
+        2,
+    ]
+    imported = client.post(
+        "/api/admin/song-emotion-profiles/import-xlsx",
+        files={"file": ("songs.xlsx", xlsx_file([row]).getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["imported"] == 1
+    detail = client.get("/api/admin/song-emotion-profiles/98765991").json()
+    assert detail["lyrics"] == "导入歌词"
+    assert detail["characterSetting"] == "无需人物"
+
+    duplicate = client.post(
+        "/api/admin/song-emotion-profiles/import-xlsx",
+        files={"file": ("songs.xlsx", xlsx_file([row, [*row[:1], "另一首歌", *row[2:]]]).getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert duplicate.status_code == 409
+    assert "文件内重复" in duplicate.json()["detail"]
+    assert "已存在于数据库" in duplicate.json()["detail"]
+    client.delete("/api/admin/song-emotion-profiles/98765991")
