@@ -56,6 +56,9 @@ def user_public(user: UserModel) -> dict:
         "displayName": user.display_name,
         "role": user.role,
         "mustChangePassword": user.must_change_password,
+        "dailyChatLimit": user.daily_chat_limit,
+        "dailyImageLimit": user.daily_image_limit,
+        "dailyVideoLimit": user.daily_video_limit,
     }
 
 

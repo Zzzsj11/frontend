@@ -57,3 +57,26 @@ def test_admin_users_list_has_limit_cap(client):
     response = client.get("/api/admin/users", params={"limit": 99999})
     assert response.status_code == 200
     assert len(response.json()) <= 500
+
+
+def test_admin_can_set_per_user_daily_model_limits(client):
+    created = client.post(
+        "/api/admin/users",
+        json={
+            "username": "custom-daily-limits",
+            "password": "secure-pass-123",
+            "daily_chat_limit": 12,
+            "daily_image_limit": 7,
+            "daily_video_limit": 4,
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["dailyChatLimit"] == 12
+    updated = client.patch(
+        f"/api/admin/users/{created.json()['id']}",
+        json={"daily_chat_limit": 20, "daily_image_limit": 10, "daily_video_limit": 5},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["dailyChatLimit"] == 20
+    assert updated.json()["dailyImageLimit"] == 10
+    assert updated.json()["dailyVideoLimit"] == 5

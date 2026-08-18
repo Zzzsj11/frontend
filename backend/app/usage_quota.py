@@ -5,11 +5,11 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import settings
-from .models import utcnow
+from .models import UserModel, utcnow
 
 QUOTA_LABELS = {"chat": "Chat", "image": "图片生成", "video": "视频生成"}
 
@@ -22,10 +22,19 @@ def quota_date() -> date:
     return datetime.now(timezone).date()
 
 
-async def consume_daily_quota(db: AsyncSession, *, user_id: str, category: str, limit: int) -> int:
+async def consume_daily_quota(db: AsyncSession, *, user_id: str, category: str, limit: int | None = None) -> int:
     """Atomically consume one accepted model call from a user's natural-day quota."""
     if category not in QUOTA_LABELS:
         raise ValueError(f"未知限额分类：{category}")
+    if limit is None:
+        limit_column = {
+            "chat": UserModel.daily_chat_limit,
+            "image": UserModel.daily_image_limit,
+            "video": UserModel.daily_video_limit,
+        }[category]
+        limit = (await db.execute(select(limit_column).where(UserModel.id == user_id, UserModel.deleted_at.is_(None)))).scalar_one_or_none()
+        if limit is None:
+            raise HTTPException(404, "用户不存在")
     now = utcnow()
     result = await db.execute(
         text(

@@ -22,12 +22,18 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=8, max_length=200)
     display_name: str = Field(default="", max_length=120)
     role: Literal["admin", "user"] = "user"
+    daily_chat_limit: int | None = Field(default=None, ge=1, le=1_000_000)
+    daily_image_limit: int | None = Field(default=None, ge=1, le=1_000_000)
+    daily_video_limit: int | None = Field(default=None, ge=1, le=1_000_000)
 
 
 class UserUpdate(BaseModel):
     display_name: str | None = Field(default=None, max_length=120)
     role: Literal["admin", "user"] | None = None
     status: Literal["active", "disabled"] | None = None
+    daily_chat_limit: int | None = Field(default=None, ge=1, le=1_000_000)
+    daily_image_limit: int | None = Field(default=None, ge=1, le=1_000_000)
+    daily_video_limit: int | None = Field(default=None, ge=1, le=1_000_000)
 
 
 class ProjectCreate(BaseModel):

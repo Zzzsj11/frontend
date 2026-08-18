@@ -22,6 +22,9 @@ test('administrator can inspect dashboard, models, errors and audit logs', async
   await expect(page.getByRole('link', { name: '返回工作台' })).toHaveAttribute('href', '/projects')
   await expect(page.getByRole('heading', { name: '仪表盘' })).toBeVisible()
   await expect(page.getByText('累计 Token')).toBeVisible()
+  await page.getByRole('button', { name: '用户' }).click()
+  await expect(page.getByText('Chat/日').first()).toBeVisible()
+  await expect(page.getByRole('button', { name: '保存日限额' }).first()).toBeVisible()
   await page.getByRole('button', { name: '模型管理' }).click()
   await expect(
     page.locator('tbody').getByText('gpt-image-2', { exact: true }).first(),

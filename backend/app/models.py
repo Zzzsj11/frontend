@@ -31,6 +31,9 @@ class UserModel(LifecycleMixin, Base):
     status: Mapped[str] = mapped_column(String(32), default="active", index=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    daily_chat_limit: Mapped[int] = mapped_column(Integer, default=1000)
+    daily_image_limit: Mapped[int] = mapped_column(Integer, default=100)
+    daily_video_limit: Mapped[int] = mapped_column(Integer, default=100)
 
 
 class RefreshTokenModel(LifecycleMixin, Base):

@@ -437,7 +437,7 @@ async def create_image_generation(payload: ImageGenerationCreate, user: CurrentU
     await require_active_model(db, payload.model or settings.image_model, "image")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
     await _check_concurrency(db, user.id, "image", 20)
-    await consume_daily_quota(db, user_id=user.id, category="image", limit=settings.daily_image_limit)
+    await consume_daily_quota(db, user_id=user.id, category="image")
     job = await jobs.create(
         "image",
         payload.model_dump(mode="json"),
@@ -481,7 +481,7 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
     await require_active_model(db, payload.model or settings.video_model, "video")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
     await _check_concurrency(db, user.id, "video", 20)
-    await consume_daily_quota(db, user_id=user.id, category="video", limit=settings.daily_video_limit)
+    await consume_daily_quota(db, user_id=user.id, category="video")
     # 数字人头像优先用平台虚拟资产（asset://），其余 URL（如场景图）原样保留
     payload.image_urls = await _resolve_asset_avatar_urls(db, payload.image_urls)
     job = await jobs.create(
@@ -575,7 +575,7 @@ async def get_chat_session(session_id: str, user: CurrentUser) -> dict:
 async def post_chat_message(session_id: str, payload: ChatMessageCreate, user: CurrentUser) -> dict:
     session = await chat_or_404(user.id, session_id)
     try:
-        last_seq = await chat_manager.post(session, payload.text.strip(), daily_limit=settings.daily_chat_limit)
+        last_seq = await chat_manager.post(session, payload.text.strip())
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
     return {"ok": True, "lastSeq": last_seq}

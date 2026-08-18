@@ -158,7 +158,15 @@ async def create_user(payload: UserCreate, user: CurrentUser, db: AsyncSession =
     if exists:
         raise HTTPException(409, "用户名已存在")
     item = UserModel(
-        id=uid("user"), username=username, password_hash=hash_password(payload.password), display_name=payload.display_name, role=payload.role, must_change_password=True
+        id=uid("user"),
+        username=username,
+        password_hash=hash_password(payload.password),
+        display_name=payload.display_name,
+        role=payload.role,
+        must_change_password=True,
+        daily_chat_limit=payload.daily_chat_limit or settings.daily_chat_limit,
+        daily_image_limit=payload.daily_image_limit or settings.daily_image_limit,
+        daily_video_limit=payload.daily_video_limit or settings.daily_video_limit,
     )
     db.add(item)
     await db.commit()
@@ -933,7 +941,7 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
     ]
     if not selected_humans:
         raise HTTPException(422, "该任务还未选择人物，请先在人物栏选择人物后再生成分镜大纲")
-    await consume_daily_quota(db, user_id=user.id, category="chat", limit=settings.daily_chat_limit)
+    await consume_daily_quota(db, user_id=user.id, category="chat")
 
     if task.storyboard_type == "general":
         config = dict(task.storyboard_config or {})
@@ -1179,7 +1187,7 @@ async def regenerate_storyboard_outline_segment(task_id: str, scene_index: int, 
     current_progress = (task.storyboard_config or {}).get("outlineProgress") or {}
     if current_progress.get("phase") == "segment_retry" and current_progress.get("sceneIndex") == scene_index:
         raise HTTPException(409, "该场景段正在重新生成中，请等待本轮完成后再提交")
-    await consume_daily_quota(db, user_id=user.id, category="chat", limit=settings.daily_chat_limit)
+    await consume_daily_quota(db, user_id=user.id, category="chat")
     emotion = (task.storyboard_config or {}).get("songEmotion") or {}
     progress = {"phase": "segment_retry", "sceneIndex": scene_index, "startedAt": utcnow().isoformat()}
     config = dict(task.storyboard_config or {})
@@ -1693,7 +1701,7 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
     ).hexdigest()
     if not payload.force and line.generation_status == "succeeded" and line.prompt_context_hash == context_hash:
         return await line_json(db, line, [item.digital_human_id for item in line_cast])
-    await consume_daily_quota(db, user_id=user.id, category="chat", limit=settings.daily_chat_limit)
+    await consume_daily_quota(db, user_id=user.id, category="chat")
     now = utcnow()
     line.generation_status, line.generation_error = "running", None
     line.generation_attempt += 1

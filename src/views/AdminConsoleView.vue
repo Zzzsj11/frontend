@@ -19,6 +19,9 @@ interface AdminRow {
   status?: string
   stale?: boolean
   providerTaskId?: string
+  dailyChatLimit?: number
+  dailyImageLimit?: number
+  dailyVideoLimit?: number
   [key: string]: unknown
 }
 
@@ -375,7 +378,14 @@ const syncJob = async (row: AdminRow) => {
   }
 }
 /** 用户 tab：创建用户表单 + 启用/禁用操作（原独立用户管理页合并至此） */
-const userForm = ref({ username: '', displayName: '', password: '' })
+const userForm = ref({
+  username: '',
+  displayName: '',
+  password: '',
+  dailyChatLimit: 1000,
+  dailyImageLimit: 100,
+  dailyVideoLimit: 100,
+})
 const createUser = async () => {
   error.value = ''
   notice.value = ''
@@ -387,13 +397,41 @@ const createUser = async () => {
         password: userForm.value.password,
         display_name: userForm.value.displayName,
         role: 'user',
+        daily_chat_limit: userForm.value.dailyChatLimit,
+        daily_image_limit: userForm.value.dailyImageLimit,
+        daily_video_limit: userForm.value.dailyVideoLimit,
       }),
     })
-    userForm.value = { username: '', displayName: '', password: '' }
+    userForm.value = {
+      username: '',
+      displayName: '',
+      password: '',
+      dailyChatLimit: 1000,
+      dailyImageLimit: 100,
+      dailyVideoLimit: 100,
+    }
     notice.value = '用户创建成功，首次登录需修改初始密码'
     await load()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '创建失败'
+  }
+}
+const saveUserDailyLimits = async (row: AdminRow) => {
+  error.value = ''
+  notice.value = ''
+  try {
+    await apiRequest(`/admin/users/${row.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        daily_chat_limit: row.dailyChatLimit,
+        daily_image_limit: row.dailyImageLimit,
+        daily_video_limit: row.dailyVideoLimit,
+      }),
+    })
+    notice.value = `已保存 ${row.username || '用户'} 的每日调用上限`
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '保存每日调用上限失败'
   }
 }
 const toggleUser = async (row: AdminRow) => {
@@ -412,9 +450,16 @@ const columns = computed(() =>
   rows.value.length
     ? Object.keys(rows.value[0]).filter(
         (k) =>
-          !['capabilities', 'traceback', 'requestPayload', 'stale', 'mustChangePassword'].includes(
-            k,
-          ),
+          ![
+            'capabilities',
+            'traceback',
+            'requestPayload',
+            'stale',
+            'mustChangePassword',
+            'dailyChatLimit',
+            'dailyImageLimit',
+            'dailyVideoLimit',
+          ].includes(k),
       )
     : [],
 )
@@ -715,6 +760,15 @@ onMounted(load)
               required
               minlength="8"
             />
+            <label class="quota-field"
+              >Chat/日<input v-model.number="userForm.dailyChatLimit" type="number" min="1"
+            /></label>
+            <label class="quota-field"
+              >图片/日<input v-model.number="userForm.dailyImageLimit" type="number" min="1"
+            /></label>
+            <label class="quota-field"
+              >视频/日<input v-model.number="userForm.dailyVideoLimit" type="number" min="1"
+            /></label>
             <button class="refresh" type="submit">创建用户</button>
           </form>
           <div v-if="isPagedTab" class="pager-bar">
@@ -779,6 +833,18 @@ onMounted(load)
                     </button>
                   </td>
                   <td v-if="tab === 'users'">
+                    <div class="user-quota-editor">
+                      <label
+                        >Chat/日<input v-model.number="row.dailyChatLimit" type="number" min="1"
+                      /></label>
+                      <label
+                        >图片/日<input v-model.number="row.dailyImageLimit" type="number" min="1"
+                      /></label>
+                      <label
+                        >视频/日<input v-model.number="row.dailyVideoLimit" type="number" min="1"
+                      /></label>
+                      <button class="action" @click="saveUserDailyLimits(row)">保存日限额</button>
+                    </div>
                     <button class="action" @click="toggleUser(row)">
                       {{ row.status === 'active' ? '禁用' : '启用' }}
                     </button>
@@ -988,6 +1054,29 @@ tbody tr:hover {
   display: flex;
   gap: 10px;
   margin-bottom: 14px;
+}
+.quota-field,
+.user-quota-editor label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.filters .quota-field input,
+.user-quota-editor input {
+  width: 76px;
+  min-width: 0;
+}
+td:last-child {
+  max-width: none;
+  overflow: visible;
+}
+.user-quota-editor {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 8px;
 }
 .pager-bar {
   display: flex;
