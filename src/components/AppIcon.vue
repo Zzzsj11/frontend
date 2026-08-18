@@ -26,6 +26,7 @@ export type IconName =
   | 'chevron-right'
   | 'alert'
   | 'download'
+  | 'home'
 
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
 
@@ -80,6 +81,7 @@ const paths: Record<IconName, string[]> = {
   ],
   alert: ['M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-6h-2v-4h2v4z'],
   download: ['M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z'],
+  home: ['M12 3 2 12h3v9h6v-6h2v6h6v-9h3L12 3zm5 16h-2v-6H9v6H7v-8.1l5-4.5 5 4.5V19z'],
 }
 </script>
 

@@ -3,7 +3,11 @@ import { useAuthStore } from './stores/auth'
 import ErrorDialog from './components/ErrorDialog.vue'
 import AppHeader from './components/AppHeader.vue'
 import ImagePreviewOverlay from './components/ImagePreviewOverlay.vue'
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 const auth = useAuthStore()
+const route = useRoute()
+const isAdminRoute = computed(() => route.meta.admin === true)
 </script>
 <template>
   <ErrorDialog />
@@ -14,7 +18,7 @@ const auth = useAuthStore()
        /projects，裸 RouterView 会重新挂载 App.vue，重放 SongSidebar 的 loadSongProjects
        等初始化请求，此时 token 已清空 → 401 → refresh 失败 → 误弹“登录已过期” -->
   <div v-else class="app-shell" :class="{ authenticated: auth.authenticated }">
-    <AppHeader v-if="auth.authenticated" />
+    <AppHeader v-if="auth.authenticated && !isAdminRoute" />
     <main class="route-shell"><RouterView /></main>
   </div>
 </template>

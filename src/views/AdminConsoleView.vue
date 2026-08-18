@@ -6,6 +6,7 @@ import AdminKlingPanel from '../components/AdminKlingPanel.vue'
 import AdminRunningHubPanel from '../components/AdminRunningHubPanel.vue'
 import AdminStoryboardOptionsPanel from '../components/AdminStoryboardOptionsPanel.vue'
 import AdminSideNav from '../components/AdminSideNav.vue'
+import AdminTopBar from '../components/AdminTopBar.vue'
 import BaseModal from '../components/base/BaseModal.vue'
 import { perfSnapshot } from '../perf'
 import type { AdminNavGroup } from '../types'
@@ -406,364 +407,373 @@ onMounted(load)
 <template>
   <div class="console">
     <AdminSideNav :groups="NAV_GROUPS" :active="tab" @select="select" />
-    <main>
-      <header>
-        <div>
-          <p class="crumb">{{ groupTitle }}</p>
-          <h1>{{ tabTitle }}</h1>
-        </div>
-        <button class="refresh" @click="tab === 'perf' ? loadPerf() : load()">刷新</button>
-      </header>
-      <p v-if="error" class="error">{{ error }}</p>
-      <p v-if="notice" class="notice">{{ notice }}</p>
-      <p v-if="loading">加载中…</p>
-      <section v-else-if="tab === 'dashboard' && data" class="cards">
-        <article>
-          <b>{{ data.users }}</b
-          ><span>用户</span>
-        </article>
-        <article>
-          <b>{{ data.projects }}</b
-          ><span>项目</span>
-        </article>
-        <article>
-          <b>{{ data.jobs }}</b
-          ><span>生成任务</span>
-        </article>
-        <article>
-          <b>{{ data.systemHumans }}</b
-          ><span>系统人物</span>
-        </article>
-        <article>
-          <b>{{ data.errors }}</b
-          ><span>错误记录</span>
-        </article>
-        <article>
-          <b>{{ data.usage?.totalTokens || 0 }}</b
-          ><span>累计 Token</span>
-        </article>
-        <article class="wide">
-          <h3>任务状态</h3>
-          <pre>{{ JSON.stringify(data.jobStatuses, null, 2) }}</pre>
-        </article>
-        <article class="wide">
-          <h3>Token 构成</h3>
-          <p>输入 {{ data.usage?.inputTokens || 0 }} / 输出 {{ data.usage?.outputTokens || 0 }}</p>
-        </article>
-      </section>
-      <template v-else>
-        <AdminPromptsPanel v-if="tab === 'prompts'" :reload-token="promptsReloadToken" />
-        <AdminStoryboardOptionsPanel v-if="tab === 'categories'" />
-        <AdminRunningHubPanel v-if="tab === 'runninghub'" />
-        <AdminKlingPanel v-if="tab === 'kling'" />
-        <!-- 性能页：后端全量耗时（慢请求 TOP + 路径聚合） + 本浏览器会话观测 -->
-        <div v-if="tab === 'perf'" class="perf">
-          <section class="perf-group">
-            <h3>后端 · 慢请求 TOP（≥1000ms，按耗时倒序）</h3>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>方法</th>
-                    <th>路径</th>
-                    <th>状态</th>
-                    <th>耗时</th>
-                    <th>时间</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="row in backendSlow" :key="row.id">
-                    <td>{{ row.method }}</td>
-                    <td class="path">{{ row.path }}</td>
-                    <td>{{ row.statusCode }}</td>
-                    <td>
-                      <span :class="{ slow: row.durationMs >= 1000 }">{{ row.durationMs }}ms</span>
-                    </td>
-                    <td class="muted">{{ row.createdAt }}</td>
-                    <td><button class="action" @click="openReqDetail(row)">详情</button></td>
-                  </tr>
-                </tbody>
-              </table>
-              <p v-if="!backendSlow.length" class="empty">暂无慢请求（轮询/SSE 已自动排除）</p>
-            </div>
-          </section>
-          <section class="perf-group">
-            <h3>后端 · 接口耗时聚合（24h 正式流量 · max 倒序 TOP30）</h3>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>方法</th>
-                    <th>路径</th>
-                    <th>次数</th>
-                    <th>平均</th>
-                    <th>P95</th>
-                    <th>最大</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="row in backendSummary" :key="`${row.method} ${row.path}`">
-                    <td>{{ row.method }}</td>
-                    <td class="path">{{ row.path }}</td>
-                    <td>{{ row.count }}</td>
-                    <td>{{ row.avgMs }}ms</td>
-                    <td>
-                      <span :class="{ slow: row.p95Ms >= 1000 }">{{ row.p95Ms }}ms</span>
-                    </td>
-                    <td>
-                      <span :class="{ slow: row.maxMs >= 1000 }">{{ row.maxMs }}ms</span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-              <p v-if="!backendSummary.length" class="empty">暂无正式流量数据</p>
-            </div>
-          </section>
-          <section class="perf-group">
-            <h3>本浏览器会话 · API 耗时聚合</h3>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>方法</th>
-                    <th>路径</th>
-                    <th>次数</th>
-                    <th>平均</th>
-                    <th>P95</th>
-                    <th>最大</th>
-                    <th>解析均耗</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="row in frontPerf.apiSummary" :key="`${row.method} ${row.path}`">
-                    <td>{{ row.method }}</td>
-                    <td class="path">{{ row.path }}</td>
-                    <td>{{ row.count }}</td>
-                    <td>{{ row.avgMs }}ms</td>
-                    <td>
-                      <span :class="{ slow: row.p95Ms >= 800 }">{{ row.p95Ms }}ms</span>
-                    </td>
-                    <td>
-                      <span :class="{ slow: row.maxMs >= 800 }">{{ row.maxMs }}ms</span>
-                    </td>
-                    <td>{{ row.parseAvgMs }}ms</td>
-                  </tr>
-                </tbody>
-              </table>
-              <p v-if="!frontPerf.apiSummary.length" class="empty">本会话暂无 API 请求</p>
-            </div>
-          </section>
-          <section class="perf-group">
-            <h3>本浏览器会话 · 主线程长任务（>50ms 即渲染/脚本卡顿）</h3>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>耗时</th>
-                    <th>来源</th>
-                    <th>时间</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="task in frontPerf.longTasks" :key="task.id">
-                    <td>
-                      <span :class="{ slow: task.durationMs >= 200 }">{{ task.durationMs }}ms</span>
-                    </td>
-                    <td class="path">{{ task.target || '-' }}</td>
-                    <td class="muted">{{ new Date(task.at).toLocaleTimeString() }}</td>
-                  </tr>
-                </tbody>
-              </table>
-              <p v-if="!frontPerf.longTasks.length" class="empty">本会话未捕获主线程长任务</p>
-            </div>
-          </section>
-          <section v-if="frontPerf.navigation" class="perf-group">
-            <h3>本浏览器会话 · 整页加载计时</h3>
-            <p class="nav-timing">
-              TTFB <b>{{ frontPerf.navigation.ttfbMs }}ms</b> · DOMContentLoaded
-              <b>{{ frontPerf.navigation.domContentLoadedMs }}ms</b> · Load
-              <b>{{ frontPerf.navigation.loadMs }}ms</b>
+    <div class="admin-workspace">
+      <AdminTopBar
+        :group-title="groupTitle"
+        :title="tabTitle"
+        :loading="loading"
+        @refresh="tab === 'perf' ? loadPerf() : load()"
+      />
+      <main>
+        <p v-if="error" class="error">{{ error }}</p>
+        <p v-if="notice" class="notice">{{ notice }}</p>
+        <p v-if="loading">加载中…</p>
+        <section v-else-if="tab === 'dashboard' && data" class="cards">
+          <article>
+            <b>{{ data.users }}</b
+            ><span>用户</span>
+          </article>
+          <article>
+            <b>{{ data.projects }}</b
+            ><span>项目</span>
+          </article>
+          <article>
+            <b>{{ data.jobs }}</b
+            ><span>生成任务</span>
+          </article>
+          <article>
+            <b>{{ data.systemHumans }}</b
+            ><span>系统人物</span>
+          </article>
+          <article>
+            <b>{{ data.errors }}</b
+            ><span>错误记录</span>
+          </article>
+          <article>
+            <b>{{ data.usage?.totalTokens || 0 }}</b
+            ><span>累计 Token</span>
+          </article>
+          <article class="wide">
+            <h3>任务状态</h3>
+            <pre>{{ JSON.stringify(data.jobStatuses, null, 2) }}</pre>
+          </article>
+          <article class="wide">
+            <h3>Token 构成</h3>
+            <p>
+              输入 {{ data.usage?.inputTokens || 0 }} / 输出 {{ data.usage?.outputTokens || 0 }}
             </p>
-          </section>
-          <section v-if="frontPerf.slowApi.length" class="perf-group">
-            <h3>本浏览器会话 · 最近慢请求（≥800ms）</h3>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>方法</th>
-                    <th>路径</th>
-                    <th>状态</th>
-                    <th>耗时</th>
-                    <th>网络</th>
-                    <th>解析</th>
-                    <th>重试</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="row in frontPerf.slowApi" :key="row.id">
-                    <td>{{ row.method }}</td>
-                    <td class="path">{{ row.path }}</td>
-                    <td>{{ row.status }}</td>
-                    <td>
-                      <span class="slow">{{ row.totalMs }}ms</span>
-                    </td>
-                    <td>{{ row.networkMs }}ms</td>
-                    <td>{{ row.parseMs }}ms</td>
-                    <td>{{ row.retried ? '是' : '否' }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-          <p class="perf-tip">
-            定位链：后端 P95/max 大 → 接口/数据库/上游慢；本会话网络耗时大而后端正常 → 网络/网关；
-            解析耗时长 → 响应体大；长任务集中在渲染期 → 前端渲染问题（大数据列表/图片解码）。
-          </p>
-        </div>
-        <div v-if="tab === 'jobs'" class="filters">
-          <select v-model="jobFilters.kind" @change="searchJobs">
-            <option value="">全部类型</option>
-            <option value="image">图片</option>
-            <option value="video">视频</option>
-          </select>
-          <select v-model="jobFilters.status" @change="searchJobs">
-            <option value="">全部状态</option>
-            <option value="queued">queued</option>
-            <option value="running">running</option>
-            <option value="succeeded">succeeded</option>
-            <option value="failed">failed</option>
-            <option value="cancelled">cancelled</option>
-          </select>
-          <input
-            v-model="jobFilters.q"
-            placeholder="任务ID / 供应商任务ID"
-            @keyup.enter="searchJobs"
-          />
-          <button class="refresh" @click="searchJobs">查询</button>
-          <span class="pager">
-            <button class="action" :disabled="jobPage <= 1" @click="turnJobPage(-1)">上一页</button>
-            第 {{ jobPage }} 页 · 共 {{ data?.total || 0 }} 条
-            <button
-              class="action"
-              :disabled="jobPage * jobPageSize >= (data?.total || 0)"
-              @click="turnJobPage(1)"
-            >
-              下一页
-            </button>
-          </span>
-        </div>
-        <div v-if="tab === 'requests'" class="filters">
-          <select v-model="reqFilters.runId" @change="load">
-            <option value="">全部批次</option>
-            <option v-for="r in reqRuns" :key="r.runId" :value="r.runId">
-              {{ r.runId }}（{{ r.requests }} 次 · 均 {{ r.avgMs }}ms · 峰 {{ r.maxMs }}ms · 错
-              {{ r.errors }}）
-            </option>
-          </select>
-          <input
-            v-model="reqFilters.path"
-            placeholder="路径过滤 如 /api/auth"
-            @keyup.enter="load"
-          />
-          <button class="refresh" @click="load">查询</button>
-        </div>
-        <div v-if="tab === 'llm'" class="filters">
-          <input v-model="llmFilters.projectTaskId" placeholder="projectTaskId 过滤" />
-          <input v-model="llmFilters.operation" placeholder="operation 如 ass_scene_plan" />
-          <select v-model="llmFilters.status">
-            <option value="">全部状态</option>
-            <option value="ok">ok</option>
-            <option value="error">error</option>
-          </select>
-          <button class="refresh" @click="load">查询</button>
-        </div>
-        <form v-if="tab === 'users'" class="filters" @submit.prevent="createUser">
-          <input v-model="userForm.username" placeholder="用户名" required minlength="3" />
-          <input v-model="userForm.displayName" placeholder="显示名称" />
-          <input
-            v-model="userForm.password"
-            type="password"
-            placeholder="初始密码（至少 8 位）"
-            required
-            minlength="8"
-          />
-          <button class="refresh" type="submit">创建用户</button>
-        </form>
-        <div v-if="isPagedTab" class="pager-bar">
-          <span class="pager">
-            <button class="action" :disabled="currentPage <= 1" @click="turnPage(-1)">
-              上一页
-            </button>
-            第 {{ currentPage }} 页 · 共 {{ data?.total || 0 }} 条 · 每页 {{ pageSize }} 条
-            <button class="action" :disabled="currentPage >= pageCount" @click="turnPage(1)">
-              下一页
-            </button>
-          </span>
-        </div>
-        <section v-if="tab !== 'perf' && tab !== 'prompts'" class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th v-for="c in columns" :key="c">{{ c }}</th>
-                <th
-                  v-if="
-                    tab === 'models' ||
-                    tab === 'llm' ||
-                    tab === 'requests' ||
-                    tab === 'jobs' ||
-                    tab === 'users'
-                  "
-                >
-                  操作
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in rows" :key="row.id || row.model">
-                <td v-for="c in columns" :key="c">
-                  <span
-                    :class="{
-                      status: c === 'status',
-                      slow: tab === 'requests' && c === 'durationMs' && Number(row[c]) >= 1000,
-                    }"
-                    >{{ typeof row[c] === 'object' ? JSON.stringify(row[c]) : row[c] }}</span
-                  ><span v-if="c === 'status' && row.stale" class="stale-flag">（疑似中断）</span>
-                </td>
-                <td v-if="tab === 'models'">
-                  <button class="action" @click="toggleModel(row)">
-                    {{ row.status === 'active' ? '停用' : '启用' }}
-                  </button>
-                </td>
-                <td v-if="tab === 'llm'">
-                  <button class="action" @click="openLlmDetail(row)">详情</button>
-                </td>
-                <td v-if="tab === 'requests'">
-                  <button class="action" @click="openReqDetail(row)">详情</button>
-                </td>
-                <td v-if="tab === 'jobs'">
-                  <button
-                    v-if="row.providerTaskId"
-                    class="action"
-                    :disabled="syncing === row.id"
-                    @click="syncJob(row)"
-                  >
-                    {{ syncing === row.id ? '同步中…' : '同步' }}
-                  </button>
-                </td>
-                <td v-if="tab === 'users'">
-                  <button class="action" @click="toggleUser(row)">
-                    {{ row.status === 'active' ? '禁用' : '启用' }}
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <p v-if="!rows.length" class="empty">暂无数据</p>
+          </article>
         </section>
-      </template>
-    </main>
+        <template v-else>
+          <AdminPromptsPanel v-if="tab === 'prompts'" :reload-token="promptsReloadToken" />
+          <AdminStoryboardOptionsPanel v-if="tab === 'categories'" />
+          <AdminRunningHubPanel v-if="tab === 'runninghub'" />
+          <AdminKlingPanel v-if="tab === 'kling'" />
+          <!-- 性能页：后端全量耗时（慢请求 TOP + 路径聚合） + 本浏览器会话观测 -->
+          <div v-if="tab === 'perf'" class="perf">
+            <section class="perf-group">
+              <h3>后端 · 慢请求 TOP（≥1000ms，按耗时倒序）</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>方法</th>
+                      <th>路径</th>
+                      <th>状态</th>
+                      <th>耗时</th>
+                      <th>时间</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in backendSlow" :key="row.id">
+                      <td>{{ row.method }}</td>
+                      <td class="path">{{ row.path }}</td>
+                      <td>{{ row.statusCode }}</td>
+                      <td>
+                        <span :class="{ slow: row.durationMs >= 1000 }"
+                          >{{ row.durationMs }}ms</span
+                        >
+                      </td>
+                      <td class="muted">{{ row.createdAt }}</td>
+                      <td><button class="action" @click="openReqDetail(row)">详情</button></td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p v-if="!backendSlow.length" class="empty">暂无慢请求（轮询/SSE 已自动排除）</p>
+              </div>
+            </section>
+            <section class="perf-group">
+              <h3>后端 · 接口耗时聚合（24h 正式流量 · max 倒序 TOP30）</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>方法</th>
+                      <th>路径</th>
+                      <th>次数</th>
+                      <th>平均</th>
+                      <th>P95</th>
+                      <th>最大</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in backendSummary" :key="`${row.method} ${row.path}`">
+                      <td>{{ row.method }}</td>
+                      <td class="path">{{ row.path }}</td>
+                      <td>{{ row.count }}</td>
+                      <td>{{ row.avgMs }}ms</td>
+                      <td>
+                        <span :class="{ slow: row.p95Ms >= 1000 }">{{ row.p95Ms }}ms</span>
+                      </td>
+                      <td>
+                        <span :class="{ slow: row.maxMs >= 1000 }">{{ row.maxMs }}ms</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p v-if="!backendSummary.length" class="empty">暂无正式流量数据</p>
+              </div>
+            </section>
+            <section class="perf-group">
+              <h3>本浏览器会话 · API 耗时聚合</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>方法</th>
+                      <th>路径</th>
+                      <th>次数</th>
+                      <th>平均</th>
+                      <th>P95</th>
+                      <th>最大</th>
+                      <th>解析均耗</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in frontPerf.apiSummary" :key="`${row.method} ${row.path}`">
+                      <td>{{ row.method }}</td>
+                      <td class="path">{{ row.path }}</td>
+                      <td>{{ row.count }}</td>
+                      <td>{{ row.avgMs }}ms</td>
+                      <td>
+                        <span :class="{ slow: row.p95Ms >= 800 }">{{ row.p95Ms }}ms</span>
+                      </td>
+                      <td>
+                        <span :class="{ slow: row.maxMs >= 800 }">{{ row.maxMs }}ms</span>
+                      </td>
+                      <td>{{ row.parseAvgMs }}ms</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p v-if="!frontPerf.apiSummary.length" class="empty">本会话暂无 API 请求</p>
+              </div>
+            </section>
+            <section class="perf-group">
+              <h3>本浏览器会话 · 主线程长任务（>50ms 即渲染/脚本卡顿）</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>耗时</th>
+                      <th>来源</th>
+                      <th>时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="task in frontPerf.longTasks" :key="task.id">
+                      <td>
+                        <span :class="{ slow: task.durationMs >= 200 }"
+                          >{{ task.durationMs }}ms</span
+                        >
+                      </td>
+                      <td class="path">{{ task.target || '-' }}</td>
+                      <td class="muted">{{ new Date(task.at).toLocaleTimeString() }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p v-if="!frontPerf.longTasks.length" class="empty">本会话未捕获主线程长任务</p>
+              </div>
+            </section>
+            <section v-if="frontPerf.navigation" class="perf-group">
+              <h3>本浏览器会话 · 整页加载计时</h3>
+              <p class="nav-timing">
+                TTFB <b>{{ frontPerf.navigation.ttfbMs }}ms</b> · DOMContentLoaded
+                <b>{{ frontPerf.navigation.domContentLoadedMs }}ms</b> · Load
+                <b>{{ frontPerf.navigation.loadMs }}ms</b>
+              </p>
+            </section>
+            <section v-if="frontPerf.slowApi.length" class="perf-group">
+              <h3>本浏览器会话 · 最近慢请求（≥800ms）</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>方法</th>
+                      <th>路径</th>
+                      <th>状态</th>
+                      <th>耗时</th>
+                      <th>网络</th>
+                      <th>解析</th>
+                      <th>重试</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in frontPerf.slowApi" :key="row.id">
+                      <td>{{ row.method }}</td>
+                      <td class="path">{{ row.path }}</td>
+                      <td>{{ row.status }}</td>
+                      <td>
+                        <span class="slow">{{ row.totalMs }}ms</span>
+                      </td>
+                      <td>{{ row.networkMs }}ms</td>
+                      <td>{{ row.parseMs }}ms</td>
+                      <td>{{ row.retried ? '是' : '否' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            <p class="perf-tip">
+              定位链：后端 P95/max 大 → 接口/数据库/上游慢；本会话网络耗时大而后端正常 → 网络/网关；
+              解析耗时长 → 响应体大；长任务集中在渲染期 → 前端渲染问题（大数据列表/图片解码）。
+            </p>
+          </div>
+          <div v-if="tab === 'jobs'" class="filters">
+            <select v-model="jobFilters.kind" @change="searchJobs">
+              <option value="">全部类型</option>
+              <option value="image">图片</option>
+              <option value="video">视频</option>
+            </select>
+            <select v-model="jobFilters.status" @change="searchJobs">
+              <option value="">全部状态</option>
+              <option value="queued">queued</option>
+              <option value="running">running</option>
+              <option value="succeeded">succeeded</option>
+              <option value="failed">failed</option>
+              <option value="cancelled">cancelled</option>
+            </select>
+            <input
+              v-model="jobFilters.q"
+              placeholder="任务ID / 供应商任务ID"
+              @keyup.enter="searchJobs"
+            />
+            <button class="refresh" @click="searchJobs">查询</button>
+            <span class="pager">
+              <button class="action" :disabled="jobPage <= 1" @click="turnJobPage(-1)">
+                上一页
+              </button>
+              第 {{ jobPage }} 页 · 共 {{ data?.total || 0 }} 条
+              <button
+                class="action"
+                :disabled="jobPage * jobPageSize >= (data?.total || 0)"
+                @click="turnJobPage(1)"
+              >
+                下一页
+              </button>
+            </span>
+          </div>
+          <div v-if="tab === 'requests'" class="filters">
+            <select v-model="reqFilters.runId" @change="load">
+              <option value="">全部批次</option>
+              <option v-for="r in reqRuns" :key="r.runId" :value="r.runId">
+                {{ r.runId }}（{{ r.requests }} 次 · 均 {{ r.avgMs }}ms · 峰 {{ r.maxMs }}ms · 错
+                {{ r.errors }}）
+              </option>
+            </select>
+            <input
+              v-model="reqFilters.path"
+              placeholder="路径过滤 如 /api/auth"
+              @keyup.enter="load"
+            />
+            <button class="refresh" @click="load">查询</button>
+          </div>
+          <div v-if="tab === 'llm'" class="filters">
+            <input v-model="llmFilters.projectTaskId" placeholder="projectTaskId 过滤" />
+            <input v-model="llmFilters.operation" placeholder="operation 如 ass_scene_plan" />
+            <select v-model="llmFilters.status">
+              <option value="">全部状态</option>
+              <option value="ok">ok</option>
+              <option value="error">error</option>
+            </select>
+            <button class="refresh" @click="load">查询</button>
+          </div>
+          <form v-if="tab === 'users'" class="filters" @submit.prevent="createUser">
+            <input v-model="userForm.username" placeholder="用户名" required minlength="3" />
+            <input v-model="userForm.displayName" placeholder="显示名称" />
+            <input
+              v-model="userForm.password"
+              type="password"
+              placeholder="初始密码（至少 8 位）"
+              required
+              minlength="8"
+            />
+            <button class="refresh" type="submit">创建用户</button>
+          </form>
+          <div v-if="isPagedTab" class="pager-bar">
+            <span class="pager">
+              <button class="action" :disabled="currentPage <= 1" @click="turnPage(-1)">
+                上一页
+              </button>
+              第 {{ currentPage }} 页 · 共 {{ data?.total || 0 }} 条 · 每页 {{ pageSize }} 条
+              <button class="action" :disabled="currentPage >= pageCount" @click="turnPage(1)">
+                下一页
+              </button>
+            </span>
+          </div>
+          <section v-if="tab !== 'perf' && tab !== 'prompts'" class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th v-for="c in columns" :key="c">{{ c }}</th>
+                  <th
+                    v-if="
+                      tab === 'models' ||
+                      tab === 'llm' ||
+                      tab === 'requests' ||
+                      tab === 'jobs' ||
+                      tab === 'users'
+                    "
+                  >
+                    操作
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in rows" :key="row.id || row.model">
+                  <td v-for="c in columns" :key="c">
+                    <span
+                      :class="{
+                        status: c === 'status',
+                        slow: tab === 'requests' && c === 'durationMs' && Number(row[c]) >= 1000,
+                      }"
+                      >{{ typeof row[c] === 'object' ? JSON.stringify(row[c]) : row[c] }}</span
+                    ><span v-if="c === 'status' && row.stale" class="stale-flag">（疑似中断）</span>
+                  </td>
+                  <td v-if="tab === 'models'">
+                    <button class="action" @click="toggleModel(row)">
+                      {{ row.status === 'active' ? '停用' : '启用' }}
+                    </button>
+                  </td>
+                  <td v-if="tab === 'llm'">
+                    <button class="action" @click="openLlmDetail(row)">详情</button>
+                  </td>
+                  <td v-if="tab === 'requests'">
+                    <button class="action" @click="openReqDetail(row)">详情</button>
+                  </td>
+                  <td v-if="tab === 'jobs'">
+                    <button
+                      v-if="row.providerTaskId"
+                      class="action"
+                      :disabled="syncing === row.id"
+                      @click="syncJob(row)"
+                    >
+                      {{ syncing === row.id ? '同步中…' : '同步' }}
+                    </button>
+                  </td>
+                  <td v-if="tab === 'users'">
+                    <button class="action" @click="toggleUser(row)">
+                      {{ row.status === 'active' ? '禁用' : '启用' }}
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p v-if="!rows.length" class="empty">暂无数据</p>
+          </section>
+        </template>
+      </main>
+    </div>
     <BaseModal
       :open="!!reqDetail || (detailLoading && tab === 'requests')"
       title="请求详情"
@@ -818,32 +828,31 @@ onMounted(load)
 </template>
 <style scoped>
 .console {
-  min-height: 100vh;
-  background: var(--bg);
+  --admin-bg: #f5f7fa;
+  --admin-surface: #fff;
+  --admin-border: #e4e7ec;
+  height: 100%;
+  min-height: 0;
+  background: var(--admin-bg);
   display: grid;
   grid-template-columns: 236px 1fr;
   color: var(--text);
+  overflow: hidden;
+}
+.admin-workspace {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
 }
 main {
-  padding: 26px 32px 40px;
   min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 24px 30px 40px;
 }
-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-.crumb {
-  margin: 0 0 4px;
-  color: var(--text-secondary);
-  font-size: var(--font-sm);
-}
-h1 {
-  margin: 0;
-  font-size: 22px;
-}
-.refresh,
 .action {
   border: 0;
   border-radius: var(--radius-sm);
@@ -854,7 +863,6 @@ h1 {
   cursor: pointer;
   transition: background 0.15s;
 }
-.refresh:hover,
 .action:hover:not(:disabled) {
   background: var(--primary-hover);
 }
@@ -864,9 +872,9 @@ h1 {
   gap: 16px;
 }
 .cards article {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
   padding: 20px 22px;
   display: flex;
   flex-direction: column;
@@ -885,9 +893,9 @@ h1 {
 }
 .table-wrap {
   overflow: auto;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
   box-shadow: var(--shadow-card);
 }
 table {
@@ -1050,5 +1058,25 @@ tbody tr:hover {
   white-space: pre-wrap;
   word-break: break-all;
   margin: 8px 0;
+}
+@media (max-width: 900px) {
+  .console {
+    grid-template-columns: 190px 1fr;
+  }
+  main {
+    padding: 20px 18px 32px;
+  }
+}
+@media (max-width: 640px) {
+  .console {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .cards {
+    grid-template-columns: 1fr;
+  }
+  .cards .wide {
+    grid-column: auto;
+  }
 }
 </style>

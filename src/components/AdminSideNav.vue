@@ -65,7 +65,6 @@ const isOpen = (group: AdminNavGroup) =>
         </div>
       </section>
     </nav>
-    <RouterLink class="back-link" to="/projects">← 返回工作台</RouterLink>
   </aside>
 </template>
 
@@ -74,15 +73,16 @@ const isOpen = (group: AdminNavGroup) =>
   display: flex;
   flex-direction: column;
   padding: 18px 12px 12px;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
+  min-height: 0;
+  background: #101828;
+  border-right: 1px solid #1d2939;
 }
 .brand {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 4px 8px 16px;
-  color: var(--text);
+  color: #f2f4f7;
   text-decoration: none;
 }
 .brand-mark {
@@ -108,7 +108,7 @@ const isOpen = (group: AdminNavGroup) =>
 }
 .brand-text small {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: #98a2b3;
 }
 .nav-groups {
   display: flex;
@@ -130,14 +130,14 @@ const isOpen = (group: AdminNavGroup) =>
   border-radius: var(--radius-xs);
   background: transparent;
   padding: 12px 8px 6px;
-  color: var(--text-secondary);
+  color: #98a2b3;
   font-size: var(--font-sm);
   font-weight: 600;
   letter-spacing: 0.08em;
   cursor: pointer;
 }
 .group-title:hover {
-  color: var(--text);
+  color: #f2f4f7;
 }
 .chev {
   transition: transform 0.15s;
@@ -156,7 +156,7 @@ const isOpen = (group: AdminNavGroup) =>
   border-radius: var(--radius-sm);
   background: transparent;
   padding: 8px 10px 8px 14px;
-  color: var(--text-regular);
+  color: #d0d5dd;
   font-size: 13px;
   text-align: left;
   cursor: pointer;
@@ -165,23 +165,32 @@ const isOpen = (group: AdminNavGroup) =>
     color 0.12s;
 }
 .nav-item:hover {
-  background: var(--bg);
-  color: var(--text);
+  background: #1d2939;
+  color: #fff;
 }
 .nav-item.on {
-  background: var(--primary-light);
-  color: var(--primary);
+  background: rgba(255, 90, 44, 0.16);
+  color: #ffb18f;
   font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--primary);
 }
-.back-link {
-  margin-top: auto;
-  border-radius: var(--radius-sm);
-  padding: 10px 8px 2px;
-  color: var(--text-secondary);
-  font-size: 13px;
-  text-decoration: none;
-}
-.back-link:hover {
-  color: var(--primary);
+@media (max-width: 640px) {
+  .side-nav {
+    max-height: 190px;
+    padding: 10px;
+    border-right: 0;
+    border-bottom: 1px solid #1d2939;
+  }
+  .brand {
+    padding-bottom: 8px;
+  }
+  .nav-groups {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px 8px;
+  }
+  .group-title {
+    padding-top: 6px;
+  }
 }
 </style>
