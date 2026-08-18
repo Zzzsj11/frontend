@@ -35,6 +35,7 @@ from .models import (
     ProjectModel,
     PromptTemplateModel,
     PromptVersionModel,
+    ServerMaintenanceRunModel,
     StoryboardOptionItemModel,
     TokenUsageModel,
     UserModel,
@@ -62,6 +63,7 @@ from .runninghub import submit_first_frame_task as rh_submit_first_frame_task
 from .runninghub import submit_task as rh_submit_task
 from .runninghub import submit_text_task as rh_submit_text_task
 from .runninghub import upload_media as rh_upload_media
+from .server_monitoring import monitoring_summary
 from .storage import get_storage, import_remote, safe_key
 from .storyboard_options import OPTION_KINDS
 
@@ -119,6 +121,52 @@ async def dashboard(user: CurrentUser, db: AsyncSession = Db):
         "usage": {"inputTokens": usage[0], "outputTokens": usage[1], "totalTokens": usage[2]},
         "jobStatuses": statuses,
     }
+
+
+@router.get("/server-monitoring")
+async def server_monitoring(user: CurrentUser, hours: int = 24, db: AsyncSession = Db):
+    require_admin(user)
+    result = await monitoring_summary(db, hours)
+    runs = list(
+        (await db.execute(select(ServerMaintenanceRunModel).where(ServerMaintenanceRunModel.deleted_at.is_(None)).order_by(ServerMaintenanceRunModel.created_at.desc()).limit(20)))
+        .scalars()
+        .all()
+    )
+    result["maintenanceRuns"] = [
+        {"id": x.id, "action": x.action, "trigger": x.trigger, "dryRun": x.dry_run, "status": x.status, "summary": x.summary, "details": x.details, "createdAt": iso(x.created_at)}
+        for x in runs
+    ]
+    return result
+
+
+class ServerMaintenanceDryRunIn(BaseModel):
+    action: str = Field(pattern="^(cleanup_temp_files|cleanup_dangling_images|rotate_logs)$")
+
+
+@router.post("/server-monitoring/maintenance/dry-run", status_code=201)
+async def server_maintenance_dry_run(payload: ServerMaintenanceDryRunIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    """只生成白名单维护方案并审计；第一阶段不在 Web 进程执行宿主机删除。"""
+    require_admin(user)
+    labels = {
+        "cleanup_temp_files": "扫描专用临时目录中超过 24 小时且已完成任务的文件",
+        "cleanup_dangling_images": "扫描 dangling 镜像，保留当前及上一发布版本",
+        "rotate_logs": "扫描超过轮转阈值的应用与维护日志",
+    }
+    item = ServerMaintenanceRunModel(
+        id=f"maintenance-{uuid.uuid4().hex}",
+        requested_by=user.id,
+        source="primary",
+        action=payload.action,
+        trigger="manual",
+        dry_run=True,
+        status="completed",
+        summary=f"DRY-RUN：{labels[payload.action]}",
+        details={"executed": False, "safety": "allowlist-only", "requiresManualExecution": True},
+    )
+    db.add(item)
+    await audit(db, request, user, "server_maintenance.dry_run", "server_maintenance", item.id, None, {"action": payload.action})
+    await db.commit()
+    return {"id": item.id, "status": item.status, "dryRun": True, "summary": item.summary, "details": item.details}
 
 
 @router.get("/projects")

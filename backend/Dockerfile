@@ -16,6 +16,7 @@ RUN if [ -d /app/.venv/lib/python3.14/site-packages ]; then \
 COPY alembic.ini ./
 COPY migrations ./migrations
 COPY app ./app
+COPY scripts ./scripts
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh
 EXPOSE 8000

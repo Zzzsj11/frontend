@@ -429,6 +429,70 @@ class H3TestPresetModel(LifecycleMixin, Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)
 
 
+class ServerMetricSampleModel(LifecycleMixin, Base):
+    __tablename__ = "server_metric_samples"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    source: Mapped[str] = mapped_column(String(120), default="primary", index=True)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    boot_id: Mapped[str] = mapped_column(String(80), default="")
+    interface: Mapped[str] = mapped_column(String(80), default="")
+    cpu_percent: Mapped[float] = mapped_column(Float, default=0)
+    load_1: Mapped[float] = mapped_column(Float, default=0)
+    load_5: Mapped[float] = mapped_column(Float, default=0)
+    load_15: Mapped[float] = mapped_column(Float, default=0)
+    memory_total_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    memory_available_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    disk_total_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    disk_available_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    network_tx_bytes_total: Mapped[int] = mapped_column(BigInteger, default=0)
+    network_rx_bytes_total: Mapped[int] = mapped_column(BigInteger, default=0)
+    network_tx_bps: Mapped[float] = mapped_column(Float, default=0)
+    network_rx_bps: Mapped[float] = mapped_column(Float, default=0)
+    containers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+
+
+class ServerTrafficMonthModel(LifecycleMixin, Base):
+    __tablename__ = "server_traffic_months"
+    __table_args__ = (UniqueConstraint("source", "month", name="uq_server_traffic_source_month"),)
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    source: Mapped[str] = mapped_column(String(120), default="primary", index=True)
+    month: Mapped[date] = mapped_column(Date, index=True)
+    quota_bytes: Mapped[int] = mapped_column(BigInteger)
+    egress_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    last_counter_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    last_boot_id: Mapped[str] = mapped_column(String(80), default="")
+
+
+class ServerAlertEventModel(LifecycleMixin, Base):
+    __tablename__ = "server_alert_events"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    source: Mapped[str] = mapped_column(String(120), default="primary", index=True)
+    alert_key: Mapped[str] = mapped_column(String(120), index=True)
+    severity: Mapped[str] = mapped_column(String(32), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    message: Mapped[str] = mapped_column(Text, default="")
+    current_value: Mapped[float] = mapped_column(Float, default=0)
+    threshold_value: Mapped[float] = mapped_column(Float, default=0)
+    first_triggered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class ServerMaintenanceRunModel(LifecycleMixin, Base):
+    __tablename__ = "server_maintenance_runs"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    requested_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    source: Mapped[str] = mapped_column(String(120), default="primary", index=True)
+    action: Mapped[str] = mapped_column(String(80), index=True)
+    trigger: Mapped[str] = mapped_column(String(32), default="manual", index=True)
+    dry_run: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(32), default="completed", index=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
 class AiModelModel(LifecycleMixin, Base):
     __tablename__ = "ai_models"
     id: Mapped[str] = mapped_column(String(80), primary_key=True)

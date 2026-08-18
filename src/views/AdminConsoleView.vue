@@ -5,6 +5,7 @@ import AdminPromptsPanel from '../components/AdminPromptsPanel.vue'
 import AdminKlingPanel from '../components/AdminKlingPanel.vue'
 import AdminRunningHubPanel from '../components/AdminRunningHubPanel.vue'
 import AdminStoryboardOptionsPanel from '../components/AdminStoryboardOptionsPanel.vue'
+import AdminServerMonitoringPanel from '../components/AdminServerMonitoringPanel.vue'
 import AdminSideNav from '../components/AdminSideNav.vue'
 import AdminTopBar from '../components/AdminTopBar.vue'
 import BaseModal from '../components/base/BaseModal.vue'
@@ -103,6 +104,7 @@ type Tab =
   | 'llm'
   | 'requests'
   | 'perf'
+  | 'server'
   | 'prompts'
   | 'categories'
   | 'runninghub'
@@ -150,6 +152,7 @@ const NAV_GROUPS: AdminNavGroup[] = [
       { key: 'llm', label: 'LLM 调用' },
       { key: 'requests', label: '接口耗时' },
       { key: 'perf', label: '性能' },
+      { key: 'server', label: '服务器监控' },
     ],
   },
 ]
@@ -220,6 +223,7 @@ const endpoint = computed(
       llm: llmEndpoint.value,
       requests: reqEndpoint.value,
       perf: '',
+      server: '',
       prompts: '',
       categories: '',
       runninghub: '',
@@ -238,7 +242,13 @@ const load = async () => {
     return
   }
   // 通用分类/模型测试页由各自面板自管数据
-  if (tab.value === 'categories' || tab.value === 'runninghub' || tab.value === 'kling') return
+  if (
+    tab.value === 'categories' ||
+    tab.value === 'runninghub' ||
+    tab.value === 'kling' ||
+    tab.value === 'server'
+  )
+    return
   loading.value = true
   error.value = ''
   try {
@@ -255,7 +265,13 @@ const select = async (key: string) => {
   pageOffset.value = 0
   if (value === 'requests') void loadReqRuns()
   if (value === 'perf') return void loadPerf()
-  if (value === 'prompts' || value === 'categories' || value === 'runninghub' || value === 'kling')
+  if (
+    value === 'prompts' ||
+    value === 'categories' ||
+    value === 'runninghub' ||
+    value === 'kling' ||
+    value === 'server'
+  )
     return
   await load()
 }
@@ -459,6 +475,7 @@ onMounted(load)
           <AdminStoryboardOptionsPanel v-if="tab === 'categories'" />
           <AdminRunningHubPanel v-if="tab === 'runninghub'" />
           <AdminKlingPanel v-if="tab === 'kling'" />
+          <AdminServerMonitoringPanel v-if="tab === 'server'" />
           <!-- 性能页：后端全量耗时（慢请求 TOP + 路径聚合） + 本浏览器会话观测 -->
           <div v-if="tab === 'perf'" class="perf">
             <section class="perf-group">

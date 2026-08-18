@@ -35,4 +35,7 @@ test('administrator can inspect dashboard, models, errors and audit logs', async
   await expect(page.getByRole('heading', { name: '错误日志' })).toBeVisible()
   await page.getByRole('button', { name: '操作审计' }).click()
   await expect(page.getByRole('heading', { name: '操作审计' })).toBeVisible()
+  await page.getByRole('button', { name: '服务器监控' }).click()
+  await expect(page.getByRole('heading', { name: '服务器资源监控' })).toBeVisible()
+  await expect(page.getByText('月流量仅统计公网出站 · 自然月 300 GiB')).toBeVisible()
 })

@@ -121,6 +121,10 @@ class Settings:
     kling_api_key: str = os.getenv("KLING_API_KEY") or video_api_key
     kling_model: str = os.getenv("KLING_MODEL", "kling-v3-omni")
     kling_timeout: float = float(os.getenv("KLING_TIMEOUT", "60"))
+    # 服务器监控：自然月仅统计默认公网出口网卡的发送字节，1 GiB = 1024^3 bytes。
+    server_traffic_quota_gib: int = max(1, int(os.getenv("SERVER_TRAFFIC_QUOTA_GIB", "300")))
+    server_monitor_timezone: str = os.getenv("SERVER_MONITOR_TIMEZONE", "Asia/Shanghai")
+    server_metric_retention_days: int = max(7, int(os.getenv("SERVER_METRIC_RETENTION_DAYS", "35")))
 
 
 settings = Settings()
