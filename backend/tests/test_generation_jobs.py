@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
@@ -210,12 +211,35 @@ async def test_recover_stale_storyboard_jobs_marked_failed(client) -> None:
     _insert_job("job-sb-stale", kind="storyboard_line", status="running", created_at=stale_time, updated_at=stale_time)
     _insert_job("job-sb-fresh", kind="storyboard_line", status="running")
 
+    project = client.post("/api/projects", json={"name": "stale-outline-project"}).json()
+    task = client.post(
+        f"/api/projects/{project['id']}/tasks",
+        json={"title": "stale outline", "storyboard_type": "general"},
+    ).json()
+    connection = sqlite3.connect(TEST_DB, timeout=10)
+    try:
+        connection.execute(
+            "UPDATE project_tasks SET status = 'outlining', storyboard_config = ?, updated_at = ? WHERE id = ?",
+            ('{"outlineProgress":{"phase":"generating","shotsDone":0,"shotsTotal":21}}', stale_time.strftime("%Y-%m-%d %H:%M:%S.%f"), task["id"]),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
     await recover_stale_storyboard_generation()
 
     stale_row = _job_row("job-sb-stale")
     assert stale_row["status"] == "failed"
     assert "中断" in stale_row["error"]
     assert _job_row("job-sb-fresh")["status"] == "running"
+    connection = sqlite3.connect(TEST_DB, timeout=10)
+    try:
+        connection.row_factory = sqlite3.Row
+        outline = dict(connection.execute("SELECT status, storyboard_config FROM project_tasks WHERE id = ?", (task["id"],)).fetchone())
+    finally:
+        connection.close()
+    assert outline["status"] == "outline_failed"
+    assert "大纲生成进程已中断" in json.loads(outline["storyboard_config"])["outlineProgress"]["error"]
 
 
 def test_admin_jobs_collects_tasks_with_filters_and_pagination(client) -> None:

@@ -15,6 +15,7 @@ from .models import (
     DigitalHumanModel,
     DigitalHumanStyleModel,
     GenerationJobModel,
+    ProjectTaskModel,
     PromptTemplateModel,
     PromptVersionModel,
     SongEmotionProfileModel,
@@ -322,9 +323,30 @@ async def ensure_pending_asset_avatars() -> None:
 
 
 async def recover_stale_storyboard_generation() -> None:
-    """Return abandoned in-flight lines to the resumable queue after a restart."""
+    """收编已丢失执行协程的大纲和逐句生成任务。"""
     cutoff = utcnow() - timedelta(minutes=10)
+    outline_cutoff = utcnow() - timedelta(minutes=5)
     async with session_factory() as session:
+        stale_outlines = list(
+            (
+                await session.execute(
+                    select(ProjectTaskModel).where(
+                        ProjectTaskModel.status == "outlining",
+                        ProjectTaskModel.deleted_at.is_(None),
+                        ProjectTaskModel.updated_at < outline_cutoff,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for task in stale_outlines:
+            config = dict(task.storyboard_config or {})
+            progress = dict(config.get("outlineProgress") or {})
+            progress.update(phase="error", error="大纲生成进程已中断，请重新生成大纲")
+            config["outlineProgress"] = progress
+            task.storyboard_config = config
+            task.status = "outline_failed"
         await session.execute(
             update(StoryboardLineModel)
             .where(

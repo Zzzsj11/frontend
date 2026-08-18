@@ -6,8 +6,9 @@ import json
 import tempfile
 import uuid
 import zipfile
+from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, Coroutine
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
@@ -795,6 +796,41 @@ _outline_background_tasks: set[asyncio.Task] = set()
 _segment_retry_tasks: set[asyncio.Task] = set()
 
 
+async def _outline_heartbeat(task_id: str) -> None:
+    """大纲生成租约心跳。
+
+    LLM 单次请求期间也定期刷新 updated_at；进程退出后心跳停止，
+    全局巡检器才能安全地把超时 outlining 判定为僵尸任务。
+    """
+    while True:
+        await asyncio.sleep(30)
+        async with session_factory() as session:
+            task = await session.get(ProjectTaskModel, task_id)
+            if not task or task.deleted_at is not None or task.status != "outlining":
+                return
+            config = dict(task.storyboard_config or {})
+            progress = dict(config.get("outlineProgress") or {})
+            progress["heartbeatAt"] = utcnow().isoformat()
+            config["outlineProgress"] = progress
+            task.storyboard_config = config
+            await session.commit()
+
+
+def _start_outline_background(task_id: str, operation: Coroutine[Any, Any, None]) -> None:
+    async def supervised() -> None:
+        heartbeat = asyncio.create_task(_outline_heartbeat(task_id))
+        try:
+            await operation
+        finally:
+            heartbeat.cancel()
+            with suppress(asyncio.CancelledError):
+                await heartbeat
+
+    background = asyncio.create_task(supervised())
+    _outline_background_tasks.add(background)
+    background.add_done_callback(_outline_background_tasks.discard)
+
+
 async def _run_ass_outline_generation(
     *,
     task_id: str,
@@ -1037,16 +1073,15 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
         task.storyboard_config = config
         task.status = "outlining"
         await db.commit()
-        background = asyncio.create_task(
+        _start_outline_background(
+            task.id,
             _run_general_outline_generation(
                 task_id=task.id,
                 user_id=user.id,
                 project_id=task.project_id,
                 selected_humans=selected_humans,
-            )
+            ),
         )
-        _outline_background_tasks.add(background)
-        background.add_done_callback(_outline_background_tasks.discard)
         return {"taskId": task.id, "status": "outlining", "progress": progress}
 
     lines = list(
@@ -1075,7 +1110,8 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
     task.storyboard_config = config
     task.status = "outlining"
     await db.commit()
-    background = asyncio.create_task(
+    _start_outline_background(
+        task.id,
         _run_ass_outline_generation(
             task_id=task.id,
             user_id=user.id,
@@ -1085,10 +1121,8 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
             role_ids=role_ids,
             emotion=(task.storyboard_config or {}).get("songEmotion") or {},
             extra_requirement=task.extra_requirement or "",
-        )
+        ),
     )
-    _outline_background_tasks.add(background)
-    background.add_done_callback(_outline_background_tasks.discard)
     return {"taskId": task.id, "status": "outlining", "progress": progress}
 
 

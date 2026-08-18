@@ -5,7 +5,7 @@ import json
 import logging
 import re
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
@@ -65,6 +65,16 @@ from .usage_quota import consume_daily_quota
 logger = logging.getLogger(__name__)
 
 
+async def stale_generation_reaper() -> None:
+    """定期收编 API 进程重启后遗留的僵尸生成状态。"""
+    while True:
+        await asyncio.sleep(60)
+        try:
+            await recover_stale_storyboard_generation()
+        except Exception:
+            logger.exception("僵尸生成任务巡检失败")
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     await init_database()
@@ -76,9 +86,15 @@ async def lifespan(_app: FastAPI):
     recovered = await jobs.recover_stale_jobs(resume_generation)
     if recovered["resumed"] or recovered["failed"]:
         logger.info("媒体生成任务恢复：续跑 %s 个，判败 %s 个", recovered["resumed"], recovered["failed"])
-    yield
-    await close_redis()
-    await close_database()
+    reaper = asyncio.create_task(stale_generation_reaper())
+    try:
+        yield
+    finally:
+        reaper.cancel()
+        with suppress(asyncio.CancelledError):
+            await reaper
+        await close_redis()
+        await close_database()
 
 
 app = FastAPI(title="MV Agent API", version="0.3.0", lifespan=lifespan)
