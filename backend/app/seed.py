@@ -108,8 +108,11 @@ async def seed_system_data() -> None:
             session.add(role)
         ass_role = await session.get(AdminRoleModel, "admin-role-ass")
         if not ass_role:
-            ass_role = AdminRoleModel(id="admin-role-ass", code="ass_admin", name="ASS 管理员", description="仅管理 ASS 歌曲情感库")
+            ass_role = AdminRoleModel(id="admin-role-ass", code="ass_admin", name="内容配置管理员", description="管理歌曲情感库与通用分类")
             session.add(ass_role)
+        else:
+            ass_role.name = "内容配置管理员"
+            ass_role.description = "管理歌曲情感库与通用分类"
         permissions = [
             ("dashboard.read", "查看仪表盘"),
             ("users.manage", "管理用户"),
@@ -118,6 +121,8 @@ async def seed_system_data() -> None:
             ("logs.read", "查看日志"),
             ("song_emotions.read", "查看 ASS 歌曲情感库"),
             ("song_emotions.manage", "管理 ASS 歌曲情感库"),
+            ("storyboard_options.read", "查看通用分类"),
+            ("storyboard_options.manage", "管理通用分类"),
         ]
         for code, name in permissions:
             pid = f"admin-perm-{code.replace('.', '-')}"
@@ -135,7 +140,7 @@ async def seed_system_data() -> None:
             ).scalar_one_or_none()
             if not super_link:
                 session.add(AdminRolePermissionModel(id=f"arp-super-{code.replace('.', '-')}", role_id=role.id, permission_id=pid))
-            if code.startswith("song_emotions."):
+            if code.startswith(("song_emotions.", "storyboard_options.")):
                 ass_link = (
                     await session.execute(
                         select(AdminRolePermissionModel).where(

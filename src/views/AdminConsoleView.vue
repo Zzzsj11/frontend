@@ -12,7 +12,7 @@ import AdminTopBar from '../components/AdminTopBar.vue'
 import BaseModal from '../components/base/BaseModal.vue'
 import { perfSnapshot } from '../perf'
 import { useAuthStore } from '../stores/auth'
-import type { AdminNavGroup } from '../types'
+import type { AdminNavGroup, AdminNavItem } from '../types'
 
 /** 管理后台列表行：各 tab 返回列不一致，未建模的列由 columns 动态渲染 */
 interface AdminRow {
@@ -168,12 +168,17 @@ const ALL_NAV_GROUPS: AdminNavGroup[] = [
 ]
 const NAV_GROUPS = computed<AdminNavGroup[]>(() => {
   if (auth.user?.isSuperAdmin) return ALL_NAV_GROUPS
+  const contentItems: AdminNavItem[] = []
+  if (auth.user?.permissions?.includes('storyboard_options.read'))
+    contentItems.push({ key: 'categories', label: '通用分类' })
   if (auth.user?.permissions?.includes('song_emotions.read'))
+    contentItems.push({ key: 'song-emotions', label: '歌曲情感库' })
+  if (contentItems.length)
     return [
       {
         key: 'content',
         label: '内容配置',
-        items: [{ key: 'song-emotions', label: '歌曲情感库' }],
+        items: contentItems,
       },
     ]
   return []
@@ -897,7 +902,7 @@ onMounted(load)
                       >后台角色
                       <select :value="adminRoleCode(row)" @change="saveAdminRole(row, $event)">
                         <option value="none">普通用户</option>
-                        <option value="ass_admin">ASS 管理员</option>
+                        <option value="ass_admin">内容配置管理员</option>
                         <option value="super_admin">超级管理员</option>
                       </select>
                     </label>

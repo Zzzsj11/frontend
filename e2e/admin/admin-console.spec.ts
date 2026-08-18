@@ -47,7 +47,7 @@ test('administrator can inspect dashboard, models, errors and audit logs', async
   await expect(page.getByText('月流量仅统计公网出站 · 自然月 300 GiB')).toBeVisible()
 })
 
-test('ASS administrator only sees and operates the song emotion library', async ({
+test('content administrator only sees and operates content configuration', async ({
   page,
   request,
 }) => {
@@ -77,6 +77,7 @@ test('ASS administrator only sees and operates the song emotion library', async 
     await page.getByRole('menuitem', { name: '管理后台' }).click()
     await expect(page).toHaveURL(/\/admin/)
     await expect(page.getByRole('heading', { name: '歌曲情感库' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '通用分类' })).toBeVisible()
     await expect(page.getByRole('button', { name: '歌曲情感库' })).toBeVisible()
     await expect(page.getByRole('button', { name: '仪表盘' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: '用户' })).toHaveCount(0)

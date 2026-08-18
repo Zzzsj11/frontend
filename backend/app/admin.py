@@ -44,7 +44,14 @@ from .models import (
 )
 from .prompts import DEFAULT_PROMPTS, invalidate, render_lenient, template_variables
 from .providers import ProviderError, list_video_models, query_provider_task, resume_generation, store_provider_result
-from .rbac import SONG_EMOTIONS_MANAGE, SONG_EMOTIONS_READ, require_permission, require_super_admin
+from .rbac import (
+    SONG_EMOTIONS_MANAGE,
+    SONG_EMOTIONS_READ,
+    STORYBOARD_OPTIONS_MANAGE,
+    STORYBOARD_OPTIONS_READ,
+    require_permission,
+    require_super_admin,
+)
 from .runninghub import (
     ASPECT_RATIOS,
     DEFAULT_FIRST_FRAME_MEGAPIXELS,
@@ -1096,7 +1103,7 @@ def _sibling_where(kind: str, parent_id: str | None):
 @router.get("/storyboard-options")
 async def storyboard_options_list(kind: str, user: CurrentUser, db: AsyncSession = Db):
     """平铺列表（未删除），前端按 parentId 组树；管理端需要看到完整结构而非仅树。"""
-    require_admin(user)
+    require_permission(user, STORYBOARD_OPTIONS_READ)
     if kind not in OPTION_KINDS:
         raise HTTPException(422, "未知的选项类型")
     rows = (
@@ -1115,7 +1122,7 @@ async def storyboard_options_list(kind: str, user: CurrentUser, db: AsyncSession
 
 @router.post("/storyboard-options", status_code=201)
 async def storyboard_option_create(payload: StoryboardOptionIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
-    require_admin(user)
+    require_permission(user, STORYBOARD_OPTIONS_MANAGE)
     if payload.kind not in OPTION_KINDS:
         raise HTTPException(422, "未知的选项类型")
     name = _validate_option_name(payload.name)
@@ -1147,7 +1154,7 @@ async def storyboard_option_create(payload: StoryboardOptionIn, request: Request
 
 @router.patch("/storyboard-options/{item_id}")
 async def storyboard_option_update(item_id: str, payload: StoryboardOptionPatch, request: Request, user: CurrentUser, db: AsyncSession = Db):
-    require_admin(user)
+    require_permission(user, STORYBOARD_OPTIONS_MANAGE)
     item = await db.get(StoryboardOptionItemModel, item_id)
     if not item or item.deleted_at is not None:
         raise HTTPException(404, "选项不存在")
@@ -1176,7 +1183,7 @@ async def storyboard_option_update(item_id: str, payload: StoryboardOptionPatch,
 @router.delete("/storyboard-options/{item_id}")
 async def storyboard_option_delete(item_id: str, request: Request, user: CurrentUser, db: AsyncSession = Db):
     """软删除；genre 级联软删除子孙，避免树断链孤儿。历史项目 config 存中文名不受影响。"""
-    require_admin(user)
+    require_permission(user, STORYBOARD_OPTIONS_MANAGE)
     item = await db.get(StoryboardOptionItemModel, item_id)
     if not item or item.deleted_at is not None:
         raise HTTPException(404, "选项不存在")

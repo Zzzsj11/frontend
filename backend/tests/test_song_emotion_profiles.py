@@ -76,12 +76,18 @@ def test_ass_admin_can_only_manage_song_emotions(client):
     assert assigned.json()["adminRoleCodes"] == ["ass_admin"]
     login = client.post("/api/auth/login", json={"username": "ass-only-admin", "password": "secure-pass-123"}).json()
     assert login["user"]["isSuperAdmin"] is False
-    assert set(login["user"]["permissions"]) == {"song_emotions.read", "song_emotions.manage"}
+    assert set(login["user"]["permissions"]) == {
+        "song_emotions.read",
+        "song_emotions.manage",
+        "storyboard_options.read",
+        "storyboard_options.manage",
+    }
     headers = bearer(login["accessToken"])
     assert client.get("/api/admin/song-emotion-profiles", headers=headers).status_code == 200
     assert client.post("/api/admin/song-emotion-profiles", json=sample("98765434"), headers=headers).status_code == 201
     assert client.patch("/api/admin/song-emotion-profiles/98765434", json={"song_name": "已修改"}, headers=headers).status_code == 200
     assert client.delete("/api/admin/song-emotion-profiles/98765434", headers=headers).status_code == 200
+    assert client.get("/api/admin/storyboard-options", params={"kind": "genre"}, headers=headers).status_code == 200
     assert client.get("/api/admin/dashboard", headers=headers).status_code == 403
     assert client.get("/api/admin/users", headers=headers).status_code == 403
     restored = client.post("/api/auth/login", json={"username": "admin", "password": "123456"})

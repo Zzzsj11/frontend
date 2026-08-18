@@ -10,6 +10,8 @@ SUPER_ADMIN_ROLE = "super_admin"
 ASS_ADMIN_ROLE = "ass_admin"
 SONG_EMOTIONS_READ = "song_emotions.read"
 SONG_EMOTIONS_MANAGE = "song_emotions.manage"
+STORYBOARD_OPTIONS_READ = "storyboard_options.read"
+STORYBOARD_OPTIONS_MANAGE = "storyboard_options.manage"
 
 
 async def load_admin_access(db: AsyncSession, user: UserModel) -> tuple[list[str], list[str]]:
