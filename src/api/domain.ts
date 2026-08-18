@@ -473,6 +473,8 @@ export async function generateShotVideo(
       ratio: '16:9',
       imageModel: DEFAULT_IMAGE_MODEL,
       videoModel: DEFAULT_VIDEO_MODEL,
+      generateAudio: false,
+      watermark: false,
     },
     projectTaskId,
     storyboardLineId,

@@ -36,6 +36,10 @@ class UserUpdate(BaseModel):
     daily_video_limit: int | None = Field(default=None, ge=1, le=1_000_000)
 
 
+class UserAdminRoleUpdate(BaseModel):
+    admin_role_code: Literal["none", "ass_admin", "super_admin"]
+
+
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     artist: str | None = Field(default=None, max_length=255)
@@ -201,6 +205,10 @@ class VideoGenerationCreate(BaseModel):
     model: str | None = Field(default=None, max_length=160)
     project_task_id: str | None = None
     storyboard_line_id: str | None = None
+
+
+class GenerationStatusBatchRequest(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
 
 
 class RemoteImportCreate(BaseModel):

@@ -208,6 +208,9 @@ export interface AuthUser {
   displayName: string
   role: 'admin' | 'user'
   mustChangePassword: boolean
+  adminRoleCodes?: string[]
+  permissions?: string[]
+  isSuperAdmin?: boolean
 }
 export async function loginRequest(username: string, password: string) {
   let response: Response

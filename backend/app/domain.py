@@ -24,6 +24,8 @@ from .database import database_session, session_factory
 from .jobs import Job, jobs
 from .media_constraints import normalize_video_duration
 from .models import (
+    AdminOperationLogModel,
+    AdminRoleModel,
     AiModelModel,
     ApiErrorLogModel,
     ChatMessageModel,
@@ -41,10 +43,12 @@ from .models import (
     StoryboardLineCastModel,
     StoryboardLineModel,
     TokenUsageModel,
+    UserAdminRoleModel,
     UserModel,
     VoiceAssetModel,
     utcnow,
 )
+from .rbac import attach_admin_access
 from .schemas import (
     CastUpdate,
     DigitalHumanCreate,
@@ -59,6 +63,7 @@ from .schemas import (
     StyleCreate,
     TaskCreate,
     TaskUpdate,
+    UserAdminRoleUpdate,
     UserCreate,
     UserUpdate,
 )
@@ -137,8 +142,9 @@ def uid(prefix: str) -> str:
 
 
 def require_admin(user) -> None:
-    if user.role != "admin":
-        raise HTTPException(403, "需要管理员权限")
+    from .rbac import require_super_admin
+
+    require_super_admin(user)
 
 
 @router.get("/admin/users")
@@ -147,7 +153,11 @@ async def list_users(user: CurrentUser, limit: int = 100, db: AsyncSession = Db)
     require_admin(user)
     limit = min(500, max(1, limit))
     items = (await db.execute(select(UserModel).where(UserModel.deleted_at.is_(None)).order_by(UserModel.created_at).limit(limit))).scalars().all()
-    return [{**user_public(item), "status": item.status, "createdAt": item.created_at.isoformat()} for item in items]
+    result = []
+    for item in items:
+        await attach_admin_access(db, item)
+        result.append({**user_public(item), "status": item.status, "createdAt": item.created_at.isoformat()})
+    return result
 
 
 @router.post("/admin/users", status_code=201)
@@ -182,6 +192,82 @@ async def update_user(user_id: str, payload: UserUpdate, user: CurrentUser, db: 
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(item, key, value)
     await db.commit()
+    return user_public(item)
+
+
+@router.put("/admin/users/{user_id}/admin-role")
+async def update_user_admin_role(
+    user_id: str,
+    payload: UserAdminRoleUpdate,
+    request: Request,
+    user: CurrentUser,
+    db: AsyncSession = Db,
+) -> dict:
+    require_admin(user)
+    item = await db.get(UserModel, user_id)
+    if not item or item.deleted_at is not None:
+        raise HTTPException(404, "用户不存在")
+    if user_id == user.id and payload.admin_role_code != "super_admin":
+        raise HTTPException(422, "不能移除当前超级管理员自己的权限")
+    before_roles = list(
+        (
+            await db.execute(
+                select(AdminRoleModel.code)
+                .join(UserAdminRoleModel, UserAdminRoleModel.role_id == AdminRoleModel.id)
+                .where(UserAdminRoleModel.user_id == user_id, UserAdminRoleModel.deleted_at.is_(None))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    now = utcnow()
+    links = list(
+        (
+            await db.execute(
+                select(UserAdminRoleModel).where(
+                    UserAdminRoleModel.user_id == user_id,
+                    UserAdminRoleModel.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for link in links:
+        link.deleted_at = now
+    if payload.admin_role_code == "none":
+        item.role = "user"
+    else:
+        role = (
+            await db.execute(
+                select(AdminRoleModel).where(
+                    AdminRoleModel.code == payload.admin_role_code,
+                    AdminRoleModel.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if not role:
+            raise HTTPException(500, "后台角色尚未初始化")
+        item.role = "admin"
+        reusable = next((link for link in links if link.role_id == role.id), None)
+        if reusable:
+            reusable.deleted_at = None
+        else:
+            db.add(UserAdminRoleModel(id=uid("uar"), user_id=user_id, role_id=role.id))
+    db.add(
+        AdminOperationLogModel(
+            id=uid("audit"),
+            admin_user_id=user.id,
+            action="user.admin_role.update",
+            target_type="user",
+            target_id=user_id,
+            before_data={"roles": before_roles},
+            after_data={"role": payload.admin_role_code},
+            client_ip=request.client.host if request.client else None,
+        )
+    )
+    await db.commit()
+    await attach_admin_access(db, item)
     return user_public(item)
 
 

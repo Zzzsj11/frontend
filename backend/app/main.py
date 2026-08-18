@@ -47,7 +47,17 @@ from .prompts import get_prompt
 from .providers import generate_image, generate_video, resume_generation
 from .redis_store import close_redis, redis_ok
 from .request_logging import api_request_log_middleware
-from .schemas import ChatMessageCreate, ChatSessionCreate, ImageGenerationCreate, LoginCreate, PasswordChange, PortraitPromptParams, RemoteImportCreate, VideoGenerationCreate
+from .schemas import (
+    ChatMessageCreate,
+    ChatSessionCreate,
+    GenerationStatusBatchRequest,
+    ImageGenerationCreate,
+    LoginCreate,
+    PasswordChange,
+    PortraitPromptParams,
+    RemoteImportCreate,
+    VideoGenerationCreate,
+)
 from .seed import recover_stale_storyboard_generation, seed_system_data
 from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
 from .usage_quota import consume_daily_quota
@@ -436,7 +446,7 @@ async def create_image_generation(payload: ImageGenerationCreate, user: CurrentU
         raise HTTPException(422, "prompt 与 portrait 至少提供其一")
     await require_active_model(db, payload.model or settings.image_model, "image")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
-    await _check_concurrency(db, user.id, "image", 20)
+    await _check_concurrency(db, user.id, "image", settings.image_generation_concurrency)
     await consume_daily_quota(db, user_id=user.id, category="image")
     job = await jobs.create(
         "image",
@@ -480,7 +490,7 @@ async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str]) ->
 async def create_video_generation(payload: VideoGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
     await require_active_model(db, payload.model or settings.video_model, "video")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
-    await _check_concurrency(db, user.id, "video", 20)
+    await _check_concurrency(db, user.id, "video", settings.video_generation_concurrency)
     await consume_daily_quota(db, user_id=user.id, category="video")
     # 数字人头像优先用平台虚拟资产（asset://），其余 URL（如场景图）原样保留
     payload.image_urls = await _resolve_asset_avatar_urls(db, payload.image_urls)
@@ -502,6 +512,36 @@ async def get_generation(job_id: str, user: CurrentUser) -> dict:
     if not job:
         raise HTTPException(404, "生成任务不存在")
     return job.public()
+
+
+@app.post("/api/generations/status")
+async def get_generation_status_batch(payload: GenerationStatusBatchRequest, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> list[dict]:
+    """单次读取一组媒体任务状态，避免大批量生成时逐任务轮询压垮 API。"""
+    job_ids = list(dict.fromkeys(payload.ids))
+    rows = (
+        (
+            await db.execute(
+                select(GenerationJobModel).where(
+                    GenerationJobModel.id.in_(job_ids),
+                    GenerationJobModel.user_id == user.id,
+                    GenerationJobModel.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        {
+            "id": row.id,
+            "kind": row.kind,
+            "status": row.status,
+            "progress": row.progress,
+            "result": row.result,
+            "error": row.error,
+        }
+        for row in rows
+    ]
 
 
 @app.get("/api/tasks/{task_id}/generations/active")

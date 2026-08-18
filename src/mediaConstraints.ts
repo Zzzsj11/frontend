@@ -19,4 +19,6 @@ export const normalizeShotOptions = (options: ShotGenOptions): ShotGenOptions =>
   duration: normalizeVideoDuration(options.duration),
   imageModel: options.imageModel || DEFAULT_IMAGE_MODEL,
   videoModel: options.videoModel || DEFAULT_VIDEO_MODEL,
+  generateAudio: options.generateAudio ?? false,
+  watermark: options.watermark ?? false,
 })

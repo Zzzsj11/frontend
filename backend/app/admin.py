@@ -36,6 +36,7 @@ from .models import (
     PromptTemplateModel,
     PromptVersionModel,
     ServerMaintenanceRunModel,
+    SongEmotionProfileModel,
     StoryboardOptionItemModel,
     TokenUsageModel,
     UserModel,
@@ -43,6 +44,7 @@ from .models import (
 )
 from .prompts import DEFAULT_PROMPTS, invalidate, render_lenient, template_variables
 from .providers import ProviderError, list_video_models, query_provider_task, resume_generation, store_provider_result
+from .rbac import SONG_EMOTIONS_MANAGE, SONG_EMOTIONS_READ, require_permission, require_super_admin
 from .runninghub import (
     ASPECT_RATIOS,
     DEFAULT_FIRST_FRAME_MEGAPIXELS,
@@ -65,15 +67,14 @@ from .runninghub import submit_text_task as rh_submit_text_task
 from .runninghub import upload_media as rh_upload_media
 from .server_monitoring import monitoring_summary
 from .storage import get_storage, import_remote, safe_key
-from .storyboard_options import OPTION_KINDS
+from .storyboard_options import OPTION_KINDS, load_general_storyboard_options
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 Db = Depends(database_session)
 
 
 def require_admin(user):
-    if user.role != "admin":
-        raise HTTPException(403, "需要管理员权限")
+    require_super_admin(user)
 
 
 def iso(value):
@@ -862,6 +863,185 @@ async def aigc_provider_models(user: CurrentUser):
         "count": len(models),
         "models": models,
     }
+
+
+# ---------- ASS 歌曲情感库 ----------
+
+
+class SongEmotionProfileIn(BaseModel):
+    song_code: str = Field(min_length=5, max_length=80, pattern=r"^\d+$")
+    song_name: str = Field(default="", max_length=255)
+    artists: str = Field(default="", max_length=2000)
+    primary_category: str | None = Field(default=None, max_length=255)
+    secondary_category: str | None = Field(default=None, max_length=255)
+    tertiary_category: str | None = Field(default=None, max_length=255)
+    material_category: str = Field(default="", max_length=2000)
+    seasons: str = Field(default="", max_length=120)
+    atmosphere: str = Field(default="", max_length=8000)
+
+
+class SongEmotionProfilePatch(BaseModel):
+    song_name: str | None = Field(default=None, max_length=255)
+    artists: str | None = Field(default=None, max_length=2000)
+    primary_category: str | None = Field(default=None, max_length=255)
+    secondary_category: str | None = Field(default=None, max_length=255)
+    tertiary_category: str | None = Field(default=None, max_length=255)
+    material_category: str | None = Field(default=None, max_length=2000)
+    seasons: str | None = Field(default=None, max_length=120)
+    atmosphere: str | None = Field(default=None, max_length=8000)
+
+
+def _clean_optional(value: str | None) -> str | None:
+    return (value.strip() or None) if value is not None else None
+
+
+def _song_payload(item: SongEmotionProfileModel) -> dict:
+    return {
+        "歌名": item.song_name,
+        "歌星": item.artists,
+        "一级分类": item.primary_category,
+        "二级分类": item.secondary_category,
+        "三级分类": item.tertiary_category,
+        "素材分类": item.material_category,
+        "季节": item.seasons,
+        "氛围基调": item.atmosphere,
+    }
+
+
+def _song_summary(item: SongEmotionProfileModel) -> dict:
+    return {
+        "songCode": item.song_code,
+        "songName": item.song_name,
+        "artists": item.artists,
+        "primaryCategory": item.primary_category,
+        "secondaryCategory": item.secondary_category,
+        "tertiaryCategory": item.tertiary_category,
+        "materialCategory": item.material_category,
+        "seasons": item.seasons,
+        "atmosphere": item.atmosphere,
+        "createdAt": iso(item.created_at),
+        "updatedAt": iso(item.updated_at),
+    }
+
+
+def _apply_song_values(item: SongEmotionProfileModel, values: dict) -> None:
+    for key, value in values.items():
+        if key in {"primary_category", "secondary_category", "tertiary_category"}:
+            setattr(item, key, _clean_optional(value))
+        elif isinstance(value, str):
+            setattr(item, key, value.strip())
+    item.source_payload = _song_payload(item)
+
+
+async def _validate_song_taxonomy(db: AsyncSession, item: SongEmotionProfileModel) -> None:
+    options = await load_general_storyboard_options(db)
+    primary = next((x for x in options["genres"] if x["value"] == item.primary_category), None)
+    if not primary:
+        raise HTTPException(422, "请选择有效的一级分类")
+    secondary = None
+    if item.secondary_category:
+        secondary = next((x for x in primary.get("children", []) if x["value"] == item.secondary_category), None)
+        if not secondary:
+            raise HTTPException(422, "二级分类不属于所选一级分类")
+    if item.tertiary_category:
+        tertiary = next((x for x in (secondary or {}).get("children", []) if x["value"] == item.tertiary_category), None)
+        if not tertiary:
+            raise HTTPException(422, "三级分类不属于所选二级分类")
+    seasons = [value for value in item.seasons.split("/") if value]
+    if not seasons or any(value not in options["seasons"] for value in seasons) or ("通用" in seasons and len(seasons) > 1):
+        raise HTTPException(422, "请选择有效的适用季节")
+    item.material_category = "-".join(value for value in (item.primary_category, item.secondary_category, item.tertiary_category) if value)
+    item.source_payload = _song_payload(item)
+
+
+@router.get("/song-emotion-profiles")
+async def song_emotion_profiles_list(
+    user: CurrentUser,
+    db: AsyncSession = Db,
+    q: str = "",
+    primary_category: str = "",
+    secondary_category: str = "",
+    tertiary_category: str = "",
+    limit: int = 50,
+    offset: int = 0,
+):
+    require_permission(user, SONG_EMOTIONS_READ)
+    limit = min(max(limit, 1), 200)
+    offset = max(offset, 0)
+    filters = [SongEmotionProfileModel.deleted_at.is_(None)]
+    if q.strip():
+        pattern = f"%{q.strip()}%"
+        filters.append(
+            or_(
+                SongEmotionProfileModel.song_code.ilike(pattern),
+                SongEmotionProfileModel.song_name.ilike(pattern),
+                SongEmotionProfileModel.artists.ilike(pattern),
+            )
+        )
+    for column, value in (
+        (SongEmotionProfileModel.primary_category, primary_category),
+        (SongEmotionProfileModel.secondary_category, secondary_category),
+        (SongEmotionProfileModel.tertiary_category, tertiary_category),
+    ):
+        if value.strip():
+            filters.append(column == value.strip())
+    total = int((await db.execute(select(func.count()).select_from(SongEmotionProfileModel).where(*filters))).scalar_one())
+    rows = list((await db.execute(select(SongEmotionProfileModel).where(*filters).order_by(SongEmotionProfileModel.song_code.desc()).limit(limit).offset(offset))).scalars().all())
+    return {"total": total, "items": [_song_summary(item) for item in rows]}
+
+
+@router.get("/song-emotion-profiles/{song_code}")
+async def song_emotion_profile_detail(song_code: str, user: CurrentUser, db: AsyncSession = Db):
+    require_permission(user, SONG_EMOTIONS_READ)
+    item = await db.get(SongEmotionProfileModel, song_code)
+    if not item or item.deleted_at is not None:
+        raise HTTPException(404, "歌曲情感档案不存在")
+    return _song_summary(item)
+
+
+@router.post("/song-emotion-profiles", status_code=201)
+async def song_emotion_profile_create(payload: SongEmotionProfileIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    require_permission(user, SONG_EMOTIONS_MANAGE)
+    code = payload.song_code.strip()
+    existing = await db.get(SongEmotionProfileModel, code)
+    if existing:
+        raise HTTPException(409, "歌曲编号已存在（包括已删除记录）")
+    item = SongEmotionProfileModel(song_code=code)
+    _apply_song_values(item, payload.model_dump(exclude={"song_code"}))
+    await _validate_song_taxonomy(db, item)
+    db.add(item)
+    await db.flush()
+    await audit(db, request, user, "song_emotion_profile.create", "song_emotion_profile", code, None, _song_summary(item))
+    await db.commit()
+    return _song_summary(item)
+
+
+@router.patch("/song-emotion-profiles/{song_code}")
+async def song_emotion_profile_update(song_code: str, payload: SongEmotionProfilePatch, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    require_permission(user, SONG_EMOTIONS_MANAGE)
+    item = await db.get(SongEmotionProfileModel, song_code)
+    if not item or item.deleted_at is not None:
+        raise HTTPException(404, "歌曲情感档案不存在")
+    before = _song_summary(item)
+    _apply_song_values(item, payload.model_dump(exclude_unset=True))
+    await _validate_song_taxonomy(db, item)
+    await db.flush()
+    await audit(db, request, user, "song_emotion_profile.update", "song_emotion_profile", song_code, before, _song_summary(item))
+    await db.commit()
+    return _song_summary(item)
+
+
+@router.delete("/song-emotion-profiles/{song_code}")
+async def song_emotion_profile_delete(song_code: str, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    require_permission(user, SONG_EMOTIONS_MANAGE)
+    item = await db.get(SongEmotionProfileModel, song_code)
+    if not item or item.deleted_at is not None:
+        raise HTTPException(404, "歌曲情感档案不存在")
+    before = _song_summary(item)
+    item.deleted_at = utcnow()
+    await audit(db, request, user, "song_emotion_profile.delete", "song_emotion_profile", song_code, before, None)
+    await db.commit()
+    return {"ok": True}
 
 
 # ---------- 通用分镜选项（曲风分类树 / 季节 / 年龄段 / 画面风格） ----------

@@ -6,9 +6,10 @@ import AppIcon from './AppIcon.vue'
 import BaseModal from './base/BaseModal.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
 import ImageZoom from './ImageZoom.vue'
+import ShotGenerationOptionsPopover from './ShotGenerationOptionsPopover.vue'
 import { confirmDialog } from '../composables/useConfirmDialog'
-import { normalizeShotOptions, VIDEO_DURATION_CHOICES } from '../mediaConstraints'
-import { IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, loadGenerationModels } from '../generationModels'
+import { normalizeShotOptions } from '../mediaConstraints'
+import { loadGenerationModels } from '../generationModels'
 
 const store = useProjectStore()
 void loadGenerationModels()
@@ -24,9 +25,6 @@ const activeTab = ref<TabKey | null>(null)
 
 // 分镜视频生成参数草稿（清晰度 / 时长 / 画幅 / 模型），重新生成分镜时生效
 const optionsDraft = ref<ShotGenOptions>({ ...DEFAULT_SHOT_OPTIONS })
-const resolutionChoices: ShotGenOptions['resolution'][] = ['480p', '720p', '1080p']
-const durationChoices = VIDEO_DURATION_CHOICES
-const ratioChoices: ShotGenOptions['ratio'][] = ['16:9', '9:16', '4:3', '1:1']
 
 // 歌词非中文（不含汉字）且存在译文时，在歌词下方展示中文翻译
 const lyricsTranslation = computed(() => {
@@ -35,6 +33,15 @@ const lyricsTranslation = computed(() => {
   return zh
 })
 const isGeneral = computed(() => store.editingLine?.source === 'general')
+const nonLyricSegmentLabel = computed(() => {
+  const labels: Partial<Record<NonNullable<ShotGenOptions['segmentType']>, string>> = {
+    intro: '前奏',
+    interlude: '间奏',
+    outro: '尾奏',
+  }
+  const segmentType = store.editingLine?.shotOptions?.segmentType
+  return segmentType ? labels[segmentType] : undefined
+})
 
 // 人物预览：当前分镜出演角色（空 = 空镜头）
 const castOfLine = computed(() => {
@@ -158,11 +165,17 @@ const cancel = () => store.closeEditor()
 </script>
 
 <template>
-  <BaseModal :open="!!store.editingLine" width="620px" aria-label="编辑视频内容" @close="cancel">
+  <BaseModal
+    :open="!!store.editingLine"
+    width="620px"
+    mask-variant="emphasized"
+    aria-label="编辑视频内容"
+    @close="cancel"
+  >
     <template #title>编辑视频内容</template>
     <template v-if="store.editingLine">
       <div class="modal-body">
-        <p class="body-tip">点击任一预览下方的标签，展开调整对应的参数与提示词</p>
+        <p class="body-tip">选择人物、视频或场景，调整对应内容</p>
 
         <!-- 三个预览：人物 / 分镜 / 场景 -->
         <div class="preview-cards">
@@ -287,11 +300,16 @@ const cancel = () => store.closeEditor()
         <!-- 分镜调整面板 -->
         <div v-if="activeTab === 'shot'" class="tab-panel">
           <template v-if="!isGeneral">
-            <p class="panel-title">歌词（当前视频）</p>
+            <p class="panel-title">歌词（{{ nonLyricSegmentLabel || '当前视频' }}）</p>
             <input
               v-model="lyricsDraft"
               class="lyrics-input"
-              placeholder="输入这段视频对应的歌词…"
+              :disabled="!!nonLyricSegmentLabel"
+              :placeholder="
+                nonLyricSegmentLabel
+                  ? `${nonLyricSegmentLabel}段无歌词，不支持修改`
+                  : '输入这段视频对应的歌词…'
+              "
             />
             <p v-if="lyricsTranslation" class="lyrics-zh-hint">中文翻译：{{ lyricsTranslation }}</p>
           </template>
@@ -323,45 +341,6 @@ const cancel = () => store.closeEditor()
             </div>
           </template>
 
-          <!-- 生成参数：清晰度 / 时长 / 画幅 / 模型，重新生成分镜时生效 -->
-          <p class="panel-title mt">生成参数</p>
-          <div class="gen-options">
-            <label class="opt-item">
-              <span class="opt-label">清晰度</span>
-              <select v-model="optionsDraft.resolution" class="opt-select">
-                <option v-for="r in resolutionChoices" :key="r" :value="r">{{ r }}</option>
-              </select>
-            </label>
-            <label class="opt-item">
-              <span class="opt-label">时长</span>
-              <select v-model.number="optionsDraft.duration" class="opt-select">
-                <option v-for="d in durationChoices" :key="d" :value="d">{{ d }}s</option>
-              </select>
-            </label>
-            <label class="opt-item">
-              <span class="opt-label">画幅</span>
-              <select v-model="optionsDraft.ratio" class="opt-select">
-                <option v-for="r in ratioChoices" :key="r" :value="r">{{ r }}</option>
-              </select>
-            </label>
-            <label class="opt-item">
-              <span class="opt-label">视频模型</span>
-              <select v-model="optionsDraft.videoModel" class="opt-select" disabled>
-                <option v-for="item in VIDEO_MODEL_OPTIONS" :key="item.value" :value="item.value">
-                  {{ item.label }}
-                </option>
-              </select>
-            </label>
-            <label class="opt-item">
-              <span class="opt-label">图片模型</span>
-              <select v-model="optionsDraft.imageModel" class="opt-select" disabled>
-                <option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">
-                  {{ item.label }}
-                </option>
-              </select>
-            </label>
-          </div>
-
           <p class="panel-title mt">视频提示词</p>
           <div class="prompt-editor">
             <textarea
@@ -377,43 +356,25 @@ const cancel = () => store.closeEditor()
             >
               上次生成失败：{{ store.editingLine.shot.error || '未知原因' }}
             </p>
-            <button
-              class="btn-outline prompt-action"
-              :disabled="store.editingLine.shot.status === 'generating' || !shotPromptDraft.trim()"
-              @click="regenShot"
-            >
-              <span v-if="store.editingLine.shot.status === 'generating'" class="spinner" />
-              <AppIcon v-else name="movie" :size="14" />
-              {{ store.editingLine.shot.assets.length ? '重新生成视频' : '生成视频' }}
-            </button>
+            <div class="prompt-toolbar">
+              <ShotGenerationOptionsPopover v-model="optionsDraft" mode="shot" />
+              <button
+                class="btn-outline prompt-action"
+                :disabled="
+                  store.editingLine.shot.status === 'generating' || !shotPromptDraft.trim()
+                "
+                @click="regenShot"
+              >
+                <span v-if="store.editingLine.shot.status === 'generating'" class="spinner" />
+                <AppIcon v-else name="movie" :size="14" />
+                {{ store.editingLine.shot.assets.length ? '重新生成视频' : '生成视频' }}
+              </button>
+            </div>
           </div>
         </div>
 
         <!-- 场景调整面板 -->
         <div v-if="activeTab === 'scene'" class="tab-panel">
-          <p class="panel-title">生成参数</p>
-          <div class="gen-options scene-gen-options">
-            <label class="opt-item">
-              <span class="opt-label">清晰度</span>
-              <select v-model="optionsDraft.resolution" class="opt-select">
-                <option v-for="r in resolutionChoices" :key="r" :value="r">{{ r }}</option>
-              </select>
-            </label>
-            <label class="opt-item">
-              <span class="opt-label">画幅</span>
-              <select v-model="optionsDraft.ratio" class="opt-select">
-                <option v-for="r in ratioChoices" :key="r" :value="r">{{ r }}</option>
-              </select>
-            </label>
-            <label class="opt-item">
-              <span class="opt-label">图片模型</span>
-              <select v-model="optionsDraft.imageModel" class="opt-select" disabled>
-                <option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">
-                  {{ item.label }}
-                </option>
-              </select>
-            </label>
-          </div>
           <p class="panel-title">场景提示词</p>
           <div class="prompt-editor">
             <textarea
@@ -429,17 +390,20 @@ const cancel = () => store.closeEditor()
             >
               上次生成失败：{{ store.editingLine.scene.error || '未知原因' }}
             </p>
-            <button
-              class="btn-outline prompt-action"
-              :disabled="
-                store.editingLine.scene.status === 'generating' || !scenePromptDraft.trim()
-              "
-              @click="regenScene"
-            >
-              <span v-if="store.editingLine.scene.status === 'generating'" class="spinner" />
-              <AppIcon v-else name="scene" :size="14" />
-              {{ store.editingLine.scene.imageUrl ? '重新生成场景' : '生成场景' }}
-            </button>
+            <div class="prompt-toolbar">
+              <ShotGenerationOptionsPopover v-model="optionsDraft" mode="scene" />
+              <button
+                class="btn-outline prompt-action"
+                :disabled="
+                  store.editingLine.scene.status === 'generating' || !scenePromptDraft.trim()
+                "
+                @click="regenScene"
+              >
+                <span v-if="store.editingLine.scene.status === 'generating'" class="spinner" />
+                <AppIcon v-else name="scene" :size="14" />
+                {{ store.editingLine.scene.imageUrl ? '重新生成场景' : '生成场景' }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -494,11 +458,11 @@ const cancel = () => store.closeEditor()
 
 <style scoped>
 .modal-body {
-  padding: 16px 22px 20px;
+  padding: 12px 22px 16px;
   overflow-y: auto;
 }
 .body-tip {
-  margin: 0 0 14px;
+  margin: 0 0 10px;
   font-size: var(--font-sm);
   color: var(--text-secondary);
 }
@@ -507,7 +471,7 @@ const cancel = () => store.closeEditor()
 .preview-cards {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
+  gap: 10px;
 }
 .pcard {
   border: 1px solid var(--border);
@@ -523,7 +487,7 @@ const cancel = () => store.closeEditor()
 }
 .pcard-media {
   position: relative;
-  aspect-ratio: 4 / 3;
+  height: 96px;
   background: var(--surface-dark);
   display: flex;
   align-items: center;
@@ -615,7 +579,7 @@ const cancel = () => store.closeEditor()
   color: var(--text);
   font-size: 13px;
   font-weight: 600;
-  padding: 8px 10px;
+  padding: 6px 10px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -651,10 +615,10 @@ const cancel = () => store.closeEditor()
 
 /* 展开的调整面板 */
 .tab-panel {
-  margin-top: 14px;
+  margin-top: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 14px 16px;
+  padding: 12px 14px;
   background: var(--surface-muted);
   animation: panelIn 0.18s ease;
 }
@@ -675,7 +639,7 @@ const cancel = () => store.closeEditor()
   color: var(--text);
 }
 .panel-title.mt {
-  margin-top: 14px;
+  margin-top: 10px;
 }
 .panel-head {
   display: flex;
@@ -751,7 +715,7 @@ const cancel = () => store.closeEditor()
 }
 .asset-thumb {
   position: relative;
-  width: 96px;
+  width: 84px;
   aspect-ratio: 16 / 9;
   border-radius: var(--radius-sm);
   border: 2px solid transparent;
@@ -817,6 +781,11 @@ const cancel = () => store.closeEditor()
   border-color: var(--primary);
   box-shadow: 0 0 0 2px rgba(255, 90, 44, 0.12);
 }
+.lyrics-input:disabled {
+  cursor: not-allowed;
+  background: var(--bg);
+  color: var(--text-secondary);
+}
 .lyrics-zh-hint {
   margin: 6px 2px 0;
   font-size: var(--font-sm);
@@ -833,10 +802,17 @@ const cancel = () => store.closeEditor()
   border: 1px solid var(--border-dark);
   border-radius: var(--radius-sm);
   background: #fff;
-  overflow: hidden;
+  overflow: visible;
   transition:
     border-color 0.15s,
     box-shadow 0.15s;
+}
+.prompt-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 10px 10px;
 }
 .prompt-editor:focus-within {
   border-color: var(--primary);
@@ -852,50 +828,15 @@ const cancel = () => store.closeEditor()
   box-shadow: none;
 }
 .prompt-action {
-  align-self: flex-end;
   flex-shrink: 0;
-  margin: 0 12px 12px;
+  margin: 0;
   padding: 6px 12px;
   background: #fff;
   box-shadow: 0 2px 7px rgba(0, 0, 0, 0.06);
 }
 /* 分镜提示词框加大，方便编写较长的镜头描述 */
 .prompt-input.prompt-shot {
-  min-height: 132px;
-}
-
-/* 生成参数选择（清晰度 / 时长 / 画幅 / 模型） */
-.gen-options {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-}
-.opt-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.opt-label {
-  font-size: var(--font-sm);
-  color: var(--text-secondary);
-}
-.opt-select {
-  border: 1px solid var(--border-dark);
-  border-radius: var(--radius-sm);
-  background: #fff;
-  color: var(--text);
-  font-size: 13px;
-  font-family: inherit;
-  padding: 5px 8px;
-  cursor: pointer;
-  outline: none;
-  transition: border-color 0.15s;
-}
-.opt-select:hover,
-.opt-select:focus {
-  border-color: var(--primary);
+  min-height: 168px;
 }
 
 /* 底部 */
@@ -905,9 +846,28 @@ const cancel = () => store.closeEditor()
   background: #fff;
   color: var(--text);
   font-size: var(--font-md);
-  padding: 9px 24px;
+  padding: 7px 20px;
   cursor: pointer;
   transition: border-color 0.15s;
+}
+
+@media (max-width: 640px) {
+  .modal-body {
+    padding-inline: 14px;
+  }
+  .preview-cards {
+    gap: 6px;
+  }
+  .pcard-media {
+    height: 76px;
+  }
+  .prompt-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .prompt-action {
+    align-self: flex-end;
+  }
 }
 .btn-cancel:hover {
   border-color: var(--text-secondary);

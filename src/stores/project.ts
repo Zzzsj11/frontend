@@ -40,7 +40,7 @@ const sidebarKeys = (userId: string) => ({
 /** 「批量生成视频」进行中标记持久化 key（按用户+任务隔离）：刷新/切走子任务中断后，回到该任务时续跑 */
 const batchShotKey = (userId: string, taskId: string) => `mv_batch_shot_${userId}_${taskId}`
 /** 与后端单用户视频生成上限一致，避免第 21 个请求被 429 拒绝。 */
-const BATCH_SHOT_CONCURRENCY = 20
+const BATCH_SHOT_CONCURRENCY = 200
 
 /** 无配音时的占位时长（秒） */
 export const DEFAULT_CLIP_DURATION = 5
@@ -52,6 +52,8 @@ export const DEFAULT_SHOT_OPTIONS: ShotGenOptions = {
   ratio: '16:9',
   imageModel: DEFAULT_IMAGE_MODEL,
   videoModel: DEFAULT_VIDEO_MODEL,
+  generateAudio: false,
+  watermark: false,
 }
 
 let rafId = 0
@@ -1789,7 +1791,7 @@ export const useProjectStore = defineStore('project', {
       }
     },
 
-    /** 批量生成视频片段：提示词就绪且视频「未生成/失败」的行最多 20 路并发（与后端单用户上限一致）；
+    /** 批量生成视频片段：提示词就绪且视频「未生成/失败」的行最多 200 路并发（与后端单用户上限一致）；
      *  单行失败不中断后续（失败原因入行内状态，429 单账号上限由后端兜底并统一弹窗）；
      *  「批量进行中」标记按任务持久化：刷新/切换子任务中断后，回到该任务自动续跑剩余行 */
     async generateAllShots() {

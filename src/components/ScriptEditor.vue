@@ -141,7 +141,7 @@ const batchGeneratableCount = computed(
         <button
           class="btn-outline"
           :disabled="!batchGeneratableCount || store.batchShooting || store.songSwitching"
-          title="批量生成全部「提示词就绪但视频未生成/失败」分镜的视频片段（最多同时生成 20 个）"
+          title="批量生成全部「提示词就绪但视频未生成/失败」分镜的视频片段（最多同时生成 200 个）"
           @click="store.generateAllShots()"
         >
           <span v-if="store.batchShooting" class="spinner" />

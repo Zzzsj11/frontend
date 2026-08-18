@@ -10,6 +10,9 @@ const menu = ref<HTMLElement | null>(null)
 const userName = computed(() => auth.user?.displayName || auth.user?.username || '用户')
 const userInitial = computed(() => userName.value.trim().charAt(0).toUpperCase() || 'U')
 const balanceText = computed(() => auth.balance?.balanceDisplay || '--')
+const hasAdminAccess = computed(
+  () => auth.user?.isSuperAdmin || Boolean(auth.user?.permissions?.length),
+)
 const keyText = computed(() => {
   const key = auth.balance?.key
   if (!key) return ''
@@ -86,11 +89,7 @@ onBeforeUnmount(() => {
             <strong>{{ userName }}</strong
             ><span>@{{ auth.user?.username }}</span>
           </div>
-          <RouterLink
-            v-if="auth.user?.role === 'admin'"
-            role="menuitem"
-            to="/admin"
-            @click="menuOpen = false"
+          <RouterLink v-if="hasAdminAccess" role="menuitem" to="/admin" @click="menuOpen = false"
             >管理后台</RouterLink
           >
           <RouterLink role="menuitem" to="/account/password" @click="menuOpen = false"

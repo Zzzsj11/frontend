@@ -10,6 +10,56 @@ import pytest
 from conftest import TEST_DB
 
 
+def test_job_manager_keeps_excess_provider_calls_queued(monkeypatch) -> None:
+    from app.jobs import Job, JobManager
+
+    async def scenario() -> None:
+        manager = JobManager({"video": asyncio.Semaphore(2)})
+        persisted: list[tuple[str, str]] = []
+        releases = [asyncio.Event() for _ in range(3)]
+        started: list[str] = []
+
+        async def fake_persist(job: Job) -> None:
+            persisted.append((job.id, job.status))
+
+        async def fake_persist_asset(_job: Job) -> None:
+            return None
+
+        monkeypatch.setattr(manager, "_persist", fake_persist)
+        monkeypatch.setattr(manager, "_persist_asset", fake_persist_asset)
+
+        jobs = [Job(id=f"queued-{index}", kind="video") for index in range(3)]
+
+        def runner(index: int):
+            async def run(job: Job) -> dict:
+                started.append(job.id)
+                await releases[index].wait()
+                return {"videoUrl": f"/{job.id}.mp4"}
+
+            return run
+
+        tasks = [asyncio.create_task(manager._run(job, runner(index))) for index, job in enumerate(jobs)]
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        assert started == ["queued-0", "queued-1"]
+        assert [job.status for job in jobs] == ["running", "running", "queued"]
+
+        releases[0].set()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert started == ["queued-0", "queued-1", "queued-2"]
+        assert jobs[2].status == "running"
+
+        releases[1].set()
+        releases[2].set()
+        await asyncio.gather(*tasks)
+        assert all(job.status == "succeeded" for job in jobs)
+        assert ("queued-2", "queued") not in persisted
+
+    asyncio.run(scenario())
+
+
 def _insert_job(
     job_id: str,
     *,
@@ -96,6 +146,28 @@ async def test_poll_tolerates_transient_errors_until_limit() -> None:
     failing = _FakeClient([_FakeResponse(boom=True) for _ in range(POLL_MAX_CONSECUTIVE_ERRORS + 1)])
     with pytest.raises(ProviderError, match="连续失败"):
         await _poll(failing, "http://provider", {}, Job(id="job-poll-bad", kind="image"), timeout_seconds=60, interval_seconds=0)
+
+
+def test_provider_poll_scheduler_spreads_200_tasks_over_30_ticks() -> None:
+    from app.jobs import Job
+    from app.providers import ProviderPollScheduler, _poll_batch_size, _ScheduledPoll
+
+    async def scenario() -> None:
+        scheduler = ProviderPollScheduler(coverage_seconds=30)
+        loop = asyncio.get_running_loop()
+        for index in range(200):
+            job = Job(id=f"provider-{index}", kind="video")
+            scheduler._entries[job.id] = _ScheduledPoll(job, "https://provider.test", {}, float("inf"), loop.create_future())
+            scheduler._queue.append(job.id)
+
+        assert _poll_batch_size(200, 30) == 7
+        batches = [scheduler._take_batch() for _ in range(30)]
+        assert [len(batch) for batch in batches[:28]] == [7] * 28
+        assert len(batches[28]) == 200 - 7 * 28
+        assert len(batches[29]) == 0
+        assert len({entry.job.id for batch in batches for entry in batch}) == 200
+
+    asyncio.run(scenario())
 
 
 async def test_recover_stale_jobs_resumes_recent_and_fails_orphans(client) -> None:
@@ -282,12 +354,12 @@ def test_generation_concurrency_limit_returns_429(client, monkeypatch) -> None:
     monkeypatch.setattr(main, "generate_video", fake_video)
 
     try:
-        # 上限 20：占满 20 个活跃图片任务后，第 21 个被拒（429 在消耗配额之前）
-        for index in range(20):
+        # 上限 200：占满活跃图片任务后，第 201 个被拒（429 在消耗配额之前）
+        for index in range(200):
             _insert_owned_job(f"job-conc-img-{index}", user_id=user["id"], kind="image")
         blocked = client.post("/api/generations/images", json={"prompt": "concurrency"})
         assert blocked.status_code == 429
-        assert "图片" in blocked.json()["detail"] and "20" in blocked.json()["detail"]
+        assert "图片" in blocked.json()["detail"] and "200" in blocked.json()["detail"]
 
         # 终态与软删除不占额度：一条转 failed、一条软删后可再各进一条
         connection = sqlite3.connect(TEST_DB, timeout=10)
@@ -304,7 +376,7 @@ def test_generation_concurrency_limit_returns_429(client, monkeypatch) -> None:
         assert client.post("/api/generations/videos", json={"prompt": "v", "duration": 5}).status_code == 202
 
         # 用户隔离：其它用户占满图片额度不影响当前用户
-        for index in range(20):
+        for index in range(200):
             _insert_owned_job(f"job-conc-other-{index}", user_id="user-not-admin", kind="image")
         assert client.post("/api/generations/images", json={"prompt": "isolation"}).status_code == 202
     finally:
@@ -316,6 +388,20 @@ def test_generation_concurrency_limit_returns_429(client, monkeypatch) -> None:
             connection.commit()
         finally:
             connection.close()
+
+
+def test_generation_status_batch_is_owned_and_returns_many_jobs(client) -> None:
+    user = client.get("/api/auth/me").json()
+    _insert_owned_job("job-batch-one", user_id=user["id"], status="running")
+    _insert_owned_job("job-batch-two", user_id=user["id"], kind="video", status="succeeded")
+    _insert_owned_job("job-batch-other", user_id="user-not-admin", status="running")
+
+    response = client.post(
+        "/api/generations/status",
+        json={"ids": ["job-batch-one", "job-batch-two", "job-batch-other"]},
+    )
+    assert response.status_code == 200
+    assert {item["id"] for item in response.json()} == {"job-batch-one", "job-batch-two"}
 
 
 def test_raise_for_status_translates_aigc_error_codes() -> None:

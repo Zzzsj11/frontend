@@ -6,12 +6,13 @@
  * 与新任务的全量脚本拉取叠加形成"切换风暴"。
  *
  * 改造后：
- * - 所有生成任务共享一个 3s tick，tick 内串行查询各任务状态（自然错开请求）；
+ * - 所有生成任务共享一个 3s tick，每个 tick 将最多 500 个任务合并为一次状态请求；
  * - 每个任务可携带 AbortSignal，切换子项目时经 taskWatchers 统一 abort，
  *   旧任务的轮询立即停止（后端任务仍在跑，资产落库；切回时由 resumeActiveGenerations 恢复）；
  * - taskWatchers 同时管理 SSE 长连接（大纲/素材导出）与脚本轮询的 AbortController。
  */
 import { apiRequest } from '../api/client'
+import { ApiError } from '../errorBus'
 
 /** 轮询被主动取消（切换子项目）时抛出：调用方静默处理，不弹错误、不标失败 */
 export class PollingCancelledError extends Error {
@@ -51,20 +52,42 @@ const entries = new Map<string, WatchEntry<unknown>>()
 let timer: number | null = null
 let ticking = false
 
-async function pollEntry(entry: WatchEntry<unknown>): Promise<boolean> {
-  if (entry.signal?.aborted) throw new PollingCancelledError()
-  entry.polled = true
-  let job: GenerationJobSnapshot
+async function fetchBatchSnapshots(
+  batch: WatchEntry<unknown>[],
+  signal: AbortSignal,
+): Promise<GenerationJobSnapshot[]> {
+  const fetchLegacy = () =>
+    Promise.all(
+      batch.map((entry) =>
+        apiRequest<GenerationJobSnapshot>(`/generations/${entry.id}`, {
+          headers: { 'X-Polling': '1' },
+          signal,
+        }).then((snapshot) => ({ ...snapshot, id: entry.id })),
+      ),
+    )
   try {
-    // 打 X-Polling 标记：后端全量日志与前端性能埋点均跳过轮询请求
-    job = await apiRequest<GenerationJobSnapshot>(`/generations/${entry.id}`, {
-      headers: { 'X-Polling': '1' },
-      signal: entry.signal,
-    })
+    const response = await apiRequest<GenerationJobSnapshot[] | GenerationJobSnapshot>(
+      '/generations/status',
+      {
+        method: 'POST',
+        headers: { 'X-Polling': '1' },
+        body: JSON.stringify({ ids: batch.map((entry) => entry.id) }),
+        signal,
+      },
+    )
+    if (Array.isArray(response)) return response
+    // 单对象兼容旧测试桩及灰度期间的非标准代理响应。
+    if (batch.length === 1) return [{ ...response, id: batch[0].id }]
+    return fetchLegacy()
   } catch (error) {
-    // 主动取消时 fetch 抛 AbortError，统一归一为 PollingCancelledError
-    throw entry.signal?.aborted ? new PollingCancelledError() : error
+    if (!(error instanceof ApiError) || error.status !== 404) throw error
+    // 前端先于后端发布时回退旧接口；新后端正常情况下始终只走上面的聚合请求。
+    return fetchLegacy()
   }
+}
+
+function settleEntry(entry: WatchEntry<unknown>, job: GenerationJobSnapshot): boolean {
+  entry.polled = true
   const status = (job.status ?? '').toLowerCase()
   if (status === 'succeeded') {
     entry.resolve(entry.select(job))
@@ -85,16 +108,44 @@ async function tick() {
   if (ticking) return
   ticking = true
   try {
-    for (const entry of [...entries.values()]) {
+    const current = [...entries.values()]
+    const active: WatchEntry<unknown>[] = []
+    for (const entry of current) {
       if (!entries.delete(entry.id)) continue
-      let done = false
-      try {
-        done = await pollEntry(entry)
-      } catch (error) {
-        entry.reject(error)
-        continue
+      if (entry.signal?.aborted) {
+        entry.reject(new PollingCancelledError())
+      } else active.push(entry)
+    }
+    for (let offset = 0; offset < active.length; offset += 500) {
+      const batch = active.slice(offset, offset + 500)
+      const batchController = new AbortController()
+      const abortBatchWhenUnused = () => {
+        if (batch.every((entry) => entry.signal?.aborted)) batchController.abort()
       }
-      if (!done) entries.set(entry.id, entry)
+      for (const entry of batch) entry.signal?.addEventListener('abort', abortBatchWhenUnused)
+      try {
+        // 打 X-Polling 标记：后端全量日志与前端性能埋点均跳过轮询请求
+        const snapshots = await fetchBatchSnapshots(batch, batchController.signal)
+        const byId = new Map(snapshots.map((item) => [item.id, item]))
+        for (const entry of batch) {
+          if (entry.signal?.aborted) {
+            entry.reject(new PollingCancelledError())
+            continue
+          }
+          const snapshot = byId.get(entry.id)
+          if (!snapshot) {
+            entry.reject(new Error('生成任务不存在或无权访问'))
+            continue
+          }
+          if (!settleEntry(entry, snapshot)) entries.set(entry.id, entry)
+        }
+      } catch (error) {
+        for (const entry of batch) {
+          entry.reject(entry.signal?.aborted ? new PollingCancelledError() : error)
+        }
+      } finally {
+        for (const entry of batch) entry.signal?.removeEventListener('abort', abortBatchWhenUnused)
+      }
     }
   } finally {
     ticking = false

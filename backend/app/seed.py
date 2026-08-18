@@ -106,22 +106,53 @@ async def seed_system_data() -> None:
         if not role:
             role = AdminRoleModel(id="admin-role-super", code="super_admin", name="超级管理员", description="拥有全部后台权限")
             session.add(role)
-        for code, name in [
+        ass_role = await session.get(AdminRoleModel, "admin-role-ass")
+        if not ass_role:
+            ass_role = AdminRoleModel(id="admin-role-ass", code="ass_admin", name="ASS 管理员", description="仅管理 ASS 歌曲情感库")
+            session.add(ass_role)
+        permissions = [
             ("dashboard.read", "查看仪表盘"),
             ("users.manage", "管理用户"),
             ("models.manage", "管理模型"),
             ("assets.manage", "管理系统资产"),
             ("logs.read", "查看日志"),
-        ]:
+            ("song_emotions.read", "查看 ASS 歌曲情感库"),
+            ("song_emotions.manage", "管理 ASS 歌曲情感库"),
+        ]
+        for code, name in permissions:
             pid = f"admin-perm-{code.replace('.', '-')}"
             permission = await session.get(AdminPermissionModel, pid)
             if not permission:
                 permission = AdminPermissionModel(id=pid, code=code, name=name)
                 session.add(permission)
-                session.add(AdminRolePermissionModel(id=f"arp-{code.replace('.', '-')}", role_id=role.id, permission_id=pid))
+            super_link = (
+                await session.execute(
+                    select(AdminRolePermissionModel).where(
+                        AdminRolePermissionModel.role_id == role.id,
+                        AdminRolePermissionModel.permission_id == pid,
+                    )
+                )
+            ).scalar_one_or_none()
+            if not super_link:
+                session.add(AdminRolePermissionModel(id=f"arp-super-{code.replace('.', '-')}", role_id=role.id, permission_id=pid))
+            if code.startswith("song_emotions."):
+                ass_link = (
+                    await session.execute(
+                        select(AdminRolePermissionModel).where(
+                            AdminRolePermissionModel.role_id == ass_role.id,
+                            AdminRolePermissionModel.permission_id == pid,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if not ass_link:
+                    session.add(AdminRolePermissionModel(id=f"arp-ass-{code.replace('.', '-')}", role_id=ass_role.id, permission_id=pid))
         admin = (await session.execute(select(UserModel).where(UserModel.username == "admin", UserModel.deleted_at.is_(None)))).scalar_one_or_none()
-        if admin and not await session.get(UserAdminRoleModel, f"uar-{admin.id}"):
-            session.add(UserAdminRoleModel(id=f"uar-{admin.id}", user_id=admin.id, role_id=role.id))
+        if admin and not await session.get(UserAdminRoleModel, f"uar-super-{admin.id}"):
+            legacy_link = await session.get(UserAdminRoleModel, f"uar-{admin.id}")
+            if legacy_link:
+                legacy_link.role_id = role.id
+            else:
+                session.add(UserAdminRoleModel(id=f"uar-super-{admin.id}", user_id=admin.id, role_id=role.id))
         provider = await session.get(AiProviderModel, "provider-yinghe")
         if not provider:
             provider = AiProviderModel(id="provider-yinghe", code="yinghe", name="银河 API", base_url="", status="active")
@@ -234,12 +265,10 @@ async def seed_system_data() -> None:
                 "atmosphere": payload.get("氛围基调") or "",
                 "source_payload": payload,
             }
+            # 曲库在首次部署时由静态文件初始化；一旦入库即由管理后台维护。
+            # 已存在记录（包括软删除记录）绝不能在重启时被覆盖或复活。
             if not profile:
                 session.add(SongEmotionProfileModel(song_code=song_code, **values))
-            else:
-                profile.deleted_at = None
-                for key, value in values.items():
-                    setattr(profile, key, value)
         await seed_prompts(session)
         await seed_storyboard_options(session)
         await session.commit()

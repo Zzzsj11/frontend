@@ -14,21 +14,22 @@ describe('generationPoller 统一轮询调度器', () => {
   it('轮询到 succeeded 后按 select 提取结果，并携带 X-Polling 标记', async () => {
     const request = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(json({ id: 'job-ok', status: 'succeeded', result: { url: '/a.png' } }))
+      .mockResolvedValue(json([{ id: 'job-ok', status: 'succeeded', result: { url: '/a.png' } }]))
 
     const value = await watchGenerationJob<{ url: string }>('job-ok', {
       select: (snapshot) => snapshot.result as { url: string },
     })
     expect(value.url).toBe('/a.png')
     const call = request.mock.calls[0]
-    expect(String(call[0])).toBe('/api/generations/job-ok')
+    expect(String(call[0])).toBe('/api/generations/status')
+    expect(JSON.parse(String(call[1]?.body))).toEqual({ ids: ['job-ok'] })
     // apiRequest 会把 headers 归一为 Headers 实例
     expect((call[1]?.headers as Headers).get('X-Polling')).toBe('1')
   })
 
   it('轮询到 failed 后以任务 error 文案 reject', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      json({ id: 'job-fail', status: 'failed', error: '供应商拒绝' }),
+      json([{ id: 'job-fail', status: 'failed', error: '供应商拒绝' }]),
     )
     await expect(watchGenerationJob('job-fail', { select: (s) => s.result })).rejects.toThrow(
       '供应商拒绝',
@@ -69,7 +70,7 @@ describe('generationPoller 统一轮询调度器', () => {
 
   it('任务长期 pending 超过 timeoutMs 后以超时文案 reject', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      json({ id: 'job-timeout', status: 'running', progress: 5 }),
+      json([{ id: 'job-timeout', status: 'running', progress: 5 }]),
     )
     await expect(
       watchGenerationJob('job-timeout', {
@@ -80,22 +81,23 @@ describe('generationPoller 统一轮询调度器', () => {
     ).rejects.toThrow('生成超时，请稍后重试')
   })
 
-  it('多个任务共享调度：同周期内串行查询并各自独立落定', async () => {
-    const seen: string[] = []
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-      const url = String(input)
-      seen.push(url)
-      if (url.endsWith('job-multi-a'))
-        return json({ id: 'job-multi-a', status: 'succeeded', result: 'A' })
-      return json({ id: 'job-multi-b', status: 'succeeded', result: 'B' })
-    })
+  it('多个任务共享调度：同周期合并为一个请求并各自独立落定', async () => {
+    const request = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      json([
+        { id: 'job-multi-a', status: 'succeeded', result: 'A' },
+        { id: 'job-multi-b', status: 'succeeded', result: 'B' },
+      ]),
+    )
     const [a, b] = await Promise.all([
       watchGenerationJob('job-multi-a', { select: (s) => s.result as string }),
       watchGenerationJob('job-multi-b', { select: (s) => s.result as string }),
     ])
     expect([a, b]).toEqual(['A', 'B'])
-    expect(seen).toContain('/api/generations/job-multi-a')
-    expect(seen).toContain('/api/generations/job-multi-b')
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body)).ids).toEqual([
+      'job-multi-a',
+      'job-multi-b',
+    ])
   })
 })
 

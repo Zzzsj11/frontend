@@ -9,6 +9,7 @@ from typing import Any, Awaitable, Callable
 
 from sqlalchemy import select
 
+from .config import settings
 from .database import session_factory
 from .models import GenerationJobModel, SceneAssetModel, ShotAssetModel, utcnow
 from .redis_store import cache_job, get_cached_job
@@ -65,9 +66,11 @@ class Job:
 
 
 class JobManager:
-    def __init__(self) -> None:
+    def __init__(self, execution_slots: dict[str, asyncio.Semaphore] | None = None) -> None:
         # 本进程内活跃协程的 job id：对账/恢复时防止重复挂轮询
         self._active: set[str] = set()
+        # 受理上限与实际供应商调用并发分离：超出槽位的任务保持 queued。
+        self._execution_slots = execution_slots or {}
 
     async def create(
         self,
@@ -128,15 +131,28 @@ class JobManager:
 
     async def _run(self, job: Job, runner: JobRunner) -> None:
         self._active.add(job.id)
+        slots = self._execution_slots.get(job.kind)
+        try:
+            if slots:
+                async with slots:
+                    await self._execute(job, runner)
+            else:
+                await self._execute(job, runner)
+        except asyncio.CancelledError:
+            job.status = "cancelled"
+            raise
+        finally:
+            self._active.discard(job.id)
+            await self._persist(job)
+
+    async def _execute(self, job: Job, runner: JobRunner) -> None:
+        """拿到执行槽位后才进入 running，供应商调用完成前一直占用槽位。"""
         job.status, job.progress = "running", 5
         await self._persist(job)
         try:
             job.result = await runner(job)
             job.progress, job.status = 100, "succeeded"
             await self._persist_asset(job)
-        except asyncio.CancelledError:
-            job.status = "cancelled"
-            raise
         except Exception as exc:
             job.status, job.error = "failed", str(exc)[:2000]
             async with session_factory() as session:
@@ -154,9 +170,6 @@ class JobManager:
                     request_id=getattr(exc, "request_id", None),
                 )
                 await session.commit()
-        finally:
-            self._active.discard(job.id)
-            await self._persist(job)
 
     async def _persist_asset(self, job: Job) -> None:
         if not job.result:
@@ -358,4 +371,5 @@ class JobManager:
         return job
 
 
-jobs = JobManager()
+_provider_generation_slots = asyncio.Semaphore(settings.provider_generation_worker_concurrency)
+jobs = JobManager({"image": _provider_generation_slots, "video": _provider_generation_slots})

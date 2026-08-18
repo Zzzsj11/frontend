@@ -32,8 +32,8 @@ class UserModel(LifecycleMixin, Base):
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     daily_chat_limit: Mapped[int] = mapped_column(Integer, default=1000)
-    daily_image_limit: Mapped[int] = mapped_column(Integer, default=100)
-    daily_video_limit: Mapped[int] = mapped_column(Integer, default=100)
+    daily_image_limit: Mapped[int] = mapped_column(Integer, default=1000)
+    daily_video_limit: Mapped[int] = mapped_column(Integer, default=1000)
 
 
 class RefreshTokenModel(LifecycleMixin, Base):
@@ -380,6 +380,16 @@ class AdminPermissionModel(LifecycleMixin, Base):
 
 class AdminRolePermissionModel(LifecycleMixin, Base):
     __tablename__ = "admin_role_permissions"
+    __table_args__ = (
+        Index(
+            "uq_admin_role_permission_active",
+            "role_id",
+            "permission_id",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+    )
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     role_id: Mapped[str] = mapped_column(ForeignKey("admin_roles.id"), index=True)
     permission_id: Mapped[str] = mapped_column(ForeignKey("admin_permissions.id"), index=True)
@@ -387,6 +397,16 @@ class AdminRolePermissionModel(LifecycleMixin, Base):
 
 class UserAdminRoleModel(LifecycleMixin, Base):
     __tablename__ = "user_admin_roles"
+    __table_args__ = (
+        Index(
+            "uq_user_admin_role_active",
+            "user_id",
+            "role_id",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+    )
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     role_id: Mapped[str] = mapped_column(ForeignKey("admin_roles.id"), index=True)

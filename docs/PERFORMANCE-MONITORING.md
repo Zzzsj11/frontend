@@ -29,12 +29,12 @@
 
 **定位链（三个数一对，原因立现）：**
 
-| 现象 | 结论 |
-| --- | --- |
-| 后端 `duration_ms` / P95 大 | 接口 / 数据库 / 上游 AIGC 慢 |
-| 前端 networkMs 大、后端正常 | 网络 / nginx 网关 |
-| 前端 parseMs 大 | 响应体太大（大 JSON 列表） |
-| 主线程长任务集中在渲染期 | 前端渲染问题（大数据 v-for / 图片解码） |
+| 现象                        | 结论                                    |
+| --------------------------- | --------------------------------------- |
+| 后端 `duration_ms` / P95 大 | 接口 / 数据库 / 上游 AIGC 慢            |
+| 前端 networkMs 大、后端正常 | 网络 / nginx 网关                       |
+| 前端 parseMs 大             | 响应体太大（大 JSON 列表）              |
+| 主线程长任务集中在渲染期    | 前端渲染问题（大数据 v-for / 图片解码） |
 
 ## 2. 后端请求日志
 
@@ -69,14 +69,14 @@
 GET /api/admin/request-logs
 ```
 
-| 参数 | 说明 |
-| --- | --- |
-| `runId` | 测试批次 ID（e2e 流量） |
-| `path` | 路径模糊匹配（contains） |
-| `method` / `status` | 方法与状态码精确过滤 |
-| `minMs` | 只返回耗时 ≥ 该值（毫秒）的请求 |
-| `orderBy` | `created`（默认，时间倒序）或 `duration`（耗时倒序，慢请求 TOP） |
-| `limit` / `offset` | 分页，limit ≤ 200 |
+| 参数                | 说明                                                             |
+| ------------------- | ---------------------------------------------------------------- |
+| `runId`             | 测试批次 ID（e2e 流量）                                          |
+| `path`              | 路径模糊匹配（contains）                                         |
+| `method` / `status` | 方法与状态码精确过滤                                             |
+| `minMs`             | 只返回耗时 ≥ 该值（毫秒）的请求                                  |
+| `orderBy`           | `created`（默认，时间倒序）或 `duration`（耗时倒序，慢请求 TOP） |
+| `limit` / `offset`  | 分页，limit ≤ 200                                                |
 
 单条详情（含脱敏后的输入参数与输出原文）：
 
@@ -90,11 +90,11 @@ GET /api/admin/request-logs/{id}
 GET /api/admin/request-logs/summary?hours=24&minCount=3&limit=50
 ```
 
-| 参数 | 说明 |
-| --- | --- |
-| `hours` | 时间窗口，1-168（默认 24） |
+| 参数       | 说明                                   |
+| ---------- | -------------------------------------- |
+| `hours`    | 时间窗口，1-168（默认 24）             |
 | `minCount` | 最少请求次数才计入（默认 3，过滤偶发） |
-| `limit` | 返回条数 ≤ 100（默认 50） |
+| `limit`    | 返回条数 ≤ 100（默认 50）              |
 
 返回 `[{path, method, count, avgMs, p95Ms, maxMs}]`，**只统计正式流量**
 （`run_id == ''`，e2e 测试批次天然隔离），按 max 倒序。P95 在 Python 计算
@@ -102,14 +102,14 @@ GET /api/admin/request-logs/summary?hours=24&minCount=3&limit=50
 
 ### 3.3 前端轮询打标清单（新增轮询必须同步打标）
 
-| 位置 | 请求 | 频率 |
-| --- | --- | --- |
-| `src/api/mediaGen.ts` `waitForJob` | `GET /generations/{id}` | 3s，最长 11 分钟 |
-| `src/api/imageGen.ts` `getImageTask` | `GET /generations/{id}` | 3s，最长 5 分钟 |
-| `src/stores/project.ts` `_watchRunningStoryboardLines` | `GET /tasks/{id}` | 5s × 60 次 |
-| `src/stores/project.ts` `_pollSegmentRetry` | `GET /tasks/{id}` | 2s × 150 次 |
-| `src/api/domain.ts` `streamStoryboardOutline` | SSE 大纲进度 | 长连接 |
-| `src/api/domain.ts` `streamMaterialExport` | SSE 素材导出 | 长连接 |
+| 位置                                                   | 请求                       | 频率                                                |
+| ------------------------------------------------------ | -------------------------- | --------------------------------------------------- |
+| `src/utils/generationPoller.ts`                        | `POST /generations/status` | 3s，共享批量查询，每次最多 500 个任务，最长 11 分钟 |
+| `src/api/imageGen.ts` `getImageTask`                   | `GET /generations/{id}`    | 3s，最长 5 分钟                                     |
+| `src/stores/project.ts` `_watchRunningStoryboardLines` | `GET /tasks/{id}`          | 5s × 60 次                                          |
+| `src/stores/project.ts` `_pollSegmentRetry`            | `GET /tasks/{id}`          | 2s × 150 次                                         |
+| `src/api/domain.ts` `streamStoryboardOutline`          | SSE 大纲进度               | 长连接                                              |
+| `src/api/domain.ts` `streamMaterialExport`             | SSE 素材导出               | 长连接                                              |
 
 新增轮询点时，在 `apiRequest`/`openApiStream` 的 init headers 里加
 `{ 'X-Polling': '1' }`，否则会刷日志。
@@ -118,15 +118,15 @@ GET /api/admin/request-logs/summary?hours=24&minCount=3&limit=50
 
 会话级、内存 ring buffer、**不落库**（浏览器刷新即清空）：
 
-| 导出 | 说明 |
-| --- | --- |
-| `recordApiTiming` | 由 client.ts 自动调用；手动调用场景：特殊请求 |
-| `apiTimingSummary(limit)` | 按 path+method 聚合 count/avg/p95/max/parseAvg |
-| `recentSlowApi(minMs, limit)` | 最近慢请求（含 retried 标志） |
-| `recordLongTask` / 长任务监听 | 主线程 >50ms 阻塞片段 |
-| `navigationTiming()` | TTFB / DOMContentLoaded / Load |
-| `perfSnapshot()` | 一键取当前会话全部观测数据 |
-| `startPerfMonitoring()` | 启动 Long Task 监听（main.ts 已调用，幂等） |
+| 导出                          | 说明                                           |
+| ----------------------------- | ---------------------------------------------- |
+| `recordApiTiming`             | 由 client.ts 自动调用；手动调用场景：特殊请求  |
+| `apiTimingSummary(limit)`     | 按 path+method 聚合 count/avg/p95/max/parseAvg |
+| `recentSlowApi(minMs, limit)` | 最近慢请求（含 retried 标志）                  |
+| `recordLongTask` / 长任务监听 | 主线程 >50ms 阻塞片段                          |
+| `navigationTiming()`          | TTFB / DOMContentLoaded / Load                 |
+| `perfSnapshot()`              | 一键取当前会话全部观测数据                     |
+| `startPerfMonitoring()`       | 启动 Long Task 监听（main.ts 已调用，幂等）    |
 
 埋点位置：`src/api/client.ts` 的 `apiRequest`（t0/t1/t2）与 `openApiStream`
 （连接耗时）；轮询请求（X-Polling）自动跳过埋点，与后端日志语义一致。
@@ -153,17 +153,17 @@ GET /api/admin/request-logs/summary?hours=24&minCount=3&limit=50
 cd backend && .venv/bin/pytest tests/test_request_logging.py -q
 ```
 
-| 测试 | 覆盖 |
-| --- | --- |
-| `test_request_logged_with_run_header` | 批次头流量落库 + 详情可取 |
-| `test_not_logged_without_run_header` | 未开全量时无头流量不落库 |
-| `test_password_redacted_in_request_payload` | 密码/token 脱敏 |
-| `test_polling_requests_skipped` | X-Polling 请求不落库（同路径普通请求正常落库） |
-| `test_request_logs_filter_min_ms_and_sort_by_duration` | minMs 过滤 + duration 排序 |
-| `test_request_log_summary_aggregates_by_path` | 聚合只统计正式流量、字段完整 |
-| `test_runs_aggregation` | 批次统计（次数/均峰值/错误数） |
-| `test_filters_by_path_and_status` | 列表筛选 |
-| `test_request_logs_require_admin` | 权限控制 |
+| 测试                                                   | 覆盖                                           |
+| ------------------------------------------------------ | ---------------------------------------------- |
+| `test_request_logged_with_run_header`                  | 批次头流量落库 + 详情可取                      |
+| `test_not_logged_without_run_header`                   | 未开全量时无头流量不落库                       |
+| `test_password_redacted_in_request_payload`            | 密码/token 脱敏                                |
+| `test_polling_requests_skipped`                        | X-Polling 请求不落库（同路径普通请求正常落库） |
+| `test_request_logs_filter_min_ms_and_sort_by_duration` | minMs 过滤 + duration 排序                     |
+| `test_request_log_summary_aggregates_by_path`          | 聚合只统计正式流量、字段完整                   |
+| `test_runs_aggregation`                                | 批次统计（次数/均峰值/错误数）                 |
+| `test_filters_by_path_and_status`                      | 列表筛选                                       |
+| `test_request_logs_require_admin`                      | 权限控制                                       |
 
 ### 6.2 前端（tests/user/perf.test.ts，4 个）
 
@@ -171,12 +171,12 @@ cd backend && .venv/bin/pytest tests/test_request_logging.py -q
 npm test
 ```
 
-| 测试 | 覆盖 |
-| --- | --- |
-| `aggregates API timings by path...` | 聚合计算 count/avg/p95/max、排序 |
-| `filters slow API entries by threshold` | 慢请求阈值过滤 + retried 标志 |
-| `isPollingHeaders detects the X-Polling marker` | 标记识别 |
-| `records timing ... skips polling requests` | apiRequest 埋点集成：普通请求记录、轮询跳过 |
+| 测试                                            | 覆盖                                        |
+| ----------------------------------------------- | ------------------------------------------- |
+| `aggregates API timings by path...`             | 聚合计算 count/avg/p95/max、排序            |
+| `filters slow API entries by threshold`         | 慢请求阈值过滤 + retried 标志               |
+| `isPollingHeaders detects the X-Polling marker` | 标记识别                                    |
+| `records timing ... skips polling requests`     | apiRequest 埋点集成：普通请求记录、轮询跳过 |
 
 ### 6.3 线上手工验证（部署后冒烟）
 

@@ -104,6 +104,10 @@ export interface ShotGenOptions {
   ratio: '16:9' | '9:16' | '4:3' | '1:1'
   imageModel: ImageModelId
   videoModel: VideoModelId
+  /** 视频是否生成背景音。 */
+  generateAudio?: boolean
+  /** 视频是否添加供应商水印。 */
+  watermark?: boolean
   segmentType?: 'lyric' | 'intro' | 'interlude' | 'outro'
   timelineLabel?: string
   /** 时间轴原始时长（秒，未归一化） */

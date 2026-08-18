@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import settings
 from .database import database_session, session_factory
 from .models import RefreshTokenModel, UserModel, utcnow
+from .rbac import attach_admin_access, is_super_admin, load_admin_access
 
 password_hasher = PasswordHasher()
 bearer = HTTPBearer(auto_error=False)
@@ -59,6 +60,9 @@ def user_public(user: UserModel) -> dict:
         "dailyChatLimit": user.daily_chat_limit,
         "dailyImageLimit": user.daily_image_limit,
         "dailyVideoLimit": user.daily_video_limit,
+        "adminRoleCodes": getattr(user, "admin_role_codes", []),
+        "permissions": getattr(user, "admin_permissions", []),
+        "isSuperAdmin": is_super_admin(user),
     }
 
 
@@ -66,6 +70,7 @@ async def issue_tokens(user: UserModel, request: Request, response: Response) ->
     raw_refresh = secrets.token_urlsafe(48)
     now = utcnow()
     async with session_factory() as session:
+        roles, permissions = await load_admin_access(session, user)
         session.add(
             RefreshTokenModel(
                 id=f"refresh-{uuid.uuid4().hex}",
@@ -77,6 +82,8 @@ async def issue_tokens(user: UserModel, request: Request, response: Response) ->
             )
         )
         await session.commit()
+    user.admin_role_codes = roles
+    user.admin_permissions = permissions
     response.set_cookie(
         REFRESH_COOKIE,
         raw_refresh,
@@ -108,6 +115,7 @@ async def require_user(
     if not user or user.deleted_at is not None or user.status != "active":
         raise HTTPException(401, "用户不可用")
     request.state.user_id = user.id
+    await attach_admin_access(session, user)
     return user
 
 

@@ -7,9 +7,11 @@ import AdminRunningHubPanel from '../components/AdminRunningHubPanel.vue'
 import AdminStoryboardOptionsPanel from '../components/AdminStoryboardOptionsPanel.vue'
 import AdminServerMonitoringPanel from '../components/AdminServerMonitoringPanel.vue'
 import AdminSideNav from '../components/AdminSideNav.vue'
+import AdminSongEmotionProfilesPanel from '../components/AdminSongEmotionProfilesPanel.vue'
 import AdminTopBar from '../components/AdminTopBar.vue'
 import BaseModal from '../components/base/BaseModal.vue'
 import { perfSnapshot } from '../perf'
+import { useAuthStore } from '../stores/auth'
 import type { AdminNavGroup } from '../types'
 
 /** 管理后台列表行：各 tab 返回列不一致，未建模的列由 columns 动态渲染 */
@@ -22,6 +24,8 @@ interface AdminRow {
   dailyChatLimit?: number
   dailyImageLimit?: number
   dailyVideoLimit?: number
+  adminRoleCodes?: string[]
+  isSuperAdmin?: boolean
   [key: string]: unknown
 }
 
@@ -110,14 +114,16 @@ type Tab =
   | 'server'
   | 'prompts'
   | 'categories'
+  | 'song-emotions'
   | 'runninghub'
   | 'kling'
-const tab = ref<Tab>('dashboard'),
+const auth = useAuthStore()
+const tab = ref<Tab>(auth.user?.isSuperAdmin ? 'dashboard' : 'song-emotions'),
   loading = ref(false),
   error = ref(''),
   data = ref<AdminData | null>(null)
 /** 侧边导航分组（同类项合并为两级菜单）；新增页面时挂到对应组即可 */
-const NAV_GROUPS: AdminNavGroup[] = [
+const ALL_NAV_GROUPS: AdminNavGroup[] = [
   { key: 'overview', label: '总览', items: [{ key: 'dashboard', label: '仪表盘' }] },
   {
     key: 'business',
@@ -135,6 +141,7 @@ const NAV_GROUPS: AdminNavGroup[] = [
     items: [
       { key: 'prompts', label: '提示词' },
       { key: 'categories', label: '通用分类' },
+      { key: 'song-emotions', label: '歌曲情感库' },
       { key: 'models', label: '模型管理' },
     ],
   },
@@ -159,11 +166,23 @@ const NAV_GROUPS: AdminNavGroup[] = [
     ],
   },
 ]
+const NAV_GROUPS = computed<AdminNavGroup[]>(() => {
+  if (auth.user?.isSuperAdmin) return ALL_NAV_GROUPS
+  if (auth.user?.permissions?.includes('song_emotions.read'))
+    return [
+      {
+        key: 'content',
+        label: '内容配置',
+        items: [{ key: 'song-emotions', label: '歌曲情感库' }],
+      },
+    ]
+  return []
+})
 const tabTitle = computed(
-  () => NAV_GROUPS.flatMap((g) => g.items).find((i) => i.key === tab.value)?.label ?? '',
+  () => NAV_GROUPS.value.flatMap((g) => g.items).find((i) => i.key === tab.value)?.label ?? '',
 )
 const groupTitle = computed(
-  () => NAV_GROUPS.find((g) => g.items.some((i) => i.key === tab.value))?.label ?? '',
+  () => NAV_GROUPS.value.find((g) => g.items.some((i) => i.key === tab.value))?.label ?? '',
 )
 const llmFilters = ref({ projectTaskId: '', operation: '', status: '' })
 const llmDetail = ref<LlmDetail | null>(null),
@@ -229,6 +248,7 @@ const endpoint = computed(
       server: '',
       prompts: '',
       categories: '',
+      'song-emotions': '',
       runninghub: '',
       kling: '',
     })[tab.value],
@@ -247,6 +267,7 @@ const load = async () => {
   // 通用分类/模型测试页由各自面板自管数据
   if (
     tab.value === 'categories' ||
+    tab.value === 'song-emotions' ||
     tab.value === 'runninghub' ||
     tab.value === 'kling' ||
     tab.value === 'server'
@@ -271,6 +292,7 @@ const select = async (key: string) => {
   if (
     value === 'prompts' ||
     value === 'categories' ||
+    value === 'song-emotions' ||
     value === 'runninghub' ||
     value === 'kling' ||
     value === 'server'
@@ -383,8 +405,8 @@ const userForm = ref({
   displayName: '',
   password: '',
   dailyChatLimit: 1000,
-  dailyImageLimit: 100,
-  dailyVideoLimit: 100,
+  dailyImageLimit: 1000,
+  dailyVideoLimit: 1000,
 })
 const createUser = async () => {
   error.value = ''
@@ -407,8 +429,8 @@ const createUser = async () => {
       displayName: '',
       password: '',
       dailyChatLimit: 1000,
-      dailyImageLimit: 100,
-      dailyVideoLimit: 100,
+      dailyImageLimit: 1000,
+      dailyVideoLimit: 1000,
     }
     notice.value = '用户创建成功，首次登录需修改初始密码'
     await load()
@@ -446,6 +468,27 @@ const toggleUser = async (row: AdminRow) => {
     error.value = e instanceof Error ? e.message : '操作失败'
   }
 }
+const adminRoleCode = (row: AdminRow) =>
+  row.adminRoleCodes?.includes('super_admin')
+    ? 'super_admin'
+    : row.adminRoleCodes?.includes('ass_admin')
+      ? 'ass_admin'
+      : 'none'
+const saveAdminRole = async (row: AdminRow, event: Event) => {
+  const adminRoleCode = (event.target as HTMLSelectElement).value
+  error.value = ''
+  try {
+    await apiRequest(`/admin/users/${row.id}/admin-role`, {
+      method: 'PUT',
+      body: JSON.stringify({ admin_role_code: adminRoleCode }),
+    })
+    notice.value = `已更新 ${row.username || '用户'} 的后台角色`
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '后台角色更新失败'
+    await load()
+  }
+}
 const columns = computed(() =>
   rows.value.length
     ? Object.keys(rows.value[0]).filter(
@@ -459,6 +502,9 @@ const columns = computed(() =>
             'dailyChatLimit',
             'dailyImageLimit',
             'dailyVideoLimit',
+            'adminRoleCodes',
+            'permissions',
+            'isSuperAdmin',
           ].includes(k),
       )
     : [],
@@ -518,6 +564,7 @@ onMounted(load)
         <template v-else>
           <AdminPromptsPanel v-if="tab === 'prompts'" :reload-token="promptsReloadToken" />
           <AdminStoryboardOptionsPanel v-if="tab === 'categories'" />
+          <AdminSongEmotionProfilesPanel v-if="tab === 'song-emotions'" />
           <AdminRunningHubPanel v-if="tab === 'runninghub'" />
           <AdminKlingPanel v-if="tab === 'kling'" />
           <AdminServerMonitoringPanel v-if="tab === 'server'" />
@@ -782,7 +829,20 @@ onMounted(load)
               </button>
             </span>
           </div>
-          <section v-if="tab !== 'perf' && tab !== 'prompts'" class="table-wrap">
+          <section
+            v-if="
+              ![
+                'perf',
+                'prompts',
+                'categories',
+                'song-emotions',
+                'runninghub',
+                'kling',
+                'server',
+              ].includes(tab)
+            "
+            class="table-wrap"
+          >
             <table>
               <thead>
                 <tr>
@@ -833,6 +893,14 @@ onMounted(load)
                     </button>
                   </td>
                   <td v-if="tab === 'users'">
+                    <label class="admin-role-editor"
+                      >后台角色
+                      <select :value="adminRoleCode(row)" @change="saveAdminRole(row, $event)">
+                        <option value="none">普通用户</option>
+                        <option value="ass_admin">ASS 管理员</option>
+                        <option value="super_admin">超级管理员</option>
+                      </select>
+                    </label>
                     <div class="user-quota-editor">
                       <label
                         >Chat/日<input v-model.number="row.dailyChatLimit" type="number" min="1"

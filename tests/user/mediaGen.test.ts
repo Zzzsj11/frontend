@@ -55,6 +55,8 @@ describe('media generation API client', () => {
       ratio: '16:9',
       imageModel: DEFAULT_IMAGE_MODEL,
       videoModel: DEFAULT_VIDEO_MODEL,
+      generateAudio: true,
+      watermark: true,
     })
     expect(result).toEqual({
       coverUrl: '/media/images/scene.png',
@@ -66,6 +68,8 @@ describe('media generation API client', () => {
     expect(body.image_urls).toEqual(['/media/images/scene.png'])
     expect(body.resolution).toBe('1080p')
     expect(body.model).toBe(DEFAULT_VIDEO_MODEL)
+    expect(body.generate_audio).toBe(true)
+    expect(body.watermark).toBe(true)
   })
 
   it('surfaces a failed generation reason', async () => {

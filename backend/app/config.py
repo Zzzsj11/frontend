@@ -83,8 +83,14 @@ class Settings:
     api_request_log_all: bool = os.getenv("API_REQUEST_LOG_ALL", "false").lower() == "true"
     daily_quota_timezone: str = os.getenv("DAILY_QUOTA_TIMEZONE", "Asia/Shanghai")
     daily_chat_limit: int = max(1, int(os.getenv("DAILY_CHAT_LIMIT", "1000")))
-    daily_image_limit: int = max(1, int(os.getenv("DAILY_IMAGE_LIMIT", "100")))
-    daily_video_limit: int = max(1, int(os.getenv("DAILY_VIDEO_LIMIT", "100")))
+    daily_image_limit: int = max(1, int(os.getenv("DAILY_IMAGE_LIMIT", "1000")))
+    daily_video_limit: int = max(1, int(os.getenv("DAILY_VIDEO_LIMIT", "1000")))
+    image_generation_concurrency: int = max(1, min(1000, int(os.getenv("IMAGE_GENERATION_CONCURRENCY", "200"))))
+    video_generation_concurrency: int = max(1, min(1000, int(os.getenv("VIDEO_GENERATION_CONCURRENCY", "200"))))
+    # 图片/视频共用同一个上游账户并发池，避免两类各 200 时合计超发。
+    provider_generation_worker_concurrency: int = max(1, min(200, int(os.getenv("PROVIDER_GENERATION_WORKER_CONCURRENCY", "200"))))
+    image_result_processing_concurrency: int = max(1, min(100, int(os.getenv("IMAGE_RESULT_PROCESSING_CONCURRENCY", "40"))))
+    video_result_processing_concurrency: int = max(1, min(100, int(os.getenv("VIDEO_RESULT_PROCESSING_CONCURRENCY", "20"))))
     image_api_base_url: str = os.getenv("IMAGE_API_BASE_URL", "https://api-aigc.fzyinghe.com")
     image_api_key: str = os.getenv("IMAGE_API_KEY") or SHARED_PROVIDER_KEY
     image_model: str = os.getenv("IMAGE_MODEL", "gpt-image-2")

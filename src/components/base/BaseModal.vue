@@ -17,10 +17,20 @@ const props = withDefaults(
     loading?: boolean
     /** primary=一级弹框(z-index 1000)；nested=弹框内二级弹层(z-index 1100) */
     level?: 'primary' | 'nested'
+    /** emphasized 用于需要更强背景聚焦的编辑弹框。 */
+    maskVariant?: 'default' | 'emphasized'
     width?: string
     maxHeight?: string
   }>(),
-  { title: '', ariaLabel: '', loading: false, level: 'primary', width: '620px', maxHeight: '92vh' },
+  {
+    title: '',
+    ariaLabel: '',
+    loading: false,
+    level: 'primary',
+    maskVariant: 'default',
+    width: '620px',
+    maxHeight: '92vh',
+  },
 )
 const emit = defineEmits<{ close: [] }>()
 
@@ -43,7 +53,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="modal-mask" :class="`level-${level}`" @click.self="requestClose">
+    <div
+      v-if="open"
+      class="modal-mask"
+      :class="[`level-${level}`, `mask-${maskVariant}`]"
+      @click.self="requestClose"
+    >
       <section
         class="modal"
         :style="{ width, maxHeight }"
@@ -91,6 +106,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 .modal-mask.level-nested {
   z-index: 1100;
   background: rgba(0, 0, 0, 0.6);
+}
+.modal-mask.mask-emphasized {
+  background: rgba(0, 0, 0, 0.62);
 }
 .modal {
   display: flex;

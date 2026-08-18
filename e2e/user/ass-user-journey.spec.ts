@@ -14,6 +14,8 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
           username: 'admin',
           displayName: '管理员',
           role: 'admin',
+          isSuperAdmin: true,
+          permissions: [],
           mustChangePassword: true,
         },
       }),

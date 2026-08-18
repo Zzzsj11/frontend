@@ -558,6 +558,18 @@ describe('digital human generation with template reference', () => {
           progress: 0,
           prompt: '参照第一张参考图的构图版式。角色描述：青衣少女。画面风格：古风。',
         })
+      if (url === '/api/generations/status')
+        return json([
+          {
+            id: 'job-dh',
+            status: 'succeeded',
+            progress: 100,
+            result: {
+              urls: ['https://tos.test/dh.png'],
+              thumbnailUrls: ['https://tos.test/dh-t.png'],
+            },
+          },
+        ])
       if (url === '/api/generations/job-dh')
         return json({
           id: 'job-dh',
@@ -620,6 +632,15 @@ describe('digital human generation with template reference', () => {
       calls.push({ url, body })
       if (url === '/api/generations/images')
         return json({ id: 'job-dh', status: 'queued', progress: 0 })
+      if (url === '/api/generations/status')
+        return json([
+          {
+            id: 'job-dh',
+            status: 'succeeded',
+            progress: 100,
+            result: { urls: ['https://tos.test/dh.png'] },
+          },
+        ])
       if (url === '/api/generations/job-dh')
         return json({
           id: 'job-dh',
@@ -688,6 +709,18 @@ describe('digital human avatar regeneration with template reference', () => {
       calls.push({ url, method: init?.method, body })
       if (url === '/api/generations/images')
         return json({ id: 'job-re', status: 'queued', progress: 0 })
+      if (url === '/api/generations/status')
+        return json([
+          {
+            id: 'job-re',
+            status: 'succeeded',
+            progress: 100,
+            result: {
+              urls: ['https://tos.test/new.png'],
+              thumbnailUrls: ['https://tos.test/new-t.png'],
+            },
+          },
+        ])
       if (url === '/api/generations/job-re')
         return json({
           id: 'job-re',
@@ -734,6 +767,15 @@ describe('digital human avatar regeneration with template reference', () => {
       calls.push({ url, method: init?.method })
       if (url === '/api/generations/images')
         return json({ id: 'job-re', status: 'queued', progress: 0 })
+      if (url === '/api/generations/status')
+        return json([
+          {
+            id: 'job-re',
+            status: 'succeeded',
+            progress: 100,
+            result: { urls: ['https://tos.test/new.png'] },
+          },
+        ])
       if (url === '/api/generations/job-re')
         return json({
           id: 'job-re',
@@ -928,10 +970,10 @@ describe('batch shot video generation', () => {
     expect(store.lines.find((line) => line.id === 'l-draft')?.shot.status).toBe('none')
   })
 
-  it('runs up to twenty video generations concurrently', async () => {
+  it('runs up to two hundred video generations concurrently', async () => {
     const store = useProjectStore()
     store.activeTaskId = 'task-1'
-    store.lines = Array.from({ length: 21 }, (_, index) =>
+    store.lines = Array.from({ length: 201 }, (_, index) =>
       shotLine(`l-${index + 1}`, 'succeeded', 'none'),
     )
     let active = 0
@@ -945,13 +987,13 @@ describe('batch shot video generation', () => {
     })
 
     const run = store.generateAllShots()
-    await vi.waitFor(() => expect(active).toBe(20))
-    expect(peak).toBe(20)
-    expect(releases).toHaveLength(20)
+    await vi.waitFor(() => expect(active).toBe(200))
+    expect(peak).toBe(200)
+    expect(releases).toHaveLength(200)
 
     releases.shift()?.()
-    await vi.waitFor(() => expect(releases).toHaveLength(20))
-    expect(peak).toBe(20)
+    await vi.waitFor(() => expect(releases).toHaveLength(200))
+    expect(peak).toBe(200)
     releases.splice(0).forEach((release) => release())
     await run
     expect(store.batchShooting).toBe(false)

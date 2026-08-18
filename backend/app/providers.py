@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 import tempfile
 import time
 import uuid
+import weakref
+from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -110,6 +114,7 @@ IMAGE_POLL_TIMEOUT_SECONDS = 360
 VIDEO_POLL_TIMEOUT_SECONDS = 900
 POLL_INTERVAL_SECONDS = 30
 POLL_MAX_CONSECUTIVE_ERRORS = 5
+POLL_SCHEDULER_TICK_SECONDS = 1.0
 
 ASSET_POLL_TIMEOUT_SECONDS = 180
 ASSET_POLL_INTERVAL_SECONDS = 3.0
@@ -201,6 +206,155 @@ async def _poll(
     raise ProviderError("生成任务超时，请稍后查询")
 
 
+def _poll_batch_size(active_count: int, coverage_seconds: int = POLL_INTERVAL_SECONDS) -> int:
+    """将活跃任务均匀分散到一个轮询周期内。
+
+    例如 200 个任务、30 秒一轮，每秒查 ceil(200 / 30) = 7 个。
+    """
+    if active_count <= 0:
+        return 0
+    return max(1, math.ceil(active_count / max(1, coverage_seconds)))
+
+
+@dataclass
+class _ScheduledPoll:
+    job: Job
+    url: str
+    headers: dict[str, str]
+    deadline: float
+    future: asyncio.Future[dict[str, Any]]
+    consecutive_errors: int = 0
+
+
+class ProviderPollScheduler:
+    """进程内全局时间轮：单客户端、小批次、公平轮询所有上游任务。"""
+
+    def __init__(self, *, tick_seconds: float = POLL_SCHEDULER_TICK_SECONDS, coverage_seconds: int = POLL_INTERVAL_SECONDS) -> None:
+        self.tick_seconds = tick_seconds
+        self.coverage_seconds = coverage_seconds
+        self._entries: dict[str, _ScheduledPoll] = {}
+        self._queue: deque[str] = deque()
+        self._runner: asyncio.Task[None] | None = None
+        self._round_remaining = 0
+        self._round_batch_size = 0
+
+    @property
+    def active_count(self) -> int:
+        return len(self._entries)
+
+    def batch_size(self) -> int:
+        return _poll_batch_size(self.active_count, self.coverage_seconds)
+
+    async def watch(self, url: str, headers: dict[str, str], job: Job, *, timeout_seconds: int) -> dict[str, Any]:
+        if job.id in self._entries:
+            raise ProviderError(f"生成任务已在轮询：{job.id}")
+        future = asyncio.get_running_loop().create_future()
+        self._entries[job.id] = _ScheduledPoll(job, url, headers, time.monotonic() + timeout_seconds, future)
+        self._queue.append(job.id)
+        if self._runner is None or self._runner.done():
+            self._runner = asyncio.create_task(self._run())
+        try:
+            return await future
+        finally:
+            self._remove(job.id)
+
+    def _remove(self, job_id: str) -> None:
+        self._entries.pop(job_id, None)
+
+    def _take_batch(self) -> list[_ScheduledPoll]:
+        if self._round_remaining <= 0:
+            self._round_remaining = len(self._queue)
+            self._round_batch_size = _poll_batch_size(self._round_remaining, self.coverage_seconds)
+        batch: list[_ScheduledPoll] = []
+        take_count = min(self._round_batch_size, self._round_remaining, len(self._queue))
+        for _ in range(take_count):
+            job_id = self._queue.popleft()
+            self._round_remaining -= 1
+            entry = self._entries.get(job_id)
+            if entry is not None:
+                batch.append(entry)
+        return batch
+
+    async def _run(self) -> None:
+        async with httpx.AsyncClient(timeout=60) as client:
+            while self._entries:
+                await asyncio.sleep(self.tick_seconds)
+                now = time.monotonic()
+                for job_id, entry in list(self._entries.items()):
+                    if now >= entry.deadline:
+                        self._finish_error(job_id, ProviderError("生成任务超时，请稍后查询"))
+                batch = self._take_batch()
+                if batch:
+                    await asyncio.gather(*(self._query_one(client, entry) for entry in batch))
+
+    async def _query_one(self, client: httpx.AsyncClient, entry: _ScheduledPoll) -> None:
+        job_id = entry.job.id
+        if job_id not in self._entries:
+            return
+        try:
+            data = await _query_task(client, entry.url, entry.headers)
+        except Exception as exc:
+            entry.consecutive_errors += 1
+            if entry.consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS:
+                self._finish_error(job_id, ProviderError(f"查询生成状态连续失败：{str(exc)[:500]}"))
+            else:
+                self._queue.append(job_id)
+            return
+
+        entry.consecutive_errors = 0
+        status = str(data.get("status", "")).upper()
+        await jobs.update_progress(entry.job, int(data.get("progress") or entry.job.progress + 2))
+        if status in {"SUCCESS", "SUCCEEDED"}:
+            self._finish_result(job_id, data)
+            return
+        if status in {"FAILED", "CANCELLED"} or "FAIL" in status:
+            error = data.get("error") if isinstance(data.get("error"), dict) else {}
+            reason = data.get("failReason") or error.get("message") or f"生成任务状态：{status}"
+            self._finish_error(job_id, ProviderError(translate_provider_error(reason)))
+            return
+        self._queue.append(job_id)
+
+    def _finish_result(self, job_id: str, data: dict[str, Any]) -> None:
+        entry = self._entries.pop(job_id, None)
+        if entry and not entry.future.done():
+            entry.future.set_result(data)
+
+    def _finish_error(self, job_id: str, error: Exception) -> None:
+        entry = self._entries.pop(job_id, None)
+        if entry and not entry.future.done():
+            entry.future.set_exception(error)
+
+
+_poll_schedulers: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, ProviderPollScheduler] = weakref.WeakKeyDictionary()
+_result_semaphores: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, asyncio.Semaphore]] = weakref.WeakKeyDictionary()
+
+
+def _poll_scheduler() -> ProviderPollScheduler:
+    # pytest 会创建多个 event loop；按 loop 隔离，也避免 future 跨 loop 绑定。
+    loop = asyncio.get_running_loop()
+    scheduler = _poll_schedulers.get(loop)
+    if scheduler is None:
+        scheduler = ProviderPollScheduler()
+        _poll_schedulers[loop] = scheduler
+    return scheduler
+
+
+async def _poll_scheduled(url: str, headers: dict[str, str], job: Job, *, timeout_seconds: int) -> dict[str, Any]:
+    return await _poll_scheduler().watch(url, headers, job, timeout_seconds=timeout_seconds)
+
+
+def _result_semaphore(kind: str) -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    slots = _result_semaphores.get(loop)
+    if slots is None:
+        slots = {
+            "image": asyncio.Semaphore(settings.image_result_processing_concurrency),
+            "video": asyncio.Semaphore(settings.video_result_processing_concurrency),
+        }
+        _result_semaphores[loop] = slots
+    return slots[kind]
+
+
 async def list_video_models() -> list[dict[str, Any]]:
     """查询 AIGC 平台当前账号可见的模型列表（OpenAI 风格 /v1/models）。
 
@@ -239,11 +393,16 @@ async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, 
         if not task_id:
             raise ProviderError("生图接口未返回 taskId")
         await jobs.set_provider_task(job, "yinghe", task_id, idempotency_key=headers.get("Idempotency-Key"))
-        data = await _poll(client, f"{base}/image/generation/tasks/{task_id}", headers, job, timeout_seconds=IMAGE_POLL_TIMEOUT_SECONDS)
+    data = await _poll_scheduled(f"{base}/image/generation/tasks/{task_id}", headers, job, timeout_seconds=IMAGE_POLL_TIMEOUT_SECONDS)
     return await _store_image_result(job, task_id, data, created)
 
 
 async def _store_image_result(job: Job, task_id: str, data: dict[str, Any], created: dict[str, Any]) -> dict[str, Any]:
+    async with _result_semaphore("image"):
+        return await _store_image_result_inner(job, task_id, data, created)
+
+
+async def _store_image_result_inner(job: Job, task_id: str, data: dict[str, Any], created: dict[str, Any]) -> dict[str, Any]:
     urls = data.get("resultUrls") or ([data["resultUrl"]] if data.get("resultUrl") else [])
     if not urls:
         raise ProviderError("生图成功但未返回图片地址")
@@ -284,11 +443,16 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         if not task_id:
             raise ProviderError("视频接口未返回任务 id")
         await jobs.set_provider_task(job, "yinghe", task_id, idempotency_key=headers.get("Idempotency-Key"))
-        data = await _poll(client, f"{base}/v3/video/tasks/{task_id}", headers, job, timeout_seconds=VIDEO_POLL_TIMEOUT_SECONDS)
+    data = await _poll_scheduled(f"{base}/v3/video/tasks/{task_id}", headers, job, timeout_seconds=VIDEO_POLL_TIMEOUT_SECONDS)
     return await _store_video_result(job, task_id, data, created)
 
 
 async def _store_video_result(job: Job, task_id: str, data: dict[str, Any], created: dict[str, Any]) -> dict[str, Any]:
+    async with _result_semaphore("video"):
+        return await _store_video_result_inner(job, task_id, data, created)
+
+
+async def _store_video_result_inner(job: Job, task_id: str, data: dict[str, Any], created: dict[str, Any]) -> dict[str, Any]:
     request = job.request or {}
     # V3 Seedance 报文：结果在 content.video_url / content.last_frame_url
     content = data.get("content") if isinstance(data.get("content"), dict) else {}
@@ -327,8 +491,7 @@ async def resume_generation(job: Job) -> dict[str, Any]:
         url, timeout = f"{base}/v3/video/tasks/{job.provider_task_id}", VIDEO_POLL_TIMEOUT_SECONDS
     else:
         raise ProviderError(f"不支持恢复的任务类型：{job.kind}")
-    async with httpx.AsyncClient(timeout=60) as client:
-        data = await _poll(client, url, headers, job, timeout_seconds=timeout)
+    data = await _poll_scheduled(url, headers, job, timeout_seconds=timeout)
     return await store_provider_result(job, data)
 
 

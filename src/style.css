@@ -40,6 +40,8 @@
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.03);
   --shadow-dropdown: 0 18px 45px rgba(52, 37, 26, 0.16);
   --shadow-modal: 0 24px 70px rgba(0, 0, 0, 0.24);
+  /* 弹层层级 */
+  --z-modal-nested: 1100;
   /* 字号 */
   --font-sm: 12px;
   --font-md: 14px;

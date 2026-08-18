@@ -20,6 +20,11 @@ router.beforeEach(async (to) => {
   await auth.initialize()
   if (!to.meta.public && !auth.authenticated)
     return { path: '/login', query: { redirect: to.fullPath } }
-  if (to.meta.admin && auth.user?.role !== 'admin') return '/projects'
+  if (
+    to.meta.admin &&
+    !auth.user?.isSuperAdmin &&
+    !auth.user?.permissions?.includes('song_emotions.read')
+  )
+    return '/projects'
   if (to.path === '/login' && auth.authenticated) return '/projects'
 })
