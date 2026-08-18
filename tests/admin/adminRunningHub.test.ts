@@ -91,7 +91,8 @@ describe('admin runninghub panel', () => {
       name: '对比 · dev01 · 通用分镜 · 镜头 3 · reference',
       mode: 'reference',
       comparisonMode: 'reference',
-      prompt: '请严格参考下列图片并保持人物、场景和镜头风格一致：\n<Picture 1> 首帧\n<Picture 2> 人物A\n\n人物沿着海边缓慢行走',
+      prompt:
+        '请严格参考下列图片并保持人物、场景和镜头风格一致：\n<Picture 1> 首帧\n<Picture 2> 人物A\n\n人物沿着海边缓慢行走',
       duration: 8,
       aspectRatio: '16:9 (Widescreen)',
       inputMedia: [

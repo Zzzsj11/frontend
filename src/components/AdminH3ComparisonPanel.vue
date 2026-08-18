@@ -46,8 +46,7 @@ const referenceUrlsFor = (source: H3ComparisonSource) => {
   const current = selectedRefsByLineId.value[source.lineId]
   if (current?.length) return current
   const defaults =
-    source.referenceCandidates?.slice(0, comparisonMode.value === 'first_frame' ? 1 : 3) ??
-    []
+    source.referenceCandidates?.slice(0, comparisonMode.value === 'first_frame' ? 1 : 3) ?? []
   return defaults.length ? defaults.map((item) => item.url) : [source.coverUrl]
 }
 
@@ -296,13 +295,12 @@ onBeforeUnmount(() => pollTimers.forEach((timer) => clearTimeout(timer)))
         <details>
           <summary>查看提示词与参考图</summary>
           <div class="prompt-detail">
-            <img
-              v-if="sourceCover(preset)?.url"
-              :src="sourceCover(preset)?.url"
-              alt="参考首帧"
-            />
+            <img v-if="sourceCover(preset)?.url" :src="sourceCover(preset)?.url" alt="参考首帧" />
             <div class="reference-detail">
-              <span v-for="media in preset.inputMedia.filter((item) => item.type === 'image')" :key="media.url">
+              <span
+                v-for="media in preset.inputMedia.filter((item) => item.type === 'image')"
+                :key="media.url"
+              >
                 {{ media.name || media.url }}
               </span>
             </div>

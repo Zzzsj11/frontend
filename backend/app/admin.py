@@ -38,6 +38,7 @@ from .models import (
     GenerationJobModel,
     H3TestPresetModel,
     LlmCallLogModel,
+    ProjectCastModel,
     ProjectModel,
     ProjectTaskModel,
     PromptTemplateModel,
@@ -1703,19 +1704,23 @@ async def runninghub_comparison_create(
         }
     ]
     cast_rows = (
-        await db.execute(
-            select(DigitalHumanModel)
-            .join(ProjectCastModel, ProjectCastModel.digital_human_id == DigitalHumanModel.id)
-            .where(
-                ProjectCastModel.project_task_id == task.id,
-                ProjectCastModel.deleted_at.is_(None),
-                DigitalHumanModel.deleted_at.is_(None),
-                DigitalHumanModel.avatar_url.isnot(None),
-                DigitalHumanModel.avatar_url != "",
+        (
+            await db.execute(
+                select(DigitalHumanModel)
+                .join(ProjectCastModel, ProjectCastModel.digital_human_id == DigitalHumanModel.id)
+                .where(
+                    ProjectCastModel.project_task_id == task.id,
+                    ProjectCastModel.deleted_at.is_(None),
+                    DigitalHumanModel.deleted_at.is_(None),
+                    DigitalHumanModel.avatar_url.isnot(None),
+                    DigitalHumanModel.avatar_url != "",
+                )
+                .order_by(ProjectCastModel.sort_order, DigitalHumanModel.created_at.desc())
             )
-            .order_by(ProjectCastModel.sort_order, DigitalHumanModel.sort_order, DigitalHumanModel.created_at.desc())
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for human in cast_rows:
         if len(references) >= 3:
             break
@@ -1745,15 +1750,13 @@ async def runninghub_comparison_create(
         raise HTTPException(422, "没有可用于对比的参考图")
     mode = "first_frame" if len(references) == 1 else "reference"
     prompt_with_refs = "\n".join(
-        ["请严格参考下列图片并保持人物、场景和镜头风格一致："]
-        + [f"<Picture {index + 1}> {item['name']}" for index, item in enumerate(references)]
-        + [""]
-        + [prompt]
+        ["请严格参考下列图片并保持人物、场景和镜头风格一致："] + [f"<Picture {index + 1}> {item['name']}" for index, item in enumerate(references)] + [""] + [prompt]
     )
+    submission_prompt = prompt if mode == "first_frame" else prompt_with_refs
     try:
         if mode == "first_frame":
             result = await rh_submit_first_frame_task(
-                prompt=prompt_with_refs,
+                prompt=submission_prompt,
                 duration=duration,
                 aspect_ratio=aspect_ratio,
                 image=references[0]["url"],
@@ -1778,7 +1781,7 @@ async def runninghub_comparison_create(
         user_id=user.id,
         name=f"对比 · {owner.username} · {task.title} · 镜头 {line.sort_order + 1} · {mode}",
         mode=mode,
-        prompt=prompt_with_refs,
+        prompt=submission_prompt,
         duration=duration,
         aspect_ratio=aspect_ratio,
         input_media=references
