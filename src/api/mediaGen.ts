@@ -90,6 +90,9 @@ export async function generateShotVideo(
       resolution: options.resolution,
       model: options.videoModel,
       image_urls: imageUrls,
+      video_urls: options.referenceVideoUrls ?? [],
+      audio_urls: options.referenceAudioUrls ?? [],
+      h3_audio_usage: options.h3AudioUsage ?? 'reference',
       generate_audio: options.generateAudio ?? false,
       watermark: options.watermark ?? false,
       project_task_id: projectTaskId,
@@ -101,7 +104,7 @@ export async function generateShotVideo(
     coverThumbnailUrl?: string
     videoUrl: string
     duration: number
-  }>(job.id, 660_000, { signal })
+  }>(job.id, options.videoModel === 'minimax-h3-runninghub' ? 2_700_000 : 660_000, { signal })
   return {
     coverUrl: result.coverUrl || referenceImageUrl || '',
     coverThumbnailUrl: result.coverThumbnailUrl,

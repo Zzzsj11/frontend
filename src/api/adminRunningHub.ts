@@ -115,7 +115,7 @@ export const submitRunningHubComparisonWithRefs = (input: {
     }),
   })
 
-export const uploadRunningHubImage = (file: File) => {
+export const uploadRunningHubMedia = (file: File) => {
   const form = new FormData()
   form.append('file', file)
   return apiRequest<{ fileName: string; downloadUrl: string; size: string; tosUrl: string }>(
@@ -127,12 +127,17 @@ export const uploadRunningHubImage = (file: File) => {
   )
 }
 
+/** @deprecated 使用 uploadRunningHubMedia；保留兼容现有调用方。 */
+export const uploadRunningHubImage = uploadRunningHubMedia
+
 export const submitRunningHubTask = (input: {
   mode: 'reference' | 'text' | 'first_frame'
   prompt: string
   duration: number
   aspectRatio: string
   images: string[]
+  videos?: string[]
+  audios?: string[]
   seed?: number | null
   stage1Megapixels?: number
   stage2Megapixels?: number
@@ -147,6 +152,8 @@ export const submitRunningHubTask = (input: {
       duration: input.duration,
       aspectRatio: input.aspectRatio,
       images: input.images,
+      videos: input.videos ?? [],
+      audios: input.audios ?? [],
       seed: input.seed ?? null,
       stage1Megapixels: input.stage1Megapixels,
       stage2Megapixels: input.stage2Megapixels,

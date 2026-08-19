@@ -47,7 +47,7 @@ integrated_multimodal_description: [Shot 1] Live-action cinematic footage begins
 
 type GenerationMode = 'reference' | 'text' | 'first_frame'
 
-interface ImageSlot {
+interface MediaSlot {
   value: string
   uploading: boolean
   preview: string
@@ -59,6 +59,8 @@ interface HistoryEntry {
   duration: number
   aspectRatio: string
   imageCount: number
+  videoCount?: number
+  audioCount?: number
   mode?: GenerationMode
   status: string
   videoUrl: string
@@ -79,12 +81,14 @@ const stage1Mp = ref(0.4)
 const stage2Mp = ref(0.9)
 const textMp = ref(0.9)
 const firstFrameMp = ref(0.9)
-const slots = reactive<ImageSlot[]>([
-  { value: '', uploading: false, preview: '' },
-  { value: '', uploading: false, preview: '' },
-  { value: '', uploading: false, preview: '' },
-])
+const makeSlots = (count: number) =>
+  Array.from({ length: count }, (): MediaSlot => ({ value: '', uploading: false, preview: '' }))
+const slots = reactive<MediaSlot[]>(makeSlots(9))
+const videoSlots = reactive<MediaSlot[]>(makeSlots(3))
+const audioSlots = reactive<MediaSlot[]>(makeSlots(3))
 const fileInputs = ref<Array<HTMLInputElement | null>>([])
+const videoFileInputs = ref<Array<HTMLInputElement | null>>([])
+const audioFileInputs = ref<Array<HTMLInputElement | null>>([])
 const busy = ref(false)
 const formError = ref('')
 const current = ref<{
@@ -105,6 +109,8 @@ let pollTimer: ReturnType<typeof setTimeout> | null = null
 
 const ready = computed(() => !!status.value?.configured)
 const filledImages = computed(() => slots.map((s) => s.value.trim()).filter(Boolean))
+const filledVideos = computed(() => videoSlots.map((s) => s.value.trim()).filter(Boolean))
+const filledAudios = computed(() => audioSlots.map((s) => s.value.trim()).filter(Boolean))
 const submittedImages = computed(() =>
   mode.value === 'text'
     ? []
@@ -124,8 +130,12 @@ const canSubmit = computed(
     ready.value &&
     !busy.value &&
     !!prompt.value.trim() &&
-    (mode.value === 'text' || submittedImages.value.length > 0) &&
-    !slots.some((s) => s.uploading),
+    (mode.value === 'text' ||
+      mode.value === 'first_frame' ||
+      submittedImages.value.length + filledVideos.value.length > 0) &&
+    (mode.value !== 'first_frame' || submittedImages.value.length === 1) &&
+    submittedImages.value.length + filledVideos.value.length + filledAudios.value.length <= 12 &&
+    ![...slots, ...videoSlots, ...audioSlots].some((s) => s.uploading),
 )
 
 const loadStatus = async () => {
@@ -156,8 +166,20 @@ const applyPreset = (preset?: H3TestPreset) => {
   duration.value = preset.duration
   aspectRatio.value = preset.aspectRatio
   const images = preset.inputMedia.filter((item) => item.type === 'image')
+  const videos = preset.inputMedia.filter((item) => item.type === 'video')
+  const audios = preset.inputMedia.filter((item) => item.type === 'audio')
   slots.forEach((slot, index) => {
     const media = images[index]
+    slot.value = media?.runningHubFileName || media?.url || ''
+    slot.preview = media?.url || ''
+  })
+  videoSlots.forEach((slot, index) => {
+    const media = videos[index]
+    slot.value = media?.runningHubFileName || media?.url || ''
+    slot.preview = media?.url || ''
+  })
+  audioSlots.forEach((slot, index) => {
+    const media = audios[index]
     slot.value = media?.runningHubFileName || media?.url || ''
     slot.preview = media?.url || ''
   })
@@ -189,6 +211,8 @@ onBeforeUnmount(() => {
 })
 
 const triggerPick = (index: number) => fileInputs.value[index]?.click()
+const triggerMediaPick = (kind: 'video' | 'audio', index: number) =>
+  (kind === 'video' ? videoFileInputs.value[index] : audioFileInputs.value[index])?.click()
 
 const onFileChange = async (index: number, event: Event) => {
   const input = event.target as HTMLInputElement
@@ -196,6 +220,25 @@ const onFileChange = async (index: number, event: Event) => {
   input.value = ''
   if (!file) return
   const slot = slots[index]
+  slot.uploading = true
+  formError.value = ''
+  try {
+    const uploaded = await uploadRunningHubImage(file)
+    slot.value = uploaded.fileName
+    slot.preview = uploaded.downloadUrl
+  } catch (e) {
+    formError.value = e instanceof Error ? e.message : '上传失败'
+  } finally {
+    slot.uploading = false
+  }
+}
+
+const onMediaFileChange = async (kind: 'video' | 'audio', index: number, event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  const slot = (kind === 'video' ? videoSlots : audioSlots)[index]
   slot.uploading = true
   formError.value = ''
   try {
@@ -288,6 +331,12 @@ const submit = async () => {
       duration: duration.value,
       aspectRatio: aspectRatio.value,
       images: submittedImages.value,
+      ...(mode.value === 'reference' && filledVideos.value.length
+        ? { videos: filledVideos.value }
+        : {}),
+      ...(mode.value === 'reference' && filledAudios.value.length
+        ? { audios: filledAudios.value }
+        : {}),
       seed: seed !== null && Number.isFinite(seed) && seed >= 0 ? seed : null,
       ...(mode.value === 'text'
         ? { textMegapixels: textMp.value }
@@ -307,6 +356,8 @@ const submit = async () => {
       duration: duration.value,
       aspectRatio: aspectRatio.value,
       imageCount: submittedImages.value.length,
+      videoCount: mode.value === 'reference' ? filledVideos.value.length : 0,
+      audioCount: mode.value === 'reference' ? filledAudios.value.length : 0,
       mode: mode.value,
       status: created.status || 'QUEUED',
       videoUrl: '',
@@ -348,7 +399,7 @@ const statusTone = (value: string) =>
     <div class="rh-head">
       <div>
         <h3>RunningHub 工作流测试</h3>
-        <p class="rh-sub">MiniMax H3：支持多图参考、纯文本和首帧生成带声音视频</p>
+        <p class="rh-sub">MiniMax H3：Ref2VA 支持 9 图 / 3 视频 / 3 音频，合计最多 12 个文件</p>
       </div>
       <div v-if="status" class="rh-meta">
         <span class="badge" :class="ready ? 'ok' : 'bad'">{{
@@ -375,7 +426,7 @@ const statusTone = (value: string) =>
           :disabled="!ready"
           @click="changeMode('reference')"
         >
-          多图参考生成
+          全参考生成
         </button>
         <button
           type="button"
@@ -501,7 +552,7 @@ const statusTone = (value: string) =>
 
       <div v-if="mode !== 'text'" class="row slots">
         <div
-          v-for="(slot, index) in slots.slice(0, mode === 'first_frame' ? 1 : 3)"
+          v-for="(slot, index) in slots.slice(0, mode === 'first_frame' ? 1 : 9)"
           :key="index"
           class="slot"
         >
@@ -539,11 +590,79 @@ const statusTone = (value: string) =>
           />
         </div>
       </div>
+      <div v-if="mode === 'reference'" class="row slots">
+        <div v-for="(slot, index) in videoSlots" :key="`video-${index}`" class="slot">
+          <div class="slot-head">
+            <span class="form-label">参考视频 {{ index + 1 }}</span>
+            <button
+              type="button"
+              class="ghost-btn"
+              :disabled="!ready || slot.uploading"
+              @click="triggerMediaPick('video', index)"
+            >
+              {{ slot.uploading ? '上传中…' : '本地上传' }}
+            </button>
+            <input
+              :ref="(el) => (videoFileInputs[index] = el as HTMLInputElement | null)"
+              type="file"
+              accept="video/*"
+              hidden
+              @change="onMediaFileChange('video', index, $event)"
+            />
+          </div>
+          <input
+            v-model="slot.value"
+            class="slot-input"
+            :disabled="!ready"
+            placeholder="上传后自动填入，或粘贴视频 URL"
+          />
+          <video
+            v-if="slot.preview || slot.value.startsWith('http')"
+            :src="slot.preview || slot.value"
+            class="slot-thumb"
+            controls
+            playsinline
+          ></video>
+        </div>
+      </div>
+      <div v-if="mode === 'reference'" class="row slots">
+        <div v-for="(slot, index) in audioSlots" :key="`audio-${index}`" class="slot">
+          <div class="slot-head">
+            <span class="form-label">参考音频 {{ index + 1 }}</span>
+            <button
+              type="button"
+              class="ghost-btn"
+              :disabled="!ready || slot.uploading"
+              @click="triggerMediaPick('audio', index)"
+            >
+              {{ slot.uploading ? '上传中…' : '本地上传' }}
+            </button>
+            <input
+              :ref="(el) => (audioFileInputs[index] = el as HTMLInputElement | null)"
+              type="file"
+              accept="audio/*"
+              hidden
+              @change="onMediaFileChange('audio', index, $event)"
+            />
+          </div>
+          <input
+            v-model="slot.value"
+            class="slot-input"
+            :disabled="!ready"
+            placeholder="上传后自动填入，或粘贴音频 URL"
+          />
+          <audio
+            v-if="slot.preview || slot.value.startsWith('http')"
+            :src="slot.preview || slot.value"
+            controls
+          ></audio>
+        </div>
+      </div>
       <p v-if="mode !== 'text'" class="hint">
         {{
           mode === 'first_frame'
             ? '图片对应提示词中的 Picture 1，并作为视频 0 秒画面。上传文件 24 小时内有效。'
-            : '图位对应提示词中的 Picture 1/2/3；不足 3 张时后端自动用最后一张补齐槽位。上传文件 24 小时内有效。'
+            : '图片≤9、视频≤3、音频≤3，文件合计≤12；每段视频/音频为2–15秒，同类型总时长≤15秒。音频不能单独使用。未使用槽位会从工作流删除，不再用示例素材补齐。'
         }}
       </p>
 
@@ -662,7 +781,7 @@ const statusTone = (value: string) =>
                   ? '纯文本'
                   : entry.mode === 'first_frame'
                     ? '首帧'
-                    : `${entry.imageCount} 图`
+                    : `${entry.imageCount} 图 · ${entry.videoCount || 0} 视频 · ${entry.audioCount || 0} 音频`
               }}
             </td>
             <td>

@@ -23,6 +23,9 @@ const popoverStyle = ref<Record<string, string>>({})
 const resolutionChoices: ShotGenOptions['resolution'][] = ['480p', '720p', '1080p']
 const ratioChoices: ShotGenOptions['ratio'][] = ['16:9', '9:16', '4:3', '1:1']
 const durationChoices = VIDEO_DURATION_CHOICES
+const isH3 = computed(
+  () => props.mode === 'shot' && props.modelValue.videoModel === 'minimax-h3-runninghub',
+)
 
 const summary = computed(() => {
   const parts = [props.modelValue.ratio, props.modelValue.resolution.toUpperCase()]
@@ -37,6 +40,12 @@ const summary = computed(() => {
 const updateOption = <K extends keyof ShotGenOptions>(key: K, value: ShotGenOptions[K]) => {
   emit('update:modelValue', { ...props.modelValue, [key]: value })
 }
+const parseReferenceUrls = (value: string) =>
+  value
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 3)
 const restoreDefaults = () => {
   emit('update:modelValue', {
     ...props.modelValue,
@@ -223,6 +232,57 @@ onBeforeUnmount(close)
               <span class="switch-control"><span /></span>
               <span><strong>添加水印</strong><small>使用模型供应商提供的水印</small></span>
             </button>
+          </fieldset>
+          <fieldset v-if="isH3" class="option-group h3-reference-group">
+            <legend>H3 全参考素材</legend>
+            <label class="reference-field">
+              <span>参考视频 URL（最多3段）</span>
+              <textarea
+                :value="(modelValue.referenceVideoUrls ?? []).join('\n')"
+                rows="3"
+                placeholder="每行一个视频公网 URL；每段2–15秒，总时长≤15秒"
+                @input="
+                  updateOption(
+                    'referenceVideoUrls',
+                    parseReferenceUrls(($event.target as HTMLTextAreaElement).value),
+                  )
+                "
+              ></textarea>
+            </label>
+            <label class="reference-field">
+              <span>参考音频 URL（最多3段）</span>
+              <textarea
+                :value="(modelValue.referenceAudioUrls ?? []).join('\n')"
+                rows="3"
+                placeholder="每行一个音频公网 URL；不能脱离图片/视频单独使用"
+                @input="
+                  updateOption(
+                    'referenceAudioUrls',
+                    parseReferenceUrls(($event.target as HTMLTextAreaElement).value),
+                  )
+                "
+              ></textarea>
+            </label>
+            <label class="reference-field">
+              <span>音频用途</span>
+              <select
+                :value="modelValue.h3AudioUsage ?? 'reference'"
+                @change="
+                  updateOption(
+                    'h3AudioUsage',
+                    ($event.target as HTMLSelectElement).value as ShotGenOptions['h3AudioUsage'],
+                  )
+                "
+              >
+                <option value="reference">参考节奏/风格</option>
+                <option value="reuse">原样作为BGM</option>
+                <option value="generated">由H3生成声音</option>
+                <option value="mute">静音</option>
+              </select>
+            </label>
+            <p class="reference-hint">
+              图片由当前场景和人物自动加入；全部图片、视频和音频合计最多12个。
+            </p>
           </fieldset>
           <div class="popover-actions">
             <button type="button" class="restore-button" @click="restoreDefaults">恢复默认</button>
@@ -443,6 +503,36 @@ onBeforeUnmount(close)
 }
 .switch-option.active .switch-control span {
   transform: translateX(14px);
+}
+.h3-reference-group {
+  display: grid;
+  gap: 10px;
+}
+.reference-field {
+  display: grid;
+  gap: 5px;
+  color: var(--text-regular);
+  font-size: var(--font-sm);
+}
+.reference-field textarea,
+.reference-field select {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  padding: 8px 10px;
+  font: inherit;
+}
+.reference-field textarea {
+  resize: vertical;
+}
+.reference-hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
 }
 .popover-actions {
   position: sticky;

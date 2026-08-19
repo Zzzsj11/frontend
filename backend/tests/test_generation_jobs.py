@@ -930,32 +930,24 @@ def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) ->
             connection.close()
 
 
-def test_h3_endpoint_enforces_deployed_workflow_reference_capabilities(client) -> None:
+def test_h3_endpoint_enforces_official_reference_capabilities(client) -> None:
     base = {
         "prompt": "故宫舞蹈",
         "model": "minimax-h3-runninghub",
         "image_urls": ["https://tos.test/person.jpg"],
     }
-    missing_image = client.post(
+    too_many_videos = client.post(
         "/api/generations/videos",
-        json={"prompt": "故宫舞蹈", "model": "minimax-h3-runninghub"},
+        json={**base, "video_urls": [f"https://tos.test/dance-{index}.mp4" for index in range(4)]},
     )
-    assert missing_image.status_code == 422
-    assert "至少需要 1 个参考图片" in missing_image.json()["detail"]
+    assert too_many_videos.status_code == 422
 
-    video = client.post(
+    audio_only = client.post(
         "/api/generations/videos",
-        json={**base, "video_urls": ["https://tos.test/dance.mp4"]},
+        json={"prompt": "故宫舞蹈", "model": "minimax-h3-runninghub", "audio_urls": ["https://tos.test/music.wav"]},
     )
-    assert video.status_code == 422
-    assert "暂不支持参考视频" in video.json()["detail"]
-
-    audio = client.post(
-        "/api/generations/videos",
-        json={**base, "audio_urls": ["https://tos.test/music.wav"]},
-    )
-    assert audio.status_code == 422
-    assert "暂不支持参考音频" in audio.json()["detail"]
+    assert audio_only.status_code == 422
+    assert "不能单独使用" in audio_only.json()["detail"]
 
 
 def test_create_human_registers_asset_avatar(client, monkeypatch) -> None:

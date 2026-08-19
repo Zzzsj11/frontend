@@ -79,7 +79,7 @@ from .runninghub import (
 )
 from .runninghub import query_task as rh_query_task
 from .runninghub import submit_first_frame_task as rh_submit_first_frame_task
-from .runninghub import submit_task as rh_submit_task
+from .runninghub import submit_reference_task as rh_submit_reference_task
 from .runninghub import submit_text_task as rh_submit_text_task
 from .runninghub import upload_media as rh_upload_media
 from .server_monitoring import monitoring_summary
@@ -1764,7 +1764,7 @@ async def runninghub_comparison_create(
                 megapixels=DEFAULT_FIRST_FRAME_MEGAPIXELS,
             )
         else:
-            result = await rh_submit_task(
+            result = await rh_submit_reference_task(
                 prompt=prompt_with_refs,
                 duration=duration,
                 aspect_ratio=aspect_ratio,
@@ -1850,7 +1850,9 @@ class RunningHubTaskIn(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
     duration: float = Field(default=8, ge=MIN_DURATION, le=MAX_DURATION)
     aspect_ratio: str = Field(default="16:9 (Widescreen)", alias="aspectRatio")
-    images: list[str] = Field(default_factory=list, max_length=3)
+    images: list[str] = Field(default_factory=list, max_length=9)
+    videos: list[str] = Field(default_factory=list, max_length=3)
+    audios: list[str] = Field(default_factory=list, max_length=3)
     seed: int | None = Field(default=None, ge=0)
     stage1_megapixels: float = Field(default=DEFAULT_STAGE1_MEGAPIXELS, ge=MEGAPIXELS_MIN, le=MEGAPIXELS_MAX, alias="stage1Megapixels")
     stage2_megapixels: float = Field(default=DEFAULT_STAGE2_MEGAPIXELS, ge=MEGAPIXELS_MIN, le=MEGAPIXELS_MAX, alias="stage2Megapixels")
@@ -1886,11 +1888,13 @@ async def runninghub_task_create(payload: RunningHubTaskIn, request: Request, us
                 megapixels=payload.text_megapixels,
             )
         else:
-            result = await rh_submit_task(
+            result = await rh_submit_reference_task(
                 prompt=payload.prompt,
                 duration=payload.duration,
                 aspect_ratio=payload.aspect_ratio,
                 images=payload.images,
+                videos=payload.videos,
+                audios=payload.audios,
                 seed=payload.seed,
                 stage1_megapixels=payload.stage1_megapixels,
                 stage2_megapixels=payload.stage2_megapixels,
@@ -1911,6 +1915,8 @@ async def runninghub_task_create(payload: RunningHubTaskIn, request: Request, us
             "duration": payload.duration,
             "aspectRatio": payload.aspect_ratio,
             "imageCount": len(payload.images),
+            "videoCount": len(payload.videos),
+            "audioCount": len(payload.audios),
             "stage1Megapixels": payload.stage1_megapixels,
             "stage2Megapixels": payload.stage2_megapixels,
             "textMegapixels": payload.text_megapixels,
@@ -1926,7 +1932,11 @@ async def runninghub_task_create(payload: RunningHubTaskIn, request: Request, us
             prompt=payload.prompt,
             duration=payload.duration,
             aspect_ratio=payload.aspect_ratio,
-            input_media=[{"type": "image", "runningHubFileName": value, "url": value if value.startswith("https://") else ""} for value in payload.images],
+            input_media=[
+                *[{"type": "image", "runningHubFileName": value, "url": value if value.startswith("https://") else ""} for value in payload.images],
+                *[{"type": "video", "runningHubFileName": value, "url": value if value.startswith("https://") else ""} for value in payload.videos],
+                *[{"type": "audio", "runningHubFileName": value, "url": value if value.startswith("https://") else ""} for value in payload.audios],
+            ],
             output_media=[],
             task_id=task_id,
             task_status=result.get("status", "QUEUED"),

@@ -191,10 +191,23 @@ async def seed_system_data() -> None:
                     "durations": {"min": 4, "max": 15},
                     "ratios": ["16:9", "9:16", "4:3", "1:1"],
                     "resolutions": ["480p", "720p", "1080p"],
-                    "referenceImage": {"min": 1, "max": 3},
-                    "referenceVideo": {"min": 0, "max": 0},
-                    "referenceAudio": {"min": 0, "max": 0},
-                    "workflowVersion": "runninghub-legacy-image-ref-v1",
+                    "variants": {
+                        "fl2va": {"images": {"min": 0, "max": 2}},
+                        "ref2va": {
+                            "images": {"min": 0, "max": 9},
+                            "videos": {"min": 0, "max": 3, "duration": {"min": 2, "max": 15, "totalMax": 15}},
+                            "audios": {"min": 0, "max": 3, "duration": {"min": 2, "max": 15, "totalMax": 15}, "requiresVisual": True},
+                            "totalFilesMax": 12,
+                        },
+                    },
+                    "referenceImage": {"min": 0, "max": 9},
+                    "referenceVideo": {"min": 0, "max": 3},
+                    "referenceAudio": {"min": 0, "max": 3},
+                    "referenceTotalMax": 12,
+                    "referenceAudioRequiresVisual": True,
+                    "workflowVersion": "runninghub-h3-official-ref2va-v2",
+                    "promptCompiler": "h3-prompt-writing",
+                    "promptCompilerVersion": "1.0.0",
                     "nativeAudio": True,
                     "executionPool": "runninghub-h3",
                     "executionConcurrency": 2,
@@ -219,6 +232,12 @@ async def seed_system_data() -> None:
                         is_default=is_default,
                     )
                 )
+            elif code == "minimax-h3-runninghub":
+                # 模型能力属于系统种子配置；启动时同步升级已有环境，避免仅新库生效。
+                model.provider_model_id = provider_id or code
+                model.capabilities = capabilities
+                model.status = "active"
+                model.user_visible = True
         system_style_specs = [
             ("style-system-male", "男", 0),
             ("style-system-female", "女", 1),

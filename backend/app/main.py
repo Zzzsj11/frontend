@@ -41,6 +41,7 @@ from .database import close_database, database_ok, database_session, init_databa
 from .domain import owned_line, owned_project, owned_task, uid, visible_humans
 from .domain import router as domain_router
 from .error_logging import record_api_error, request_payload
+from .h3_prompt_compiler import compile_h3_prompt
 from .jobs import jobs
 from .media_constraints import normalize_video_duration
 from .models import (
@@ -212,6 +213,12 @@ def validate_video_references(payload: VideoGenerationCreate, capabilities: dict
         if len(field) > maximum:
             supported = "暂不支持" if maximum == 0 else f"最多支持 {maximum} 个"
             raise HTTPException(422, f"该视频模型{supported}参考{label}")
+    total_maximum = int(capabilities.get("referenceTotalMax") or 0)
+    total = len(payload.image_urls) + len(payload.video_urls) + len(payload.audio_urls)
+    if total_maximum and total > total_maximum:
+        raise HTTPException(422, f"该视频模型所有参考文件合计最多支持 {total_maximum} 个")
+    if capabilities.get("referenceAudioRequiresVisual") and payload.audio_urls and not (payload.image_urls or payload.video_urls):
+        raise HTTPException(422, "该视频模型的参考音频不能单独使用，必须同时提供图片或视频")
 
 
 @app.get("/api/health")
@@ -563,9 +570,25 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
     # 数字人头像优先用平台虚拟资产（asset://），其余 URL（如场景图）原样保留
     if provider.code == "yinghe":
         payload.image_urls = await _resolve_asset_avatar_urls(db, payload.image_urls)
+    h3_compilation = compile_h3_prompt(payload) if provider.code == "runninghub" else None
+    if h3_compilation:
+        payload.prompt = h3_compilation.prompt
+    snapshot = generation_request_snapshot(payload, model, provider)
+    if h3_compilation:
+        snapshot.update(
+            {
+                "_sourcePrompt": h3_compilation.source_prompt,
+                "_compiledPrompt": h3_compilation.prompt,
+                "_h3Mode": h3_compilation.mode,
+                "_promptCompiler": h3_compilation.compiler,
+                "_promptCompilerVersion": h3_compilation.version,
+                "_referenceBindings": h3_compilation.reference_bindings,
+                "_promptWarnings": list(h3_compilation.warnings),
+            }
+        )
     job = await jobs.create(
         "video",
-        generation_request_snapshot(payload, model, provider),
+        snapshot,
         lambda item: generate_video(payload, item),
         user_id=user.id,
         project_id=project_id,

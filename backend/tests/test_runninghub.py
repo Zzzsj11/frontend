@@ -11,7 +11,7 @@ from app import admin as admin_module
 from app.config import settings
 from app.database import session_factory
 from app.models import ProjectModel, ProjectTaskModel, ShotAssetModel, StoryboardLineModel, UserModel
-from app.runninghub import RunningHubError, build_first_frame_node_info_list, build_node_info_list, build_text_node_info_list
+from app.runninghub import RunningHubError, build_first_frame_node_info_list, build_node_info_list, build_reference_workflow, build_text_node_info_list
 
 
 def bearer(token: str) -> dict[str, str]:
@@ -71,6 +71,38 @@ def test_runninghub_node_info_list_validation():
         build_node_info_list(prompt="x", duration=8, aspect_ratio="16:9 (Widescreen)", images=["a.png"], stage1_megapixels=3.0)
     with pytest.raises(RunningHubError, match="二阶段分辨率"):
         build_node_info_list(prompt="x", duration=8, aspect_ratio="16:9 (Widescreen)", images=["a.png"], stage2_megapixels=0.1)
+
+
+def test_reference_workflow_expands_to_official_limits_and_removes_empty_defaults():
+    workflow = build_reference_workflow(
+        prompt="subject_definitions:\n<Subject 1> ...",
+        duration=10,
+        aspect_ratio="16:9 (Widescreen)",
+        images=[f"openapi/image-{index}.png" for index in range(9)],
+        videos=[f"openapi/video-{index}.mp4" for index in range(3)],
+        audios=[],
+        seed=10,
+    )
+    inputs = workflow["108"]["inputs"]
+    assert all(f"ref_images.ref_image_{index}" in inputs for index in range(9))
+    assert all(f"ref_videos.ref_video_{index}" in inputs for index in range(3))
+    assert all(f"ref_audios.ref_audio_{index}" not in inputs for index in range(3))
+    assert all(node not in workflow for node in ("100", "103", "130", "169", "173", "177"))
+    assert workflow["243"]["inputs"]["noise_seed"] == 10
+    assert workflow["300"]["inputs"]["noise_seed"] == 11
+
+
+def test_reference_workflow_enforces_cross_media_rules():
+    common = {"prompt": "x", "duration": 8, "aspect_ratio": "16:9 (Widescreen)"}
+    with pytest.raises(RunningHubError, match="音频不能作为唯一输入"):
+        build_reference_workflow(**common, images=[], audios=["a.wav"])
+    with pytest.raises(RunningHubError, match="合计最多 12"):
+        build_reference_workflow(
+            **common,
+            images=[f"{index}.png" for index in range(9)],
+            videos=["1.mp4"],
+            audios=["1.wav", "2.wav", "3.wav"],
+        )
 
 
 def test_runninghub_text_node_info_list():
@@ -154,7 +186,7 @@ def test_runninghub_task_submit_and_query(client, monkeypatch):
         async def put_bytes(self, key: str, content: bytes, content_type: str | None = None):
             return f"https://tos.test/{key}"
 
-    monkeypatch.setattr(admin_module, "rh_submit_task", fake_submit)
+    monkeypatch.setattr(admin_module, "rh_submit_reference_task", fake_submit)
     monkeypatch.setattr(admin_module, "rh_query_task", fake_query)
     monkeypatch.setattr(admin_module, "rh_upload_media", fake_upload)
     monkeypatch.setattr(admin_module, "import_remote", fake_import)
@@ -174,6 +206,8 @@ def test_runninghub_task_submit_and_query(client, monkeypatch):
         "duration": 12,
         "aspect_ratio": "16:9 (Widescreen)",
         "images": ["openapi/a.png"],
+        "videos": [],
+        "audios": [],
         "seed": 42,
         # 请求未传 → pydantic 默认值
         "stage1_megapixels": 0.4,

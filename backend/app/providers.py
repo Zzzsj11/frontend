@@ -11,6 +11,7 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -19,7 +20,8 @@ from .jobs import Job, jobs
 from .runninghub import RunningHubError
 from .runninghub import query_task as runninghub_query_task
 from .runninghub import submit_first_frame_task as runninghub_submit_first_frame_task
-from .runninghub import submit_task as runninghub_submit_task
+from .runninghub import submit_reference_task as runninghub_submit_reference_task
+from .runninghub import submit_text_task as runninghub_submit_text_task
 from .runninghub import upload_media as runninghub_upload_media
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
 from .storage import import_remote, import_remote_image, put_image_with_thumbnail, safe_key
@@ -118,6 +120,8 @@ def _usage(data: dict[str, Any]) -> dict[str, Any]:
 IMAGE_POLL_TIMEOUT_SECONDS = 360
 VIDEO_POLL_TIMEOUT_SECONDS = 900
 H3_POLL_INTERVAL_SECONDS = 15
+H3_POLL_TIMEOUT_SECONDS = 2400
+H3_REFERENCE_FILE_MAX_BYTES = 100 * 1024 * 1024
 POLL_INTERVAL_SECONDS = 30
 POLL_MAX_CONSECUTIVE_ERRORS = 5
 POLL_SCHEDULER_TICK_SECONDS = 1.0
@@ -482,7 +486,7 @@ def _h3_megapixels(resolution: str) -> tuple[float, float]:
 
 
 async def _poll_runninghub(job: Job) -> dict[str, Any]:
-    deadline = time.monotonic() + VIDEO_POLL_TIMEOUT_SECONDS
+    deadline = time.monotonic() + H3_POLL_TIMEOUT_SECONDS
     consecutive_errors = 0
     while time.monotonic() < deadline:
         await asyncio.sleep(H3_POLL_INTERVAL_SECONDS)
@@ -504,24 +508,78 @@ async def _poll_runninghub(job: Job) -> dict[str, Any]:
     raise ProviderError("H3 生成任务超时，请稍后查询")
 
 
+async def _h3_media_duration(content: bytes, suffix: str) -> float:
+    with tempfile.NamedTemporaryFile(suffix=suffix or ".bin") as handle:
+        handle.write(content)
+        handle.flush()
+        process = await asyncio.create_subprocess_exec(
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=nw=1:nk=1",
+            handle.name,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+    if process.returncode != 0:
+        raise ProviderError(f"H3 参考媒体无法读取时长：{stderr.decode(errors='ignore')[:200]}")
+    try:
+        return float(stdout.decode().strip())
+    except ValueError as exc:
+        raise ProviderError("H3 参考媒体未返回有效时长") from exc
+
+
+async def _upload_h3_reference(url: str, kind: str, index: int) -> tuple[str, float | None]:
+    try:
+        async with httpx.AsyncClient(timeout=180, follow_redirects=True) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise ProviderError(f"H3 参考{kind}下载失败：{exc}") from exc
+    content = response.content
+    if len(content) > H3_REFERENCE_FILE_MAX_BYTES:
+        raise ProviderError(f"H3 单个参考{kind}不能超过 100MB")
+    suffix = Path(urlparse(url).path).suffix.lower() or {"图片": ".png", "视频": ".mp4", "音频": ".wav"}[kind]
+    media_duration = await _h3_media_duration(content, suffix) if kind in {"视频", "音频"} else None
+    uploaded = await runninghub_upload_media(content, f"h3-{kind}-{index}{suffix}")
+    file_name = str(uploaded.get("fileName") or "")
+    if not file_name:
+        raise ProviderError(f"H3 参考{kind}上传成功但未返回文件名")
+    return file_name, media_duration
+
+
+def _validate_h3_reference_durations(kind: str, durations: list[float]) -> None:
+    for value in durations:
+        if not 2 <= value <= 15:
+            raise ProviderError(f"H3 每段参考{kind}时长必须为 2–15 秒，检测到 {value:.2f} 秒")
+    if sum(durations) > 15.05:
+        raise ProviderError(f"H3 参考{kind}总时长不能超过 15 秒，当前为 {sum(durations):.2f} 秒")
+
+
 async def generate_h3_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
     images = [url.strip() for url in request.image_urls if url.strip()]
-    if not images:
-        raise ProviderError("MiniMax H3 多参考模式至少需要 1 张场景图或人物参考图")
-    if len(images) > 3:
-        raise ProviderError("当前 RunningHub H3 工作流最多支持 3 张参考图")
+    videos = [url.strip() for url in request.video_urls if url.strip()]
+    audios = [url.strip() for url in request.audio_urls if url.strip()]
+    mode = str((job.request or {}).get("_h3Mode") or request.h3_mode)
+    if mode == "auto":
+        mode = "reference" if videos or audios or len(images) > 1 else ("first_frame" if images else "text")
     stage1, stage2 = _h3_megapixels(request.resolution)
     try:
-        if len(images) == 1:
-            async with httpx.AsyncClient(timeout=180, follow_redirects=True) as client:
-                response = await client.get(images[0])
-                response.raise_for_status()
-            if len(response.content) > 25 * 1024 * 1024:
-                raise ProviderError("H3 首帧图片超过 25MB 限制")
-            uploaded = await runninghub_upload_media(response.content, "h3-first-frame.png")
-            image_name = str(uploaded.get("fileName") or "")
-            if not image_name:
-                raise ProviderError("H3 首帧上传成功但未返回文件名")
+        if mode == "text":
+            created = await runninghub_submit_text_task(
+                prompt=request.prompt,
+                duration=float(request.duration),
+                aspect_ratio=_h3_first_frame_aspect_ratio(request.ratio),
+                megapixels=stage2,
+            )
+        elif mode == "first_frame":
+            if len(images) != 1 or videos or audios:
+                raise ProviderError("H3 首帧模式必须且只能提供 1 张图片")
+            image_name, _ = await _upload_h3_reference(images[0], "图片", 1)
             created = await runninghub_submit_first_frame_task(
                 prompt=request.prompt,
                 duration=float(request.duration),
@@ -529,12 +587,23 @@ async def generate_h3_video(request: VideoGenerationCreate, job: Job) -> dict[st
                 image=image_name,
                 megapixels=stage2,
             )
+        elif mode in {"last_frame", "first_last"}:
+            raise ProviderError("当前尚未配置 H3-Base-FL2VA 尾帧/首尾帧 RunningHub 工作流")
         else:
-            created = await runninghub_submit_task(
+            if audios and not (images or videos):
+                raise ProviderError("H3 Ref2VA 音频不能作为唯一输入，必须同时提供图片或视频")
+            image_uploads = [await _upload_h3_reference(url, "图片", index) for index, url in enumerate(images, 1)]
+            video_uploads = [await _upload_h3_reference(url, "视频", index) for index, url in enumerate(videos, 1)]
+            audio_uploads = [await _upload_h3_reference(url, "音频", index) for index, url in enumerate(audios, 1)]
+            _validate_h3_reference_durations("视频", [duration for _, duration in video_uploads if duration is not None])
+            _validate_h3_reference_durations("音频", [duration for _, duration in audio_uploads if duration is not None])
+            created = await runninghub_submit_reference_task(
                 prompt=request.prompt,
                 duration=float(request.duration),
                 aspect_ratio=_h3_aspect_ratio(request.ratio),
-                images=images,
+                images=[name for name, _ in image_uploads],
+                videos=[name for name, _ in video_uploads],
+                audios=[name for name, _ in audio_uploads],
                 stage1_megapixels=stage1,
                 stage2_megapixels=stage2,
             )
@@ -558,6 +627,13 @@ async def _store_h3_video_result(job: Job, data: dict[str, Any]) -> dict[str, An
     stored_url = await import_remote(source_url, f"{owner_prefix}/videos", f"h3-{task_id}.mp4")
     stored_cover, stored_cover_thumbnail = await _video_first_frame(source_url, f"h3-{task_id}", job.user_id)
     request = job.request or {}
+    generation_mode = request.get("_h3Mode")
+    if not generation_mode:
+        generation_mode = (
+            "reference"
+            if request.get("video_urls") or request.get("audio_urls") or len(request.get("image_urls") or []) > 1
+            else ("first_frame" if request.get("image_urls") else "text")
+        )
     return {
         "provider": "runninghub",
         "providerTaskId": task_id,
@@ -569,7 +645,9 @@ async def _store_h3_video_result(job: Job, data: dict[str, Any]) -> dict[str, An
         "sourceUrl": source_url,
         "duration": request.get("duration"),
         "ratio": request.get("ratio"),
-        "generationMode": "first_frame" if len(request.get("image_urls") or []) == 1 else "multi_reference",
+        "generationMode": generation_mode,
+        "promptCompiler": request.get("_promptCompiler"),
+        "promptCompilerVersion": request.get("_promptCompilerVersion"),
     }
 
 

@@ -108,6 +108,11 @@ export interface ShotGenOptions {
   generateAudio?: boolean
   /** 视频是否添加供应商水印。 */
   watermark?: boolean
+  /** H3 Ref2VA 可选参考视频（最多3段，同类型总时长≤15秒）。 */
+  referenceVideoUrls?: string[]
+  /** H3 Ref2VA 可选参考音频（最多3段，同类型总时长≤15秒）。 */
+  referenceAudioUrls?: string[]
+  h3AudioUsage?: 'reference' | 'reuse' | 'generated' | 'mute'
   segmentType?: 'lyric' | 'intro' | 'interlude' | 'outro'
   timelineLabel?: string
   /** 时间轴原始时长（秒，未归一化） */

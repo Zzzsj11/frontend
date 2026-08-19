@@ -56,6 +56,32 @@ FIRST_FRAME_ASPECT_RATIOS: tuple[str, ...] = (
 )
 DEFAULT_FIRST_FRAME_MEGAPIXELS = 0.9
 
+# H3-Base-Ref2VA 官方规格：图像≤9、视频≤3、音频≤3，所有文件合计≤12。
+# 当前官方工作流 JSON 预置 6 图/1 视频/3 音频；第 7~9 图和第 2~3 视频由
+# build_reference_workflow 按需克隆输入节点，未使用的示例槽会从执行图中删除。
+REFERENCE_WORKFLOW_PATH = Path(__file__).parent / "workflows" / "minimax_h3_reference_to_video.json"
+REFERENCE_NODE_PROMPT = "83"
+REFERENCE_NODE_DURATION = "84"
+REFERENCE_NODE_STAGE1_RESOLUTION = "105"
+REFERENCE_NODE_STAGE2_RESOLUTION = "297"
+REFERENCE_NODE_MODEL = "108"
+REFERENCE_NODE_SEEDS = ("243", "300")
+REFERENCE_IMAGE_SLOTS: tuple[tuple[str, str], ...] = (
+    ("97", "99"),
+    ("101", "102"),
+    ("132", "129"),
+    ("170", "168"),
+    ("174", "172"),
+    ("178", "176"),
+)
+REFERENCE_IMAGE_PREVIEWS = ("100", "103", "130", "169", "173", "177")
+REFERENCE_VIDEO_SLOTS = ("135",)
+REFERENCE_AUDIO_SLOTS = ("138", "154", "156")
+MAX_REFERENCE_IMAGES = 9
+MAX_REFERENCE_VIDEOS = 3
+MAX_REFERENCE_AUDIOS = 3
+MAX_REFERENCE_FILES = 12
+
 # ResolutionSelector（LayerUtility）的合法宽高比字符串；"16:9 (Widescreen)" 已经工作流默认验证
 ASPECT_RATIOS: tuple[str, ...] = (
     "16:9 (Widescreen)",
@@ -256,6 +282,137 @@ async def submit_task(
     return result
 
 
+def build_reference_workflow(
+    *,
+    prompt: str,
+    duration: float,
+    aspect_ratio: str,
+    images: list[str],
+    videos: list[str] | None = None,
+    audios: list[str] | None = None,
+    seed: int | None = None,
+    stage1_megapixels: float = DEFAULT_STAGE1_MEGAPIXELS,
+    stage2_megapixels: float = DEFAULT_STAGE2_MEGAPIXELS,
+) -> dict[str, Any]:
+    """Build a clean Ref2VA graph with only the supplied multimodal references."""
+    prompt = prompt.strip()
+    images = [value.strip() for value in images if value and value.strip()]
+    videos = [value.strip() for value in (videos or []) if value and value.strip()]
+    audios = [value.strip() for value in (audios or []) if value and value.strip()]
+    if not prompt:
+        raise RunningHubError("提示词不能为空")
+    if not MIN_DURATION <= duration <= MAX_DURATION:
+        raise RunningHubError(f"视频时长需在 {MIN_DURATION:g}~{MAX_DURATION:g} 秒之间")
+    if aspect_ratio not in ASPECT_RATIOS:
+        raise RunningHubError(f"不支持的宽高比：{aspect_ratio}")
+    _check_megapixels(stage1_megapixels, "一阶段")
+    _check_megapixels(stage2_megapixels, "二阶段")
+    if len(images) > MAX_REFERENCE_IMAGES:
+        raise RunningHubError(f"H3 Ref2VA 最多支持 {MAX_REFERENCE_IMAGES} 张参考图")
+    if len(videos) > MAX_REFERENCE_VIDEOS:
+        raise RunningHubError(f"H3 Ref2VA 最多支持 {MAX_REFERENCE_VIDEOS} 段参考视频")
+    if len(audios) > MAX_REFERENCE_AUDIOS:
+        raise RunningHubError(f"H3 Ref2VA 最多支持 {MAX_REFERENCE_AUDIOS} 段参考音频")
+    if audios and not (images or videos):
+        raise RunningHubError("H3 Ref2VA 音频不能作为唯一输入，必须同时提供图片或视频")
+    if not (images or videos):
+        raise RunningHubError("H3 Ref2VA 至少需要 1 张图片或 1 段视频")
+    if len(images) + len(videos) + len(audios) > MAX_REFERENCE_FILES:
+        raise RunningHubError(f"H3 Ref2VA 所有参考文件合计最多 {MAX_REFERENCE_FILES} 个")
+
+    try:
+        workflow = json.loads(REFERENCE_WORKFLOW_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RunningHubError(f"H3 多参考工作流读取失败：{exc}") from exc
+
+    # 预览节点不会参与成片，服务化执行时删除，避免默认示例素材成为额外输出根节点。
+    for node_id in REFERENCE_IMAGE_PREVIEWS:
+        workflow.pop(node_id, None)
+    model_inputs = workflow[REFERENCE_NODE_MODEL]["inputs"]
+
+    image_slots = list(REFERENCE_IMAGE_SLOTS)
+    image_template = workflow["170"]
+    scale_template = workflow["168"]
+    for index in range(len(image_slots), MAX_REFERENCE_IMAGES):
+        load_id, scale_id = str(900 + index), str(910 + index)
+        workflow[load_id] = json.loads(json.dumps(image_template))
+        workflow[scale_id] = json.loads(json.dumps(scale_template))
+        workflow[scale_id]["inputs"]["image"] = [load_id, 0]
+        image_slots.append((load_id, scale_id))
+    for index, (load_id, scale_id) in enumerate(image_slots):
+        key = f"ref_images.ref_image_{index}"
+        if index < len(images):
+            workflow[load_id]["inputs"]["image"] = images[index]
+            model_inputs[key] = [scale_id, 0]
+        else:
+            model_inputs.pop(key, None)
+            workflow.pop(scale_id, None)
+            workflow.pop(load_id, None)
+
+    video_slots = list(REFERENCE_VIDEO_SLOTS)
+    video_template = workflow["135"]
+    for index in range(len(video_slots), MAX_REFERENCE_VIDEOS):
+        node_id = str(930 + index)
+        workflow[node_id] = json.loads(json.dumps(video_template))
+        video_slots.append(node_id)
+    for index, node_id in enumerate(video_slots):
+        key = f"ref_videos.ref_video_{index}"
+        if index < len(videos):
+            workflow[node_id]["inputs"]["video"] = videos[index]
+            model_inputs[key] = [node_id, 0]
+        else:
+            model_inputs.pop(key, None)
+            workflow.pop(node_id, None)
+
+    for index, node_id in enumerate(REFERENCE_AUDIO_SLOTS):
+        key = f"ref_audios.ref_audio_{index}"
+        if index < len(audios):
+            workflow[node_id]["inputs"]["audio"] = audios[index]
+            model_inputs[key] = [node_id, 0]
+        else:
+            model_inputs.pop(key, None)
+            workflow.pop(node_id, None)
+
+    workflow[REFERENCE_NODE_PROMPT]["inputs"]["text"] = prompt
+    workflow[REFERENCE_NODE_DURATION]["inputs"]["value"] = duration
+    for node_id, megapixels in (
+        (REFERENCE_NODE_STAGE1_RESOLUTION, stage1_megapixels),
+        (REFERENCE_NODE_STAGE2_RESOLUTION, stage2_megapixels),
+    ):
+        workflow[node_id]["inputs"]["aspect_ratio"] = aspect_ratio
+        workflow[node_id]["inputs"]["megapixels"] = megapixels
+    if seed is not None:
+        for offset, node_id in enumerate(REFERENCE_NODE_SEEDS):
+            workflow[node_id]["inputs"]["noise_seed"] = seed + offset
+    return workflow
+
+
+async def submit_reference_task(
+    *,
+    prompt: str,
+    duration: float,
+    aspect_ratio: str,
+    images: list[str],
+    videos: list[str] | None = None,
+    audios: list[str] | None = None,
+    seed: int | None = None,
+    stage1_megapixels: float = DEFAULT_STAGE1_MEGAPIXELS,
+    stage2_megapixels: float = DEFAULT_STAGE2_MEGAPIXELS,
+) -> dict[str, Any]:
+    workflow = build_reference_workflow(
+        prompt=prompt,
+        duration=duration,
+        aspect_ratio=aspect_ratio,
+        images=images,
+        videos=videos,
+        audios=audios,
+        seed=seed,
+        stage1_megapixels=stage1_megapixels,
+        stage2_megapixels=stage2_megapixels,
+    )
+    return await _submit_custom_workflow_json(workflow, [], "多参考生成")
+
+
 async def submit_text_task(
     *,
     prompt: str,
@@ -304,6 +461,12 @@ async def _submit_custom_workflow(workflow_path: Path, node_info: list[dict[str,
     except (OSError, ValueError) as exc:
         raise RunningHubError(f"H3 {label}工作流读取失败：{exc}") from exc
 
+    return await _submit_custom_workflow_json(workflow, node_info, label)
+
+
+async def _submit_custom_workflow_json(workflow: str | dict[str, Any], node_info: list[dict[str, Any]], label: str) -> dict[str, Any]:
+    if not isinstance(workflow, str):
+        workflow = json.dumps(workflow, ensure_ascii=False, separators=(",", ":"))
     # RunningHub 的高级 ComfyUI 接口允许直接提交完整工作流；返回结构为
     # {code, msg, data:{taskId, taskStatus}}，与 /openapi/v2/run/workflow 不同。
     origin = settings.runninghub_base_url.removesuffix("/openapi/v2")
