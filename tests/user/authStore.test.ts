@@ -10,6 +10,31 @@ describe('auth logout cleanup', () => {
     setActivePinia(createPinia())
   })
 
+  it('does not load business data before a temporary-password user changes password', async () => {
+    const auth = useAuthStore()
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          accessToken: 'temporary-token',
+          user: {
+            id: 'forced-user',
+            username: 'forced-user',
+            displayName: 'Forced User',
+            role: 'user',
+            mustChangePassword: true,
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+
+    await auth.login('forced-user', 'temporary-password')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/login')
+    expect(auth.balance).toBeNull()
+  })
+
   it('clears per-user sidebar keys and the pending digital human draft on logout', async () => {
     const auth = useAuthStore()
     auth.user = {

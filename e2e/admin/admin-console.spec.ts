@@ -64,6 +64,7 @@ test('content administrator only sees and operates content configuration', async
   const adminHeaders = { Authorization: `Bearer ${(await adminLogin.json()).accessToken}` }
   const assUsername = `ass-admin-${Date.now()}`
   const assPassword = 'secure-pass-123'
+  const assChangedPassword = 'secure-pass-456'
   const created = await request.post('/api/admin/users', {
     headers: adminHeaders,
     data: { username: assUsername, password: assPassword },
@@ -78,6 +79,11 @@ test('content administrator only sees and operates content configuration', async
     await page.getByLabel('用户名').fill(assUsername)
     await page.getByLabel('密码').fill(assPassword)
     await page.getByRole('button', { name: '登录' }).click()
+    await expect(page).toHaveURL(/\/account\/password/)
+    await page.getByLabel('当前密码').fill(assPassword)
+    await page.getByLabel('新密码', { exact: true }).fill(assChangedPassword)
+    await page.getByLabel('确认新密码').fill(assChangedPassword)
+    await page.getByRole('button', { name: '保存新密码' }).click()
     await expect(page).toHaveURL(/\/projects/)
     await page.locator('.user-trigger').click()
     await expect(page.getByRole('menuitem', { name: '管理后台' })).toBeVisible()
@@ -90,7 +96,7 @@ test('content administrator only sees and operates content configuration', async
     await expect(page.getByRole('button', { name: '用户' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: '新增歌曲' })).toBeVisible()
     const assLogin = await request.post('/api/auth/login', {
-      data: { username: assUsername, password: assPassword },
+      data: { username: assUsername, password: assChangedPassword },
     })
     const assHeaders = { Authorization: `Bearer ${(await assLogin.json()).accessToken}` }
     expect((await request.get('/api/admin/dashboard', { headers: assHeaders })).status()).toBe(403)

@@ -38,14 +38,14 @@ export const useAuthStore = defineStore('auth', {
       if (!this.ready) {
         this.user = await restoreSession().catch(() => null)
         this.ready = true
-        if (this.user) void this.loadBalance()
+        if (this.user && !this.user.mustChangePassword) void this.loadBalance()
       }
     },
     async login(username: string, password: string) {
       this.loading = true
       try {
         this.user = (await loginRequest(username, password)).user
-        void this.loadBalance(true)
+        if (!this.user.mustChangePassword) void this.loadBalance(true)
       } finally {
         this.loading = false
         this.ready = true
