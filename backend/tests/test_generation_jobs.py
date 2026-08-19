@@ -115,6 +115,25 @@ def test_h3_video_provider_archives_output(monkeypatch) -> None:
             submitted.update(kwargs)
             return {"taskId": "rh-h3-1", "status": "RUNNING"}
 
+        async def fake_upload(_content: bytes, _filename: str):
+            return {"fileName": "openapi/first-frame.png"}
+
+        class FakeResponse:
+            content = b"image"
+
+            def raise_for_status(self):
+                return None
+
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def get(self, _url):
+                return FakeResponse()
+
         async def fake_query(_task_id: str):
             return {
                 "taskId": "rh-h3-1",
@@ -135,7 +154,9 @@ def test_h3_video_provider_archives_output(monkeypatch) -> None:
         async def fake_cover(_url, _task_id, _user_id):
             return "https://tos.test/h3.jpg", "https://tos.test/h3-thumb.jpg"
 
-        monkeypatch.setattr(providers, "runninghub_submit_task", fake_submit)
+        monkeypatch.setattr(providers, "runninghub_submit_first_frame_task", fake_submit)
+        monkeypatch.setattr(providers, "runninghub_upload_media", fake_upload)
+        monkeypatch.setattr(providers.httpx, "AsyncClient", lambda **_kwargs: FakeClient())
         monkeypatch.setattr(providers, "runninghub_query_task", fake_query)
         monkeypatch.setattr(providers.jobs, "set_provider_task", fake_set_provider_task)
         monkeypatch.setattr(providers.jobs, "update_progress", fake_progress)
@@ -154,18 +175,24 @@ def test_h3_video_provider_archives_output(monkeypatch) -> None:
             id="job-h3",
             kind="video",
             user_id="user-1",
-            request={"model": "minimax-h3-runninghub", "duration": 5, "ratio": "16:9", "_provider": "runninghub"},
+            request={
+                "model": "minimax-h3-runninghub",
+                "duration": 5,
+                "ratio": "16:9",
+                "image_urls": ["https://tos.test/person.jpg"],
+                "_provider": "runninghub",
+            },
         )
         result = await providers.generate_video(request, job)
-        assert submitted["images"] == ["https://tos.test/person.jpg"]
-        assert submitted["stage1_megapixels"] == 0.4
-        assert submitted["stage2_megapixels"] == 0.9
+        assert submitted["image"] == "openapi/first-frame.png"
+        assert submitted["megapixels"] == 0.9
         return result
 
     result = asyncio.run(scenario())
     assert result["provider"] == "runninghub"
     assert result["videoUrl"] == "https://tos.test/h3.mp4"
     assert result["usage"] == {"consumeCoins": "12"}
+    assert result["generationMode"] == "first_frame"
 
 
 def _insert_job(

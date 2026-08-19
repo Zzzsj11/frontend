@@ -18,7 +18,9 @@ from .config import settings
 from .jobs import Job, jobs
 from .runninghub import RunningHubError
 from .runninghub import query_task as runninghub_query_task
+from .runninghub import submit_first_frame_task as runninghub_submit_first_frame_task
 from .runninghub import submit_task as runninghub_submit_task
+from .runninghub import upload_media as runninghub_upload_media
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
 from .storage import import_remote, import_remote_image, put_image_with_thumbnail, safe_key
 
@@ -462,6 +464,15 @@ def _h3_aspect_ratio(ratio: str) -> str:
     }.get(ratio, "16:9 (Widescreen)")
 
 
+def _h3_first_frame_aspect_ratio(ratio: str) -> str:
+    return {
+        "16:9": "16:9 (Widescreen)",
+        "9:16": "9:16 (Portrait Widescreen)",
+        "1:1": "1:1 (Square)",
+        "4:3": "4:3 (Classic)",
+    }.get(ratio, "16:9 (Widescreen)")
+
+
 def _h3_megapixels(resolution: str) -> tuple[float, float]:
     return {
         "480p": (0.2, 0.4),
@@ -501,14 +512,32 @@ async def generate_h3_video(request: VideoGenerationCreate, job: Job) -> dict[st
         raise ProviderError("当前 RunningHub H3 工作流最多支持 3 张参考图")
     stage1, stage2 = _h3_megapixels(request.resolution)
     try:
-        created = await runninghub_submit_task(
-            prompt=request.prompt,
-            duration=float(request.duration),
-            aspect_ratio=_h3_aspect_ratio(request.ratio),
-            images=images,
-            stage1_megapixels=stage1,
-            stage2_megapixels=stage2,
-        )
+        if len(images) == 1:
+            async with httpx.AsyncClient(timeout=180, follow_redirects=True) as client:
+                response = await client.get(images[0])
+                response.raise_for_status()
+            if len(response.content) > 25 * 1024 * 1024:
+                raise ProviderError("H3 首帧图片超过 25MB 限制")
+            uploaded = await runninghub_upload_media(response.content, "h3-first-frame.png")
+            image_name = str(uploaded.get("fileName") or "")
+            if not image_name:
+                raise ProviderError("H3 首帧上传成功但未返回文件名")
+            created = await runninghub_submit_first_frame_task(
+                prompt=request.prompt,
+                duration=float(request.duration),
+                aspect_ratio=_h3_first_frame_aspect_ratio(request.ratio),
+                image=image_name,
+                megapixels=stage2,
+            )
+        else:
+            created = await runninghub_submit_task(
+                prompt=request.prompt,
+                duration=float(request.duration),
+                aspect_ratio=_h3_aspect_ratio(request.ratio),
+                images=images,
+                stage1_megapixels=stage1,
+                stage2_megapixels=stage2,
+            )
     except RunningHubError as exc:
         raise ProviderError(f"H3 提交失败：{exc}") from exc
     task_id = str(created.get("taskId") or "")
@@ -540,6 +569,7 @@ async def _store_h3_video_result(job: Job, data: dict[str, Any]) -> dict[str, An
         "sourceUrl": source_url,
         "duration": request.get("duration"),
         "ratio": request.get("ratio"),
+        "generationMode": "first_frame" if len(request.get("image_urls") or []) == 1 else "multi_reference",
     }
 
 
