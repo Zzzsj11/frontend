@@ -28,6 +28,12 @@ export const videoModelConcurrency = (modelId?: string): number => {
     ?.executionConcurrency
   return Number.isFinite(configured) ? Math.max(1, Number(configured)) : 200
 }
+export const generationModelLabel = (option: GenerationModelOption): string => {
+  const concurrency = option.capabilities?.executionConcurrency
+  return Number.isFinite(concurrency) && Number(concurrency) < 200
+    ? `${option.label}（并发上限 ${Number(concurrency)}）`
+    : option.label
+}
 let loaded = false
 export async function loadGenerationModels(force = false): Promise<void> {
   if (loaded && !force) return

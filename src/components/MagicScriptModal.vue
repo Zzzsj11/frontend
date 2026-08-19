@@ -10,6 +10,7 @@ import {
   DEFAULT_VIDEO_MODEL,
   IMAGE_MODEL_OPTIONS,
   VIDEO_MODEL_OPTIONS,
+  generationModelLabel,
   loadGenerationModels,
 } from '../generationModels'
 
@@ -138,9 +139,9 @@ const cancel = () => {
           >
           <label
             ><span>视频模型 *</span
-            ><select v-model="videoModel" disabled>
+            ><select v-model="videoModel" aria-label="视频模型">
               <option v-for="item in VIDEO_MODEL_OPTIONS" :key="item.value" :value="item.value">
-                {{ item.label }}
+                {{ generationModelLabel(item) }}
               </option>
             </select></label
           >
@@ -153,7 +154,7 @@ const cancel = () => {
             </select></label
           >
         </div>
-        <p class="model-hint">当前内测版模型固定，选项已保留用于后续扩展。</p>
+        <p class="model-hint">H3 同时执行上限为 2 个任务，超出的任务会自动排队。</p>
       </section>
 
       <!-- 完整角色库横向多选 -->

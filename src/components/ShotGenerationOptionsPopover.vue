@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
-import { IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS } from '../generationModels'
+import { IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, generationModelLabel } from '../generationModels'
 import { VIDEO_DURATION_CHOICES } from '../mediaConstraints'
 import type { ShotGenOptions } from '../types'
 
@@ -24,7 +24,8 @@ const summary = computed(() => {
   const models = props.mode === 'shot' ? VIDEO_MODEL_OPTIONS : IMAGE_MODEL_OPTIONS
   const modelValue =
     props.mode === 'shot' ? props.modelValue.videoModel : props.modelValue.imageModel
-  parts.push(models.find((item) => item.value === modelValue)?.label || modelValue)
+  const model = models.find((item) => item.value === modelValue)
+  parts.push(model ? generationModelLabel(model) : modelValue)
   return parts.join(' · ')
 })
 const updateOption = <K extends keyof ShotGenOptions>(key: K, value: ShotGenOptions[K]) => {
@@ -109,7 +110,7 @@ onBeforeUnmount(close)
                 @change="updateOption('videoModel', ($event.target as HTMLSelectElement).value)"
               >
                 <option v-for="item in VIDEO_MODEL_OPTIONS" :key="item.value" :value="item.value">
-                  {{ item.label }}
+                  {{ generationModelLabel(item) }}
                 </option>
               </select>
               <select
