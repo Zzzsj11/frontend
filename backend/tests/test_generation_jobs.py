@@ -61,6 +61,113 @@ def test_job_manager_keeps_excess_provider_calls_queued(monkeypatch) -> None:
     asyncio.run(scenario())
 
 
+def test_job_manager_applies_independent_model_execution_pools(monkeypatch) -> None:
+    from app.jobs import Job, JobManager
+
+    async def scenario() -> None:
+        manager = JobManager()
+        releases = {name: asyncio.Event() for name in ("h3", "seedance")}
+        started: list[str] = []
+
+        async def fake_persist(_job: Job) -> None:
+            return None
+
+        async def fake_persist_asset(_job: Job) -> None:
+            return None
+
+        monkeypatch.setattr(manager, "_persist", fake_persist)
+        monkeypatch.setattr(manager, "_persist_asset", fake_persist_asset)
+
+        async def runner(job: Job) -> dict:
+            pool = str((job.request or {})["_executionPool"])
+            started.append(job.id)
+            await releases[pool].wait()
+            return {"videoUrl": f"/{job.id}.mp4"}
+
+        jobs = [Job(id=f"h3-{index}", kind="video", request={"_executionPool": "h3", "_executionConcurrency": 2}) for index in range(3)] + [
+            Job(id=f"seedance-{index}", kind="video", request={"_executionPool": "seedance", "_executionConcurrency": 4}) for index in range(3)
+        ]
+        tasks = [asyncio.create_task(manager._run(job, runner)) for job in jobs]
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        assert started[:2] == ["h3-0", "h3-1"]
+        assert "h3-2" not in started
+        assert {"seedance-0", "seedance-1", "seedance-2"}.issubset(started)
+
+        releases["h3"].set()
+        releases["seedance"].set()
+        await asyncio.gather(*tasks)
+        assert "h3-2" in started
+
+    asyncio.run(scenario())
+
+
+def test_h3_video_provider_archives_output(monkeypatch) -> None:
+    from app import providers
+    from app.jobs import Job
+    from app.schemas import VideoGenerationCreate
+
+    async def scenario() -> dict:
+        submitted = {}
+
+        async def fake_submit(**kwargs):
+            submitted.update(kwargs)
+            return {"taskId": "rh-h3-1", "status": "RUNNING"}
+
+        async def fake_query(_task_id: str):
+            return {
+                "taskId": "rh-h3-1",
+                "status": "SUCCESS",
+                "results": [{"url": "https://rh.test/h3.mp4", "outputType": "mp4"}],
+                "usage": {"consumeCoins": "12"},
+            }
+
+        async def fake_set_provider_task(job, provider, task_id, **_kwargs):
+            job.provider, job.provider_task_id = provider, task_id
+
+        async def fake_progress(_job, _progress):
+            return None
+
+        async def fake_import(_url, _prefix, _filename):
+            return "https://tos.test/h3.mp4"
+
+        async def fake_cover(_url, _task_id, _user_id):
+            return "https://tos.test/h3.jpg", "https://tos.test/h3-thumb.jpg"
+
+        monkeypatch.setattr(providers, "runninghub_submit_task", fake_submit)
+        monkeypatch.setattr(providers, "runninghub_query_task", fake_query)
+        monkeypatch.setattr(providers.jobs, "set_provider_task", fake_set_provider_task)
+        monkeypatch.setattr(providers.jobs, "update_progress", fake_progress)
+        monkeypatch.setattr(providers, "import_remote", fake_import)
+        monkeypatch.setattr(providers, "_video_first_frame", fake_cover)
+        monkeypatch.setattr(providers, "H3_POLL_INTERVAL_SECONDS", 0)
+        request = VideoGenerationCreate(
+            prompt="故宫舞蹈",
+            duration=5,
+            ratio="16:9",
+            resolution="720p",
+            image_urls=["https://tos.test/person.jpg"],
+            model="minimax-h3-runninghub",
+        )
+        job = Job(
+            id="job-h3",
+            kind="video",
+            user_id="user-1",
+            request={"model": "minimax-h3-runninghub", "duration": 5, "ratio": "16:9", "_provider": "runninghub"},
+        )
+        result = await providers.generate_video(request, job)
+        assert submitted["images"] == ["https://tos.test/person.jpg"]
+        assert submitted["stage1_megapixels"] == 0.4
+        assert submitted["stage2_megapixels"] == 0.9
+        return result
+
+    result = asyncio.run(scenario())
+    assert result["provider"] == "runninghub"
+    assert result["videoUrl"] == "https://tos.test/h3.mp4"
+    assert result["usage"] == {"consumeCoins": "12"}
+
+
 def _insert_job(
     job_id: str,
     *,
@@ -276,7 +383,7 @@ def test_admin_job_sync_marks_failed_from_provider(client, monkeypatch) -> None:
 
     _insert_job("job-sync-fail", status="running", provider_task_id="pt-fail")
 
-    async def fake_query(kind: str, task_id: str) -> dict:
+    async def fake_query(kind: str, task_id: str, provider: str | None = None) -> dict:
         return {"status": "FAILED", "failReason": "内容审核未通过"}
 
     monkeypatch.setattr(admin, "query_provider_task", fake_query)
@@ -293,7 +400,7 @@ def test_admin_job_sync_recovers_success_result(client, monkeypatch) -> None:
 
     _insert_job("job-sync-recover", status="running", provider_task_id="pt-success")
 
-    async def fake_query(kind: str, task_id: str) -> dict:
+    async def fake_query(kind: str, task_id: str, provider: str | None = None) -> dict:
         return {"status": "SUCCESS", "progress": 100}
 
     async def fake_store(job, data: dict) -> dict:
@@ -316,7 +423,7 @@ def test_admin_job_sync_resumes_orphan_running_at_provider(client, monkeypatch) 
 
     _insert_job("job-sync-resume", status="running", provider_task_id="pt-running")
 
-    async def fake_query(kind: str, task_id: str) -> dict:
+    async def fake_query(kind: str, task_id: str, provider: str | None = None) -> dict:
         return {"status": "RUNNING", "progress": 40}
 
     class FakeManager:
@@ -794,6 +901,34 @@ def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) ->
             connection.commit()
         finally:
             connection.close()
+
+
+def test_h3_endpoint_enforces_deployed_workflow_reference_capabilities(client) -> None:
+    base = {
+        "prompt": "故宫舞蹈",
+        "model": "minimax-h3-runninghub",
+        "image_urls": ["https://tos.test/person.jpg"],
+    }
+    missing_image = client.post(
+        "/api/generations/videos",
+        json={"prompt": "故宫舞蹈", "model": "minimax-h3-runninghub"},
+    )
+    assert missing_image.status_code == 422
+    assert "至少需要 1 个参考图片" in missing_image.json()["detail"]
+
+    video = client.post(
+        "/api/generations/videos",
+        json={**base, "video_urls": ["https://tos.test/dance.mp4"]},
+    )
+    assert video.status_code == 422
+    assert "暂不支持参考视频" in video.json()["detail"]
+
+    audio = client.post(
+        "/api/generations/videos",
+        json={**base, "audio_urls": ["https://tos.test/music.wav"]},
+    )
+    assert audio.status_code == 422
+    assert "暂不支持参考音频" in audio.json()["detail"]
 
 
 def test_create_human_registers_asset_avatar(client, monkeypatch) -> None:

@@ -13,6 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from PIL import UnidentifiedImageError
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -42,7 +43,17 @@ from .domain import router as domain_router
 from .error_logging import record_api_error, request_payload
 from .jobs import jobs
 from .media_constraints import normalize_video_duration
-from .models import AiModelModel, DigitalHumanModel, GenerationJobModel, ProjectCastModel, ProjectTaskModel, SongEmotionProfileModel, StoryboardLineModel, UserModel
+from .models import (
+    AiModelModel,
+    AiProviderModel,
+    DigitalHumanModel,
+    GenerationJobModel,
+    ProjectCastModel,
+    ProjectTaskModel,
+    SongEmotionProfileModel,
+    StoryboardLineModel,
+    UserModel,
+)
 from .prompts import get_prompt
 from .providers import generate_image, generate_video, resume_generation
 from .redis_store import close_redis, redis_ok
@@ -152,15 +163,55 @@ def sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-async def require_active_model(db: AsyncSession, code: str, modality: str) -> None:
-    model = (
+async def require_active_model(db: AsyncSession, code: str, modality: str) -> tuple[AiModelModel, AiProviderModel]:
+    row = (
         await db.execute(
-            select(AiModelModel).where(AiModelModel.code == code, AiModelModel.modality == modality, AiModelModel.status == "active", AiModelModel.deleted_at.is_(None))
+            select(AiModelModel, AiProviderModel)
+            .join(AiProviderModel, AiProviderModel.id == AiModelModel.provider_id)
+            .where(
+                AiModelModel.code == code,
+                AiModelModel.modality == modality,
+                AiModelModel.status == "active",
+                AiModelModel.deleted_at.is_(None),
+                AiProviderModel.status == "active",
+                AiProviderModel.deleted_at.is_(None),
+            )
         )
-    ).scalar_one_or_none()
-    if not model:
+    ).one_or_none()
+    if not row:
         label = {"chat": "文本", "image": "图片", "video": "视频", "audio": "音频"}.get(modality, "生成")
         raise HTTPException(422, f"不支持或已停用的{label}模型：{code}")
+    return row
+
+
+def generation_request_snapshot(payload: BaseModel, model: AiModelModel, provider: AiProviderModel) -> dict:
+    capabilities = dict(model.capabilities or {})
+    default_pool = "yinghe-generation" if provider.code == "yinghe" else f"{provider.code}:{model.modality}"
+    return {
+        **payload.model_dump(mode="json"),
+        "_provider": provider.code,
+        "_providerModelId": model.provider_model_id,
+        "_capabilities": capabilities,
+        "_executionPool": capabilities.get("executionPool") or default_pool,
+        "_executionConcurrency": capabilities.get("executionConcurrency") or settings.provider_generation_worker_concurrency,
+    }
+
+
+def validate_video_references(payload: VideoGenerationCreate, capabilities: dict) -> None:
+    for field, capability_key, label in (
+        (payload.image_urls, "referenceImage", "图片"),
+        (payload.video_urls, "referenceVideo", "视频"),
+        (payload.audio_urls, "referenceAudio", "音频"),
+    ):
+        rule = capabilities.get(capability_key)
+        if not isinstance(rule, dict):
+            continue
+        minimum, maximum = int(rule.get("min") or 0), int(rule.get("max") or 0)
+        if len(field) < minimum:
+            raise HTTPException(422, f"该视频模型至少需要 {minimum} 个参考{label}")
+        if len(field) > maximum:
+            supported = "暂不支持" if maximum == 0 else f"最多支持 {maximum} 个"
+            raise HTTPException(422, f"该视频模型{supported}参考{label}")
 
 
 @app.get("/api/health")
@@ -460,13 +511,13 @@ async def create_image_generation(payload: ImageGenerationCreate, user: CurrentU
         payload.prompt = await _portrait_prompt(payload.portrait.description, payload.portrait.style)
     if not payload.prompt.strip():
         raise HTTPException(422, "prompt 与 portrait 至少提供其一")
-    await require_active_model(db, payload.model or settings.image_model, "image")
+    model, provider = await require_active_model(db, payload.model or settings.image_model, "image")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
     await _check_concurrency(db, user.id, "image", settings.image_generation_concurrency)
     await consume_daily_quota(db, user_id=user.id, category="image")
     job = await jobs.create(
         "image",
-        payload.model_dump(mode="json"),
+        generation_request_snapshot(payload, model, provider),
         lambda item: generate_image(payload, item),
         user_id=user.id,
         project_id=project_id,
@@ -504,15 +555,17 @@ async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str]) ->
 
 @app.post("/api/generations/videos", status_code=202)
 async def create_video_generation(payload: VideoGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
-    await require_active_model(db, payload.model or settings.video_model, "video")
+    model, provider = await require_active_model(db, payload.model or settings.video_model, "video")
+    validate_video_references(payload, dict(model.capabilities or {}))
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
     await _check_concurrency(db, user.id, "video", settings.video_generation_concurrency)
     await consume_daily_quota(db, user_id=user.id, category="video")
     # 数字人头像优先用平台虚拟资产（asset://），其余 URL（如场景图）原样保留
-    payload.image_urls = await _resolve_asset_avatar_urls(db, payload.image_urls)
+    if provider.code == "yinghe":
+        payload.image_urls = await _resolve_asset_avatar_urls(db, payload.image_urls)
     job = await jobs.create(
         "video",
-        payload.model_dump(mode="json"),
+        generation_request_snapshot(payload, model, provider),
         lambda item: generate_video(payload, item),
         user_id=user.id,
         project_id=project_id,

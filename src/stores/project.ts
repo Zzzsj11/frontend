@@ -22,7 +22,11 @@ import { generateVoice } from '../api/voice'
 import { nextId } from '../utils/id'
 import { ApiError, reportApiError } from '../errorBus'
 import { DEFAULT_VIDEO_DURATION, normalizeShotOptions } from '../mediaConstraints'
-import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL } from '../generationModels'
+import {
+  DEFAULT_IMAGE_MODEL,
+  DEFAULT_VIDEO_MODEL,
+  videoModelConcurrency,
+} from '../generationModels'
 import {
   PollingCancelledError,
   abortableSleep,
@@ -1818,9 +1822,19 @@ export const useProjectStore = defineStore('project', {
           if (needsShot(line)) await this.generateShotFor(line.id)
         }
       }
+      const dispatchConcurrency = pending.length
+        ? Math.min(
+            BATCH_SHOT_CONCURRENCY,
+            ...pending.map((line) =>
+              videoModelConcurrency(
+                normalizeShotOptions(line.shotOptions ?? DEFAULT_SHOT_OPTIONS).videoModel,
+              ),
+            ),
+          )
+        : 0
       try {
         await Promise.all(
-          Array.from({ length: Math.min(BATCH_SHOT_CONCURRENCY, pending.length) }, worker),
+          Array.from({ length: Math.min(dispatchConcurrency, pending.length) }, worker),
         )
       } catch (error) {
         if (!(error instanceof PollingCancelledError)) throw error

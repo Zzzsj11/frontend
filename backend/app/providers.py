@@ -16,6 +16,9 @@ import httpx
 
 from .config import settings
 from .jobs import Job, jobs
+from .runninghub import RunningHubError
+from .runninghub import query_task as runninghub_query_task
+from .runninghub import submit_task as runninghub_submit_task
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
 from .storage import import_remote, import_remote_image, put_image_with_thumbnail, safe_key
 
@@ -112,6 +115,7 @@ def _usage(data: dict[str, Any]) -> dict[str, Any]:
 
 IMAGE_POLL_TIMEOUT_SECONDS = 360
 VIDEO_POLL_TIMEOUT_SECONDS = 900
+H3_POLL_INTERVAL_SECONDS = 15
 POLL_INTERVAL_SECONDS = 30
 POLL_MAX_CONSECUTIVE_ERRORS = 5
 POLL_SCHEDULER_TICK_SECONDS = 1.0
@@ -420,6 +424,8 @@ async def _store_image_result_inner(job: Job, task_id: str, data: dict[str, Any]
 
 
 async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
+    if (job.request or {}).get("_provider") == "runninghub":
+        return await generate_h3_video(request, job)
     base, headers = _video_config()
     content: list[dict[str, Any]] = [{"type": "text", "text": request.prompt}]
     content.extend({"type": "image_url", "image_url": {"url": url}, "role": "reference_image"} for url in request.image_urls)
@@ -445,6 +451,96 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         await jobs.set_provider_task(job, "yinghe", task_id, idempotency_key=headers.get("Idempotency-Key"))
     data = await _poll_scheduled(f"{base}/v3/video/tasks/{task_id}", headers, job, timeout_seconds=VIDEO_POLL_TIMEOUT_SECONDS)
     return await _store_video_result(job, task_id, data, created)
+
+
+def _h3_aspect_ratio(ratio: str) -> str:
+    return {
+        "16:9": "16:9 (Widescreen)",
+        "9:16": "9:16 (Portrait)",
+        "1:1": "1:1 (Square)",
+        "4:3": "4:3 (Classic)",
+    }.get(ratio, "16:9 (Widescreen)")
+
+
+def _h3_megapixels(resolution: str) -> tuple[float, float]:
+    return {
+        "480p": (0.2, 0.4),
+        "720p": (0.4, 0.9),
+        "1080p": (0.9, 1.8),
+    }.get(resolution, (0.4, 0.9))
+
+
+async def _poll_runninghub(job: Job) -> dict[str, Any]:
+    deadline = time.monotonic() + VIDEO_POLL_TIMEOUT_SECONDS
+    consecutive_errors = 0
+    while time.monotonic() < deadline:
+        await asyncio.sleep(H3_POLL_INTERVAL_SECONDS)
+        try:
+            data = await runninghub_query_task(job.provider_task_id or "")
+        except RunningHubError as exc:
+            consecutive_errors += 1
+            if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS:
+                raise ProviderError(f"RunningHub 状态查询连续失败：{exc}") from exc
+            continue
+        consecutive_errors = 0
+        status = str(data.get("status") or "").upper()
+        await jobs.update_progress(job, job.progress + 3)
+        if status == "SUCCESS":
+            return data
+        if status in {"FAILED", "CANCELLED"} or "FAIL" in status:
+            reason = data.get("errorMessage") or data.get("failedReason") or f"H3 生成任务状态：{status}"
+            raise ProviderError(f"H3 生成失败：{reason}")
+    raise ProviderError("H3 生成任务超时，请稍后查询")
+
+
+async def generate_h3_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
+    images = [url.strip() for url in request.image_urls if url.strip()]
+    if not images:
+        raise ProviderError("MiniMax H3 多参考模式至少需要 1 张场景图或人物参考图")
+    if len(images) > 3:
+        raise ProviderError("当前 RunningHub H3 工作流最多支持 3 张参考图")
+    stage1, stage2 = _h3_megapixels(request.resolution)
+    try:
+        created = await runninghub_submit_task(
+            prompt=request.prompt,
+            duration=float(request.duration),
+            aspect_ratio=_h3_aspect_ratio(request.ratio),
+            images=images,
+            stage1_megapixels=stage1,
+            stage2_megapixels=stage2,
+        )
+    except RunningHubError as exc:
+        raise ProviderError(f"H3 提交失败：{exc}") from exc
+    task_id = str(created.get("taskId") or "")
+    if not task_id:
+        raise ProviderError("H3 提交成功但未返回 taskId")
+    await jobs.set_provider_task(job, "runninghub", task_id)
+    return await _store_h3_video_result(job, await _poll_runninghub(job))
+
+
+async def _store_h3_video_result(job: Job, data: dict[str, Any]) -> dict[str, Any]:
+    outputs = [item for item in (data.get("results") or []) if item.get("url")]
+    output = next((item for item in outputs if str(item.get("outputType") or "").lower() == "mp4"), outputs[0] if outputs else None)
+    if not output:
+        raise ProviderError("H3 生成成功但未返回视频地址")
+    task_id = job.provider_task_id or str(data.get("taskId") or "")
+    source_url = str(output["url"])
+    owner_prefix = f"users/{job.user_id}/generated"
+    stored_url = await import_remote(source_url, f"{owner_prefix}/videos", f"h3-{task_id}.mp4")
+    stored_cover, stored_cover_thumbnail = await _video_first_frame(source_url, f"h3-{task_id}", job.user_id)
+    request = job.request or {}
+    return {
+        "provider": "runninghub",
+        "providerTaskId": task_id,
+        "model": request.get("model") or "minimax-h3-runninghub",
+        "usage": data.get("usage") or {},
+        "videoUrl": stored_url,
+        "coverUrl": stored_cover,
+        "coverThumbnailUrl": stored_cover_thumbnail,
+        "sourceUrl": source_url,
+        "duration": request.get("duration"),
+        "ratio": request.get("ratio"),
+    }
 
 
 async def _store_video_result(job: Job, task_id: str, data: dict[str, Any], created: dict[str, Any]) -> dict[str, Any]:
@@ -483,6 +579,8 @@ async def resume_generation(job: Job) -> dict[str, Any]:
     """重启恢复：按已落库的供应商 taskId 续跑轮询，不重复提交任务"""
     if not job.provider_task_id:
         raise ProviderError("缺少供应商任务ID，无法恢复")
+    if (job.request or {}).get("_provider") == "runninghub":
+        return await _store_h3_video_result(job, await _poll_runninghub(job))
     if job.kind == "image":
         base, headers = _image_config()
         url, timeout = f"{base}/image/generation/tasks/{job.provider_task_id}", IMAGE_POLL_TIMEOUT_SECONDS
@@ -495,8 +593,13 @@ async def resume_generation(job: Job) -> dict[str, Any]:
     return await store_provider_result(job, data)
 
 
-async def query_provider_task(kind: str, task_id: str) -> dict[str, Any]:
+async def query_provider_task(kind: str, task_id: str, provider: str | None = None) -> dict[str, Any]:
     """单次查询供应商任务状态（管理后台对账用）"""
+    if provider == "runninghub":
+        try:
+            return await runninghub_query_task(task_id)
+        except RunningHubError as exc:
+            raise ProviderError(f"RunningHub 状态查询失败：{exc}") from exc
     if kind == "image":
         base, headers = _image_config()
         url = f"{base}/image/generation/tasks/{task_id}"
@@ -511,6 +614,8 @@ async def query_provider_task(kind: str, task_id: str) -> dict[str, Any]:
 
 async def store_provider_result(job: Job, data: dict[str, Any]) -> dict[str, Any]:
     """供应商成功结果下载落库（重启恢复与对账同步共用）"""
+    if (job.request or {}).get("_provider") == "runninghub":
+        return await _store_h3_video_result(job, data)
     task_id = job.provider_task_id or ""
     if job.kind == "image":
         return await _store_image_result(job, task_id, data, {})

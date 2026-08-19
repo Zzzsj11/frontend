@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAuthStore } from '../../src/stores/auth'
 import { useProjectStore } from '../../src/stores/project'
+import { VIDEO_MODEL_OPTIONS } from '../../src/generationModels'
 import type {
   DigitalHuman,
   MaterialExport,
@@ -997,6 +998,48 @@ describe('batch shot video generation', () => {
     releases.splice(0).forEach((release) => release())
     await run
     expect(store.batchShooting).toBe(false)
+  })
+
+  it('limits H3 batch dispatch to its registered model concurrency', async () => {
+    const previous = [...VIDEO_MODEL_OPTIONS]
+    VIDEO_MODEL_OPTIONS.splice(0, VIDEO_MODEL_OPTIONS.length, {
+      value: 'minimax-h3-runninghub',
+      label: 'MiniMax H3',
+      capabilities: { executionConcurrency: 2 },
+    })
+    try {
+      const store = useProjectStore()
+      store.activeTaskId = 'task-1'
+      store.lines = Array.from({ length: 3 }, (_, index) => ({
+        ...shotLine(`h3-${index + 1}`, 'succeeded', 'none'),
+        shotOptions: {
+          resolution: '720p' as const,
+          duration: 5,
+          ratio: '16:9' as const,
+          imageModel: 'gpt-image-2',
+          videoModel: 'minimax-h3-runninghub',
+        },
+      }))
+      let active = 0
+      let peak = 0
+      const releases: Array<() => void> = []
+      vi.spyOn(store, 'generateShotFor').mockImplementation(async () => {
+        active += 1
+        peak = Math.max(peak, active)
+        await new Promise<void>((resolve) => releases.push(resolve))
+        active -= 1
+      })
+
+      const run = store.generateAllShots()
+      await vi.waitFor(() => expect(active).toBe(2))
+      expect(peak).toBe(2)
+      releases.shift()?.()
+      await vi.waitFor(() => expect(releases).toHaveLength(2))
+      releases.splice(0).forEach((release) => release())
+      await run
+    } finally {
+      VIDEO_MODEL_OPTIONS.splice(0, VIDEO_MODEL_OPTIONS.length, ...previous)
+    }
   })
 
   it('keeps dispatching after a line hits the 429 concurrency cap', async () => {

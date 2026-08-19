@@ -71,6 +71,22 @@ class JobManager:
         self._active: set[str] = set()
         # 受理上限与实际供应商调用并发分离：超出槽位的任务保持 queued。
         self._execution_slots = execution_slots or {}
+        # 模型注册中心可为每个模型声明独立执行池和并发上限。任务创建时把能力
+        # 快照写进 request，保证模型配置后续变化不会改变已排队任务的调度语义。
+        self._model_execution_slots: dict[str, tuple[int, asyncio.Semaphore]] = {}
+
+    def _execution_slot(self, job: Job) -> asyncio.Semaphore | None:
+        request = job.request or {}
+        pool = str(request.get("_executionPool") or "").strip()
+        raw_limit = request.get("_executionConcurrency")
+        if pool and raw_limit is not None:
+            limit = max(1, min(1000, int(raw_limit)))
+            configured = self._model_execution_slots.get(pool)
+            if configured is None:
+                configured = (limit, asyncio.Semaphore(limit))
+                self._model_execution_slots[pool] = configured
+            return configured[1]
+        return self._execution_slots.get(job.kind)
 
     async def create(
         self,
@@ -131,7 +147,7 @@ class JobManager:
 
     async def _run(self, job: Job, runner: JobRunner) -> None:
         self._active.add(job.id)
-        slots = self._execution_slots.get(job.kind)
+        slots = self._execution_slot(job)
         try:
             if slots:
                 async with slots:

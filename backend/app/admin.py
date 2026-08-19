@@ -435,7 +435,7 @@ async def sync_generation_job(job_id: str, request: Request, user: CurrentUser, 
     if job_manager.is_active(job_id):
         return {"providerStatus": None, "action": "skipped", "detail": "任务正在本机执行中，无需同步"}
     try:
-        data = await query_provider_task(model.kind, model.provider_task_id)
+        data = await query_provider_task(model.kind, model.provider_task_id, model.provider)
     except Exception as exc:
         raise HTTPException(502, f"查询供应商失败：{str(exc)[:300]}") from exc
     provider_status = str(data.get("status", "")).upper()

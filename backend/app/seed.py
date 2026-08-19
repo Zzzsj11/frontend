@@ -163,18 +163,52 @@ async def seed_system_data() -> None:
         if not provider:
             provider = AiProviderModel(id="provider-yinghe", code="yinghe", name="银河 API", base_url="", status="active")
             session.add(provider)
+        runninghub_provider = await session.get(AiProviderModel, "provider-runninghub")
+        if not runninghub_provider:
+            runninghub_provider = AiProviderModel(id="provider-runninghub", code="runninghub", name="RunningHub", base_url="", status="active")
+            session.add(runninghub_provider)
         defaults = [
-            ("model-chat-default", "chat-default", "默认 Chat 模型", "chat", "", {"structuredOutput": True}),
-            ("model-img2", "gpt-image-2", "Img2", "image", "gpt-image-2", {"ratios": ["16:9", "9:16", "4:3", "1:1"], "imageToImage": True}),
-            ("model-sd20", "doubao-seedance-2.0", "SD2.0", "video", "doubao-seedance-2.0", {"durations": {"min": 4, "max": 15}, "ratios": ["16:9", "9:16", "4:3", "1:1"]}),
+            ("model-chat-default", provider.id, "chat-default", "默认 Chat 模型", "chat", "", {"structuredOutput": True}, True),
+            ("model-img2", provider.id, "gpt-image-2", "Img2", "image", "gpt-image-2", {"ratios": ["16:9", "9:16", "4:3", "1:1"], "imageToImage": True}, True),
+            (
+                "model-sd20",
+                provider.id,
+                "doubao-seedance-2.0",
+                "SD2.0",
+                "video",
+                "doubao-seedance-2.0",
+                {"durations": {"min": 4, "max": 15}, "ratios": ["16:9", "9:16", "4:3", "1:1"], "executionPool": "yinghe-generation", "executionConcurrency": 200},
+                True,
+            ),
+            (
+                "model-h3-runninghub",
+                runninghub_provider.id,
+                "minimax-h3-runninghub",
+                "MiniMax H3",
+                "video",
+                "minimax-h3-ref2va",
+                {
+                    "durations": {"min": 4, "max": 15},
+                    "ratios": ["16:9", "9:16", "4:3", "1:1"],
+                    "resolutions": ["480p", "720p", "1080p"],
+                    "referenceImage": {"min": 1, "max": 3},
+                    "referenceVideo": {"min": 0, "max": 0},
+                    "referenceAudio": {"min": 0, "max": 0},
+                    "workflowVersion": "runninghub-legacy-image-ref-v1",
+                    "nativeAudio": True,
+                    "executionPool": "runninghub-h3",
+                    "executionConcurrency": 2,
+                },
+                False,
+            ),
         ]
-        for mid, code, name, modality, provider_id, capabilities in defaults:
+        for mid, model_provider_id, code, name, modality, provider_id, capabilities, is_default in defaults:
             model = await session.get(AiModelModel, mid)
             if not model:
                 session.add(
                     AiModelModel(
                         id=mid,
-                        provider_id=provider.id,
+                        provider_id=model_provider_id,
                         code=code,
                         name=name,
                         modality=modality,
@@ -182,7 +216,7 @@ async def seed_system_data() -> None:
                         capabilities=capabilities,
                         status="active",
                         user_visible=True,
-                        is_default=True,
+                        is_default=is_default,
                     )
                 )
         system_style_specs = [

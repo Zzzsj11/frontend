@@ -3,26 +3,49 @@ import { apiRequest } from './api/client'
 
 export type ImageModelId = string
 export type VideoModelId = string
+export interface GenerationModelCapabilities {
+  executionConcurrency?: number
+  executionPool?: string
+  nativeAudio?: boolean
+  referenceImage?: { min?: number; max?: number }
+  [key: string]: unknown
+}
+interface GenerationModelOption {
+  value: string
+  label: string
+  capabilities?: GenerationModelCapabilities
+}
 export const DEFAULT_IMAGE_MODEL: ImageModelId = 'gpt-image-2'
 export const DEFAULT_VIDEO_MODEL: VideoModelId = 'doubao-seedance-2.0'
-export const IMAGE_MODEL_OPTIONS = reactive<Array<{ value: string; label: string }>>([
+export const IMAGE_MODEL_OPTIONS = reactive<Array<GenerationModelOption>>([
   { value: DEFAULT_IMAGE_MODEL, label: 'Img2' },
 ])
-export const VIDEO_MODEL_OPTIONS = reactive<Array<{ value: string; label: string }>>([
+export const VIDEO_MODEL_OPTIONS = reactive<Array<GenerationModelOption>>([
   { value: DEFAULT_VIDEO_MODEL, label: 'SD2.0' },
 ])
+export const videoModelConcurrency = (modelId?: string): number => {
+  const configured = VIDEO_MODEL_OPTIONS.find((item) => item.value === modelId)?.capabilities
+    ?.executionConcurrency
+  return Number.isFinite(configured) ? Math.max(1, Number(configured)) : 200
+}
 let loaded = false
 export async function loadGenerationModels(force = false): Promise<void> {
   if (loaded && !force) return
   try {
-    const items =
-      await apiRequest<Array<{ id: string; name: string; modality: string }>>('/model-options')
+    const items = await apiRequest<
+      Array<{
+        id: string
+        name: string
+        modality: string
+        capabilities?: GenerationModelCapabilities
+      }>
+    >('/model-options')
     const images = items
       .filter((x) => x.modality === 'image')
-      .map((x) => ({ value: x.id, label: x.name }))
+      .map((x) => ({ value: x.id, label: x.name, capabilities: x.capabilities }))
     const videos = items
       .filter((x) => x.modality === 'video')
-      .map((x) => ({ value: x.id, label: x.name }))
+      .map((x) => ({ value: x.id, label: x.name, capabilities: x.capabilities }))
     if (images.length) IMAGE_MODEL_OPTIONS.splice(0, IMAGE_MODEL_OPTIONS.length, ...images)
     if (videos.length) VIDEO_MODEL_OPTIONS.splice(0, VIDEO_MODEL_OPTIONS.length, ...videos)
     loaded = true
