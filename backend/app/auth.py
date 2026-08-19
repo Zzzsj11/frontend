@@ -11,7 +11,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from fastapi import Cookie, Depends, HTTPException, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import settings
@@ -39,7 +39,7 @@ def _encode_access(user: UserModel) -> tuple[str, int]:
     now = utcnow()
     expires = now + timedelta(minutes=settings.access_token_minutes)
     token = jwt.encode(
-        {"sub": user.id, "username": user.username, "role": user.role, "type": "access", "iat": now, "exp": expires},
+        {"sub": user.id, "username": user.username, "role": user.role, "ver": user.auth_version, "type": "access", "iat": now, "exp": expires},
         settings.jwt_secret,
         algorithm="HS256",
     )
@@ -109,11 +109,20 @@ async def require_user(
         if payload.get("type") != "access":
             raise ValueError
         user_id = str(payload["sub"])
+        token_version = int(payload.get("ver", 0))
     except (jwt.PyJWTError, KeyError, ValueError) as exc:
         raise HTTPException(401, "登录已过期", headers={"WWW-Authenticate": "Bearer"}) from exc
     user = await session.get(UserModel, user_id)
     if not user or user.deleted_at is not None or user.status != "active":
         raise HTTPException(401, "用户不可用")
+    if token_version != user.auth_version:
+        raise HTTPException(401, "登录凭证已失效", headers={"WWW-Authenticate": "Bearer"})
+    if user.must_change_password and request.url.path not in {
+        "/api/auth/me",
+        "/api/auth/change-password",
+        "/api/auth/logout",
+    }:
+        raise HTTPException(403, "首次登录必须先修改密码")
     request.state.user_id = user.id
     await attach_admin_access(session, user)
     return user
@@ -169,6 +178,19 @@ async def revoke_refresh(raw_token: str | None) -> None:
             token.revoked_at = now
             token.deleted_at = now
             await session.commit()
+
+
+async def revoke_all_refresh_tokens(user_id: str, session: AsyncSession) -> None:
+    now = utcnow()
+    await session.execute(
+        update(RefreshTokenModel)
+        .where(
+            RefreshTokenModel.user_id == user_id,
+            RefreshTokenModel.deleted_at.is_(None),
+            RefreshTokenModel.revoked_at.is_(None),
+        )
+        .values(revoked_at=now, deleted_at=now, updated_at=now)
+    )
 
 
 async def seed_admin() -> None:

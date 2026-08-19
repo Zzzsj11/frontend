@@ -35,7 +35,7 @@ cp backend/.env.example backend/.env
 ```bash
 docker compose up -d --build
 docker compose ps
-curl -fsS http://127.0.0.1:5173/api/health
+curl -fsS http://127.0.0.1:5173/api/health  # 对外仅返回 {"ok":true}
 ```
 
 浏览器访问 `http://127.0.0.1:5173`。首次管理员默认为 `admin / 123456`，仅限本地首次启动，登录后立即修改。

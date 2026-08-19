@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -28,6 +29,7 @@ from .auth import (
     issue_tokens,
     login,
     refresh_cookie_value,
+    revoke_all_refresh_tokens,
     revoke_refresh,
     rotate_refresh,
     seed_admin,
@@ -36,7 +38,7 @@ from .auth import (
 )
 from .balance import query_business_balance
 from .chat import chat_manager
-from .config import settings
+from .config import settings, validate_runtime_security
 from .database import close_database, database_ok, database_session, init_database
 from .domain import owned_line, owned_project, owned_task, uid, visible_humans
 from .domain import router as domain_router
@@ -57,7 +59,7 @@ from .models import (
 )
 from .prompts import get_prompt
 from .providers import generate_image, generate_video, resume_generation
-from .redis_store import close_redis, redis_ok
+from .redis_store import clear_login_attempts, close_redis, login_attempt_count, record_login_failure, redis_ok
 from .request_logging import api_request_log_middleware
 from .schemas import (
     ChatMessageCreate,
@@ -76,6 +78,29 @@ from .usage_quota import consume_daily_quota
 
 logger = logging.getLogger(__name__)
 
+ALLOWED_UPLOAD_TYPES: dict[str, set[str]] = {
+    ".jpg": {"image/jpeg"},
+    ".jpeg": {"image/jpeg"},
+    ".png": {"image/png"},
+    ".webp": {"image/webp"},
+    ".gif": {"image/gif"},
+    ".mp4": {"video/mp4"},
+    ".mov": {"video/quicktime"},
+    ".webm": {"video/webm"},
+    ".mp3": {"audio/mpeg", "audio/mp3"},
+    ".wav": {"audio/wav", "audio/x-wav", "audio/vnd.wave"},
+    ".m4a": {"audio/mp4", "audio/x-m4a"},
+    ".ogg": {"audio/ogg", "video/ogg"},
+}
+
+
+def validate_media_upload(file: UploadFile) -> None:
+    filename = file.filename or ""
+    suffix = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    content_type = (file.content_type or "").lower().split(";", 1)[0]
+    if suffix not in ALLOWED_UPLOAD_TYPES or content_type not in ALLOWED_UPLOAD_TYPES[suffix]:
+        raise HTTPException(422, "仅支持常见图片、视频和音频格式，且文件扩展名必须与 MIME 类型一致")
+
 
 async def stale_generation_reaper() -> None:
     """定期收编 API 进程重启后遗留的僵尸生成状态。"""
@@ -89,6 +114,7 @@ async def stale_generation_reaper() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    validate_runtime_security()
     await init_database()
     await seed_admin()
     await seed_system_data()
@@ -245,15 +271,7 @@ async def health(response: Response) -> dict:
     postgres, redis = await database_ok(), await redis_ok()
     if not postgres or not redis:
         response.status_code = 503
-    return {
-        "ok": postgres and redis,
-        "postgres": postgres,
-        "redis": redis,
-        "storage": settings.storage_backend,
-        "chatConfigured": bool(settings.llm_api_key),
-        "imageConfigured": bool(settings.image_api_key),
-        "videoConfigured": bool(settings.video_api_key),
-    }
+    return {"ok": postgres and redis}
 
 
 @app.get("/api/account/balance")
@@ -263,9 +281,34 @@ async def account_balance(_user: CurrentUser, force: bool = False) -> dict:
 
 @app.post("/api/auth/login")
 async def auth_login(payload: LoginCreate, request: Request, response: Response) -> dict:
+    client_ip = request.client.host if request.client else "unknown"
+    username = payload.username.strip().lower()
+    identities = (
+        hashlib.sha256(f"ip\0{client_ip}".encode()).hexdigest(),
+        hashlib.sha256(f"username\0{username}".encode()).hexdigest(),
+    )
+    try:
+        attempts = max(await asyncio.gather(*(login_attempt_count(identity) for identity in identities)))
+    except Exception:
+        logger.exception("登录限流存储不可用")
+        attempts = 1
+    if attempts >= settings.login_rate_limit_attempts:
+        raise HTTPException(
+            429,
+            "登录尝试过于频繁，请稍后再试",
+            headers={"Retry-After": str(settings.login_rate_limit_window_seconds)},
+        )
     user = await login(payload.username, payload.password)
     if not user:
+        try:
+            await asyncio.gather(*(record_login_failure(identity, settings.login_rate_limit_window_seconds) for identity in identities))
+        except Exception:
+            logger.exception("记录登录失败次数异常")
         raise HTTPException(401, "用户名或密码错误")
+    try:
+        await asyncio.gather(*(clear_login_attempts(identity) for identity in identities))
+    except Exception:
+        logger.exception("清理登录限流计数失败")
     return await issue_tokens(user, request, response)
 
 
@@ -291,19 +334,29 @@ async def auth_me(user: CurrentUser) -> dict:
 
 
 @app.post("/api/auth/change-password")
-async def change_password(payload: PasswordChange, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
+async def change_password(
+    payload: PasswordChange,
+    request: Request,
+    response: Response,
+    user: CurrentUser,
+    db: AsyncSession = Depends(database_session),
+) -> dict:
     if not verify_password(user.password_hash, payload.current_password):
         raise HTTPException(422, "当前密码错误")
     if payload.current_password == payload.new_password:
         raise HTTPException(422, "新密码不能与当前密码相同")
     user.password_hash = hash_password(payload.new_password)
     user.must_change_password = False
+    user.auth_version += 1
+    await revoke_all_refresh_tokens(user.id, db)
     await db.commit()
-    return {"ok": True}
+    tokens = await issue_tokens(user, request, response)
+    return {"ok": True, **tokens}
 
 
 @app.post("/api/uploads")
 async def upload(user: CurrentUser, file: UploadFile = File(...), category: str = "uploads") -> dict:
+    validate_media_upload(file)
     content = await file.read(100 * 1024 * 1024 + 1)
     if len(content) > 100 * 1024 * 1024:
         raise HTTPException(413, "文件不能超过 100MB")

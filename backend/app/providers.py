@@ -25,7 +25,7 @@ from .runninghub import submit_reference_task as runninghub_submit_reference_tas
 from .runninghub import submit_text_task as runninghub_submit_text_task
 from .runninghub import upload_media as runninghub_upload_media
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
-from .storage import import_remote, import_remote_image, put_image_with_thumbnail, safe_key
+from .storage import download_public_url_to_path, import_remote, import_remote_image, put_image_with_thumbnail, safe_key
 
 
 class ProviderError(RuntimeError):
@@ -745,13 +745,13 @@ async def store_provider_result(job: Job, data: dict[str, Any]) -> dict[str, Any
 
 async def _video_first_frame(video_url: str, task_id: str, user_id: str | None) -> tuple[str, str]:
     """Extract the default shot cover from the generated video's first frame."""
-    async with httpx.AsyncClient(timeout=180, follow_redirects=True) as client:
-        response = await client.get(video_url)
-        response.raise_for_status()
     with tempfile.TemporaryDirectory(prefix="mvagent-cover-") as temp_dir:
         video_path = Path(temp_dir) / "source.mp4"
         cover_path = Path(temp_dir) / "cover.jpg"
-        video_path.write_bytes(response.content)
+        try:
+            await download_public_url_to_path(video_url, video_path)
+        except (httpx.HTTPError, ValueError) as exc:
+            raise ProviderError(f"下载视频以提取首帧失败：{exc}") from exc
         from imageio_ffmpeg import get_ffmpeg_exe
 
         process = await asyncio.create_subprocess_exec(

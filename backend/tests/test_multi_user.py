@@ -7,7 +7,13 @@ def create_and_login_user(client, username: str) -> tuple[str, dict[str, str]]:
     assert created.status_code == 201
     login = client.post("/api/auth/login", json={"username": username, "password": "secure-pass-123"})
     assert login.status_code == 200
-    return created.json()["id"], bearer(login.json()["accessToken"])
+    changed = client.post(
+        "/api/auth/change-password",
+        headers=bearer(login.json()["accessToken"]),
+        json={"current_password": "secure-pass-123", "new_password": "secure-pass-456"},
+    )
+    assert changed.status_code == 200
+    return created.json()["id"], bearer(changed.json()["accessToken"])
 
 
 def test_projects_and_private_resources_are_isolated(client) -> None:

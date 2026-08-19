@@ -385,5 +385,5 @@ def test_runninghub_endpoints_require_admin(client):
     assert client.post("/api/admin/runninghub/upload", files={"file": ("a.png", b"x")}, headers=headers).status_code == 403
     client.delete(f"/api/admin/users/{created['id']}")
     # 恢复共享 TestClient 的管理员会话，避免影响后续测试
-    restored = client.post("/api/auth/login", json={"username": "admin", "password": "123456"})
+    restored = client.post("/api/auth/login", json={"username": "admin", "password": "secure-admin-123"})
     client.headers["Authorization"] = f"Bearer {restored.json()['accessToken']}"

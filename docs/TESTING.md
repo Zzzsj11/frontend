@@ -78,7 +78,7 @@ e2e 不在 preflight 内，按需触发：`test:e2e:user`（本地 mock 链路�
 - 目标非 localhost 时必须显式提供 `REMOTE_E2E_PASSWORD`，否则启动即报错（fail-fast，防止静默回退到本地开发密码白跑一轮）。
 - 推荐方式：复制 `e2e/.env.example` 为 `e2e/.env` 填一次（已 gitignore，playwright.config.ts 自动加载），之后所有 `test:remote*` 命令免环境变量直跑。
 - 禁止把真实密码写进任何入库文件。
-- 本地后端测试环境 admin/123456 由 `backend/tests/conftest.py` seed，属合法默认值。
+- 本地后端测试环境首次以 admin/123456 完成强制改密，随后固定使用测试专用密码；仅存在于一次性 SQLite，不用于服务器环境。
 
 ## API 耗时采集与性能观测
 
@@ -113,7 +113,7 @@ npm run test:admin:frontend    # 管理后台 UI
 REMOTE_REAL_GENERATION=1 npm run test:remote:api   # 含真实生成分支（产生费用）
 ```
 
-成功标准：退出码 0；健康检查 PostgreSQL/Redis 为 true；普通用户不能访问管理员 API 或他人任务；上传返回 TOS HTTPS URL；删除后资源不可再读；页面无全局错误弹窗。测试创建的用户/项目结束时走产品 API 软删除，不得物理删除业务记录。
+成功标准：退出码 0；公开健康检查严格返回 `{"ok":true}`；普通用户不能访问管理员 API 或他人任务；临时密码用户必须改密后才能进入业务接口；上传返回 TOS HTTPS URL；删除后资源不可再读；页面无全局错误弹窗。测试创建的用户/项目结束时走产品 API 软删除，不得物理删除业务记录。
 
 ## 真实生成全链路（有真实成本）
 

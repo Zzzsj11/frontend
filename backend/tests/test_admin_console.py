@@ -17,7 +17,12 @@ def test_admin_dashboard_models_and_audit(client):
 def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     created = client.post("/api/admin/users", json={"username": "admin-console-user", "password": "secure-pass-123"}).json()
     login = client.post("/api/auth/login", json={"username": "admin-console-user", "password": "secure-pass-123"}).json()
-    headers = bearer(login["accessToken"])
+    changed = client.post(
+        "/api/auth/change-password",
+        headers=bearer(login["accessToken"]),
+        json={"current_password": "secure-pass-123", "new_password": "secure-pass-456"},
+    ).json()
+    headers = bearer(changed["accessToken"])
     assert client.get("/api/admin/dashboard", headers=headers).status_code == 403
     options = client.get("/api/model-options", headers=headers).json()
     assert any(x["id"] == "gpt-image-2" for x in options)
@@ -32,7 +37,7 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     assert "first_last" in h3["capabilities"]["h3Modes"]
     client.delete(f"/api/admin/users/{created['id']}")
     # Restore the shared TestClient's refresh cookie for subsequent auth tests.
-    restored = client.post("/api/auth/login", json={"username": "admin", "password": "123456"})
+    restored = client.post("/api/auth/login", json={"username": "admin", "password": "secure-admin-123"})
     client.headers["Authorization"] = f"Bearer {restored.json()['accessToken']}"
 
 

@@ -203,3 +203,11 @@ docker compose --env-file .env.production exec -T postgres psql -U mvagent -d mv
 - 管理后台：`src/views/AdminConsoleView.vue` 的「性能」tab。
 - 数据量：线上验证 719 条/12 分钟（含用户真实操作），轮询排除后日均量级可控；
   如需长期保存可结合备份策略，表名 `api_request_logs`。
+
+## 8. 2026-08-19 性能复核
+
+- 生成视频归档与首帧提取已统一使用分块下载到临时文件，再由 TOS 文件接口上传，避免单任务最多 500 MiB 的双份内存峰值；图片缩略图仍需在内存解码，受上传大小与 Pillow 校验保护。
+- nginx 已启用文本压缩与 `/assets/` 一年缓存；管理后台路由改为动态加载，普通用户首屏不再下载管理控制台代码。
+- SSE 当前仍以轮询 Redis/数据库为可靠性基线。Redis 已发布事件，但直接改为纯 Pub/Sub 会丢失断线期间事件；应先增加可回放游标（Redis Streams 或持久事件表）再切换，不能只删轮询。
+- `generation_jobs` 已持久化且可恢复，但执行协程与部分并发控制仍在 API 进程。扩容前应迁移到独立 Worker，并把模型并发上限做成 Redis 原子租约。
+- token usage、项目、人物和聊天会话等列表需按页面逐步迁移为数据库分页。变更响应契约前先加兼容字段与前端分页，避免一次性破坏现有用户旅程。

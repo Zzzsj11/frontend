@@ -313,5 +313,5 @@ def test_non_admin_cannot_manage_prompts(client) -> None:
     assert client.get("/api/admin/prompts", headers=headers).status_code == 403
     client.delete(f"/api/admin/users/{created['id']}")
     # 恢复共享 TestClient 的管理员会话
-    restored = client.post("/api/auth/login", json={"username": "admin", "password": "123456"})
+    restored = client.post("/api/auth/login", json={"username": "admin", "password": "secure-admin-123"})
     client.headers["Authorization"] = f"Bearer {restored.json()['accessToken']}"

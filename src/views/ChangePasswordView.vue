@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { apiRequest } from '../api/client'
+import { apiRequest, setAccessToken, type AuthUser } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 const current = ref(''),
   next = ref(''),
@@ -16,11 +16,15 @@ const submit = async () => {
     return
   }
   try {
-    await apiRequest('/auth/change-password', {
-      method: 'POST',
-      body: JSON.stringify({ current_password: current.value, new_password: next.value }),
-    })
-    if (auth.user) auth.user.mustChangePassword = false
+    const result = await apiRequest<{ accessToken: string; user: AuthUser }>(
+      '/auth/change-password',
+      {
+        method: 'POST',
+        body: JSON.stringify({ current_password: current.value, new_password: next.value }),
+      },
+    )
+    setAccessToken(result.accessToken)
+    auth.user = result.user
     await router.replace('/projects')
   } catch (value) {
     error.value = value instanceof Error ? value.message : '修改失败'

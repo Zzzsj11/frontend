@@ -26,6 +26,22 @@ async def close_redis() -> None:
     await redis.aclose()
 
 
+async def login_attempt_count(key: str) -> int:
+    return int(await redis.get(f"auth:login:{key}") or 0)
+
+
+async def record_login_failure(key: str, window_seconds: int) -> int:
+    """Increment a fixed-window login counter without storing raw usernames."""
+    count = int(await redis.incr(f"auth:login:{key}"))
+    if count == 1:
+        await redis.expire(f"auth:login:{key}", window_seconds)
+    return count
+
+
+async def clear_login_attempts(key: str) -> None:
+    await redis.delete(f"auth:login:{key}")
+
+
 async def cache_job(job_id: str, snapshot: dict[str, Any]) -> None:
     await redis.set(f"job:{job_id}", json.dumps(snapshot, ensure_ascii=False), ex=7 * 24 * 3600)
     await redis.publish(f"job-events:{job_id}", json.dumps(snapshot, ensure_ascii=False))

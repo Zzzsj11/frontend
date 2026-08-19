@@ -6,6 +6,7 @@ import ipaddress
 import mimetypes
 import re
 import socket
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Awaitable, Callable, Protocol
@@ -148,11 +149,13 @@ def get_storage() -> Storage:
 
 
 async def import_remote(url: str, category: str, filename: str | None = None) -> str:
-    response_url, content, content_type = await download_public_url(url)
-    guessed = filename or Path(httpx.URL(response_url).path).name or "asset.bin"
-    if "." not in guessed:
-        guessed += mimetypes.guess_extension(content_type) or ""
-    return await get_storage().put_bytes(safe_key(category, guessed), content, content_type)
+    with tempfile.TemporaryDirectory(prefix="mvagent-import-") as temp_dir:
+        target = Path(temp_dir) / "remote.bin"
+        response_url, content_type, _size = await download_public_url_to_path(url, target)
+        guessed = filename or Path(httpx.URL(response_url).path).name or "asset.bin"
+        if "." not in guessed:
+            guessed += mimetypes.guess_extension(content_type) or ""
+        return await get_storage().put_file(safe_key(category, guessed), target, content_type)
 
 
 def make_image_thumbnail(content: bytes, max_size: tuple[int, int] = (640, 640)) -> bytes:

@@ -67,7 +67,7 @@ def test_song_emotion_profiles_require_admin(client):
     assert client.get("/api/admin/song-emotion-profiles", headers=headers).status_code == 403
     assert client.post("/api/admin/song-emotion-profiles", json=sample("98765433"), headers=headers).status_code == 403
     client.delete(f"/api/admin/users/{created['id']}")
-    restored = client.post("/api/auth/login", json={"username": "admin", "password": "123456"})
+    restored = client.post("/api/auth/login", json={"username": "admin", "password": "secure-admin-123"})
     client.headers["Authorization"] = f"Bearer {restored.json()['accessToken']}"
 
 
@@ -90,7 +90,12 @@ def test_ass_admin_can_only_manage_song_emotions(client):
         "storyboard_options.read",
         "storyboard_options.manage",
     }
-    headers = bearer(login["accessToken"])
+    changed = client.post(
+        "/api/auth/change-password",
+        headers=bearer(login["accessToken"]),
+        json={"current_password": "secure-pass-123", "new_password": "secure-pass-456"},
+    ).json()
+    headers = bearer(changed["accessToken"])
     assert client.get("/api/admin/song-emotion-profiles", headers=headers).status_code == 200
     assert client.post("/api/admin/song-emotion-profiles", json=sample("98765434"), headers=headers).status_code == 201
     assert client.patch("/api/admin/song-emotion-profiles/98765434", json={"song_name": "已修改"}, headers=headers).status_code == 200
@@ -98,7 +103,7 @@ def test_ass_admin_can_only_manage_song_emotions(client):
     assert client.get("/api/admin/storyboard-options", params={"kind": "genre"}, headers=headers).status_code == 200
     assert client.get("/api/admin/dashboard", headers=headers).status_code == 403
     assert client.get("/api/admin/users", headers=headers).status_code == 403
-    restored = client.post("/api/auth/login", json={"username": "admin", "password": "123456"})
+    restored = client.post("/api/auth/login", json={"username": "admin", "password": "secure-admin-123"})
     client.headers["Authorization"] = f"Bearer {restored.json()['accessToken']}"
     client.delete(f"/api/admin/users/{created['id']}")
 

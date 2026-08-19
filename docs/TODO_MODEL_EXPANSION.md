@@ -1,23 +1,26 @@
-# TODO：生成模型扩展技术债
+# 生成模型接入现状与剩余技术债
 
-> 本文档是仓库唯一的待办清单。核心要求：不要只给前端下拉框增加名称，必须同步完成后端白名单、能力矩阵、供应商参数映射、任务配置持久化、Token/费用账单、旧任务兼容和自动化测试。
+> 最后核验：2026-08-19。本文件不记录已失效的实施过程，只维护当前能力和仍需处理的架构债。接入模型不能只给前端下拉框增加名称，必须同步完成后端校验、供应商参数映射、任务持久化、用量记录、旧任务兼容和自动化测试。
 
 ## 已完成（勿重复）
 
 - 后端模型注册中心：模型存库，管理后台「模型管理」CRUD 与启停，公开端点 `GET /api/model-options` 动态下发。
 - 前端选择器动态化：`src/generationModels.ts` 的 `loadGenerationModels()` 从 `/model-options` 拉取并覆盖内置默认，注册中心不可用时回退默认模型，不再硬编码禁用。
+- H3 已进入项目视频生成主流程，UI 支持 T2VA、I2VA、FL2VA、Ref2VA（当前产品明确不开放 L2VA）；Ref2VA 产品上限为 6 图、1 视频、3 音频，视觉素材必需，音频不能单独提交。
+- H3 任务、请求、结果和 RunningHub 输入输出均持久化；当前单 API 实例内并发上限为 2。
 
 ## 剩余待办
 
-当前 `/model-options` 仅返回 `id / name / modality`，能力约束仍写死在前端 `src/mediaConstraints.ts`（时长 4–15s）与后端 `backend/app/media_constraints.py`。接入新模型时必须完成：
+当前 `/model-options` 已返回部分 capabilities，但仍有约束分散在前端 `src/mediaConstraints.ts`、后端 `backend/app/media_constraints.py` 和 H3 模式校验中。继续接入模型时必须完成：
 
 - [ ] 在管理后台模型注册时录入真实供应商标识，不得把 UI 别名直接当作供应商 API model 值。
 - [ ] 为每个模型声明支持的画幅、清晰度、时长范围、参考图数量、音频、水印等能力，入库并随 `/model-options` 下发（扩展现有响应结构）。
 - [ ] 前端按模型能力动态联动和禁用不支持的参数（替换 `mediaConstraints.ts` 硬编码），后端必须重复校验。
-- [ ] 扩展 `GeneralStoryboardCreate`、ASS Form 参数、`ImageGenerationCreate`、`VideoGenerationCreate` 的后端白名单。
-- [ ] 将所选模型持久化到 `project_tasks.storyboard_config` 和每条 `storyboard_lines.shot_options`；任务创建时保存一份能力快照，避免模型配置变化后无法解释历史生成参数。
-- [ ] 确保图片与视频生成请求实际传递用户选择的模型，而不只是页面展示。
-- [ ] 在 `generation_jobs`、`token_usage_records` 和失败账单中记录最终供应商及模型。
+- [x] 扩展 `GeneralStoryboardCreate`、ASS Form 参数、`ImageGenerationCreate`、`VideoGenerationCreate` 的 H3 后端白名单与模式校验。
+- [x] 将所选模型持久化到 `project_tasks.storyboard_config` 和每条 `storyboard_lines.shot_options`，并在生成请求中实际传递。
+- [x] 在 `generation_jobs` 和模型调用记录中保留最终供应商、模型及 H3 工作流信息。
+- [ ] 统一 `token_usage_records` 与失败账单的非 Token 计费字段，避免各供应商使用私有结构。
+- [ ] 把 H3 并发 2 从进程内信号量升级为 Redis/Worker 全局租约，并支持未来按供应商和模型配置不同上限。
 - [ ] 核对模型计费口径；如供应商不返回 Token，应记录调用次数、原始 usage 和可用的费用单位。
 - [ ] 处理旧任务使用已下线模型时的只读展示、重试提示与迁移策略。
 - [ ] 增加前后端模型白名单、能力矩阵、默认值、非法组合和多用户隔离测试。

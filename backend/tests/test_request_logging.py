@@ -35,7 +35,7 @@ def test_not_logged_without_run_header(client):
 
 def test_password_redacted_in_request_payload(client):
     run_id = _run_id("redact")
-    client.post("/api/auth/login", json={"username": "admin", "password": "123456"}, headers={"X-Test-Run-Id": run_id})
+    client.post("/api/auth/login", json={"username": "admin", "password": "secure-admin-123"}, headers={"X-Test-Run-Id": run_id})
     logs = client.get("/api/admin/request-logs", params={"runId": run_id}).json()
     assert logs["total"] == 1
     detail = client.get(f"/api/admin/request-logs/{logs['items'][0]['id']}").json()

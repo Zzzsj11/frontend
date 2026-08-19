@@ -57,6 +57,7 @@ LLM_BASE_URL, LLM_API_KEY, LLM_MODEL = _resolve_llm_settings(SHARED_PROVIDER_KEY
 
 @dataclass(frozen=True)
 class Settings:
+    app_env: str = os.getenv("APP_ENV", "development").lower()
     host: str = os.getenv("APP_HOST", "127.0.0.1")
     port: int = int(os.getenv("APP_PORT", "8000"))
     cors_origins: tuple[str, ...] = tuple(value.strip() for value in os.getenv("APP_CORS_ORIGINS", "http://localhost:5173").split(",") if value.strip())
@@ -66,6 +67,8 @@ class Settings:
     access_token_minutes: int = int(os.getenv("ACCESS_TOKEN_MINUTES", "15"))
     refresh_token_days: int = int(os.getenv("REFRESH_TOKEN_DAYS", "14"))
     refresh_cookie_secure: bool = os.getenv("REFRESH_COOKIE_SECURE", "false").lower() == "true"
+    login_rate_limit_attempts: int = max(3, int(os.getenv("LOGIN_RATE_LIMIT_ATTEMPTS", "8")))
+    login_rate_limit_window_seconds: int = max(30, int(os.getenv("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "300")))
     # 统一供应商 Secret 中的 Token、地址和模型必须成组使用，避免旧环境变量将
     # 共享 Token 误发到其他供应商。没有共享 Token 时才允许独立 LLM_* 覆盖。
     llm_base_url: str = LLM_BASE_URL
@@ -134,4 +137,15 @@ class Settings:
 
 
 settings = Settings()
+
+
+def validate_runtime_security() -> None:
+    if settings.app_env == "production" and settings.jwt_secret == "development-only-change-me-at-least-32-bytes":
+        raise RuntimeError("生产环境禁止使用默认 JWT_SECRET")
+    if len(settings.jwt_secret.encode()) < 32:
+        raise RuntimeError("JWT_SECRET 至少需要 32 字节")
+    if "*" in settings.cors_origins:
+        raise RuntimeError("启用凭证时 APP_CORS_ORIGINS 禁止使用通配符")
+
+
 DATA_DIR.mkdir(parents=True, exist_ok=True)

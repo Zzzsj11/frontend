@@ -59,7 +59,7 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
     extraHTTPHeaders: { 'X-Test-Run-Id': runId },
   })
   const health = await json(await publicApi.get('/api/health'))
-  expect(health).toMatchObject({ ok: true, postgres: true, redis: true })
+  expect(health).toEqual({ ok: true })
   expect((await publicApi.get('/api/auth/me')).status()).toBe(401)
   expect(
     (

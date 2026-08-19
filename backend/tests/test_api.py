@@ -3,8 +3,7 @@ def test_health(client) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["postgres"] is True
-    assert body["redis"] is True
+    assert set(body) == {"ok"}
 
 
 def test_api_errors_are_logged_with_tracking_code_and_redaction(client) -> None:
@@ -23,6 +22,63 @@ def test_auth_me_and_refresh(client) -> None:
     refreshed = client.post("/api/auth/refresh")
     assert refreshed.status_code == 200
     assert refreshed.json()["accessToken"]
+
+
+def test_forced_password_change_revokes_existing_sessions(client) -> None:
+    username = "forced-password-user"
+    created = client.post(
+        "/api/admin/users",
+        json={"username": username, "password": "initial-pass-123", "display_name": "Forced password", "role": "user"},
+    )
+    assert created.status_code == 201
+    logged_in = client.post("/api/auth/login", json={"username": username, "password": "initial-pass-123"})
+    assert logged_in.status_code == 200
+    old_access = logged_in.json()["accessToken"]
+    old_refresh = logged_in.cookies.get("mv_refresh_token")
+    assert client.get("/api/projects", headers={"Authorization": f"Bearer {old_access}"}).status_code == 403
+
+    changed = client.post(
+        "/api/auth/change-password",
+        headers={"Authorization": f"Bearer {old_access}"},
+        json={"current_password": "initial-pass-123", "new_password": "changed-pass-456"},
+    )
+    assert changed.status_code == 200
+    assert client.get("/api/projects", headers={"Authorization": f"Bearer {old_access}"}).status_code == 401
+    assert client.get("/api/projects", headers={"Authorization": f"Bearer {changed.json()['accessToken']}"}).status_code == 200
+    assert client.post("/api/auth/refresh", cookies={"mv_refresh_token": old_refresh}).status_code == 401
+
+    restored = client.post("/api/auth/login", json={"username": "admin", "password": "secure-admin-123"})
+    client.headers["Authorization"] = f"Bearer {restored.json()['accessToken']}"
+
+
+def test_login_rate_limit_is_shared_and_returns_retry_after(client) -> None:
+    import asyncio
+    import hashlib
+
+    from app.redis_store import redis
+
+    ip_key = hashlib.sha256(b"ip\0testclient").hexdigest()
+    username_key = hashlib.sha256(b"username\0rate-limit-probe").hexdigest()
+    asyncio.run(redis.delete(f"auth:login:{ip_key}", f"auth:login:{username_key}"))
+    for _ in range(8):
+        assert client.post("/api/auth/login", json={"username": "rate-limit-probe", "password": "wrong-pass"}).status_code == 401
+    blocked = client.post("/api/auth/login", json={"username": "rate-limit-probe", "password": "wrong-pass"})
+    assert blocked.status_code == 429
+    assert blocked.headers["Retry-After"] == "300"
+    asyncio.run(redis.delete(f"auth:login:{ip_key}", f"auth:login:{username_key}"))
+
+
+def test_upload_rejects_unsupported_or_mismatched_media(client) -> None:
+    unsupported = client.post(
+        "/api/uploads",
+        files={"file": ("payload.exe", b"not-an-executable", "application/octet-stream")},
+    )
+    assert unsupported.status_code == 422
+    mismatched = client.post(
+        "/api/uploads",
+        files={"file": ("avatar.png", b"not-a-png", "video/mp4")},
+    )
+    assert mismatched.status_code == 422
 
 
 def test_account_balance_endpoint(client, monkeypatch) -> None:

@@ -59,12 +59,17 @@ def test_storyboard_option_admin_crud_and_genre_cascade(client):
 def test_storyboard_options_admin_endpoints_require_admin(client):
     created = client.post("/api/admin/users", json={"username": "option-admin-user", "password": "secure-pass-123"}).json()
     login = client.post("/api/auth/login", json={"username": "option-admin-user", "password": "secure-pass-123"}).json()
-    headers = bearer(login["accessToken"])
+    changed = client.post(
+        "/api/auth/change-password",
+        headers=bearer(login["accessToken"]),
+        json={"current_password": "secure-pass-123", "new_password": "secure-pass-456"},
+    ).json()
+    headers = bearer(changed["accessToken"])
     assert client.get("/api/admin/storyboard-options", params={"kind": "season"}, headers=headers).status_code == 403
     assert client.post("/api/admin/storyboard-options", json={"kind": "season", "name": "越权"}, headers=headers).status_code == 403
     # 普通用户仍可读公开 options 端点
     assert client.get("/api/storyboards/general/options", headers=headers).status_code == 200
     client.delete(f"/api/admin/users/{created['id']}")
     # 恢复共享 TestClient 的管理员会话，避免影响后续测试
-    restored = client.post("/api/auth/login", json={"username": "admin", "password": "123456"})
+    restored = client.post("/api/auth/login", json={"username": "admin", "password": "secure-admin-123"})
     client.headers["Authorization"] = f"Bearer {restored.json()['accessToken']}"
