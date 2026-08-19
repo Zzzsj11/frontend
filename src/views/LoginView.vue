@@ -12,7 +12,11 @@ const submit = async () => {
   error.value = ''
   try {
     await auth.login(username.value.trim(), password.value)
-    await router.replace(String(route.query.redirect || '/projects'))
+    await router.replace(
+      auth.user?.mustChangePassword
+        ? '/account/password'
+        : String(route.query.redirect || '/projects'),
+    )
   } catch (value) {
     error.value = value instanceof Error ? value.message : '登录失败'
   }
