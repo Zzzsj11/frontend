@@ -38,14 +38,16 @@ const closeFromOutside = (event: MouseEvent) => {
 const closeFromEscape = (event: KeyboardEvent) => {
   if (event.key === 'Escape') menuOpen.value = false
 }
-const refreshBalance = () => void auth.loadBalance(true)
+const refreshBalance = () => {
+  if (!auth.user?.mustChangePassword) void auth.loadBalance(true)
+}
 let refreshTimer = 0
 onMounted(() => {
   document.addEventListener('click', closeFromOutside)
   document.addEventListener('keydown', closeFromEscape)
   window.addEventListener('focus', refreshBalance)
-  refreshTimer = window.setInterval(() => void auth.loadBalance(), 60_000)
-  if (!auth.balance) void auth.loadBalance()
+  refreshTimer = window.setInterval(refreshBalance, 60_000)
+  if (!auth.balance) refreshBalance()
 })
 onBeforeUnmount(() => {
   document.removeEventListener('click', closeFromOutside)
