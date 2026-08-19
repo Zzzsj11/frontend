@@ -5,7 +5,7 @@ export interface RunningHubStatus {
   configured: boolean
   keyTail: string
   workflowId: string
-  modes: Array<'reference' | 'text' | 'first_frame'>
+  modes: Array<'reference' | 'text' | 'first_frame' | 'first_last'>
   aspectRatios: string[]
   firstFrameAspectRatios: string[]
   textAspectRatios: string[]
@@ -74,7 +74,7 @@ export interface H3ComparisonSource {
 export interface H3TestPreset {
   id: string
   name: string
-  mode: 'reference' | 'text' | 'first_frame'
+  mode: 'reference' | 'text' | 'first_frame' | 'first_last'
   comparisonMode?: 'reference' | 'multi_reference' | 'first_frame'
   prompt: string
   duration: number
@@ -131,7 +131,7 @@ export const uploadRunningHubMedia = (file: File) => {
 export const uploadRunningHubImage = uploadRunningHubMedia
 
 export const submitRunningHubTask = (input: {
-  mode: 'reference' | 'text' | 'first_frame'
+  mode: 'reference' | 'text' | 'first_frame' | 'first_last'
   prompt: string
   duration: number
   aspectRatio: string

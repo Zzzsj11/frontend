@@ -221,6 +221,25 @@ def validate_video_references(payload: VideoGenerationCreate, capabilities: dict
         raise HTTPException(422, "该视频模型的参考音频不能单独使用，必须同时提供图片或视频")
 
 
+def validate_h3_mode_inputs(payload: VideoGenerationCreate) -> None:
+    """H3 产品模式约束；尾帧模式当前明确不开放。"""
+    mode = payload.h3_mode
+    images, videos, audios = payload.image_urls, payload.video_urls, payload.audio_urls
+    if mode == "text" and (images or videos or audios):
+        raise HTTPException(422, "H3 纯文本模式不能提供参考素材")
+    if mode == "first_frame" and (len(images) != 1 or videos or audios):
+        raise HTTPException(422, "H3 首帧模式必须且只能提供 1 张首帧图片")
+    if mode == "first_last" and (len(images) != 2 or videos or audios):
+        raise HTTPException(422, "H3 首尾帧模式必须且只能提供首帧、尾帧两张图片")
+    if mode == "reference":
+        if len(images) > 6 or len(videos) > 1 or len(audios) > 3:
+            raise HTTPException(422, "H3 多参考模式最多支持 6 张图片、1 段视频和 3 段音频")
+        if audios and not (images or videos):
+            raise HTTPException(422, "H3 多参考音频不能单独使用，必须同时提供图片或视频")
+        if not (images or videos):
+            raise HTTPException(422, "H3 多参考模式至少需要 1 张图片或 1 段视频")
+
+
 @app.get("/api/health")
 async def health(response: Response) -> dict:
     postgres, redis = await database_ok(), await redis_ok()
@@ -564,6 +583,8 @@ async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str]) ->
 async def create_video_generation(payload: VideoGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
     model, provider = await require_active_model(db, payload.model or settings.video_model, "video")
     validate_video_references(payload, dict(model.capabilities or {}))
+    if provider.code == "runninghub":
+        validate_h3_mode_inputs(payload)
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
     await _check_concurrency(db, user.id, "video", settings.video_generation_concurrency)
     await consume_daily_quota(db, user_id=user.id, category="video")
@@ -584,6 +605,10 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
                 "_promptCompilerVersion": h3_compilation.version,
                 "_referenceBindings": h3_compilation.reference_bindings,
                 "_promptWarnings": list(h3_compilation.warnings),
+                "_workflowVersion": (model.capabilities or {}).get("workflowVersion"),
+                "_referenceImageCount": len(payload.image_urls),
+                "_referenceVideoCount": len(payload.video_urls),
+                "_referenceAudioCount": len(payload.audio_urls),
             }
         )
     job = await jobs.create(

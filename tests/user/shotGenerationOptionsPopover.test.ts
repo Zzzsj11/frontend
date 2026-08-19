@@ -96,4 +96,24 @@ describe('ShotGenerationOptionsPopover', () => {
     expect(document.querySelector('.options-overlay')).toBeNull()
     wrapper.unmount()
   })
+
+  it('shows the four supported H3 modes without a tail-frame-only option', async () => {
+    const wrapper = mount(ShotGenerationOptionsPopover, {
+      props: {
+        modelValue: { ...options, videoModel: 'minimax-h3-runninghub' },
+        mode: 'shot',
+      },
+    })
+    await wrapper.get('[aria-label="调整生成参数"]').trigger('click')
+    const select = document.querySelector('[aria-label="H3 生成模式"]') as HTMLSelectElement
+    expect(Array.from(select.options).map((option) => option.value)).toEqual([
+      'auto',
+      'text',
+      'first_frame',
+      'first_last',
+      'reference',
+    ])
+    expect(document.body.textContent).not.toContain('尾帧 L2VA')
+    wrapper.unmount()
+  })
 })

@@ -26,7 +26,9 @@ const configuredStatus = {
   configured: true,
   keyTail: '...c817',
   workflowId: '2084514856253874178',
-  modes: ['reference', 'text', 'first_frame'] as Array<'reference' | 'text' | 'first_frame'>,
+  modes: ['reference', 'text', 'first_frame', 'first_last'] as Array<
+    'reference' | 'text' | 'first_frame' | 'first_last'
+  >,
   aspectRatios: ['16:9 (Widescreen)', '9:16 (Portrait)'],
   firstFrameAspectRatios: ['16:9 (Widescreen)', '3:4 (Portrait Standard)'],
   textAspectRatios: ['16:9 (Widescreen)', '9:16 (Portrait Widescreen)'],
@@ -260,6 +262,34 @@ describe('admin runninghub panel', () => {
         duration: 8,
         aspectRatio: '16:9 (Widescreen)',
         images: ['openapi/first.png'],
+        seed: null,
+        firstFrameMegapixels: 0.9,
+      }),
+    )
+    wrapper.unmount()
+  })
+
+  it('submits first-last-frame video with two ordered images', async () => {
+    vi.mocked(fetchRunningHubStatus).mockResolvedValue(configuredStatus)
+    vi.mocked(submitRunningHubTask).mockResolvedValue({ taskId: 'task-fl2va-1', status: 'RUNNING' })
+    const wrapper = mount(AdminRunningHubPanel)
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Key 已配置'))
+
+    await buttonByText(wrapper, '首尾帧生成').trigger('click')
+    await buttonByText(wrapper, '填入示例模板').trigger('click')
+    const inputs = wrapper.findAll('.slot-input')
+    expect(inputs).toHaveLength(2)
+    await inputs[0].setValue('openapi/first.png')
+    await inputs[1].setValue('openapi/last.png')
+    await wrapper.find('.submit-btn').trigger('click')
+
+    await vi.waitFor(() =>
+      expect(submitRunningHubTask).toHaveBeenCalledWith({
+        mode: 'first_last',
+        prompt: expect.stringContaining('Picture 2'),
+        duration: 8,
+        aspectRatio: '16:9 (Widescreen)',
+        images: ['openapi/first.png', 'openapi/last.png'],
         seed: null,
         firstFrameMegapixels: 0.9,
       }),

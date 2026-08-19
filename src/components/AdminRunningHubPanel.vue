@@ -45,7 +45,16 @@ const FIRST_FRAME_EXAMPLE_PROMPT = `For the target video, at 0.00 seconds into t
 
 integrated_multimodal_description: [Shot 1] Live-action cinematic footage begins exactly from <Picture 1>, preserving the subject, composition, lighting and background. The subject slowly turns toward the camera while a gentle breeze creates subtle natural movement. The camera makes a stable, slow push-in. Realistic texture, coherent motion, no text, no watermark.`
 
-type GenerationMode = 'reference' | 'text' | 'first_frame'
+const firstLastExamplePrompt =
+  () => `How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the ${duration.value.toFixed(2)}-second mark of the target video.
+
+integrated_multimodal_description: [Shot 1] Live-action cinematic footage begins exactly from Picture 1. The subject performs a continuous, physically coherent movement while the camera and environment remain stable, progressively converging to the pose, placement, lighting, framing, and composition established by Picture 2 at the end of the shot.
+
+overall_soundscape: Natural synchronized movement sounds and stable environment ambience.
+
+non_diegetic_music: N/A`
+
+type GenerationMode = 'reference' | 'text' | 'first_frame' | 'first_last'
 
 interface MediaSlot {
   value: string
@@ -83,8 +92,8 @@ const textMp = ref(0.9)
 const firstFrameMp = ref(0.9)
 const makeSlots = (count: number) =>
   Array.from({ length: count }, (): MediaSlot => ({ value: '', uploading: false, preview: '' }))
-const slots = reactive<MediaSlot[]>(makeSlots(9))
-const videoSlots = reactive<MediaSlot[]>(makeSlots(3))
+const slots = reactive<MediaSlot[]>(makeSlots(6))
+const videoSlots = reactive<MediaSlot[]>(makeSlots(1))
 const audioSlots = reactive<MediaSlot[]>(makeSlots(3))
 const fileInputs = ref<Array<HTMLInputElement | null>>([])
 const videoFileInputs = ref<Array<HTMLInputElement | null>>([])
@@ -114,14 +123,14 @@ const filledAudios = computed(() => audioSlots.map((s) => s.value.trim()).filter
 const submittedImages = computed(() =>
   mode.value === 'text'
     ? []
-    : mode.value === 'first_frame'
-      ? filledImages.value.slice(0, 1)
+    : mode.value === 'first_frame' || mode.value === 'first_last'
+      ? filledImages.value.slice(0, mode.value === 'first_last' ? 2 : 1)
       : filledImages.value,
 )
 const availableAspectRatios = computed(() =>
   mode.value === 'text'
     ? (status.value?.textAspectRatios ?? [])
-    : mode.value === 'first_frame'
+    : mode.value === 'first_frame' || mode.value === 'first_last'
       ? (status.value?.firstFrameAspectRatios ?? [])
       : (status.value?.aspectRatios ?? []),
 )
@@ -132,9 +141,11 @@ const canSubmit = computed(
     !!prompt.value.trim() &&
     (mode.value === 'text' ||
       mode.value === 'first_frame' ||
+      mode.value === 'first_last' ||
       submittedImages.value.length + filledVideos.value.length > 0) &&
     (mode.value !== 'first_frame' || submittedImages.value.length === 1) &&
-    submittedImages.value.length + filledVideos.value.length + filledAudios.value.length <= 12 &&
+    (mode.value !== 'first_last' || submittedImages.value.length === 2) &&
+    submittedImages.value.length + filledVideos.value.length + filledAudios.value.length <= 10 &&
     ![...slots, ...videoSlots, ...audioSlots].some((s) => s.uploading),
 )
 
@@ -258,7 +269,9 @@ const fillTemplate = () => {
       ? TEXT_EXAMPLE_PROMPT
       : mode.value === 'first_frame'
         ? FIRST_FRAME_EXAMPLE_PROMPT
-        : EXAMPLE_PROMPT
+        : mode.value === 'first_last'
+          ? firstLastExamplePrompt()
+          : EXAMPLE_PROMPT
 }
 
 const changeMode = (nextMode: GenerationMode) => {
@@ -266,7 +279,7 @@ const changeMode = (nextMode: GenerationMode) => {
   const ratios =
     nextMode === 'text'
       ? status.value?.textAspectRatios
-      : nextMode === 'first_frame'
+      : nextMode === 'first_frame' || nextMode === 'first_last'
         ? status.value?.firstFrameAspectRatios
         : status.value?.aspectRatios
   if (ratios?.length && !ratios.includes(aspectRatio.value)) aspectRatio.value = ratios[0]
@@ -340,7 +353,7 @@ const submit = async () => {
       seed: seed !== null && Number.isFinite(seed) && seed >= 0 ? seed : null,
       ...(mode.value === 'text'
         ? { textMegapixels: textMp.value }
-        : mode.value === 'first_frame'
+        : mode.value === 'first_frame' || mode.value === 'first_last'
           ? { firstFrameMegapixels: firstFrameMp.value }
           : { stage1Megapixels: stage1Mp.value, stage2Megapixels: stage2Mp.value }),
     })
@@ -399,7 +412,9 @@ const statusTone = (value: string) =>
     <div class="rh-head">
       <div>
         <h3>RunningHub 工作流测试</h3>
-        <p class="rh-sub">MiniMax H3：Ref2VA 支持 9 图 / 3 视频 / 3 音频，合计最多 12 个文件</p>
+        <p class="rh-sub">
+          MiniMax H3：T2VA / I2VA / FL2VA / Ref2VA；多参考最多6图 / 1视频 / 3音频
+        </p>
       </div>
       <div v-if="status" class="rh-meta">
         <span class="badge" :class="ready ? 'ok' : 'bad'">{{
@@ -446,6 +461,15 @@ const statusTone = (value: string) =>
         >
           首帧生成
         </button>
+        <button
+          type="button"
+          class="mode-btn"
+          :class="{ active: mode === 'first_last' }"
+          :disabled="!ready"
+          @click="changeMode('first_last')"
+        >
+          首尾帧生成
+        </button>
       </div>
       <div class="row prompt-row">
         <label class="form-label">提示词</label>
@@ -463,7 +487,9 @@ const statusTone = (value: string) =>
             ? '描述画面、主体动作、镜头运动、光线和声音；无需上传参考图'
             : mode === 'first_frame'
               ? '描述从首帧开始的主体动作、镜头运动、光线和声音'
-              : '结构化模板：subject_definitions / summary / retention_analysis / detailed_description（[Shot N] 分镜 + <d>[Chinese] 台词）/ overall_soundscape'
+              : mode === 'first_last'
+                ? '描述从首帧连续变化并在视频结束时准确落到尾帧的过程'
+                : '结构化模板：subject_definitions / summary / retention_analysis / detailed_description（[Shot N] 分镜 + <d>[Chinese] 台词）/ overall_soundscape'
         "
       ></textarea>
 
@@ -547,18 +573,30 @@ const statusTone = (value: string) =>
             {{ preset.value }} MP（16:9 约 {{ preset.size }}）
           </option>
         </select>
-        <span class="hint">首帧工作流为单阶段 8 步生成，输出包含音频。</span>
+        <span class="hint"
+          >{{ mode === 'first_last' ? '首尾帧' : '首帧' }}工作流为单阶段 8
+          步生成，输出包含音频。</span
+        >
       </div>
 
       <div v-if="mode !== 'text'" class="row slots">
         <div
-          v-for="(slot, index) in slots.slice(0, mode === 'first_frame' ? 1 : 9)"
+          v-for="(slot, index) in slots.slice(
+            0,
+            mode === 'first_frame' ? 1 : mode === 'first_last' ? 2 : 6,
+          )"
           :key="index"
           class="slot"
         >
           <div class="slot-head">
             <span class="form-label">{{
-              mode === 'first_frame' ? '首帧图片' : `参考图 ${index + 1}`
+              mode === 'first_frame'
+                ? '首帧图片'
+                : mode === 'first_last'
+                  ? index === 0
+                    ? '首帧图片'
+                    : '尾帧图片'
+                  : `参考图 ${index + 1}`
             }}</span>
             <button
               type="button"
@@ -662,7 +700,9 @@ const statusTone = (value: string) =>
         {{
           mode === 'first_frame'
             ? '图片对应提示词中的 Picture 1，并作为视频 0 秒画面。上传文件 24 小时内有效。'
-            : '图片≤9、视频≤3、音频≤3，文件合计≤12；每段视频/音频为2–15秒，同类型总时长≤15秒。音频不能单独使用。未使用槽位会从工作流删除，不再用示例素材补齐。'
+            : mode === 'first_last'
+              ? '第一张图片固定为0秒首帧，第二张图片固定为视频结束时的尾帧。'
+              : '图片≤6、视频≤1、音频≤3，文件合计≤10；每段视频/音频为2–15秒，同类型总时长≤15秒。音频不能单独使用。'
         }}
       </p>
 
@@ -781,7 +821,9 @@ const statusTone = (value: string) =>
                   ? '纯文本'
                   : entry.mode === 'first_frame'
                     ? '首帧'
-                    : `${entry.imageCount} 图 · ${entry.videoCount || 0} 视频 · ${entry.audioCount || 0} 音频`
+                    : entry.mode === 'first_last'
+                      ? '首尾帧'
+                      : `${entry.imageCount} 图 · ${entry.videoCount || 0} 视频 · ${entry.audioCount || 0} 音频`
               }}
             </td>
             <td>

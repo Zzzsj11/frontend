@@ -199,10 +199,10 @@ class VideoGenerationCreate(BaseModel):
     duration: int = Field(default=DEFAULT_VIDEO_DURATION, ge=MIN_VIDEO_DURATION, le=MAX_VIDEO_DURATION)
     ratio: Literal["16:9", "9:16", "1:1", "4:3"] = "16:9"
     resolution: Literal["480p", "720p", "1080p"] = "720p"
-    image_urls: list[str] = Field(default_factory=list, max_length=9)
-    video_urls: list[str] = Field(default_factory=list, max_length=3)
+    image_urls: list[str] = Field(default_factory=list, max_length=6)
+    video_urls: list[str] = Field(default_factory=list, max_length=1)
     audio_urls: list[str] = Field(default_factory=list, max_length=3)
-    h3_mode: Literal["auto", "text", "first_frame", "last_frame", "first_last", "reference"] = "auto"
+    h3_mode: Literal["auto", "text", "first_frame", "first_last", "reference"] = "auto"
     h3_audio_usage: Literal["reference", "reuse", "generated", "mute"] = "reference"
     generate_audio: bool = False
     watermark: bool = False

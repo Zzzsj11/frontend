@@ -11,7 +11,14 @@ from app import admin as admin_module
 from app.config import settings
 from app.database import session_factory
 from app.models import ProjectModel, ProjectTaskModel, ShotAssetModel, StoryboardLineModel, UserModel
-from app.runninghub import RunningHubError, build_first_frame_node_info_list, build_node_info_list, build_reference_workflow, build_text_node_info_list
+from app.runninghub import (
+    RunningHubError,
+    build_first_frame_node_info_list,
+    build_first_last_frame_node_info_list,
+    build_node_info_list,
+    build_reference_workflow,
+    build_text_node_info_list,
+)
 
 
 def bearer(token: str) -> dict[str, str]:
@@ -73,19 +80,21 @@ def test_runninghub_node_info_list_validation():
         build_node_info_list(prompt="x", duration=8, aspect_ratio="16:9 (Widescreen)", images=["a.png"], stage2_megapixels=0.1)
 
 
-def test_reference_workflow_expands_to_official_limits_and_removes_empty_defaults():
+def test_reference_workflow_uses_product_limits_and_removes_empty_defaults():
     workflow = build_reference_workflow(
         prompt="subject_definitions:\n<Subject 1> ...",
         duration=10,
         aspect_ratio="16:9 (Widescreen)",
-        images=[f"openapi/image-{index}.png" for index in range(9)],
-        videos=[f"openapi/video-{index}.mp4" for index in range(3)],
+        images=[f"openapi/image-{index}.png" for index in range(6)],
+        videos=["openapi/video.mp4"],
         audios=[],
         seed=10,
     )
     inputs = workflow["108"]["inputs"]
-    assert all(f"ref_images.ref_image_{index}" in inputs for index in range(9))
-    assert all(f"ref_videos.ref_video_{index}" in inputs for index in range(3))
+    assert all(f"ref_images.ref_image_{index}" in inputs for index in range(6))
+    assert "ref_images.ref_image_6" not in inputs
+    assert "ref_videos.ref_video_0" in inputs
+    assert "ref_videos.ref_video_1" not in inputs
     assert all(f"ref_audios.ref_audio_{index}" not in inputs for index in range(3))
     assert all(node not in workflow for node in ("100", "103", "130", "169", "173", "177"))
     assert workflow["243"]["inputs"]["noise_seed"] == 10
@@ -96,13 +105,13 @@ def test_reference_workflow_enforces_cross_media_rules():
     common = {"prompt": "x", "duration": 8, "aspect_ratio": "16:9 (Widescreen)"}
     with pytest.raises(RunningHubError, match="音频不能作为唯一输入"):
         build_reference_workflow(**common, images=[], audios=["a.wav"])
-    with pytest.raises(RunningHubError, match="合计最多 12"):
+    with pytest.raises(RunningHubError, match="最多支持 6 张"):
         build_reference_workflow(
             **common,
-            images=[f"{index}.png" for index in range(9)],
-            videos=["1.mp4"],
-            audios=["1.wav", "2.wav", "3.wav"],
+            images=[f"{index}.png" for index in range(7)],
         )
+    with pytest.raises(RunningHubError, match="最多支持 1 段"):
+        build_reference_workflow(**common, images=["1.png"], videos=["1.mp4", "2.mp4"])
 
 
 def test_runninghub_text_node_info_list():
@@ -143,6 +152,28 @@ def test_runninghub_first_frame_node_info_list():
         "61": {"image": "openapi/first.png"},
         "235": {"noise_seed": 88},
     }
+
+
+def test_runninghub_first_last_frame_node_info_list():
+    nodes = build_first_last_frame_node_info_list(
+        prompt="transition from Picture 1 to Picture 2",
+        duration=8,
+        aspect_ratio="16:9 (Widescreen)",
+        first_image="openapi/first.png",
+        last_image="openapi/last.png",
+        seed=99,
+        megapixels=0.9,
+    )
+    by_node = {}
+    for item in nodes:
+        by_node.setdefault(item["nodeId"], {})[item["fieldName"]] = item["fieldValue"]
+    assert by_node["332"]["prompt"].startswith("transition")
+    assert by_node["347"]["text"].startswith("transition")
+    assert by_node["346"]["value"] == 8
+    assert by_node["349"] == {"aspect_ratio": "16:9 (Widescreen)", "megapixels": 0.9}
+    assert by_node["61"]["image"] == "openapi/first.png"
+    assert by_node["73"]["image"] == "openapi/last.png"
+    assert by_node["338"]["noise_seed"] == 99
 
 
 def test_runninghub_endpoints_require_api_key(client, monkeypatch):
@@ -240,6 +271,39 @@ def test_runninghub_upstream_error_mapped_to_502(client, monkeypatch):
     response = client.post("/api/admin/runninghub/query", json={"taskId": "t-err"})
     assert response.status_code == 502
     assert "429" in response.json()["detail"]
+
+
+def test_runninghub_admin_submits_first_last_mode(client, monkeypatch):
+    configured = dataclasses.replace(settings, runninghub_api_key="rh-test-key")
+    monkeypatch.setattr(admin_module, "settings", configured)
+    submitted = {}
+
+    async def fake_submit(**kwargs):
+        submitted.update(kwargs)
+        return {"taskId": "rh-fl2va-test", "status": "RUNNING"}
+
+    monkeypatch.setattr(admin_module, "rh_submit_first_last_frame_task", fake_submit)
+    response = client.post(
+        "/api/admin/runninghub/tasks",
+        json={
+            "mode": "first_last",
+            "prompt": "Picture 1 continuously transitions to Picture 2",
+            "duration": 8,
+            "aspectRatio": "16:9 (Widescreen)",
+            "images": ["openapi/first.png", "openapi/last.png"],
+            "seed": 7,
+        },
+    )
+    assert response.status_code == 201
+    assert submitted == {
+        "prompt": "Picture 1 continuously transitions to Picture 2",
+        "duration": 8,
+        "aspect_ratio": "16:9 (Widescreen)",
+        "first_image": "openapi/first.png",
+        "last_image": "openapi/last.png",
+        "seed": 7,
+        "megapixels": 0.9,
+    }
 
 
 def test_runninghub_seedance_comparison_source_and_submit(client, monkeypatch):

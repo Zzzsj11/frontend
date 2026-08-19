@@ -1,4 +1,8 @@
+import pytest
+from fastapi import HTTPException
+
 from app.h3_prompt_compiler import REFERENCE_SECTIONS, compile_h3_prompt, detect_h3_mode
+from app.main import validate_h3_mode_inputs
 from app.schemas import VideoGenerationCreate
 
 
@@ -34,3 +38,25 @@ def test_h3_base_modes():
     assert detect_h3_mode(text) == "text"
     assert detect_h3_mode(first) == "first_frame"
     assert compile_h3_prompt(text).prompt.startswith("integrated_multimodal_description:")
+
+
+def test_h3_first_last_prompt_has_exact_alignment_instruction():
+    payload = VideoGenerationCreate(
+        prompt="人物从站立连续转为舞蹈收势",
+        duration=8,
+        image_urls=["first.png", "last.png"],
+        h3_mode="first_last",
+    )
+    compiled = compile_h3_prompt(payload)
+    assert compiled.mode == "first_last"
+    assert compiled.prompt.startswith("How the reference pictures align with the target video")
+    assert "8.00-second mark" in compiled.prompt
+    assert "Picture 1" in compiled.prompt and "Picture 2" in compiled.prompt
+
+
+def test_h3_product_mode_validation_excludes_tail_only_and_checks_inputs():
+    validate_h3_mode_inputs(VideoGenerationCreate(prompt="x", h3_mode="first_last", image_urls=["first.png", "last.png"]))
+    with pytest.raises(HTTPException, match="首尾帧"):
+        validate_h3_mode_inputs(VideoGenerationCreate(prompt="x", h3_mode="first_last", image_urls=["first.png"]))
+    with pytest.raises(ValueError):
+        VideoGenerationCreate(prompt="x", h3_mode="reference", image_urls=[f"{index}.png" for index in range(7)])

@@ -108,7 +108,15 @@ export interface ShotGenOptions {
   generateAudio?: boolean
   /** 视频是否添加供应商水印。 */
   watermark?: boolean
-  /** H3 Ref2VA 可选参考视频（最多3段，同类型总时长≤15秒）。 */
+  /** H3 生成模式；当前产品不开放尾帧模式。 */
+  h3Mode?: 'auto' | 'text' | 'first_frame' | 'first_last' | 'reference'
+  /** H3 I2VA/FL2VA 显式首帧；留空时使用当前场景图。 */
+  h3FirstFrameUrl?: string
+  /** H3 FL2VA 显式尾帧。 */
+  h3LastFrameUrl?: string
+  /** H3 Ref2VA 额外参考图片（与场景、人物图片合计最多6张）。 */
+  referenceImageUrls?: string[]
+  /** H3 Ref2VA 可选参考视频（最多1段，时长2–15秒）。 */
   referenceVideoUrls?: string[]
   /** H3 Ref2VA 可选参考音频（最多3段，同类型总时长≤15秒）。 */
   referenceAudioUrls?: string[]

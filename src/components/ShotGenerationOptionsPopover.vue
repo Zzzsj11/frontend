@@ -9,6 +9,7 @@ import {
 } from '../generationModels'
 import { DEFAULT_VIDEO_DURATION, VIDEO_DURATION_CHOICES } from '../mediaConstraints'
 import type { ShotGenOptions } from '../types'
+import H3GenerationModeFields from './H3GenerationModeFields.vue'
 
 const props = defineProps<{
   modelValue: ShotGenOptions
@@ -40,12 +41,6 @@ const summary = computed(() => {
 const updateOption = <K extends keyof ShotGenOptions>(key: K, value: ShotGenOptions[K]) => {
   emit('update:modelValue', { ...props.modelValue, [key]: value })
 }
-const parseReferenceUrls = (value: string) =>
-  value
-    .split(/[\n,]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, 3)
 const restoreDefaults = () => {
   emit('update:modelValue', {
     ...props.modelValue,
@@ -59,6 +54,13 @@ const restoreDefaults = () => {
           watermark: false,
         }
       : { imageModel: DEFAULT_IMAGE_MODEL }),
+    h3Mode: 'auto',
+    h3FirstFrameUrl: undefined,
+    h3LastFrameUrl: undefined,
+    referenceImageUrls: [],
+    referenceVideoUrls: [],
+    referenceAudioUrls: [],
+    h3AudioUsage: 'reference',
   })
 }
 const close = () => {
@@ -233,57 +235,11 @@ onBeforeUnmount(close)
               <span><strong>添加水印</strong><small>使用模型供应商提供的水印</small></span>
             </button>
           </fieldset>
-          <fieldset v-if="isH3" class="option-group h3-reference-group">
-            <legend>H3 全参考素材</legend>
-            <label class="reference-field">
-              <span>参考视频 URL（最多3段）</span>
-              <textarea
-                :value="(modelValue.referenceVideoUrls ?? []).join('\n')"
-                rows="3"
-                placeholder="每行一个视频公网 URL；每段2–15秒，总时长≤15秒"
-                @input="
-                  updateOption(
-                    'referenceVideoUrls',
-                    parseReferenceUrls(($event.target as HTMLTextAreaElement).value),
-                  )
-                "
-              ></textarea>
-            </label>
-            <label class="reference-field">
-              <span>参考音频 URL（最多3段）</span>
-              <textarea
-                :value="(modelValue.referenceAudioUrls ?? []).join('\n')"
-                rows="3"
-                placeholder="每行一个音频公网 URL；不能脱离图片/视频单独使用"
-                @input="
-                  updateOption(
-                    'referenceAudioUrls',
-                    parseReferenceUrls(($event.target as HTMLTextAreaElement).value),
-                  )
-                "
-              ></textarea>
-            </label>
-            <label class="reference-field">
-              <span>音频用途</span>
-              <select
-                :value="modelValue.h3AudioUsage ?? 'reference'"
-                @change="
-                  updateOption(
-                    'h3AudioUsage',
-                    ($event.target as HTMLSelectElement).value as ShotGenOptions['h3AudioUsage'],
-                  )
-                "
-              >
-                <option value="reference">参考节奏/风格</option>
-                <option value="reuse">原样作为BGM</option>
-                <option value="generated">由H3生成声音</option>
-                <option value="mute">静音</option>
-              </select>
-            </label>
-            <p class="reference-hint">
-              图片由当前场景和人物自动加入；全部图片、视频和音频合计最多12个。
-            </p>
-          </fieldset>
+          <H3GenerationModeFields
+            v-if="isH3"
+            :model-value="modelValue"
+            @update:model-value="emit('update:modelValue', $event)"
+          />
           <div class="popover-actions">
             <button type="button" class="restore-button" @click="restoreDefaults">恢复默认</button>
             <button type="button" class="confirm-button" @click="close">确定</button>

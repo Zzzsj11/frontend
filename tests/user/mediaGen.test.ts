@@ -72,6 +72,37 @@ describe('media generation API client', () => {
     expect(body.watermark).toBe(true)
   })
 
+  it('submits H3 FL2VA with exactly the selected first and last frames', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(jsonResponse({ id: 'job-fl2va', status: 'queued', progress: 0 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: 'job-fl2va',
+          status: 'succeeded',
+          progress: 100,
+          result: { videoUrl: '/media/videos/fl2va.mp4', duration: 8 },
+        }),
+      )
+
+    await generateShotVideo('continuous transition', '/media/current-scene.jpg', [], {
+      resolution: '720p',
+      duration: 8,
+      ratio: '16:9',
+      imageModel: DEFAULT_IMAGE_MODEL,
+      videoModel: 'minimax-h3-runninghub',
+      h3Mode: 'first_last',
+      h3FirstFrameUrl: '/media/first.jpg',
+      h3LastFrameUrl: '/media/last.jpg',
+      referenceVideoUrls: ['/media/ignored.mp4'],
+    })
+
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
+    expect(body.h3_mode).toBe('first_last')
+    expect(body.image_urls).toEqual(['/media/first.jpg', '/media/last.jpg'])
+    expect(body.video_urls).toEqual([])
+    expect(body.audio_urls).toEqual([])
+  })
+
   it('surfaces a failed generation reason', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(jsonResponse({ id: 'job-failed', status: 'queued', progress: 0 }))

@@ -8,6 +8,7 @@ export interface GenerationModelCapabilities {
   executionPool?: string
   nativeAudio?: boolean
   referenceImage?: { min?: number; max?: number }
+  h3Modes?: Array<'auto' | 'text' | 'first_frame' | 'first_last' | 'reference'>
   [key: string]: unknown
 }
 interface GenerationModelOption {

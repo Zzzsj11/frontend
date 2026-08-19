@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from .schemas import VideoGenerationCreate
 
 COMPILER_NAME = "h3-prompt-writing"
-COMPILER_VERSION = "1.0.0"
+COMPILER_VERSION = "1.1.0"
 BASE_SECTIONS = ("integrated_multimodal_description:", "overall_soundscape:", "non_diegetic_music:")
 REFERENCE_SECTIONS = ("subject_definitions:", "summary:", "retention_analysis:", "detailed_description:", "overall_soundscape:", "non_diegetic_music:")
 
@@ -57,9 +57,19 @@ def compile_h3_prompt(payload: VideoGenerationCreate) -> H3PromptCompilation:
         return H3PromptCompilation(source, source, mode, COMPILER_NAME, COMPILER_VERSION, bindings)
 
     if mode != "reference":
-        picture_note = " Begin from <Picture 1> and preserve its identity, composition, and scene continuity." if payload.image_urls else ""
+        instruction = ""
+        picture_note = ""
+        if mode == "first_frame":
+            instruction = "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.\n\n"
+            picture_note = " Begin exactly from <Picture 1> and preserve its identity, composition, and scene continuity."
+        elif mode == "first_last":
+            instruction = (
+                "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with "
+                f"the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the {payload.duration:.2f}-second mark of the target video.\n\n"
+            )
+            picture_note = " Begin exactly from Picture 1, describe a continuous visible transition, and converge exactly to Picture 2 at the end."
         compiled = (
-            f"integrated_multimodal_description: Create a {payload.duration}-second {payload.ratio} target video.{picture_note} Creative direction: {source}\n\n"
+            f"{instruction}integrated_multimodal_description: [Shot 1] Create a {payload.duration}-second {payload.ratio} target video.{picture_note} Creative direction: {source}\n\n"
             "overall_soundscape: Preserve physically plausible ambience and synchronized action sounds; do not add dialogue unless explicitly requested.\n\n"
             "non_diegetic_music: Follow the creative direction; use N/A when no audience-only music is requested."
         )

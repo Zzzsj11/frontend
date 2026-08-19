@@ -21,7 +21,11 @@ export const normalizeShotOptions = (options: ShotGenOptions): ShotGenOptions =>
   videoModel: options.videoModel || DEFAULT_VIDEO_MODEL,
   generateAudio: options.generateAudio ?? false,
   watermark: options.watermark ?? false,
-  referenceVideoUrls: (options.referenceVideoUrls ?? []).filter(Boolean).slice(0, 3),
+  h3Mode: options.h3Mode ?? 'auto',
+  h3FirstFrameUrl: options.h3FirstFrameUrl?.trim() || undefined,
+  h3LastFrameUrl: options.h3LastFrameUrl?.trim() || undefined,
+  referenceImageUrls: (options.referenceImageUrls ?? []).filter(Boolean).slice(0, 6),
+  referenceVideoUrls: (options.referenceVideoUrls ?? []).filter(Boolean).slice(0, 1),
   referenceAudioUrls: (options.referenceAudioUrls ?? []).filter(Boolean).slice(0, 3),
   h3AudioUsage: options.h3AudioUsage ?? 'reference',
 })

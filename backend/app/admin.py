@@ -79,6 +79,7 @@ from .runninghub import (
 )
 from .runninghub import query_task as rh_query_task
 from .runninghub import submit_first_frame_task as rh_submit_first_frame_task
+from .runninghub import submit_first_last_frame_task as rh_submit_first_last_frame_task
 from .runninghub import submit_reference_task as rh_submit_reference_task
 from .runninghub import submit_text_task as rh_submit_text_task
 from .runninghub import upload_media as rh_upload_media
@@ -1563,7 +1564,7 @@ async def runninghub_status(user: CurrentUser):
         "configured": bool(key),
         "keyTail": f"...{key[-4:]}" if len(key) >= 4 else "",
         "workflowId": settings.runninghub_workflow_id,
-        "modes": ["reference", "text", "first_frame"],
+        "modes": ["reference", "text", "first_frame", "first_last"],
         "aspectRatios": list(ASPECT_RATIOS),
         "firstFrameAspectRatios": list(FIRST_FRAME_ASPECT_RATIOS),
         "textAspectRatios": list(TEXT_ASPECT_RATIOS),
@@ -1846,12 +1847,12 @@ async def runninghub_upload(file: UploadFile, user: CurrentUser):
 
 
 class RunningHubTaskIn(BaseModel):
-    mode: str = Field(default="reference", pattern="^(reference|text|first_frame)$")
+    mode: str = Field(default="reference", pattern="^(reference|text|first_frame|first_last)$")
     prompt: str = Field(min_length=1, max_length=8000)
     duration: float = Field(default=8, ge=MIN_DURATION, le=MAX_DURATION)
     aspect_ratio: str = Field(default="16:9 (Widescreen)", alias="aspectRatio")
-    images: list[str] = Field(default_factory=list, max_length=9)
-    videos: list[str] = Field(default_factory=list, max_length=3)
+    images: list[str] = Field(default_factory=list, max_length=6)
+    videos: list[str] = Field(default_factory=list, max_length=1)
     audios: list[str] = Field(default_factory=list, max_length=3)
     seed: int | None = Field(default=None, ge=0)
     stage1_megapixels: float = Field(default=DEFAULT_STAGE1_MEGAPIXELS, ge=MEGAPIXELS_MIN, le=MEGAPIXELS_MAX, alias="stage1Megapixels")
@@ -1876,6 +1877,18 @@ async def runninghub_task_create(payload: RunningHubTaskIn, request: Request, us
                 duration=payload.duration,
                 aspect_ratio=payload.aspect_ratio,
                 image=payload.images[0],
+                seed=payload.seed,
+                megapixels=payload.first_frame_megapixels,
+            )
+        elif payload.mode == "first_last":
+            if len(payload.images) != 2:
+                raise RunningHubError("首尾帧生视频必须提供首帧和尾帧两张图片")
+            result = await rh_submit_first_last_frame_task(
+                prompt=payload.prompt,
+                duration=payload.duration,
+                aspect_ratio=payload.aspect_ratio,
+                first_image=payload.images[0],
+                last_image=payload.images[1],
                 seed=payload.seed,
                 megapixels=payload.first_frame_megapixels,
             )
@@ -1927,7 +1940,7 @@ async def runninghub_task_create(payload: RunningHubTaskIn, request: Request, us
         H3TestPresetModel(
             id=f"h3test-{uuid.uuid4().hex}",
             user_id=user.id,
-            name={"reference": "多参考生成", "text": "纯文本生成", "first_frame": "首帧生成"}[payload.mode],
+            name={"reference": "多参考生成", "text": "纯文本生成", "first_frame": "首帧生成", "first_last": "首尾帧生成"}[payload.mode],
             mode=payload.mode,
             prompt=payload.prompt,
             duration=payload.duration,

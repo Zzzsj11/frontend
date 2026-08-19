@@ -56,9 +56,19 @@ FIRST_FRAME_ASPECT_RATIOS: tuple[str, ...] = (
 )
 DEFAULT_FIRST_FRAME_MEGAPIXELS = 0.9
 
-# H3-Base-Ref2VA 官方规格：图像≤9、视频≤3、音频≤3，所有文件合计≤12。
-# 当前官方工作流 JSON 预置 6 图/1 视频/3 音频；第 7~9 图和第 2~3 视频由
-# build_reference_workflow 按需克隆输入节点，未使用的示例槽会从执行图中删除。
+# 首尾帧生视频工作流（用户提供的官方 FL2VA API 工作流）。
+FIRST_LAST_FRAME_WORKFLOW_PATH = Path(__file__).parent / "workflows" / "minimax_h3_first_last_frame_to_video.json"
+FIRST_LAST_NODE_PROMPT = "332"
+FIRST_LAST_NODE_PROMPT_TEXT = "347"
+FIRST_LAST_NODE_DURATION = "346"
+FIRST_LAST_NODE_RESOLUTION = "349"
+FIRST_LAST_NODE_FIRST_IMAGE = "61"
+FIRST_LAST_NODE_LAST_IMAGE = "73"
+FIRST_LAST_NODE_SEED = "338"
+DEFAULT_FIRST_LAST_MEGAPIXELS = 0.9
+
+# 项目产品规格：Ref2VA 最多 6 图/1 视频/3 音频，合计最多10个文件。
+# 工作流恰好预置对应数量的槽位；未使用的示例槽会从执行图中删除。
 REFERENCE_WORKFLOW_PATH = Path(__file__).parent / "workflows" / "minimax_h3_reference_to_video.json"
 REFERENCE_NODE_PROMPT = "83"
 REFERENCE_NODE_DURATION = "84"
@@ -77,10 +87,10 @@ REFERENCE_IMAGE_SLOTS: tuple[tuple[str, str], ...] = (
 REFERENCE_IMAGE_PREVIEWS = ("100", "103", "130", "169", "173", "177")
 REFERENCE_VIDEO_SLOTS = ("135",)
 REFERENCE_AUDIO_SLOTS = ("138", "154", "156")
-MAX_REFERENCE_IMAGES = 9
-MAX_REFERENCE_VIDEOS = 3
+MAX_REFERENCE_IMAGES = 6
+MAX_REFERENCE_VIDEOS = 1
 MAX_REFERENCE_AUDIOS = 3
-MAX_REFERENCE_FILES = 12
+MAX_REFERENCE_FILES = 10
 
 # ResolutionSelector（LayerUtility）的合法宽高比字符串；"16:9 (Widescreen)" 已经工作流默认验证
 ASPECT_RATIOS: tuple[str, ...] = (
@@ -236,6 +246,41 @@ def build_first_frame_node_info_list(
     return nodes
 
 
+def build_first_last_frame_node_info_list(
+    *,
+    prompt: str,
+    duration: float,
+    aspect_ratio: str,
+    first_image: str,
+    last_image: str,
+    seed: int | None = None,
+    megapixels: float = DEFAULT_FIRST_LAST_MEGAPIXELS,
+) -> list[dict[str, Any]]:
+    """组装 H3 FL2VA 首尾帧工作流的动态节点参数。"""
+    prompt, first_image, last_image = prompt.strip(), first_image.strip(), last_image.strip()
+    if not prompt:
+        raise RunningHubError("提示词不能为空")
+    if not first_image or not last_image:
+        raise RunningHubError("首尾帧模式必须同时提供首帧和尾帧图片")
+    if not MIN_DURATION <= duration <= MAX_DURATION:
+        raise RunningHubError(f"视频时长需在 {MIN_DURATION:g}~{MAX_DURATION:g} 秒之间")
+    if aspect_ratio not in FIRST_FRAME_ASPECT_RATIOS:
+        raise RunningHubError(f"首尾帧生视频不支持的宽高比：{aspect_ratio}")
+    _check_megapixels(megapixels, "输出")
+    nodes: list[dict[str, Any]] = [
+        {"nodeId": FIRST_LAST_NODE_PROMPT, "fieldName": "prompt", "fieldValue": prompt},
+        {"nodeId": FIRST_LAST_NODE_PROMPT_TEXT, "fieldName": "text", "fieldValue": prompt},
+        {"nodeId": FIRST_LAST_NODE_DURATION, "fieldName": "value", "fieldValue": duration},
+        {"nodeId": FIRST_LAST_NODE_RESOLUTION, "fieldName": "aspect_ratio", "fieldValue": aspect_ratio},
+        {"nodeId": FIRST_LAST_NODE_RESOLUTION, "fieldName": "megapixels", "fieldValue": megapixels},
+        {"nodeId": FIRST_LAST_NODE_FIRST_IMAGE, "fieldName": "image", "fieldValue": first_image},
+        {"nodeId": FIRST_LAST_NODE_LAST_IMAGE, "fieldName": "image", "fieldValue": last_image},
+    ]
+    if seed is not None:
+        nodes.append({"nodeId": FIRST_LAST_NODE_SEED, "fieldName": "noise_seed", "fieldValue": seed})
+    return nodes
+
+
 async def _post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     url = f"{settings.runninghub_base_url}{path}"
     try:
@@ -331,14 +376,6 @@ def build_reference_workflow(
     model_inputs = workflow[REFERENCE_NODE_MODEL]["inputs"]
 
     image_slots = list(REFERENCE_IMAGE_SLOTS)
-    image_template = workflow["170"]
-    scale_template = workflow["168"]
-    for index in range(len(image_slots), MAX_REFERENCE_IMAGES):
-        load_id, scale_id = str(900 + index), str(910 + index)
-        workflow[load_id] = json.loads(json.dumps(image_template))
-        workflow[scale_id] = json.loads(json.dumps(scale_template))
-        workflow[scale_id]["inputs"]["image"] = [load_id, 0]
-        image_slots.append((load_id, scale_id))
     for index, (load_id, scale_id) in enumerate(image_slots):
         key = f"ref_images.ref_image_{index}"
         if index < len(images):
@@ -350,11 +387,6 @@ def build_reference_workflow(
             workflow.pop(load_id, None)
 
     video_slots = list(REFERENCE_VIDEO_SLOTS)
-    video_template = workflow["135"]
-    for index in range(len(video_slots), MAX_REFERENCE_VIDEOS):
-        node_id = str(930 + index)
-        workflow[node_id] = json.loads(json.dumps(video_template))
-        video_slots.append(node_id)
     for index, node_id in enumerate(video_slots):
         key = f"ref_videos.ref_video_{index}"
         if index < len(videos):
@@ -451,6 +483,29 @@ async def submit_first_frame_task(
         megapixels=megapixels,
     )
     return await _submit_custom_workflow(FIRST_FRAME_WORKFLOW_PATH, node_info, "首帧生视频")
+
+
+async def submit_first_last_frame_task(
+    *,
+    prompt: str,
+    duration: float,
+    aspect_ratio: str,
+    first_image: str,
+    last_image: str,
+    seed: int | None = None,
+    megapixels: float = DEFAULT_FIRST_LAST_MEGAPIXELS,
+) -> dict[str, Any]:
+    """使用官方 FL2VA 工作流提交首尾帧生视频任务。"""
+    node_info = build_first_last_frame_node_info_list(
+        prompt=prompt,
+        duration=duration,
+        aspect_ratio=aspect_ratio,
+        first_image=first_image,
+        last_image=last_image,
+        seed=seed,
+        megapixels=megapixels,
+    )
+    return await _submit_custom_workflow(FIRST_LAST_FRAME_WORKFLOW_PATH, node_info, "首尾帧生视频")
 
 
 async def _submit_custom_workflow(workflow_path: Path, node_info: list[dict[str, Any]], label: str) -> dict[str, Any]:

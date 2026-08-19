@@ -80,7 +80,22 @@ export async function generateShotVideo(
   storyboardLineId?: string,
   signal?: AbortSignal,
 ): Promise<{ coverUrl: string; coverThumbnailUrl?: string; videoUrl: string; duration: number }> {
-  const imageUrls = [referenceImageUrl, ...characterImageUrls].filter(Boolean) as string[]
+  const mode = options.h3Mode ?? 'auto'
+  const automaticImages = [referenceImageUrl, ...characterImageUrls].filter(Boolean) as string[]
+  const explicitFirst = options.h3FirstFrameUrl || referenceImageUrl
+  const imageUrls =
+    options.videoModel !== 'minimax-h3-runninghub' || mode === 'auto'
+      ? automaticImages
+      : mode === 'text'
+        ? []
+        : mode === 'first_frame'
+          ? ([explicitFirst].filter(Boolean) as string[])
+          : mode === 'first_last'
+            ? ([explicitFirst, options.h3LastFrameUrl].filter(Boolean) as string[])
+            : Array.from(
+                new Set([...automaticImages, ...(options.referenceImageUrls ?? [])]),
+              ).slice(0, 6)
+  const includeReferences = mode === 'auto' || mode === 'reference'
   const job = await request<GenerationJob>('/generations/videos', {
     method: 'POST',
     body: JSON.stringify({
@@ -90,8 +105,9 @@ export async function generateShotVideo(
       resolution: options.resolution,
       model: options.videoModel,
       image_urls: imageUrls,
-      video_urls: options.referenceVideoUrls ?? [],
-      audio_urls: options.referenceAudioUrls ?? [],
+      video_urls: includeReferences ? (options.referenceVideoUrls ?? []) : [],
+      audio_urls: includeReferences ? (options.referenceAudioUrls ?? []) : [],
+      h3_mode: mode,
       h3_audio_usage: options.h3AudioUsage ?? 'reference',
       generate_audio: options.generateAudio ?? false,
       watermark: options.watermark ?? false,

@@ -20,6 +20,7 @@ from .jobs import Job, jobs
 from .runninghub import RunningHubError
 from .runninghub import query_task as runninghub_query_task
 from .runninghub import submit_first_frame_task as runninghub_submit_first_frame_task
+from .runninghub import submit_first_last_frame_task as runninghub_submit_first_last_frame_task
 from .runninghub import submit_reference_task as runninghub_submit_reference_task
 from .runninghub import submit_text_task as runninghub_submit_text_task
 from .runninghub import upload_media as runninghub_upload_media
@@ -587,8 +588,18 @@ async def generate_h3_video(request: VideoGenerationCreate, job: Job) -> dict[st
                 image=image_name,
                 megapixels=stage2,
             )
-        elif mode in {"last_frame", "first_last"}:
-            raise ProviderError("当前尚未配置 H3-Base-FL2VA 尾帧/首尾帧 RunningHub 工作流")
+        elif mode == "first_last":
+            if len(images) != 2 or videos or audios:
+                raise ProviderError("H3 首尾帧模式必须且只能提供首帧、尾帧两张图片")
+            uploaded = [await _upload_h3_reference(url, "图片", index) for index, url in enumerate(images, 1)]
+            created = await runninghub_submit_first_last_frame_task(
+                prompt=request.prompt,
+                duration=float(request.duration),
+                aspect_ratio=_h3_first_frame_aspect_ratio(request.ratio),
+                first_image=uploaded[0][0],
+                last_image=uploaded[1][0],
+                megapixels=stage2,
+            )
         else:
             if audios and not (images or videos):
                 raise ProviderError("H3 Ref2VA 音频不能作为唯一输入，必须同时提供图片或视频")
