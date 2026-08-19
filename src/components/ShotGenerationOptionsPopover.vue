@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
-import { IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, generationModelLabel } from '../generationModels'
-import { VIDEO_DURATION_CHOICES } from '../mediaConstraints'
+import {
+  DEFAULT_IMAGE_MODEL,
+  DEFAULT_VIDEO_MODEL,
+  IMAGE_MODEL_OPTIONS,
+  VIDEO_MODEL_OPTIONS,
+  generationModelLabel,
+} from '../generationModels'
+import { DEFAULT_VIDEO_DURATION, VIDEO_DURATION_CHOICES } from '../mediaConstraints'
 import type { ShotGenOptions } from '../types'
 
 const props = defineProps<{
@@ -30,6 +36,21 @@ const summary = computed(() => {
 })
 const updateOption = <K extends keyof ShotGenOptions>(key: K, value: ShotGenOptions[K]) => {
   emit('update:modelValue', { ...props.modelValue, [key]: value })
+}
+const restoreDefaults = () => {
+  emit('update:modelValue', {
+    ...props.modelValue,
+    ratio: '16:9',
+    resolution: '480p',
+    ...(props.mode === 'shot'
+      ? {
+          duration: DEFAULT_VIDEO_DURATION,
+          videoModel: DEFAULT_VIDEO_MODEL,
+          generateAudio: false,
+          watermark: false,
+        }
+      : { imageModel: DEFAULT_IMAGE_MODEL }),
+  })
 }
 const close = () => {
   open.value = false
@@ -203,6 +224,10 @@ onBeforeUnmount(close)
               <span><strong>添加水印</strong><small>使用模型供应商提供的水印</small></span>
             </button>
           </fieldset>
+          <div class="popover-actions">
+            <button type="button" class="restore-button" @click="restoreDefaults">恢复默认</button>
+            <button type="button" class="confirm-button" @click="close">确定</button>
+          </div>
         </div>
       </div>
     </Teleport>
@@ -418,6 +443,45 @@ onBeforeUnmount(close)
 }
 .switch-option.active .switch-control span {
   transform: translateX(14px);
+}
+.popover-actions {
+  position: sticky;
+  bottom: -16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin: 4px -16px -16px;
+  padding: 14px 16px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.restore-button,
+.confirm-button {
+  min-width: 92px;
+  min-height: 38px;
+  border-radius: var(--radius-sm);
+  padding: 7px 16px;
+  font: inherit;
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+.restore-button {
+  border: 1px solid var(--border-dark);
+  background: var(--surface);
+  color: var(--text-regular);
+}
+.restore-button:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
+}
+.confirm-button {
+  border: 1px solid var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+.confirm-button:hover {
+  filter: brightness(0.96);
 }
 @media (max-width: 640px) {
   .options-popover {

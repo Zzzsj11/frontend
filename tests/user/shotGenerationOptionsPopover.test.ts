@@ -55,4 +55,45 @@ describe('ShotGenerationOptionsPopover', () => {
     expect(document.body.textContent).not.toContain('添加水印')
     wrapper.unmount()
   })
+
+  it('restores shot defaults and closes when confirmed', async () => {
+    const wrapper = mount(ShotGenerationOptionsPopover, {
+      props: {
+        modelValue: {
+          ...options,
+          ratio: '9:16',
+          resolution: '1080p',
+          duration: 12,
+          videoModel: 'minimax-h3-runninghub',
+          generateAudio: true,
+          watermark: true,
+        },
+        mode: 'shot',
+      },
+    })
+
+    await wrapper.get('[aria-label="调整生成参数"]').trigger('click')
+    const restore = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '恢复默认',
+    ) as HTMLButtonElement
+    restore.click()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
+      ratio: '16:9',
+      resolution: '480p',
+      duration: 5,
+      videoModel: 'doubao-seedance-2.0',
+      generateAudio: false,
+      watermark: false,
+    })
+
+    const confirm = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '确定',
+    ) as HTMLButtonElement
+    confirm.click()
+    await wrapper.vm.$nextTick()
+    expect(document.querySelector('.options-overlay')).toBeNull()
+    wrapper.unmount()
+  })
 })
