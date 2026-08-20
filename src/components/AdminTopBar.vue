@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppIcon from './AppIcon.vue'
+import DeploymentBadge from './DeploymentBadge.vue'
 import { useAuthStore } from '../stores/auth'
 
 defineProps<{ groupTitle: string; title: string; loading?: boolean }>()
@@ -41,6 +42,7 @@ onBeforeUnmount(() => {
       <h1>{{ title }}</h1>
     </div>
     <div class="topbar-actions">
+      <DeploymentBadge />
       <RouterLink class="icon-button" to="/projects" title="返回工作台" aria-label="返回工作台">
         <AppIcon name="home" :size="18" />
       </RouterLink>

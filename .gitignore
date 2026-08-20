@@ -39,6 +39,7 @@ dist-ssr
 .env.staging
 .deployed-version
 .previous-version
+.deployment/
 backups/
 
 # Editor directories and files

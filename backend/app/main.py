@@ -7,6 +7,7 @@ import logging
 import re
 import time
 from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
@@ -275,6 +276,20 @@ async def health(response: Response) -> dict:
     if not postgres or not redis:
         response.status_code = 503
     return {"ok": postgres and redis}
+
+
+@app.get("/api/release")
+async def release_info() -> dict:
+    """返回实际部署完成标识；文件由部署脚本在全部服务健康后更新。"""
+    path = Path("/run/deployment/info.json")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"version": None, "deployedAt": None}
+    return {
+        "version": str(payload.get("version") or "") or None,
+        "deployedAt": str(payload.get("deployedAt") or "") or None,
+    }
 
 
 @app.get("/api/account/balance")

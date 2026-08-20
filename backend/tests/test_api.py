@@ -6,6 +6,12 @@ def test_health(client) -> None:
     assert set(body) == {"ok"}
 
 
+def test_release_info_without_deployment_manifest(client) -> None:
+    response = client.get("/api/release")
+    assert response.status_code == 200
+    assert response.json() == {"version": None, "deployedAt": None}
+
+
 def test_api_errors_are_logged_with_tracking_code_and_redaction(client) -> None:
     response = client.post("/api/auth/login", json={"username": "admin", "password": "wrong-password"})
     assert response.status_code == 401

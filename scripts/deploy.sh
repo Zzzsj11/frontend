@@ -6,6 +6,10 @@ env_file=".env.${env_name}"; test -f "$env_file" || { echo "missing $env_file"; 
 if [[ "$env_name" == "production" ]]; then "$root/scripts/validate-secret-layout.sh"; fi
 previous="$(cat .deployed-version 2>/dev/null || true)"
 printf '%s\n' "$previous" > .previous-version
+mkdir -p .deployment
+if [[ ! -f .deployment/info.json ]]; then
+  printf '{"version":null,"deployedAt":null}\n' > .deployment/info.json
+fi
 export RELEASE_VERSION="$version"
 compose=(docker compose --env-file "$env_file" -f docker-compose.yml -f "docker-compose.${env_name}.yml")
 if [[ "${DEPLOY_SKIP_PULL:-0}" != "1" ]]; then
@@ -57,4 +61,7 @@ docker rm -f "$green" >/dev/null || echo "warn: failed to remove $green" >&2
 # 兜底其余服务（postgres/redis 配置漂移等），无变化时为空操作
 "${compose[@]}" up -d --remove-orphans
 printf '%s\n' "$version" > .deployed-version
+deployed_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+printf '{"version":"%s","deployedAt":"%s"}\n' "$version" "$deployed_at" > .deployment/info.json.tmp
+mv .deployment/info.json.tmp .deployment/info.json
 echo "deployed $version ($env_name); previous=$previous"
