@@ -71,13 +71,28 @@ async def _workload_snapshot(db: AsyncSession, captured_at: datetime) -> dict[st
     )
     by_kind: dict[str, dict[str, Any]] = {}
     for job in completed:
-        item = by_kind.setdefault(job.kind, {"success": 0, "failed": 0, "durations": []})
+        item = by_kind.setdefault(job.kind, {"success": 0, "failed": 0, "queue": [], "execution": [], "end_to_end": [], "observed": 0})
         item["success" if job.status == "succeeded" else "failed"] += 1
+        if job.started_at:
+            item["queue"].append(max(0, (_aware(job.started_at) - _aware(job.created_at)).total_seconds()))
         if job.started_at and job.finished_at:
-            item["durations"].append(max(0, (_aware(job.finished_at) - _aware(job.started_at)).total_seconds()))
+            item["execution"].append(max(0, (_aware(job.finished_at) - _aware(job.started_at)).total_seconds()))
+        if job.first_result_observed_at:
+            item["observed"] += 1
+            item["end_to_end"].append(max(0, (_aware(job.first_result_observed_at) - _aware(job.created_at)).total_seconds()))
     for kind, stats in by_kind.items():
-        durations = stats.pop("durations")
-        stats.update({"kind": kind, "avgSeconds": round(sum(durations) / len(durations), 2) if durations else 0, "p95Seconds": _percentile(durations, 0.95)})
+        queue = stats.pop("queue")
+        execution = stats.pop("execution")
+        end_to_end = stats.pop("end_to_end")
+        stats.update(
+            {
+                "kind": kind,
+                "queue_wait_seconds": {"avg": round(sum(queue) / len(queue), 2) if queue else 0, "p95": _percentile(queue, 0.95)},
+                "execution_seconds": {"avg": round(sum(execution) / len(execution), 2) if execution else 0, "p95": _percentile(execution, 0.95)},
+                "end_to_end_seconds": {"avg": round(sum(end_to_end) / len(end_to_end), 2) if end_to_end else 0, "p95": _percentile(end_to_end, 0.95)},
+                "observationCoveragePercent": round(stats.pop("observed") / max(1, stats["success"] + stats["failed"]) * 100, 2),
+            }
+        )
     llm_rows = list((await db.execute(select(LlmCallLogModel).where(LlmCallLogModel.deleted_at.is_(None), LlmCallLogModel.created_at >= since))).scalars())
     durations = [float(row.duration_ms) for row in llm_rows]
     return {

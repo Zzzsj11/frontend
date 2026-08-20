@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, select
 
 from app.database import session_factory
-from app.models import ServerAlertEventModel, ServerMetricSampleModel, ServerTrafficMonthModel
+from app.models import GenerationJobModel, ServerAlertEventModel, ServerMetricSampleModel, ServerTrafficMonthModel
 from app.server_monitoring import GIB, ingest_server_metric
 
 
@@ -47,6 +47,19 @@ def test_metric_ingest_tracks_egress_and_alerts(client):
                 await db.execute(delete(model))
             await db.commit()
             now = datetime.now(timezone.utc)
+            db.add(
+                GenerationJobModel(
+                    id="job-monitor-timing",
+                    kind="monitor_test",
+                    status="succeeded",
+                    request={},
+                    created_at=now - timedelta(seconds=30),
+                    started_at=now - timedelta(seconds=20),
+                    finished_at=now - timedelta(seconds=5),
+                    first_result_observed_at=now,
+                )
+            )
+            await db.commit()
             await ingest_server_metric(db, payload(now - timedelta(minutes=1), tx=10 * GIB))
             await ingest_server_metric(db, payload(now, tx=11 * GIB, cpu=96))
             traffic = (await db.execute(select(ServerTrafficMonthModel))).scalar_one()
@@ -62,6 +75,10 @@ def test_metric_ingest_tracks_egress_and_alerts(client):
     assert body["latest"]["interface"] == "eth0"
     assert body["latest"]["cpuIowaitPercent"] == 2.5
     assert body["latest"]["workloads"]["configuredExecutionLimits"]["export"] == 1
+    timing = next(item for item in body["latest"]["workloads"]["completedLastHour"] if item["kind"] == "monitor_test")
+    assert timing["queue_wait_seconds"]["p95"] == 10
+    assert timing["execution_seconds"]["p95"] == 15
+    assert timing["end_to_end_seconds"]["p95"] == 30
     assert body["traffic"]["accounting"] == "public-egress"
     assert body["traffic"]["quotaBytes"] == 300 * GIB
 

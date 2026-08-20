@@ -75,7 +75,22 @@ async function fetchBatchSnapshots(
         signal,
       },
     )
-    if (Array.isArray(response)) return response
+    if (Array.isArray(response)) {
+      const terminalIds = response
+        .filter((item) =>
+          ['succeeded', 'failed', 'cancelled'].includes((item.status ?? '').toLowerCase()),
+        )
+        .map((item) => item.id)
+      if (terminalIds.length) {
+        await apiRequest('/generations/observed', {
+          method: 'POST',
+          headers: { 'X-Polling': '1' },
+          body: JSON.stringify({ ids: terminalIds }),
+          signal,
+        }).catch(() => undefined)
+      }
+      return response
+    }
     // 单对象兼容旧测试桩及灰度期间的非标准代理响应。
     if (batch.length === 1) return [{ ...response, id: batch[0].id }]
     return fetchLegacy()

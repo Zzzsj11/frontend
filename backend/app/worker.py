@@ -47,8 +47,10 @@ async def _claim(kinds: tuple[str, ...], providers: tuple[str, ...]) -> Job | No
         )
         if model is None:
             return None
+        # Claim ownership without starting the execution clock. A model-level
+        # semaphore (for example H3=2) may still keep this job waiting; the
+        # JobManager writes started_at only after that final execution slot is acquired.
         model.status = "running"
-        model.started_at = model.started_at or utcnow()
         await session.commit()
         return _job_from_model(model)
 

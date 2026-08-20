@@ -18,6 +18,8 @@ backend/.env
 backend/.env.chat
 e2e/.env
 backend/.provider_config.py
+backend/.runtime_secrets.env
+backend/.postgres_password
 backend/data/
 __pycache__/
 *.py[cod]

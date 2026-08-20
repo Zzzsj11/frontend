@@ -25,6 +25,8 @@ describe('generationPoller 统一轮询调度器', () => {
     expect(JSON.parse(String(call[1]?.body))).toEqual({ ids: ['job-ok'] })
     // apiRequest 会把 headers 归一为 Headers 实例
     expect((call[1]?.headers as Headers).get('X-Polling')).toBe('1')
+    expect(String(request.mock.calls[1][0])).toBe('/api/generations/observed')
+    expect(JSON.parse(String(request.mock.calls[1][1]?.body))).toEqual({ ids: ['job-ok'] })
   })
 
   it('轮询到 failed 后以任务 error 文案 reject', async () => {
@@ -93,8 +95,12 @@ describe('generationPoller 统一轮询调度器', () => {
       watchGenerationJob('job-multi-b', { select: (s) => s.result as string }),
     ])
     expect([a, b]).toEqual(['A', 'B'])
-    expect(request).toHaveBeenCalledTimes(1)
+    expect(request).toHaveBeenCalledTimes(2)
     expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body)).ids).toEqual([
+      'job-multi-a',
+      'job-multi-b',
+    ])
+    expect(JSON.parse(String(request.mock.calls[1]?.[1]?.body)).ids).toEqual([
       'job-multi-a',
       'job-multi-b',
     ])

@@ -3,6 +3,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"; cd "$root"
 version="${1:?usage: scripts/deploy.sh VERSION}"; env_name="${DEPLOY_ENV:-production}"
 env_file=".env.${env_name}"; test -f "$env_file" || { echo "missing $env_file"; exit 1; }
+if [[ "$env_name" == "production" ]]; then "$root/scripts/validate-secret-layout.sh"; fi
 previous="$(cat .deployed-version 2>/dev/null || true)"
 printf '%s\n' "$previous" > .previous-version
 export RELEASE_VERSION="$version"

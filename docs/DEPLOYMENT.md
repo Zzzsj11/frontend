@@ -2,10 +2,10 @@
 
 本文给维护人员和 Code Agent 提供可直接照做的部署手册。当前只维护两个环境：
 
-| 环境           | 用途                                     | 入口                         | 数据             |
-| -------------- | ---------------------------------------- | ---------------------------- | ---------------- |
-| 本地开发环境   | 开发、单元测试、完整预检                 | `http://127.0.0.1:5173`      | 本地 Docker 卷   |
-| 服务器测试环境 | 业务方手工验收、远程 API/Playwright 回归 | `http://120.24.38.200`       | 服务器 Docker 卷 |
+| 环境           | 用途                                     | 入口                    | 数据             |
+| -------------- | ---------------------------------------- | ----------------------- | ---------------- |
+| 本地开发环境   | 开发、单元测试、完整预检                 | `http://127.0.0.1:5173` | 本地 Docker 卷   |
+| 服务器测试环境 | 业务方手工验收、远程 API/Playwright 回归 | `http://120.24.38.200`  | 服务器 Docker 卷 |
 
 v1.0.0 完成前不建设预发布或正式生产环境，也不通过域名执行业务回归。远程测试固定使用服务器 IP 和 HTTP `80` 端口。当前发布方式是在服务器从 Git 获取指定提交，并在服务器本地构建带 Git SHA 的版本化镜像。
 
@@ -209,14 +209,12 @@ cp backend/.env.example backend/.env
 chmod 600 .env.production backend/.env
 ```
 
-编辑 `.env.production`，至少替换：
+`.env.production` 只保存非敏感部署参数：
 
 ```dotenv
 REGISTRY=mvagent-local
-JWT_SECRET=<至少 32 字节的随机值>
 POSTGRES_DB=mvagent
 POSTGRES_USER=mvagent
-POSTGRES_PASSWORD=<强随机密码>
 FRONTEND_PORT=80
 BACKEND_PORT=8000
 ```
@@ -228,11 +226,14 @@ openssl rand -hex 32
 openssl rand -base64 36
 ```
 
-继续填写 `backend/.env` 与 `backend/.provider_config.py` 中的模型、TOS、余额查询等配置：
+首次从旧部署迁移时，先保留原配置并执行：
 
 ```bash
-chmod 600 backend/.provider_config.py
+python3 scripts/migrate-runtime-secrets.py
+scripts/validate-secret-layout.sh
 ```
+
+脚本会把 JWT、数据库密码、模型 Key 和 TOS 凭据集中写入 `backend/.runtime_secrets.env`，把数据库密码单独写入 `backend/.postgres_password`，两者权限均为 `600`；随后从旧 `.env` 文件中移除敏感项。容器只读挂载 Secret，Docker metadata 中只保留空占位或 Secret 路径。轮换时修改 Secret 文件后滚动重建 backend 和 workers，禁止在命令行参数、聊天或日志中传值。
 
 启用单机Worker拆分时，在服务器 `.env.production` 增加：
 
@@ -243,14 +244,14 @@ MEDIA_WORKER_CONCURRENCY=4
 EXPORT_WORKER_CONCURRENCY=1
 CHAT_WORKER_CONCURRENCY=2
 STORYBOARD_WORKER_CONCURRENCY=2
-
-生产单机建议使用 `sudo PROJECT_DIR=/opt/mv-agent-frontend scripts/install-monitoring-systemd.sh` 安装 30 秒监控 timer；`install-maintenance-cron.sh` 会检测该 timer，仅在未启用时保留一分钟采集兜底。监控字段、容量口径和告警阈值见 `docs/ARCHITECTURE-CAPACITY-AND-OBSERVABILITY.md`。
 WORKER_STALE_SECONDS=180
 ```
 
+生产单机建议使用 `sudo PROJECT_DIR=/opt/mv-agent-frontend scripts/install-monitoring-systemd.sh` 安装 30 秒监控 timer；`install-maintenance-cron.sh` 会检测该 timer，仅在未启用时保留一分钟采集兜底。监控字段、容量口径和告警阈值见 `docs/ARCHITECTURE-CAPACITY-AND-OBSERVABILITY.md`。
+
 `worker-media`、`worker-export`、`worker-chat` 与 `worker-storyboard` 必须和 backend 使用同一个版本化后端镜像。4核测试机上导出并发固定为1，分镜编排并发建议2；不要把 `JOB_EXECUTION_MODE` 切为 `worker` 却遗漏 `COMPOSE_PROFILES=workers`，否则新任务只会排队而无人领取。
 
-统一供应商配置启用 `AIGC_TOKEN` 时，聊天地址和默认文本模型必须来自同一配置组；不要保留指向其他厂商的旧 `LLM_BASE_URL`、`LLM_API_KEY` 或 `LLM_MODEL`。任何核验命令都不得打印 Token。
+统一供应商配置启用 `AIGC_TOKEN` 时，聊天地址和默认文本模型必须来自同一个 `runtime_secrets` 配置组。任何核验命令都不得打印 Token。
 
 当前测试服务器安全组/防火墙只需对验收人员开放 SSH `22/tcp` 和 Web `80/tcp`。后端 `8000` 只绑定回环地址，PostgreSQL/Redis 在服务器部署覆盖中不映射宿主机端口。
 

@@ -7,7 +7,7 @@
 - 登录分别按“客户端 IP 哈希”和“用户名哈希”在 Redis 做共享限流，默认任一维度 5 分钟最多 8 次，可同时抵御单源枚举与分布式撞同一账号；调整 `LOGIN_RATE_LIMIT_ATTEMPTS` / `LOGIN_RATE_LIMIT_WINDOW_SECONDS` 时必须同步安全测试。
 - 临时密码用户由后端强制只能访问 `/api/auth/me`、`/api/auth/change-password` 和 `/api/auth/logout`，不能只依赖前端路由。
 - 修改密码会提升 `users.auth_version`、软撤销该用户全部 refresh token，并签发新会话；旧 access/refresh token 均立即失效。
-- `APP_ENV=production` 时默认 JWT Secret 会拒绝启动；所有环境的 Secret 均不得短于 32 字节。Secret 只存 600 权限环境文件或受控 Secret Manager。
+- `APP_ENV=production` 时必须挂载权限为 `600` 的 `/run/secrets/runtime_secrets`，默认 JWT Secret 或缺少 Secret 挂载都会拒绝启动。敏感值不再作为 Docker 环境变量注入；PostgreSQL 使用独立的 `POSTGRES_PASSWORD_FILE`。
 - refresh cookie 为 HttpOnly + SameSite=Lax。当前服务器测试环境仍使用 HTTP IP，`REFRESH_COOKIE_SECURE=false` 是已知限制；启用 HTTPS 后必须改为 `true`，同时启用 HSTS。
 
 ## 网络与浏览器边界
@@ -28,5 +28,6 @@
 ## 发布卡口与剩余风险
 
 - 每周运行 `scripts/security-check.sh`；Critical 阻断发布。发布前必须执行 `make preflight` 和权限/API Playwright，发布后核对安全头、限流、强制改密、旧令牌失效与用户隔离。
+- `scripts/validate-secret-layout.sh` 阻止 `.env.production` 和 `backend/.env` 重新出现 Key、Token、JWT、TOS 或数据库密码。拥有宿主机 root/Docker 权限的人员仍能读取挂载文件，因此服务器账号与 Docker socket 必须按最高权限管理。
 - Docker 基础镜像必须固定版本和已验证 SHA-256 digest，发布镜像保留 Commit SHA。
 - 待架构治理：统一出站下载代理、HTTPS/安全 Cookie/HSTS、Redis Pub/Sub 驱动 SSE、外置 Worker 与按供应商并发配额。失败供应商调用的业务配额是否返还需先确定防滥用规则，不能简单自动退款。

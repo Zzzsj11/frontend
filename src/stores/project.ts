@@ -765,6 +765,7 @@ export const useProjectStore = defineStore('project', {
       const controller = registerTaskWatcher(taskId)
       let lastEventAt = Date.now()
       let watchdogTimedOut = false
+      let observedJobId = ''
       const watchdog = window.setInterval(() => {
         if (Date.now() - lastEventAt > 150_000) {
           watchdogTimedOut = true
@@ -777,10 +778,13 @@ export const useProjectStore = defineStore('project', {
           (event) => {
             lastEventAt = Date.now()
             this.outlineProgress = event.progress
+            observedJobId = String(event.progress?.jobId ?? observedJobId)
             this._setTaskStatus(taskId, event.status)
           },
           controller.signal,
         )
+        if (observedJobId)
+          await api.acknowledgeGenerationResults([observedJobId]).catch(() => undefined)
         return 'completed'
       } catch (error) {
         if (controller.signal.aborted) return watchdogTimedOut ? 'timeout' : 'navigation-cancelled'
@@ -900,16 +904,20 @@ export const useProjectStore = defineStore('project', {
     async _pollSegmentRetry(taskId: string, sceneIndex: number): Promise<void> {
       const deadline = Date.now() + 300_000
       const watcher = registerTaskWatcher(taskId)
+      let observedJobId = ''
       while (Date.now() < deadline && this.activeTaskId === taskId && !watcher.signal.aborted) {
         const fresh = await api.fetchSongScript(taskId, true).catch(() => null)
         if (!fresh || this.activeTaskId !== taskId || watcher.signal.aborted) return
         const progress = fresh.outlineProgress as
-          { phase?: string; sceneIndex?: number; error?: string } | undefined
+          { phase?: string; sceneIndex?: number; error?: string; jobId?: string } | undefined
+        observedJobId = String(progress?.jobId ?? observedJobId)
         if (progress?.phase === 'segment_retry_failed') {
           throw new Error(progress.error || '场景段大纲重新生成失败')
         }
         // outlineProgress 被清掉或 phase 不是 segment_retry 说明任务已结束
         if (!progress || progress.phase !== 'segment_retry' || progress.sceneIndex !== sceneIndex) {
+          if (observedJobId)
+            await api.acknowledgeGenerationResults([observedJobId]).catch(() => undefined)
           return
         }
         await abortableSleep(2000, watcher.signal)
@@ -1912,7 +1920,11 @@ export const useProjectStore = defineStore('project', {
           }
           const latest = await api.fetchMaterialExport(item.id)
           this._upsertMaterialExport(latest)
-          if (['ready', 'failed'].includes(latest.status)) return
+          if (['ready', 'failed'].includes(latest.status)) {
+            if (latest.jobId)
+              await api.acknowledgeGenerationResults([latest.jobId]).catch(() => undefined)
+            return
+          }
         }
       } catch (error) {
         reportApiError(error, '导出进度连接失败，可刷新页面恢复')

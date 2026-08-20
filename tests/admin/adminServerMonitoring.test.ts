@@ -23,6 +23,22 @@ const sample = {
   networkRxBps: 2_000_000,
   interface: 'eth0',
   containers: [],
+  workloads: {
+    queues: [{ kind: 'video', queued: 2, running: 2, oldestQueuedSeconds: 120 }],
+    completedLastHour: [
+      {
+        kind: 'video',
+        success: 8,
+        failed: 1,
+        queue_wait_seconds: { avg: 60, p95: 120 },
+        execution_seconds: { avg: 10, p95: 14.4 },
+        end_to_end_seconds: { avg: 74, p95: 137.4 },
+        observationCoveragePercent: 88.9,
+      },
+    ],
+    llmLastHour: { calls: 10, failed: 0, tokens: 1000, avgMs: 1000, p95Ms: 1500 },
+    configuredExecutionLimits: { video: 2 },
+  },
 }
 
 const summary = {
@@ -63,6 +79,11 @@ describe('admin server monitoring panel', () => {
     expect(wrapper.text()).toContain('30.00 GiB')
     expect(wrapper.text()).toContain('270.00 GiB')
     expect(wrapper.text()).toContain('2026-08-01 自然月')
+    expect(wrapper.text()).toContain('排队 P95')
+    expect(wrapper.text()).toContain('2.0 分')
+    expect(wrapper.text()).toContain('14 秒')
+    expect(wrapper.text()).toContain('2.3 分')
+    expect(wrapper.text()).toContain('89%')
     wrapper.unmount()
   })
 

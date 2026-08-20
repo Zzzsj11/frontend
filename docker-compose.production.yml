@@ -11,11 +11,15 @@ services:
     image: ${REGISTRY:?set REGISTRY}/mv-agent-backend:${RELEASE_VERSION:?set RELEASE_VERSION}
     build: !reset null
     secrets:
-      - provider_config
+      - runtime_secrets
     environment:
       APP_ENV: production
-      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
+      JWT_SECRET: ''
+      DATABASE_URL: ''
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-mvagent}
+      POSTGRES_DB: ${POSTGRES_DB:-mvagent}
       JOB_EXECUTION_MODE: ${JOB_EXECUTION_MODE:-inline}
     deploy:
       resources:
@@ -26,11 +30,15 @@ services:
     image: ${REGISTRY:?set REGISTRY}/mv-agent-backend:${RELEASE_VERSION:?set RELEASE_VERSION}
     build: !reset null
     secrets:
-      - provider_config
+      - runtime_secrets
     environment:
       APP_ENV: production
-      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
+      JWT_SECRET: ''
+      DATABASE_URL: ''
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-mvagent}
+      POSTGRES_DB: ${POSTGRES_DB:-mvagent}
     deploy:
       resources:
         limits:
@@ -40,11 +48,15 @@ services:
     image: ${REGISTRY:?set REGISTRY}/mv-agent-backend:${RELEASE_VERSION:?set RELEASE_VERSION}
     build: !reset null
     secrets:
-      - provider_config
+      - runtime_secrets
     environment:
       APP_ENV: production
-      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
+      JWT_SECRET: ''
+      DATABASE_URL: ''
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-mvagent}
+      POSTGRES_DB: ${POSTGRES_DB:-mvagent}
     deploy:
       resources:
         limits:
@@ -54,11 +66,15 @@ services:
     image: ${REGISTRY:?set REGISTRY}/mv-agent-backend:${RELEASE_VERSION:?set RELEASE_VERSION}
     build: !reset null
     secrets:
-      - provider_config
+      - runtime_secrets
     environment:
       APP_ENV: production
-      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
+      JWT_SECRET: ''
+      DATABASE_URL: ''
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-mvagent}
+      POSTGRES_DB: ${POSTGRES_DB:-mvagent}
     deploy:
       resources:
         limits:
@@ -68,11 +84,15 @@ services:
     image: ${REGISTRY:?set REGISTRY}/mv-agent-backend:${RELEASE_VERSION:?set RELEASE_VERSION}
     build: !reset null
     secrets:
-      - provider_config
+      - runtime_secrets
     environment:
       APP_ENV: production
-      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
+      JWT_SECRET: ''
+      DATABASE_URL: ''
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-mvagent}
+      POSTGRES_DB: ${POSTGRES_DB:-mvagent}
     deploy:
       resources:
         limits:
@@ -83,7 +103,10 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: !reset null
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
     deploy:
       resources:
         limits:
@@ -98,5 +121,7 @@ services:
           memory: 1G
 
 secrets:
-  provider_config:
-    file: ./backend/.provider_config.py
+  runtime_secrets:
+    file: ./backend/.runtime_secrets.env
+  postgres_password:
+    file: ./backend/.postgres_password

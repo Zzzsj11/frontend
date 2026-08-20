@@ -658,6 +658,17 @@ def test_generation_status_batch_is_owned_and_returns_many_jobs(client) -> None:
     )
     assert response.status_code == 200
     assert {item["id"] for item in response.json()} == {"job-batch-one", "job-batch-two"}
+    observed = client.post("/api/generations/observed", json={"ids": ["job-batch-one", "job-batch-two", "job-batch-other"]})
+    assert observed.status_code == 200
+    assert observed.json()["observed"] == 1
+    connection = sqlite3.connect(TEST_DB)
+    try:
+        own = connection.execute("SELECT first_result_observed_at FROM generation_jobs WHERE id = 'job-batch-two'").fetchone()[0]
+        other = connection.execute("SELECT first_result_observed_at FROM generation_jobs WHERE id = 'job-batch-other'").fetchone()[0]
+    finally:
+        connection.close()
+    assert own is not None
+    assert other is None
 
 
 def test_raise_for_status_translates_aigc_error_codes() -> None:

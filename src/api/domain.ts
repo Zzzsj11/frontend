@@ -140,6 +140,15 @@ export const fetchActiveGenerations = (taskId: string) =>
 export const waitGenerationJob = (id: string, signal?: AbortSignal) =>
   mediaGen.waitForJob(id, 660_000, { signal })
 
+export const acknowledgeGenerationResults = (ids: string[]) =>
+  ids.length
+    ? apiRequest<{ observed: number }>('/generations/observed', {
+        method: 'POST',
+        headers: { 'X-Polling': '1' },
+        body: JSON.stringify({ ids }),
+      })
+    : Promise.resolve({ observed: 0 })
+
 /** POST /api/songs — 新建空歌曲项目，用户随后选择 ASS 分镜或通用分镜 */
 export async function createSongProject(name: string): Promise<SongProject> {
   return apiRequest<SongProject>('/projects', { method: 'POST', body: JSON.stringify({ name }) })

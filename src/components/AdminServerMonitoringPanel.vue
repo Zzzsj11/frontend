@@ -64,6 +64,21 @@ const workload = computed(
       configuredExecutionLimits: {},
     },
 )
+const workloadRows = computed(() => {
+  const kinds = new Set([
+    ...workload.value.queues.map((item) => item.kind),
+    ...workload.value.completedLastHour.map((item) => item.kind),
+  ])
+  return [...kinds].sort().map(
+    (kind) =>
+      workload.value.queues.find((item) => item.kind === kind) ?? {
+        kind,
+        queued: 0,
+        running: 0,
+        oldestQueuedSeconds: 0,
+      },
+  )
+})
 const activeAlerts = computed(
   () => data.value?.alerts.filter((item) => item.status === 'active') ?? [],
 )
@@ -214,11 +229,14 @@ const changeRange = () => void load()
                 <th>运行</th>
                 <th>最久等待</th>
                 <th>近 1h 成功/失败</th>
-                <th>平均/P95</th>
+                <th>排队 P95</th>
+                <th>执行 P95</th>
+                <th>端到端 P95</th>
+                <th>确认覆盖</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="item in workload.queues" :key="item.kind">
+              <tr v-for="item in workloadRows" :key="item.kind">
                 <td>{{ item.kind }}</td>
                 <td>{{ item.queued }}</td>
                 <td>{{ item.running }}</td>
@@ -230,19 +248,38 @@ const changeRange = () => void load()
                 <td>
                   {{
                     seconds(
-                      workload.completedLastHour.find((x) => x.kind === item.kind)?.avgSeconds ?? 0,
-                    )
-                  }}
-                  /
-                  {{
-                    seconds(
-                      workload.completedLastHour.find((x) => x.kind === item.kind)?.p95Seconds ?? 0,
+                      workload.completedLastHour.find((x) => x.kind === item.kind)
+                        ?.queue_wait_seconds.p95 ?? 0,
                     )
                   }}
                 </td>
+                <td>
+                  {{
+                    seconds(
+                      workload.completedLastHour.find((x) => x.kind === item.kind)
+                        ?.execution_seconds.p95 ?? 0,
+                    )
+                  }}
+                </td>
+                <td>
+                  {{
+                    seconds(
+                      workload.completedLastHour.find((x) => x.kind === item.kind)
+                        ?.end_to_end_seconds.p95 ?? 0,
+                    )
+                  }}
+                </td>
+                <td>
+                  {{
+                    (
+                      workload.completedLastHour.find((x) => x.kind === item.kind)
+                        ?.observationCoveragePercent ?? 0
+                    ).toFixed(0)
+                  }}%
+                </td>
               </tr>
-              <tr v-if="!workload.queues.length">
-                <td colspan="6">当前无排队或运行任务</td>
+              <tr v-if="!workloadRows.length">
+                <td colspan="9">当前无排队或运行任务</td>
               </tr>
             </tbody>
           </table>

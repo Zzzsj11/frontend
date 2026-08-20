@@ -215,6 +215,10 @@ class GenerationStatusBatchRequest(BaseModel):
     ids: list[str] = Field(min_length=1, max_length=500)
 
 
+class GenerationObservedRequest(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+
+
 class RemoteImportCreate(BaseModel):
     url: str
     category: str = "imports"

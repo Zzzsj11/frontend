@@ -194,6 +194,7 @@ class GenerationJobModel(LifecycleMixin, Base):
     idempotency_key: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_result_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
 
 class SceneAssetModel(LifecycleMixin, Base):

@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from PIL import UnidentifiedImageError
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -56,6 +56,7 @@ from .models import (
     SongEmotionProfileModel,
     StoryboardLineModel,
     UserModel,
+    utcnow,
 )
 from .prompts import get_prompt
 from .providers import generate_image, generate_video, resume_generation
@@ -64,6 +65,7 @@ from .request_logging import api_request_log_middleware
 from .schemas import (
     ChatMessageCreate,
     ChatSessionCreate,
+    GenerationObservedRequest,
     GenerationStatusBatchRequest,
     ImageGenerationCreate,
     LoginCreate,
@@ -713,6 +715,25 @@ async def get_generation_status_batch(payload: GenerationStatusBatchRequest, use
         }
         for row in rows
     ]
+
+
+@app.post("/api/generations/observed")
+async def acknowledge_generation_results(payload: GenerationObservedRequest, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
+    """Browser acknowledgement after a terminal result has crossed the response boundary."""
+    now = utcnow()
+    result = await db.execute(
+        update(GenerationJobModel)
+        .where(
+            GenerationJobModel.id.in_(list(dict.fromkeys(payload.ids))),
+            GenerationJobModel.user_id == user.id,
+            GenerationJobModel.status.in_(("succeeded", "failed", "cancelled")),
+            GenerationJobModel.first_result_observed_at.is_(None),
+            GenerationJobModel.deleted_at.is_(None),
+        )
+        .values(first_result_observed_at=now, updated_at=now)
+    )
+    await db.commit()
+    return {"observed": result.rowcount}
 
 
 @app.get("/api/tasks/{task_id}/generations/active")

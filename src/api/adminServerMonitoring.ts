@@ -32,8 +32,10 @@ export interface ServerMetricPoint {
       kind: string
       success: number
       failed: number
-      avgSeconds: number
-      p95Seconds: number
+      queue_wait_seconds: { avg: number; p95: number }
+      execution_seconds: { avg: number; p95: number }
+      end_to_end_seconds: { avg: number; p95: number }
+      observationCoveragePercent: number
     }>
     llmLastHour: { calls: number; failed: number; tokens: number; avgMs: number; p95Ms: number }
     configuredExecutionLimits: Record<string, number>

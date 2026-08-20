@@ -8,7 +8,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const BASE = 'https://api-aigc.fzyinghe.com'
-const API_KEY = 'yh-tc6lxzhy3hjnzrj59qr4d8y213fvyixwv61t9tcq0dsbsot'
+const API_KEY = process.env.AIGC_TOKEN || process.env.IMAGE_API_KEY
+if (!API_KEY) throw new Error('请通过 AIGC_TOKEN 或 IMAGE_API_KEY 注入密钥')
 const OUT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../public/digital-humans')
 
 // 与 src/mock/data.ts 中的数字人一一对应

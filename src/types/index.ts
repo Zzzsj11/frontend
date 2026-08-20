@@ -243,6 +243,7 @@ export interface OutlineProgress {
   shotsTotal?: number
   startedAt?: string
   error?: string
+  jobId?: string
 }
 
 /** 大纲回填到分镜行的规划结果（全局/段级重试端点共用） */

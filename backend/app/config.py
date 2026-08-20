@@ -4,9 +4,23 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote_plus
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BACKEND_DIR / "data"
+RUNTIME_SECRETS_FILE = Path(os.getenv("RUNTIME_SECRETS_FILE", "/run/secrets/runtime_secrets"))
+
+
+def _load_runtime_secrets() -> None:
+    """Load root-mounted secrets into this process only; Docker metadata keeps empty placeholders."""
+    if not RUNTIME_SECRETS_FILE.is_file():
+        return
+    for raw in RUNTIME_SECRETS_FILE.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ[key.strip()] = value.strip().strip('"').strip("'")
 
 
 def _load_dotenv() -> None:
@@ -21,6 +35,7 @@ def _load_dotenv() -> None:
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
+_load_runtime_secrets()
 _load_dotenv()
 
 
@@ -61,7 +76,10 @@ class Settings:
     host: str = os.getenv("APP_HOST", "127.0.0.1")
     port: int = int(os.getenv("APP_PORT", "8000"))
     cors_origins: tuple[str, ...] = tuple(value.strip() for value in os.getenv("APP_CORS_ORIGINS", "http://localhost:5173").split(",") if value.strip())
-    database_url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://mvagent:mvagent@127.0.0.1:5433/mvagent")
+    database_url: str = os.getenv("DATABASE_URL") or (
+        f"postgresql+asyncpg://{quote_plus(os.getenv('POSTGRES_USER', 'mvagent'))}:{quote_plus(os.getenv('POSTGRES_PASSWORD', 'mvagent'))}@"
+        f"{os.getenv('POSTGRES_HOST', '127.0.0.1')}:{os.getenv('POSTGRES_PORT', '5433')}/{os.getenv('POSTGRES_DB', 'mvagent')}"
+    )
     redis_url: str = os.getenv("REDIS_URL", "redis://127.0.0.1:6380/0")
     job_execution_mode: str = os.getenv("JOB_EXECUTION_MODE", "inline").lower()
     worker_poll_seconds: float = max(0.2, float(os.getenv("WORKER_POLL_SECONDS", "1")))
@@ -149,6 +167,12 @@ def validate_runtime_security() -> None:
         raise RuntimeError("JWT_SECRET 至少需要 32 字节")
     if "*" in settings.cors_origins:
         raise RuntimeError("启用凭证时 APP_CORS_ORIGINS 禁止使用通配符")
+    if settings.app_env == "production":
+        if not RUNTIME_SECRETS_FILE.is_file():
+            raise RuntimeError("生产环境必须挂载 /run/secrets/runtime_secrets")
+        mode = RUNTIME_SECRETS_FILE.stat().st_mode & 0o777
+        if mode & 0o077:
+            raise RuntimeError("runtime_secrets 权限必须为 600 或更严格")
 
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
