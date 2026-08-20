@@ -127,6 +127,19 @@ def test_external_worker_reconstructs_media_request(monkeypatch) -> None:
     assert "_provider" not in captured
 
 
+def test_external_worker_dispatches_chat_session(monkeypatch) -> None:
+    from app import worker
+    from app.jobs import Job
+
+    async def fake_run(session_id, job):
+        return {"sessionId": session_id, "jobId": job.id}
+
+    monkeypatch.setattr(worker.chat_manager, "run_persisted", fake_run)
+    job = Job(id="job-worker-chat", kind="chat", request={"session_id": "chat-123"})
+
+    assert asyncio.run(worker._runner(job)(job)) == {"sessionId": "chat-123", "jobId": "job-worker-chat"}
+
+
 def test_h3_video_provider_archives_output(monkeypatch) -> None:
     from app import providers
     from app.jobs import Job

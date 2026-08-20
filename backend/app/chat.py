@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from .config import settings
 from .database import session_factory
+from .jobs import Job, jobs
 from .models import ChatMessageModel, ChatSessionModel
 from .redis_store import append_chat_event, chat_events_after, redis
 from .token_usage import add_token_usage
@@ -105,6 +106,7 @@ class ChatManager:
         ]
 
     async def delete(self, user_id: str, session_id: str) -> bool:
+        await redis.set(f"chat:{session_id}:cancel", "1", ex=300)
         task = self.tasks.pop(session_id, None)
         if task and not task.done():
             task.cancel()
@@ -121,6 +123,8 @@ class ChatManager:
         return True
 
     async def post(self, session: ChatSession, text: str) -> int:
+        if session.status == "running":
+            raise RuntimeError("助手仍在回复，请等待或先中断")
         task = self.tasks.get(session.id)
         if task and not task.done():
             raise RuntimeError("助手仍在回复，请等待或先中断")
@@ -137,8 +141,28 @@ class ChatManager:
         session.messages.append({"role": "user", "content": text})
         user_event = await append_chat_event(session.id, "user", {"text": text})
         await append_chat_event(session.id, "state", {"status": "running"})
-        self.tasks[session.id] = asyncio.create_task(self._run(session))
+        await redis.delete(f"chat:{session.id}:cancel")
+        if settings.job_execution_mode == "worker":
+            await jobs.create(
+                "chat",
+                {"session_id": session.id},
+                lambda item: self.run_persisted(session.id, item),
+                user_id=session.user_id,
+            )
+        else:
+            self.tasks[session.id] = asyncio.create_task(self._run(session))
         return user_event["seq"]
+
+    async def run_persisted(self, session_id: str, _job: Job | None = None) -> dict[str, str]:
+        async with session_factory() as db:
+            result = await db.execute(
+                select(ChatSessionModel).where(ChatSessionModel.id == session_id, ChatSessionModel.deleted_at.is_(None)).options(selectinload(ChatSessionModel.messages))
+            )
+            model = result.scalar_one_or_none()
+        if not model:
+            raise RuntimeError("对话不存在")
+        await self._run(self._from_model(model))
+        return {"sessionId": session_id}
 
     async def _run(self, session: ChatSession) -> None:
         usage: Any = {}
@@ -181,6 +205,8 @@ class ChatManager:
                     stream_options={"include_usage": True},
                 )
                 async for chunk in stream:
+                    if await redis.get(f"chat:{session.id}:cancel"):
+                        raise asyncio.CancelledError
                     if chunk.usage:
                         usage = chunk.usage
                     request_id = request_id or getattr(chunk, "id", None)
@@ -243,6 +269,7 @@ class ChatManager:
             await append_chat_event(session.id, "state", {"status": "idle"})
 
     async def interrupt(self, session_id: str) -> None:
+        await redis.set(f"chat:{session_id}:cancel", "1", ex=300)
         task = self.tasks.get(session_id)
         if task and not task.done():
             task.cancel()

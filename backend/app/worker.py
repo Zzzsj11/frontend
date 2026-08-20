@@ -8,6 +8,7 @@ from datetime import timedelta
 
 from sqlalchemy import select
 
+from .chat import chat_manager
 from .config import settings, validate_runtime_security
 from .database import close_database, init_database, session_factory
 from .domain import _run_material_export
@@ -97,6 +98,9 @@ def _runner(job: Job):
     if job.kind == "export":
         export_id = str(request.get("export_id") or "")
         return lambda item: _run_material_export(export_id, item)
+    if job.kind == "chat":
+        session_id = str(request.get("session_id") or "")
+        return lambda item: chat_manager.run_persisted(session_id, item)
     raise RuntimeError(f"unsupported worker job kind: {job.kind}")
 
 

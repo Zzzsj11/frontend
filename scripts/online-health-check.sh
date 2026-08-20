@@ -28,7 +28,7 @@ for service in postgres redis backend frontend; do
 done
 
 if grep -Eq '^JOB_EXECUTION_MODE=worker$' "$env_file"; then
-  for service in worker-media worker-export; do
+  for service in worker-media worker-export worker-chat; do
     container_id="$("${compose[@]}" ps -q "$service")"
     status="$(docker inspect --format '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$container_id" 2>/dev/null || true)"
     [[ "$status" == 'running/healthy' ]] && pass "container $service: healthy" || fail "container $service: $status"
