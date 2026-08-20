@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import io
+import sqlite3
 import threading
 import time
 import zipfile
 
+from conftest import TEST_DB
 from PIL import Image
 
 from app.media_constraints import normalize_video_duration
@@ -188,6 +190,14 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     outlined = wait_for_outline(client, storyboard.json()["taskId"])
     assert outlined["status"] == "generating"
     assert outlined["storyboardConfig"]["storyBible"]["failedSegments"] == []
+    connection = sqlite3.connect(TEST_DB, timeout=10)
+    try:
+        usage_count = connection.execute("SELECT count(*) FROM token_usage_records WHERE generation_job_id = ?", (outline.json()["jobId"],)).fetchone()[0]
+        call_count = connection.execute("SELECT count(*) FROM llm_call_logs WHERE generation_job_id = ?", (outline.json()["jobId"],)).fetchone()[0]
+    finally:
+        connection.close()
+    assert usage_count > 0
+    assert call_count > 0
     generated_line = client.post(f"/api/tasks/{storyboard.json()['taskId']}/storyboard-lines/{line['id']}/generate", json={})
     assert generated_line.status_code == 200, generated_line.text
     assert generated_line.json()["usage"] == {"inputTokens": 120, "outputTokens": 40, "cachedInputTokens": 0, "totalTokens": 160}

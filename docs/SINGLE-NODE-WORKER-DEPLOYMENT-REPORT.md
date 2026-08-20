@@ -12,13 +12,15 @@
 
 ## 验证结果
 
-- 完整发布卡口通过：后端 198 项、前端 150 项，Alembic 单 head、前端构建、Docker构建全部成功。
+- 完整发布卡口通过：后端200项、前端150项，Alembic单head、前端构建、Docker构建全部成功。
 - 远程 API 权限/隔离/软删除旅程和浏览器登录/项目旅程通过（公网安全组未放行时通过 SSH 隧道执行）。
 - Worker隔离故障测试：停止导出Worker后工单保持 `queued`；重启API仍为 `queued`；恢复Worker后才领取并落终态。
+- 分镜Worker真实故障隔离：停止 `worker-storyboard` 后提交ASS大纲，API返回202且工单保持 `queued`；恢复Worker后同一工单成功完成、任务进入 `generating` 并生成视觉圣经。完整输入、LLM调用和Token用量均关联该工单。
 - Chat真实链路：API入队、`worker-chat`调用、Redis事件、PostgreSQL消息和用量落库成功；“只回复OK”约3秒，53 tokens。
 - 图片真实链路：`gpt-image-2`生成、轮询、TOS原图/缩略图归档成功，约61秒。
 - H3真实链路：T2VA、4秒、480P、静音视频生成和TOS归档成功；供应商耗时81秒，17 coins。
 - 数据盘顺序测试：512 MiB同步写约2.56秒（约200 MiB/s），直读约3.40秒（约151 MiB/s）。
+- PostgreSQL本机备份已迁入数据盘，并实际完成一次隔离数据库恢复验证；验证库用户记录可读且清理成功。每日备份、每周恢复验证均已进入cron。
 - 空载CPU 98–100% idle、IO wait 0%；API约95 MiB，媒体Worker约95 MiB，Chat约85 MiB，导出Worker约78 MiB，PostgreSQL约49 MiB，Redis约4 MiB。
 - 容器已设置CPU/内存上限；4核机器上导出Worker并发固定为1，H3模型池并发固定为2。
 

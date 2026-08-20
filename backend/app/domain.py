@@ -868,6 +868,7 @@ async def _run_ass_outline_generation(
                 user_id=user_id,
                 project_id=project_id,
                 project_task_id=task_id,
+                generation_job_id=job.id if job else None,
                 operation_suffix="_failed",
             )
             config = dict(task.storyboard_config or {})
@@ -907,6 +908,7 @@ async def _run_ass_outline_generation(
             user_id=user_id,
             project_id=project_id,
             project_task_id=task_id,
+            generation_job_id=job.id if job else None,
         )
         await session.commit()
         return {"taskId": task_id, "storyBibleVersion": story_bible.get("version") or STORY_BIBLE_VERSION}
@@ -989,6 +991,7 @@ async def _run_general_outline_generation(
                 user_id=user_id,
                 project_id=project_id,
                 project_task_id=task_id,
+                generation_job_id=job.id if job else None,
                 operation_suffix="_failed",
             )
             failed_config = dict(task.storyboard_config or {})
@@ -1022,6 +1025,7 @@ async def _run_general_outline_generation(
             user_id=user_id,
             project_id=project_id,
             project_task_id=task_id,
+            generation_job_id=job.id if job else None,
         )
         await session.commit()
         return {"taskId": task_id, "storyBibleVersion": story_bible.get("version") or STORY_BIBLE_VERSION}
@@ -1206,7 +1210,15 @@ async def _run_segment_retry(
             task = await session.get(ProjectTaskModel, task_id)
             if not task or task.deleted_at is not None:
                 return
-            _persist_llm_calls(session, getattr(exc, "usage_records", None), default_operation="ass_scene_segment", user_id=user_id, project_id=project_id, project_task_id=task_id)
+            _persist_llm_calls(
+                session,
+                getattr(exc, "usage_records", None),
+                default_operation="ass_scene_segment",
+                user_id=user_id,
+                project_id=project_id,
+                project_task_id=task_id,
+                generation_job_id=job.id if job else None,
+            )
             config = dict(task.storyboard_config or {})
             config["outlineProgress"] = {"phase": "segment_retry_failed", "sceneIndex": scene_index, "error": str(exc)[:300]}
             task.storyboard_config = config
@@ -1255,7 +1267,15 @@ async def _run_segment_retry(
         target_lines = lines[shot_start : shot_start + shot_count]
         segment_plans = new_bible["shots"][shot_start : shot_start + shot_count]
         await _apply_story_bible_to_lines(session, target_lines, segment_plans, now=utcnow())
-        _persist_llm_calls(session, result["usageRecords"], default_operation="ass_scene_segment", user_id=user_id, project_id=project_id, project_task_id=task_id)
+        _persist_llm_calls(
+            session,
+            result["usageRecords"],
+            default_operation="ass_scene_segment",
+            user_id=user_id,
+            project_id=project_id,
+            project_task_id=task_id,
+            generation_job_id=job.id if job else None,
+        )
         await session.commit()
         if job:
             await jobs.update_progress(job, 95)
