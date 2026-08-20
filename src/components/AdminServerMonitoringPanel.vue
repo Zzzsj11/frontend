@@ -37,7 +37,7 @@ const runDry = async (action: string) => {
 }
 onMounted(() => {
   void load()
-  timer = setInterval(() => void load(), 60_000)
+  timer = setInterval(() => void load(), 30_000)
 })
 onBeforeUnmount(() => timer && clearInterval(timer))
 
@@ -52,7 +52,18 @@ const bytes = (value = 0) => {
   return `${size.toFixed(index >= 3 ? 2 : 1)} ${units[index]}`
 }
 const mbps = (value = 0) => `${((value * 8) / 1_000_000).toFixed(2)} Mbps`
+const seconds = (value = 0) =>
+  value >= 60 ? `${(value / 60).toFixed(1)} 分` : `${value.toFixed(0)} 秒`
 const latest = computed(() => data.value?.latest)
+const workload = computed(
+  () =>
+    latest.value?.workloads ?? {
+      queues: [],
+      completedLastHour: [],
+      llmLastHour: { calls: 0, failed: 0, tokens: 0, avgMs: 0, p95Ms: 0 },
+      configuredExecutionLimits: {},
+    },
+)
 const activeAlerts = computed(
   () => data.value?.alerts.filter((item) => item.status === 'active') ?? [],
 )
@@ -86,7 +97,9 @@ const changeRange = () => void load()
     <div class="monitor-toolbar">
       <div>
         <h2>服务器资源监控</h2>
-        <p>宿主机每分钟采样 · 月流量仅统计公网出站 · 自然月 300 GiB</p>
+        <p>
+          宿主机每 30 秒采样 · 队列与模型负载按采样时点聚合 · 月流量仅统计公网出站 · 自然月 300 GiB
+        </p>
       </div>
       <div class="range-actions">
         <select v-model.number="hours" @change="changeRange">
@@ -146,6 +159,141 @@ const changeRange = () => void load()
         </article>
       </section>
 
+      <section class="metric-grid operational-grid">
+        <article :class="cardTone(latest.cpuIowaitPercent ?? 0, 15, 30)">
+          <span>CPU I/O 等待</span><b>{{ (latest.cpuIowaitPercent ?? 0).toFixed(1) }}%</b>
+          <small>持续超过 15% 表示磁盘正在拖慢任务</small>
+        </article>
+        <article
+          :class="
+            cardTone(
+              latest.swapTotalBytes
+                ? (((latest.swapTotalBytes ?? 0) - (latest.swapFreeBytes ?? 0)) /
+                    latest.swapTotalBytes) *
+                    100
+                : 0,
+              50,
+              80,
+            )
+          "
+        >
+          <span>Swap</span
+          ><b>{{ bytes((latest.swapTotalBytes ?? 0) - (latest.swapFreeBytes ?? 0)) }}</b>
+          <small>总计 {{ bytes(latest.swapTotalBytes ?? 0) }}</small>
+        </article>
+        <article class="healthy">
+          <span>磁盘吞吐</span><b>写 {{ bytes(latest.diskWriteBps ?? 0) }}/s</b>
+          <small
+            >读 {{ bytes(latest.diskReadBps ?? 0) }}/s ·
+            {{ (latest.diskReadIops ?? 0).toFixed(1) }}/{{
+              (latest.diskWriteIops ?? 0).toFixed(1)
+            }}
+            IOPS</small
+          >
+        </article>
+        <article class="healthy">
+          <span>LLM · 最近 1 小时</span><b>{{ workload.llmLastHour.calls }} 次</b>
+          <small
+            >P95 {{ seconds(workload.llmLastHour.p95Ms / 1000) }} ·
+            {{ workload.llmLastHour.tokens }} tokens</small
+          >
+        </article>
+      </section>
+
+      <section class="monitor-card">
+        <div class="section-head">
+          <h3>任务队列与吞吐</h3>
+          <span>提交量 ≠ 同时执行量</span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>任务类型</th>
+                <th>排队</th>
+                <th>运行</th>
+                <th>最久等待</th>
+                <th>近 1h 成功/失败</th>
+                <th>平均/P95</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in workload.queues" :key="item.kind">
+                <td>{{ item.kind }}</td>
+                <td>{{ item.queued }}</td>
+                <td>{{ item.running }}</td>
+                <td>{{ seconds(item.oldestQueuedSeconds) }}</td>
+                <td>
+                  {{ workload.completedLastHour.find((x) => x.kind === item.kind)?.success ?? 0 }} /
+                  {{ workload.completedLastHour.find((x) => x.kind === item.kind)?.failed ?? 0 }}
+                </td>
+                <td>
+                  {{
+                    seconds(
+                      workload.completedLastHour.find((x) => x.kind === item.kind)?.avgSeconds ?? 0,
+                    )
+                  }}
+                  /
+                  {{
+                    seconds(
+                      workload.completedLastHour.find((x) => x.kind === item.kind)?.p95Seconds ?? 0,
+                    )
+                  }}
+                </td>
+              </tr>
+              <tr v-if="!workload.queues.length">
+                <td colspan="6">当前无排队或运行任务</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="capacity-list">
+          <span v-for="(limit, name) in workload.configuredExecutionLimits" :key="name"
+            ><b>{{ name }}</b> {{ limit }} 槽</span
+          >
+        </div>
+      </section>
+
+      <section class="monitor-card">
+        <div class="section-head">
+          <h3>文件系统</h3>
+          <span>同时监控容量与 inode</span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>挂载路径</th>
+                <th>已用</th>
+                <th>可用</th>
+                <th>inode 已用</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="fs in latest.filesystems ?? []" :key="fs.path">
+                <td>{{ fs.path }}</td>
+                <td>
+                  {{
+                    (
+                      ((fs.totalBytes - fs.availableBytes) / Math.max(1, fs.totalBytes)) *
+                      100
+                    ).toFixed(1)
+                  }}%
+                </td>
+                <td>{{ bytes(fs.availableBytes) }}</td>
+                <td>
+                  {{
+                    (((fs.inodeTotal - fs.inodeFree) / Math.max(1, fs.inodeTotal)) * 100).toFixed(
+                      1,
+                    )
+                  }}%
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section class="monitor-card traffic-card">
         <div class="section-head">
           <h3>月度公网出站流量</h3>
@@ -185,6 +333,7 @@ const changeRange = () => void load()
                 <th>内存用量</th>
                 <th>网络 IO</th>
                 <th>磁盘 IO</th>
+                <th>进程数</th>
               </tr>
             </thead>
             <tbody>
@@ -195,6 +344,7 @@ const changeRange = () => void load()
                 <td>{{ item.memoryUsage }}</td>
                 <td>{{ item.networkIO }}</td>
                 <td>{{ item.blockIO }}</td>
+                <td>{{ item.pids ?? 0 }}</td>
               </tr>
             </tbody>
           </table>
@@ -294,6 +444,17 @@ const changeRange = () => void load()
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+}
+.operational-grid article {
+  min-height: 106px;
+}
+.capacity-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 12px;
+  color: #667085;
+  font-size: 12px;
 }
 .metric-grid article,
 .monitor-card {

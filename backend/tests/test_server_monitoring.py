@@ -17,17 +17,25 @@ def payload(captured: datetime, *, tx: int, cpu: float = 10) -> dict:
         "bootId": "boot-test",
         "interface": "eth0",
         "cpuPercent": cpu,
+        "cpuIowaitPercent": 2.5,
         "load1": 0.1,
         "load5": 0.2,
         "load15": 0.3,
         "memoryTotalBytes": 8 * GIB,
         "memoryAvailableBytes": 4 * GIB,
+        "swapTotalBytes": 4 * GIB,
+        "swapFreeBytes": 3 * GIB,
         "diskTotalBytes": 100 * GIB,
         "diskAvailableBytes": 50 * GIB,
         "networkTxBytesTotal": tx,
         "networkRxBytesTotal": tx * 2,
         "networkTxBps": 1024,
         "networkRxBps": 2048,
+        "diskReadBps": 4096,
+        "diskWriteBps": 8192,
+        "diskReadIops": 2,
+        "diskWriteIops": 4,
+        "filesystems": [{"path": "/", "totalBytes": 100 * GIB, "availableBytes": 50 * GIB, "inodeTotal": 1000, "inodeFree": 900}],
         "containers": [{"name": "backend", "cpuPercent": 1.2, "memoryPercent": 3.4}],
     }
 
@@ -52,6 +60,8 @@ def test_metric_ingest_tracks_egress_and_alerts(client):
     assert response.status_code == 200
     body = response.json()
     assert body["latest"]["interface"] == "eth0"
+    assert body["latest"]["cpuIowaitPercent"] == 2.5
+    assert body["latest"]["workloads"]["configuredExecutionLimits"]["export"] == 1
     assert body["traffic"]["accounting"] == "public-egress"
     assert body["traffic"]["quotaBytes"] == 300 * GIB
 

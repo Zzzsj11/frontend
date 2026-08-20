@@ -243,6 +243,8 @@ MEDIA_WORKER_CONCURRENCY=4
 EXPORT_WORKER_CONCURRENCY=1
 CHAT_WORKER_CONCURRENCY=2
 STORYBOARD_WORKER_CONCURRENCY=2
+
+生产单机建议使用 `sudo PROJECT_DIR=/opt/mv-agent-frontend scripts/install-monitoring-systemd.sh` 安装 30 秒监控 timer；`install-maintenance-cron.sh` 会检测该 timer，仅在未启用时保留一分钟采集兜底。监控字段、容量口径和告警阈值见 `docs/ARCHITECTURE-CAPACITY-AND-OBSERVABILITY.md`。
 WORKER_STALE_SECONDS=180
 ```
 

@@ -3,15 +3,41 @@ import { apiRequest } from './client'
 export interface ServerMetricPoint {
   capturedAt: string
   cpuPercent: number
+  cpuIowaitPercent: number
   load: [number, number, number]
   memoryUsedPercent: number
   memoryTotalBytes: number
   memoryAvailableBytes: number
+  swapTotalBytes: number
+  swapFreeBytes: number
   diskUsedPercent: number
   diskTotalBytes: number
   diskAvailableBytes: number
   networkTxBps: number
   networkRxBps: number
+  diskReadBps: number
+  diskWriteBps: number
+  diskReadIops: number
+  diskWriteIops: number
+  filesystems: Array<{
+    path: string
+    totalBytes: number
+    availableBytes: number
+    inodeTotal: number
+    inodeFree: number
+  }>
+  workloads: {
+    queues: Array<{ kind: string; queued: number; running: number; oldestQueuedSeconds: number }>
+    completedLastHour: Array<{
+      kind: string
+      success: number
+      failed: number
+      avgSeconds: number
+      p95Seconds: number
+    }>
+    llmLastHour: { calls: number; failed: number; tokens: number; avgMs: number; p95Ms: number }
+    configuredExecutionLimits: Record<string, number>
+  }
   interface: string
   containers: Array<{
     name: string
@@ -20,6 +46,8 @@ export interface ServerMetricPoint {
     memoryUsage: string
     networkIO: string
     blockIO: string
+    memoryUsedBytes: number
+    pids: number
   }>
 }
 

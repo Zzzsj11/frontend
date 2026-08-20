@@ -5,11 +5,13 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import settings
 from .models import (
+    GenerationJobModel,
+    LlmCallLogModel,
     ServerAlertEventModel,
     ServerMetricSampleModel,
     ServerTrafficMonthModel,
@@ -17,6 +19,7 @@ from .models import (
 )
 
 GIB = 1024**3
+WORKER_LIMITS = {"image/video": 4, "export": 1, "chat": 2, "ass/general outline": 2, "storyboard line (API)": 4}
 
 
 def _percent(used: int | float, total: int | float) -> float:
@@ -32,6 +35,65 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
+def _percentile(values: list[float], percentile: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    return round(ordered[min(len(ordered) - 1, int((len(ordered) - 1) * percentile))], 2)
+
+
+async def _workload_snapshot(db: AsyncSession, captured_at: datetime) -> dict[str, Any]:
+    """Small DB-derived operational snapshot; no request bodies or private prompts are copied."""
+    active_rows = (
+        await db.execute(
+            select(GenerationJobModel.kind, GenerationJobModel.status, func.count(), func.min(GenerationJobModel.created_at))
+            .where(GenerationJobModel.deleted_at.is_(None), GenerationJobModel.status.in_(("queued", "running")))
+            .group_by(GenerationJobModel.kind, GenerationJobModel.status)
+        )
+    ).all()
+    queues: dict[str, dict[str, Any]] = {}
+    for kind, status, count, oldest in active_rows:
+        item = queues.setdefault(kind, {"kind": kind, "queued": 0, "running": 0, "oldestQueuedSeconds": 0})
+        item[status] = int(count)
+        if status == "queued" and oldest:
+            item["oldestQueuedSeconds"] = max(0, int((_aware(captured_at) - _aware(oldest)).total_seconds()))
+    since = captured_at - timedelta(hours=1)
+    completed = list(
+        (
+            await db.execute(
+                select(GenerationJobModel).where(
+                    GenerationJobModel.deleted_at.is_(None),
+                    GenerationJobModel.finished_at >= since,
+                    GenerationJobModel.status.in_(("succeeded", "failed")),
+                )
+            )
+        ).scalars()
+    )
+    by_kind: dict[str, dict[str, Any]] = {}
+    for job in completed:
+        item = by_kind.setdefault(job.kind, {"success": 0, "failed": 0, "durations": []})
+        item["success" if job.status == "succeeded" else "failed"] += 1
+        if job.started_at and job.finished_at:
+            item["durations"].append(max(0, (_aware(job.finished_at) - _aware(job.started_at)).total_seconds()))
+    for kind, stats in by_kind.items():
+        durations = stats.pop("durations")
+        stats.update({"kind": kind, "avgSeconds": round(sum(durations) / len(durations), 2) if durations else 0, "p95Seconds": _percentile(durations, 0.95)})
+    llm_rows = list((await db.execute(select(LlmCallLogModel).where(LlmCallLogModel.deleted_at.is_(None), LlmCallLogModel.created_at >= since))).scalars())
+    durations = [float(row.duration_ms) for row in llm_rows]
+    return {
+        "queues": sorted(queues.values(), key=lambda x: x["kind"]),
+        "completedLastHour": sorted(by_kind.values(), key=lambda x: x["kind"]),
+        "llmLastHour": {
+            "calls": len(llm_rows),
+            "failed": sum(row.status != "ok" for row in llm_rows),
+            "tokens": sum(row.total_tokens for row in llm_rows),
+            "avgMs": round(sum(durations) / len(durations), 2) if durations else 0,
+            "p95Ms": _percentile(durations, 0.95),
+        },
+        "configuredExecutionLimits": WORKER_LIMITS,
+    }
+
+
 async def ingest_server_metric(db: AsyncSession, payload: dict[str, Any]) -> ServerMetricSampleModel:
     captured_at = datetime.fromisoformat(str(payload["capturedAt"]).replace("Z", "+00:00"))
     if captured_at.tzinfo is None:
@@ -44,18 +106,27 @@ async def ingest_server_metric(db: AsyncSession, payload: dict[str, Any]) -> Ser
         boot_id=str(payload.get("bootId") or "")[:80],
         interface=str(payload.get("interface") or "")[:80],
         cpu_percent=float(payload.get("cpuPercent") or 0),
+        cpu_iowait_percent=float(payload.get("cpuIowaitPercent") or 0),
         load_1=float(payload.get("load1") or 0),
         load_5=float(payload.get("load5") or 0),
         load_15=float(payload.get("load15") or 0),
         memory_total_bytes=int(payload.get("memoryTotalBytes") or 0),
         memory_available_bytes=int(payload.get("memoryAvailableBytes") or 0),
+        swap_total_bytes=int(payload.get("swapTotalBytes") or 0),
+        swap_free_bytes=int(payload.get("swapFreeBytes") or 0),
         disk_total_bytes=int(payload.get("diskTotalBytes") or 0),
         disk_available_bytes=int(payload.get("diskAvailableBytes") or 0),
         network_tx_bytes_total=int(payload.get("networkTxBytesTotal") or 0),
         network_rx_bytes_total=int(payload.get("networkRxBytesTotal") or 0),
         network_tx_bps=float(payload.get("networkTxBps") or 0),
         network_rx_bps=float(payload.get("networkRxBps") or 0),
+        disk_read_bps=float(payload.get("diskReadBps") or 0),
+        disk_write_bps=float(payload.get("diskWriteBps") or 0),
+        disk_read_iops=float(payload.get("diskReadIops") or 0),
+        disk_write_iops=float(payload.get("diskWriteIops") or 0),
+        filesystems=list(payload.get("filesystems") or []),
         containers=list(payload.get("containers") or []),
+        workloads=await _workload_snapshot(db, captured_at),
     )
     previous = (
         await db.execute(
@@ -113,11 +184,14 @@ async def _evaluate_alerts(db: AsyncSession, sample: ServerMetricSampleModel, tr
     memory_used = _percent(sample.memory_total_bytes - sample.memory_available_bytes, sample.memory_total_bytes)
     disk_used = _percent(sample.disk_total_bytes - sample.disk_available_bytes, sample.disk_total_bytes)
     traffic_used = _percent(traffic.egress_bytes, traffic.quota_bytes)
+    swap_used = _percent(sample.swap_total_bytes - sample.swap_free_bytes, sample.swap_total_bytes)
     checks = (
         ("cpu", "CPU 使用率过高", sample.cpu_percent, 80.0, 95.0, "%"),
         ("memory", "可用内存不足", memory_used, 80.0, 90.0, "% 已使用"),
         ("disk", "磁盘空间不足", disk_used, 75.0, 90.0, "% 已使用"),
         ("traffic", "月度公网出站流量接近配额", traffic_used, 70.0, 95.0, "% 已使用"),
+        ("swap", "Swap 使用率过高", swap_used, 50.0, 80.0, "% 已使用"),
+        ("iowait", "磁盘 I/O 等待过高", sample.cpu_iowait_percent, 15.0, 30.0, "%"),
     )
     now = sample.captured_at
     for key, title, value, warning, critical, unit in checks:
@@ -170,17 +244,26 @@ def metric_json(item: ServerMetricSampleModel) -> dict[str, Any]:
     return {
         "capturedAt": item.captured_at.isoformat(),
         "cpuPercent": item.cpu_percent,
+        "cpuIowaitPercent": item.cpu_iowait_percent,
         "load": [item.load_1, item.load_5, item.load_15],
         "memoryUsedPercent": memory_used,
         "memoryTotalBytes": item.memory_total_bytes,
         "memoryAvailableBytes": item.memory_available_bytes,
+        "swapTotalBytes": item.swap_total_bytes,
+        "swapFreeBytes": item.swap_free_bytes,
         "diskUsedPercent": disk_used,
         "diskTotalBytes": item.disk_total_bytes,
         "diskAvailableBytes": item.disk_available_bytes,
         "networkTxBps": item.network_tx_bps,
         "networkRxBps": item.network_rx_bps,
+        "diskReadBps": item.disk_read_bps,
+        "diskWriteBps": item.disk_write_bps,
+        "diskReadIops": item.disk_read_iops,
+        "diskWriteIops": item.disk_write_iops,
+        "filesystems": item.filesystems,
         "interface": item.interface,
         "containers": item.containers,
+        "workloads": item.workloads,
     }
 
 
