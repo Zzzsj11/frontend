@@ -75,6 +75,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'kill -0 1']
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
 
   worker-export:
     extends: worker-media

@@ -2,6 +2,11 @@ services:
   frontend:
     image: ${REGISTRY:?set REGISTRY}/mv-agent-frontend:${RELEASE_VERSION:?set RELEASE_VERSION}
     build: !reset null
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
   backend:
     image: ${REGISTRY:?set REGISTRY}/mv-agent-backend:${RELEASE_VERSION:?set RELEASE_VERSION}
     build: !reset null
@@ -12,6 +17,11 @@ services:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
       JOB_EXECUTION_MODE: ${JOB_EXECUTION_MODE:-inline}
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 2G
   worker-media:
     image: ${REGISTRY:?set REGISTRY}/mv-agent-backend:${RELEASE_VERSION:?set RELEASE_VERSION}
     build: !reset null
@@ -21,6 +31,11 @@ services:
       APP_ENV: production
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
+    deploy:
+      resources:
+        limits:
+          cpus: '1.50'
+          memory: 4G
   worker-export:
     image: ${REGISTRY:?set REGISTRY}/mv-agent-backend:${RELEASE_VERSION:?set RELEASE_VERSION}
     build: !reset null
@@ -30,14 +45,29 @@ services:
       APP_ENV: production
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
+    deploy:
+      resources:
+        limits:
+          cpus: '2.00'
+          memory: 6G
   postgres:
     ports: !reset []
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    deploy:
+      resources:
+        limits:
+          cpus: '1.50'
+          memory: 6G
   redis:
     ports: !reset []
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 1G
 
 secrets:
   provider_config:

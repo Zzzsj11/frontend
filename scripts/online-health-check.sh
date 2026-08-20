@@ -9,9 +9,12 @@ pass() { printf '[PASS] %s\n' "$1"; }
 fail() { printf '[FAIL] %s\n' "$1"; failures=$((failures + 1)); }
 
 cd "$PROJECT_DIR" || { printf '[FAIL] project directory: %s\n' "$PROJECT_DIR"; exit 1; }
+env_file=".env.${DEPLOY_ENV:-production}"
+export RELEASE_VERSION="${RELEASE_VERSION:-$(cat .deployed-version 2>/dev/null || true)}"
+compose=(docker compose --env-file "$env_file" -f docker-compose.yml -f "docker-compose.${DEPLOY_ENV:-production}.yml")
 
 for service in postgres redis backend frontend; do
-  container_id="$(docker compose ps -q "$service" 2>/dev/null)"
+  container_id="$("${compose[@]}" ps -q "$service" 2>/dev/null)"
   if [ -z "$container_id" ]; then
     fail "container $service is missing"
     continue
@@ -24,16 +27,24 @@ for service in postgres redis backend frontend; do
   fi
 done
 
+if grep -Eq '^JOB_EXECUTION_MODE=worker$' "$env_file"; then
+  for service in worker-media worker-export; do
+    container_id="$("${compose[@]}" ps -q "$service")"
+    status="$(docker inspect --format '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$container_id" 2>/dev/null || true)"
+    [[ "$status" == 'running/healthy' ]] && pass "container $service: healthy" || fail "container $service: $status"
+  done
+fi
+
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 curl -fsS --max-time 10 "http://127.0.0.1:$BACKEND_PORT/api/health" >/dev/null \
   && pass "backend API on 127.0.0.1:$BACKEND_PORT" \
   || fail "backend API on 127.0.0.1:$BACKEND_PORT"
 
-docker compose exec -T postgres sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1 \
+"${compose[@]}" exec -T postgres sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1 \
   && pass 'PostgreSQL accepts connections' \
   || fail 'PostgreSQL connection'
 
-[ "$(docker compose exec -T redis redis-cli ping 2>/dev/null | tr -d '\r')" = 'PONG' ] \
+[ "$("${compose[@]}" exec -T redis redis-cli ping 2>/dev/null | tr -d '\r')" = 'PONG' ] \
   && pass 'Redis responds PONG' \
   || fail 'Redis connection'
 
