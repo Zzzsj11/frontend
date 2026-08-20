@@ -333,6 +333,8 @@ DEPLOY_ENV=production ./scripts/deploy-local-images.sh
 7. 等待正式 backend 健康检查后删除 green 容器，并兜底更新其余服务；
 8. 将当前和上一版本写入 `.deployed-version`、`.previous-version`；全部容器健康后再原子更新 `.deployment/info.json`。工作台与管理后台顶部栏通过 `/api/release` 展示这次实际部署完成时间及 Git 版本短号，测试人员可据此确认页面是否为最新部署。
 
+部署脚本会无条件重建 backend 与全部 Worker。原因是运行时 Secret 虽以只读文件挂载，但应用只在进程启动时加载；即使镜像版本未变化，Key 轮换也必须启动新进程才能生效。
+
 切换期间新旧 backend 短暂共存并共同承接流量（共享同一数据库），因此每次发布必须保持 API 向后兼容；数据库迁移遵循 expand/contract。
 
 构建期间另开一个 SSH 会话观察资源，避免误以为进程卡死：

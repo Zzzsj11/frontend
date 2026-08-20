@@ -52,11 +52,16 @@ if [[ "$green_ok" != "1" ]]; then
   echo "aborting deploy, current version still serving" >&2
   exit 1
 fi
-# 重建正式 backend：旧容器停起期间流量由 green 承载
-"${compose[@]}" up -d --no-deps backend
+# 强制重建正式 backend：版本号不变的 Secret 轮换也必须让进程重新读取挂载文件；
+# 旧容器停起期间流量由 green 承载。
+"${compose[@]}" up -d --no-deps --force-recreate backend
 for _ in {1..30}; do curl -fsS http://127.0.0.1:8000/api/health >/dev/null && break; sleep 2; done
 curl -fsS http://127.0.0.1:8000/api/health >/dev/null
 docker rm -f "$green" >/dev/null || echo "warn: failed to remove $green" >&2
+
+# Worker 同样只在启动时读取 Secret。显式重建避免 Compose 因镜像/配置声明未变而
+# 继续运行持有旧 Key 的进程；数据库工单会在新 Worker 启动后恢复领取。
+"${compose[@]}" up -d --no-deps --force-recreate worker-chat worker-media worker-export worker-storyboard
 
 # 兜底其余服务（postgres/redis 配置漂移等），无变化时为空操作
 "${compose[@]}" up -d --remove-orphans
