@@ -103,6 +103,32 @@ def test_job_manager_applies_independent_model_execution_pools(monkeypatch) -> N
     asyncio.run(scenario())
 
 
+def test_uncertain_provider_submission_requires_manual_review(monkeypatch) -> None:
+    from app import jobs as jobs_module
+    from app.jobs import Job, JobManager
+
+    async def scenario() -> None:
+        manager = JobManager()
+
+        async def fake_persist(_job: Job) -> None:
+            return None
+
+        monkeypatch.setattr(manager, "_persist", fake_persist)
+        monkeypatch.setattr(jobs_module, "add_token_usage", lambda *_args, **_kwargs: None)
+
+        async def uncertain(job: Job) -> dict:
+            job.phase = "submitting_provider"
+            raise TimeoutError("response lost")
+
+        job = Job(id="uncertain-provider", kind="video")
+        await manager._run(job, uncertain)
+        assert job.status == "failed"
+        assert job.phase == "manual_review"
+        assert "不支持幂等重提" in (job.error or "")
+
+    asyncio.run(scenario())
+
+
 def test_external_worker_reconstructs_media_request(monkeypatch) -> None:
     from app import worker
     from app.jobs import Job
@@ -216,6 +242,9 @@ def test_h3_video_provider_archives_output(monkeypatch) -> None:
         async def fake_set_provider_task(job, provider, task_id, **_kwargs):
             job.provider, job.provider_task_id = provider, task_id
 
+        async def fake_mark_provider_submitting(job):
+            job.phase = "submitting_provider"
+
         async def fake_progress(_job, _progress):
             return None
 
@@ -230,6 +259,7 @@ def test_h3_video_provider_archives_output(monkeypatch) -> None:
         monkeypatch.setattr(providers.httpx, "AsyncClient", lambda **_kwargs: FakeClient())
         monkeypatch.setattr(providers, "runninghub_query_task", fake_query)
         monkeypatch.setattr(providers.jobs, "set_provider_task", fake_set_provider_task)
+        monkeypatch.setattr(providers.jobs, "mark_provider_submitting", fake_mark_provider_submitting)
         monkeypatch.setattr(providers.jobs, "update_progress", fake_progress)
         monkeypatch.setattr(providers, "import_remote", fake_import)
         monkeypatch.setattr(providers, "_video_first_frame", fake_cover)
@@ -434,6 +464,48 @@ async def test_worker_requeues_replayable_storyboard_job_with_bounded_attempts(c
     row = _job_row("job-ass-replay")
     assert row["status"] == "failed"
     assert "重试次数" in row["error"]
+
+
+async def test_worker_claim_records_owner_and_lease(client) -> None:
+    from app.worker import _claim
+
+    _insert_job("job-lease-claim", kind="chat")
+    claimed = await _claim(("chat",), (), "worker-test-owner")
+    assert claimed is not None and claimed.id == "job-lease-claim"
+    row = _job_row("job-lease-claim")
+    assert row["worker_id"] == "worker-test-owner"
+    assert row["phase"] == "claimed"
+    assert row["claimed_at"] and row["heartbeat_at"] and row["lease_expires_at"]
+
+
+async def test_worker_does_not_recover_live_lease_and_never_replays_uncertain_provider_submit(client) -> None:
+    from app.worker import _recover_stale
+
+    stale = datetime.now(timezone.utc) - timedelta(minutes=10)
+    future = datetime.now(timezone.utc) + timedelta(minutes=2)
+    _insert_job("job-live-lease", kind="video", status="running", updated_at=stale)
+    _insert_job("job-uncertain-submit", kind="video", status="running", updated_at=stale)
+    connection = sqlite3.connect(TEST_DB, timeout=10)
+    try:
+        connection.execute(
+            "UPDATE generation_jobs SET lease_expires_at = ?, worker_id = ? WHERE id = ?",
+            (future.strftime("%Y-%m-%d %H:%M:%S.%f"), "worker-live", "job-live-lease"),
+        )
+        connection.execute(
+            "UPDATE generation_jobs SET phase = 'submitting_provider', lease_expires_at = ? WHERE id = ?",
+            (stale.strftime("%Y-%m-%d %H:%M:%S.%f"), "job-uncertain-submit"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    resumed, failed = await _recover_stale(("video",), ())
+    assert (resumed, failed) == (0, 1)
+    assert _job_row("job-live-lease")["status"] == "running"
+    uncertain = _job_row("job-uncertain-submit")
+    assert uncertain["status"] == "failed"
+    assert uncertain["phase"] == "manual_review"
+    assert "不支持幂等创建" in uncertain["error"]
 
 
 async def test_recover_stale_storyboard_jobs_marked_failed(client) -> None:

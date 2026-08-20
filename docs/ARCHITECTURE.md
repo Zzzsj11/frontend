@@ -10,6 +10,8 @@
 
 Chat对话、媒体生成、素材导出、ASS/通用大纲和ASS场景段重试支持两种执行模式：默认 `inline` 保持本地单进程行为；服务器设置 `JOB_EXECUTION_MODE=worker` 后，API只在同一事务中写领域状态和 `generation_jobs`，`worker-chat`、`worker-media`、`worker-export` 与 `worker-storyboard` 使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 领取。ASS工单的完整人物、时间段、视觉圣经和重试场景快照保存在 `generation_jobs.request`，进度与心跳同时落PostgreSQL；Worker中断后最多自动重放3次。Redis只承担低延迟唤醒、Chat跨进程取消、热状态与事件，短暂不可用不会丢失数据库工单。单机Worker进程内继续按模型注册中心的 `executionPool/executionConcurrency` 限流，H3上限为2；扩到多机/K8s前仍需把该限制升级为Redis原子租约。新模型接入现状和剩余清单见 `TODO_MODEL_EXPANSION.md`。
 
+单机 Worker 可靠性以 PostgreSQL 租约为准：`worker_instances` 记录进程版本、`running/draining/drained` 状态、心跳与在途任务数；`generation_jobs` 记录 `worker_id/claimed_at/heartbeat_at/lease_expires_at/phase/provider_submitted_at`。SIGTERM 后 Worker 先持久化 `draining` 并停止领取，现有任务继续心跳直至结束。只有租约过期的任务可被恢复；已有 `provider_task_id` 的媒体任务只恢复轮询。当前供应商不支持创建幂等键，因此处于 `submitting_provider` 且没有 taskId 的崩溃任务一律转为 `manual_review`，禁止自动重提，避免重复计费。这个极短窗口无法由客户端完全消除，只能依赖供应商未来提供幂等创建或按本地 job ID 查询任务。
+
 数据库结构只由 Alembic 管理，应用启动仅验证连接；测试用 SQLite 可在隔离数据库中由 metadata 建表。认证采用短 access token、数据库 refresh token 与 `users.auth_version`，改密可即时撤销历史会话。
 
 素材导出使用 `material_exports` 保存用户、子项目、进度阶段、字节数和 TOS 归档地址，并关联 `generation_jobs`。每次导出拥有独立 ID、临时目录和 TOS 对象键；不同子项目可并行执行且前端状态按 `taskId` 隔离。浏览器通过带 Access Token 的流式 Fetch 订阅 SSE，断线或刷新后以 PostgreSQL 状态恢复，SSE 只承担实时通知而不是事实存储。

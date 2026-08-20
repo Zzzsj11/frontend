@@ -87,6 +87,17 @@ export interface ServerMonitoringSummary {
     summary: string
     createdAt: string
   }>
+  workers: Array<{
+    id: string
+    version: string
+    kinds: string[]
+    providers: string[]
+    status: 'running' | 'draining' | 'drained' | 'offline'
+    activeJobs: number
+    startedAt: string
+    lastHeartbeatAt: string
+    drainingAt?: string | null
+  }>
 }
 
 export const fetchServerMonitoring = (hours: number) =>

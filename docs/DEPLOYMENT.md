@@ -335,6 +335,8 @@ DEPLOY_ENV=production ./scripts/deploy-local-images.sh
 
 部署脚本会无条件重建 backend 与全部 Worker。原因是运行时 Secret 虽以只读文件挂载，但应用只在进程启动时加载；即使镜像版本未变化，Key 轮换也必须启动新进程才能生效。
 
+单机 Worker 按 `chat → storyboard → media → export` 逐类排空和重建，不同时替换四类进程。SIGTERM 后旧进程停止领取并等待在途任务，Compose 宽限期分别为 2、10、20、30 分钟；这期间新提交仍保留在 PostgreSQL 队列。管理后台“服务器监控”可查看 `draining` 和在途数量。由于供应商创建接口没有幂等能力，禁止为了缩短发布时间强杀处于供应商提交窗口的 media Worker；超过宽限期且未落库 taskId 的任务会进入人工核对而不是自动重提。
+
 切换期间新旧 backend 短暂共存并共同承接流量（共享同一数据库），因此每次发布必须保持 API 向后兼容；数据库迁移遵循 expand/contract。
 
 构建期间另开一个 SSH 会话观察资源，避免误以为进程卡死：

@@ -195,6 +195,30 @@ class GenerationJobModel(LifecycleMixin, Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     first_result_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    worker_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    phase: Mapped[str] = mapped_column(String(48), default="queued", server_default="queued", index=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    provider_submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class WorkerInstanceModel(LifecycleMixin, Base):
+    """单机 Worker 进程注册表；用于 drain、租约归属和发布排障。"""
+
+    __tablename__ = "worker_instances"
+    id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    hostname: Mapped[str] = mapped_column(String(160), default="")
+    pid: Mapped[int] = mapped_column(Integer)
+    version: Mapped[str] = mapped_column(String(160), default="development", index=True)
+    kinds: Mapped[list[str]] = mapped_column(JSON, default=list)
+    providers: Mapped[list[str]] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(32), default="running", index=True)
+    active_job_count: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    draining_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class SceneAssetModel(LifecycleMixin, Base):

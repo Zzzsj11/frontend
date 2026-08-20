@@ -3,17 +3,20 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import signal
+import socket
+import uuid
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from .chat import chat_manager
 from .config import settings, validate_runtime_security
 from .database import close_database, init_database, session_factory
 from .domain import _run_material_export, run_storyboard_job
 from .jobs import Job, jobs
-from .models import GenerationJobModel, ProjectTaskModel, utcnow
+from .models import GenerationJobModel, ProjectTaskModel, WorkerInstanceModel, utcnow
 from .providers import generate_image, generate_video, resume_generation
 from .redis_store import close_redis
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
@@ -27,7 +30,7 @@ def _job_from_model(model: GenerationJobModel) -> Job:
     return jobs._from_model(model)
 
 
-async def _claim(kinds: tuple[str, ...], providers: tuple[str, ...]) -> Job | None:
+async def _claim(kinds: tuple[str, ...], providers: tuple[str, ...], worker_id: str = "test-worker") -> Job | None:
     async with session_factory() as session:
         query = (
             select(GenerationJobModel)
@@ -50,13 +53,19 @@ async def _claim(kinds: tuple[str, ...], providers: tuple[str, ...]) -> Job | No
         # Claim ownership without starting the execution clock. A model-level
         # semaphore (for example H3=2) may still keep this job waiting; the
         # JobManager writes started_at only after that final execution slot is acquired.
+        now = utcnow()
         model.status = "running"
+        model.phase = "claimed"
+        model.worker_id = worker_id
+        model.claimed_at = now
+        model.heartbeat_at = now
+        model.lease_expires_at = now + timedelta(seconds=settings.worker_stale_seconds)
         await session.commit()
         return _job_from_model(model)
 
 
 async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> tuple[int, int]:
-    """Recover jobs whose former worker stopped heartbeating through progress updates."""
+    """只恢复租约已过期的任务；旧数据回退到 updated_at 判定。"""
     resumed = failed = 0
     threshold = utcnow() - timedelta(seconds=settings.worker_stale_seconds)
     async with session_factory() as session:
@@ -66,7 +75,10 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
                     select(GenerationJobModel).where(
                         GenerationJobModel.kind.in_(kinds),
                         GenerationJobModel.status == "running",
-                        GenerationJobModel.updated_at < threshold,
+                        or_(
+                            GenerationJobModel.lease_expires_at < utcnow(),
+                            GenerationJobModel.lease_expires_at.is_(None) & (GenerationJobModel.updated_at < threshold),
+                        ),
                         GenerationJobModel.deleted_at.is_(None),
                     )
                 )
@@ -78,15 +90,24 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
                 continue
             if model.kind in REPLAYABLE_INTERNAL_KINDS and model.attempt < MAX_INTERNAL_ATTEMPTS:
                 model.status = "queued"
+                model.phase = "queued"
                 model.started_at = None
                 model.attempt += 1
                 resumed += 1
             elif model.provider_task_id:
                 model.status = "queued"
+                model.phase = "provider_running"
                 resumed += 1
             else:
                 model.status = "failed"
-                model.error = "Worker中断且重试次数已耗尽，请重新提交" if model.kind in REPLAYABLE_INTERNAL_KINDS else "Worker中断且供应商任务ID尚未落库，请重新提交"
+                model.phase = "manual_review" if model.phase == "submitting_provider" else "failed"
+                model.error = (
+                    "Worker中断且重试次数已耗尽，请重新提交"
+                    if model.kind in REPLAYABLE_INTERNAL_KINDS
+                    else "Worker在供应商提交窗口中断；因供应商不支持幂等创建，已停止自动重提，请先人工核对供应商任务"
+                    if model.phase == "manual_review"
+                    else "Worker中断且供应商任务ID尚未落库，请重新提交"
+                )
                 model.finished_at = utcnow()
                 if model.kind in REPLAYABLE_INTERNAL_KINDS and model.project_task_id:
                     task = await session.get(ProjectTaskModel, model.project_task_id)
@@ -102,6 +123,9 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
                         config["outlineProgress"] = progress
                         task.storyboard_config = config
                 failed += 1
+            model.worker_id = None
+            model.heartbeat_at = None
+            model.lease_expires_at = None
         await session.commit()
     return resumed, failed
 
@@ -131,6 +155,22 @@ def _runner(job: Job):
 async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency: int) -> None:
     validate_runtime_security()
     await init_database()
+    worker_id = f"worker-{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    version = os.getenv("RELEASE_VERSION", "development")
+    async with session_factory() as session:
+        session.add(
+            WorkerInstanceModel(
+                id=worker_id,
+                hostname=socket.gethostname(),
+                pid=os.getpid(),
+                version=version,
+                kinds=list(kinds),
+                providers=list(providers),
+                status="running",
+                active_job_count=0,
+            )
+        )
+        await session.commit()
     resumed, failed = await _recover_stale(kinds, providers)
     if resumed or failed:
         logger.warning("recovered stale jobs: resumed=%s failed=%s", resumed, failed)
@@ -140,6 +180,29 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
         loop.add_signal_handler(name, stop.set)
     slots = asyncio.Semaphore(concurrency)
     active: set[asyncio.Task] = set()
+
+    async def update_instance(status: str | None = None) -> None:
+        async with session_factory() as session:
+            instance = await session.get(WorkerInstanceModel, worker_id)
+            if not instance:
+                return
+            now = utcnow()
+            instance.last_heartbeat_at = now
+            instance.active_job_count = len(active)
+            if status:
+                instance.status = status
+                if status == "draining" and not instance.draining_at:
+                    instance.draining_at = now
+                if status == "drained":
+                    instance.stopped_at = now
+            await session.commit()
+
+    async def instance_heartbeat() -> None:
+        while True:
+            await update_instance()
+            await asyncio.sleep(max(5.0, min(15.0, settings.worker_stale_seconds / 3)))
+
+    instance_heartbeat_task = asyncio.create_task(instance_heartbeat())
 
     async def execute(job: Job) -> None:
         async with slots:
@@ -170,7 +233,7 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
     try:
         while not stop.is_set():
             if len(active) < concurrency:
-                job = await _claim(kinds, providers)
+                job = await _claim(kinds, providers, worker_id)
                 if job:
                     task = asyncio.create_task(execute(job))
                     active.add(task)
@@ -181,8 +244,12 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
             except TimeoutError:
                 pass
     finally:
+        await update_instance("draining")
         if active:
             await asyncio.gather(*active, return_exceptions=True)
+        await update_instance("drained")
+        instance_heartbeat_task.cancel()
+        await asyncio.gather(instance_heartbeat_task, return_exceptions=True)
         await close_redis()
         await close_database()
 

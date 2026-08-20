@@ -50,6 +50,7 @@ from .models import (
     StoryboardOptionItemModel,
     TokenUsageModel,
     UserModel,
+    WorkerInstanceModel,
     utcnow,
 )
 from .prompts import DEFAULT_PROMPTS, invalidate, render_lenient, template_variables
@@ -303,6 +304,24 @@ async def server_monitoring(user: CurrentUser, hours: int = 24, db: AsyncSession
         {"id": x.id, "action": x.action, "trigger": x.trigger, "dryRun": x.dry_run, "status": x.status, "summary": x.summary, "details": x.details, "createdAt": iso(x.created_at)}
         for x in runs
     ]
+    workers = list(
+        (await db.execute(select(WorkerInstanceModel).where(WorkerInstanceModel.deleted_at.is_(None)).order_by(WorkerInstanceModel.started_at.desc()).limit(20))).scalars().all()
+    )
+    stale_before = utcnow() - timedelta(seconds=settings.worker_stale_seconds * 2)
+    result["workers"] = [
+        {
+            "id": item.id,
+            "version": item.version,
+            "kinds": item.kinds,
+            "providers": item.providers,
+            "status": "offline" if item.status in {"running", "draining"} and item.last_heartbeat_at < stale_before else item.status,
+            "activeJobs": item.active_job_count,
+            "startedAt": iso(item.started_at),
+            "lastHeartbeatAt": iso(item.last_heartbeat_at),
+            "drainingAt": iso(item.draining_at),
+        }
+        for item in workers
+    ]
     return result
 
 
@@ -387,9 +406,11 @@ async def jobs(
         term = f"%{q.strip()}%"
         conditions.append(or_(GenerationJobModel.id.ilike(term), GenerationJobModel.provider_task_id.ilike(term)))
     total = (await db.execute(select(func.count()).select_from(GenerationJobModel).where(*conditions))).scalar_one()
-    stale_cutoff = utcnow() - timedelta(minutes=10)
     stale_col = case(
-        (GenerationJobModel.status.in_(("queued", "running")) & (GenerationJobModel.updated_at < stale_cutoff), True),
+        (
+            (GenerationJobModel.status == "running") & GenerationJobModel.lease_expires_at.is_not(None) & (GenerationJobModel.lease_expires_at < utcnow()),
+            True,
+        ),
         else_=False,
     )
     rows = (
@@ -409,6 +430,8 @@ async def jobs(
             "kind": j.kind,
             "status": j.status,
             "progress": j.progress,
+            "phase": j.phase,
+            "workerId": j.worker_id,
             "provider": j.provider,
             "providerTaskId": j.provider_task_id,
             "model": (j.request or {}).get("model"),
@@ -418,6 +441,9 @@ async def jobs(
             "durationSeconds": round((j.finished_at - j.started_at).total_seconds()) if j.finished_at and j.started_at else None,
             "createdAt": iso(j.created_at),
             "finishedAt": iso(j.finished_at),
+            "heartbeatAt": iso(j.heartbeat_at),
+            "leaseExpiresAt": iso(j.lease_expires_at),
+            "providerSubmittedAt": iso(j.provider_submitted_at),
         }
         for j, username, stale in rows
     ]

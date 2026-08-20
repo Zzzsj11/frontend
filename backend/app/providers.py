@@ -396,6 +396,7 @@ async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, 
     }
     if request.images:
         payload["image"] = request.images if len(request.images) > 1 else request.images[0]
+    await jobs.mark_provider_submitting(job)
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(f"{base}/image/generation/tasks", headers=headers, json=payload)
         _raise_for_status(response)
@@ -447,6 +448,7 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         # 让上游返回尾帧图做封面，免去本地 ffmpeg 抽帧
         "return_last_frame": True,
     }
+    await jobs.mark_provider_submitting(job)
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(f"{base}/v3/video/tasks", headers=headers, json=payload)
         _raise_for_status(response)
@@ -571,6 +573,7 @@ async def generate_h3_video(request: VideoGenerationCreate, job: Job) -> dict[st
     stage1, stage2 = _h3_megapixels(request.resolution)
     try:
         if mode == "text":
+            await jobs.mark_provider_submitting(job)
             created = await runninghub_submit_text_task(
                 prompt=request.prompt,
                 duration=float(request.duration),
@@ -582,6 +585,7 @@ async def generate_h3_video(request: VideoGenerationCreate, job: Job) -> dict[st
             if len(images) != 1 or videos or audios:
                 raise ProviderError("H3 首帧模式必须且只能提供 1 张图片")
             image_name, _ = await _upload_h3_reference(images[0], "图片", 1)
+            await jobs.mark_provider_submitting(job)
             created = await runninghub_submit_first_frame_task(
                 prompt=request.prompt,
                 duration=float(request.duration),
@@ -594,6 +598,7 @@ async def generate_h3_video(request: VideoGenerationCreate, job: Job) -> dict[st
             if len(images) != 2 or videos or audios:
                 raise ProviderError("H3 首尾帧模式必须且只能提供首帧、尾帧两张图片")
             uploaded = [await _upload_h3_reference(url, "图片", index) for index, url in enumerate(images, 1)]
+            await jobs.mark_provider_submitting(job)
             created = await runninghub_submit_first_last_frame_task(
                 prompt=request.prompt,
                 duration=float(request.duration),
@@ -611,6 +616,7 @@ async def generate_h3_video(request: VideoGenerationCreate, job: Job) -> dict[st
             audio_uploads = [await _upload_h3_reference(url, "音频", index) for index, url in enumerate(audios, 1)]
             _validate_h3_reference_durations("视频", [duration for _, duration in video_uploads if duration is not None])
             _validate_h3_reference_durations("音频", [duration for _, duration in audio_uploads if duration is not None])
+            await jobs.mark_provider_submitting(job)
             created = await runninghub_submit_reference_task(
                 prompt=request.prompt,
                 duration=float(request.duration),

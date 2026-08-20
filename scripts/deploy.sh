@@ -59,9 +59,18 @@ for _ in {1..30}; do curl -fsS http://127.0.0.1:8000/api/health >/dev/null && br
 curl -fsS http://127.0.0.1:8000/api/health >/dev/null
 docker rm -f "$green" >/dev/null || echo "warn: failed to remove $green" >&2
 
-# Worker 同样只在启动时读取 Secret。显式重建避免 Compose 因镜像/配置声明未变而
-# 继续运行持有旧 Key 的进程；数据库工单会在新 Worker 启动后恢复领取。
-"${compose[@]}" up -d --no-deps --force-recreate worker-chat worker-media worker-export worker-storyboard
+# 单机逐类排空：旧进程先收到 SIGTERM、停止领取并在各自 stop_grace_period 内完成
+# 在途任务，再启动同类新进程。供应商不支持创建幂等键时，不让新旧版本并行提交
+# 比缩短发布耗时更重要；该类排空期间新任务继续安全留在 PostgreSQL 队列。
+for worker in worker-chat worker-storyboard worker-media worker-export; do
+  "${compose[@]}" up -d --no-deps --force-recreate "$worker"
+  for _ in {1..60}; do
+    status="$("${compose[@]}" ps --format json "$worker" 2>/dev/null | grep -o '"Health":"[^"]*"' | head -1 || true)"
+    [[ "$status" == '"Health":"healthy"' ]] && break
+    sleep 2
+  done
+  [[ "$status" == '"Health":"healthy"' ]] || { echo "$worker failed health check" >&2; exit 1; }
+done
 
 # 兜底其余服务（postgres/redis 配置漂移等），无变化时为空操作
 "${compose[@]}" up -d --remove-orphans

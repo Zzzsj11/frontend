@@ -293,6 +293,40 @@ const changeRange = () => void load()
 
       <section class="monitor-card">
         <div class="section-head">
+          <h3>Worker 实例与排空状态</h3>
+          <span>进程心跳超过两倍租约未更新时标记离线</span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>任务类型</th>
+                <th>状态</th>
+                <th>在途任务</th>
+                <th>版本</th>
+                <th>最近心跳</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="worker in data?.workers ?? []" :key="worker.id">
+                <td>{{ worker.kinds.join('、') }}</td>
+                <td>
+                  <span class="worker-status" :class="worker.status">{{ worker.status }}</span>
+                </td>
+                <td>{{ worker.activeJobs }}</td>
+                <td>{{ worker.version.replace(/^git-/, '').slice(0, 7) }}</td>
+                <td>{{ new Date(worker.lastHeartbeatAt).toLocaleString() }}</td>
+              </tr>
+              <tr v-if="!data?.workers?.length">
+                <td colspan="5">暂无 Worker 注册信息</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="monitor-card">
+        <div class="section-head">
           <h3>文件系统</h3>
           <span>同时监控容量与 inode</span>
         </div>
@@ -492,6 +526,17 @@ const changeRange = () => void load()
   margin-top: 12px;
   color: #667085;
   font-size: 12px;
+}
+.worker-status {
+  color: var(--success);
+  font-weight: 650;
+}
+.worker-status.draining {
+  color: var(--warning);
+}
+.worker-status.drained,
+.worker-status.offline {
+  color: var(--danger);
 }
 .metric-grid article,
 .monitor-card {

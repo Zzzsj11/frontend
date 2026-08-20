@@ -55,6 +55,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    stop_grace_period: 20m
     entrypoint: ['./worker-entrypoint.sh']
     command: ['--kinds', 'image,video', '--concurrency', '${MEDIA_WORKER_CONCURRENCY:-4}']
     profiles: ['workers']
@@ -70,6 +71,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-development-only-change-me-at-least-32-bytes}
       STORAGE_BACKEND: tos
       JOB_EXECUTION_MODE: worker
+      RELEASE_VERSION: ${RELEASE_VERSION:-development}
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,14 +86,17 @@ services:
 
   worker-export:
     extends: worker-media
+    stop_grace_period: 30m
     command: ['--kinds', 'export', '--concurrency', '${EXPORT_WORKER_CONCURRENCY:-1}']
 
   worker-chat:
     extends: worker-media
+    stop_grace_period: 2m
     command: ['--kinds', 'chat', '--concurrency', '${CHAT_WORKER_CONCURRENCY:-2}']
 
   worker-storyboard:
     extends: worker-media
+    stop_grace_period: 10m
     command:
       [
         '--kinds',

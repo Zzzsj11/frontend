@@ -57,6 +57,19 @@ const summary = {
   },
   alerts: [],
   maintenanceRuns: [],
+  workers: [
+    {
+      id: 'worker-media-1',
+      version: 'git-abcdef123456',
+      kinds: ['image', 'video'],
+      providers: [],
+      status: 'draining' as const,
+      activeJobs: 2,
+      startedAt: '2026-08-17T11:00:00Z',
+      lastHeartbeatAt: '2026-08-17T12:00:00Z',
+      drainingAt: '2026-08-17T11:59:00Z',
+    },
+  ],
 }
 
 describe('admin server monitoring panel', () => {
@@ -84,6 +97,9 @@ describe('admin server monitoring panel', () => {
     expect(wrapper.text()).toContain('14 秒')
     expect(wrapper.text()).toContain('2.3 分')
     expect(wrapper.text()).toContain('89%')
+    expect(wrapper.text()).toContain('Worker 实例与排空状态')
+    expect(wrapper.text()).toContain('draining')
+    expect(wrapper.text()).toContain('abcdef1')
     wrapper.unmount()
   })
 

@@ -4,7 +4,7 @@ import asyncio
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
 from sqlalchemy import select
@@ -49,6 +49,8 @@ class Job:
     provider: str | None = None
     provider_task_id: str | None = None
     idempotency_key: str | None = None
+    worker_id: str | None = None
+    phase: str = "queued"
 
     def public(self) -> dict[str, Any]:
         return {
@@ -63,6 +65,7 @@ class Job:
             "provider": self.provider,
             "provider_task_id": self.provider_task_id,
             "idempotency_key": self.idempotency_key,
+            "phase": self.phase,
         }
 
 
@@ -163,11 +166,14 @@ class JobManager:
         async with session_factory() as session:
             model = await session.get(GenerationJobModel, job.id)
             if model:
+                if job.worker_id and model.worker_id != job.worker_id:
+                    return
                 model.status, model.progress, model.result, model.error = job.status, job.progress, job.result, job.error
                 model.provider, model.provider_task_id = job.provider, job.provider_task_id
+                model.phase = job.phase
                 if job.idempotency_key:
                     model.idempotency_key = job.idempotency_key
-                if job.status == "running" and model.started_at is None:
+                if job.status == "running" and job.phase != "claimed" and model.started_at is None:
                     model.started_at = utcnow()
                 if job.status in {"succeeded", "failed", "cancelled"}:
                     model.finished_at = utcnow()
@@ -182,9 +188,11 @@ class JobManager:
         job.updated_at = time.time()
         async with session_factory() as session:
             model = await session.get(GenerationJobModel, job.id)
-            if model and model.status == "running":
+            if model and model.status == "running" and (not job.worker_id or model.worker_id == job.worker_id):
                 model.progress = job.progress
-                model.updated_at = utcnow()
+                now = utcnow()
+                model.heartbeat_at = now
+                model.lease_expires_at = now + timedelta(seconds=settings.worker_stale_seconds)
                 await session.commit()
         await cache_job(job.id, job.public())
 
@@ -202,7 +210,7 @@ class JobManager:
             else:
                 await self._execute(job, runner)
         except asyncio.CancelledError:
-            job.status = "cancelled"
+            job.status, job.phase = "cancelled", "cancelled"
             raise
         finally:
             self._active.discard(job.id)
@@ -210,14 +218,18 @@ class JobManager:
 
     async def _execute(self, job: Job, runner: JobRunner) -> None:
         """拿到执行槽位后才进入 running，供应商调用完成前一直占用槽位。"""
-        job.status, job.progress = "running", 5
+        job.status, job.progress, job.phase = "running", 5, "executing"
         await self._persist(job)
         try:
             job.result = await runner(job)
-            job.progress, job.status = 100, "succeeded"
+            job.progress, job.status, job.phase = 100, "succeeded", "succeeded"
             await self._persist_asset(job)
         except Exception as exc:
-            job.status, job.error = "failed", str(exc)[:2000]
+            uncertain_submission = job.phase == "submitting_provider"
+            job.status = "failed"
+            job.phase = "manual_review" if uncertain_submission else "failed"
+            prefix = "供应商创建结果不确定且不支持幂等重提，请先人工核对供应商任务；" if uncertain_submission else ""
+            job.error = f"{prefix}{exc}"[:2000]
             async with session_factory() as session:
                 add_token_usage(
                     session,
@@ -312,7 +324,7 @@ class JobManager:
 
     async def set_provider_task(self, job: Job, provider: str, task_id: str, *, idempotency_key: str | None = None) -> None:
         """供应商 taskId 即时落库：重启恢复与后台对账都依赖它，成功失败都要保留"""
-        job.provider, job.provider_task_id = provider, task_id
+        job.provider, job.provider_task_id, job.phase = provider, task_id, "provider_running"
         if idempotency_key:
             job.idempotency_key = idempotency_key
         job.updated_at = time.time()
@@ -321,6 +333,8 @@ class JobManager:
             if model:
                 model.provider, model.provider_task_id = job.provider, job.provider_task_id
                 model.idempotency_key = job.idempotency_key
+                model.phase = job.phase
+                model.provider_submitted_at = utcnow()
                 await session.commit()
         await cache_job(job.id, job.public())
 
@@ -345,7 +359,19 @@ class JobManager:
             provider=model.provider,
             provider_task_id=model.provider_task_id,
             idempotency_key=model.idempotency_key,
+            worker_id=model.worker_id,
+            phase=model.phase or "queued",
         )
+
+    async def mark_provider_submitting(self, job: Job) -> None:
+        """在无供应商幂等能力时标记危险窗口；崩溃恢复不得自动重复创建。"""
+        job.phase = "submitting_provider"
+        async with session_factory() as session:
+            model = await session.get(GenerationJobModel, job.id)
+            if model and (not job.worker_id or model.worker_id == job.worker_id):
+                model.phase = job.phase
+                await session.commit()
+        await cache_job(job.id, job.public())
 
     async def recover_stale_jobs(self, runner: JobRunner) -> dict[str, int]:
         """重启后恢复媒体生成任务：内存协程已丢，有供应商 taskId 且未过期的续跑轮询挽回结果，其余判败"""
