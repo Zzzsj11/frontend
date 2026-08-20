@@ -140,6 +140,17 @@ def test_external_worker_dispatches_chat_session(monkeypatch) -> None:
     assert asyncio.run(worker._runner(job)(job)) == {"sessionId": "chat-123", "jobId": "job-worker-chat"}
 
 
+def test_nested_provider_usage_is_normalized() -> None:
+    from app.token_usage import normalize_usage
+
+    normalized = normalize_usage({"taskId": "image-task", "rawUsage": {"input_tokens": 7, "output_tokens": 3072, "cached_tokens": 3, "images": 1}})
+
+    assert normalized["inputTokens"] == 7
+    assert normalized["outputTokens"] == 3072
+    assert normalized["cachedInputTokens"] == 3
+    assert normalized["totalTokens"] == 3079
+
+
 def test_h3_video_provider_archives_output(monkeypatch) -> None:
     from app import providers
     from app.jobs import Job

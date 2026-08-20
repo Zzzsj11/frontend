@@ -17,11 +17,12 @@ def normalize_usage(value: Any) -> dict[str, Any]:
         raw = value.model_dump(mode="json")
     else:
         raw = {key: getattr(value, key) for key in dir(value) if not key.startswith("_") and isinstance(getattr(value, key, None), (str, int, float, bool, type(None)))}
-    input_tokens = int(raw.get("input_tokens") or raw.get("inputTokens") or raw.get("prompt_tokens") or raw.get("promptTokens") or 0)
-    output_tokens = int(raw.get("output_tokens") or raw.get("outputTokens") or raw.get("completion_tokens") or raw.get("completionTokens") or 0)
-    details = raw.get("prompt_tokens_details") or raw.get("input_tokens_details") or {}
-    cached = int(details.get("cached_tokens") or details.get("cache_read_input_tokens") or raw.get("cached_input_tokens") or 0)
-    total = int(raw.get("total_tokens") or raw.get("totalTokens") or input_tokens + output_tokens)
+    metrics = raw.get("rawUsage") if isinstance(raw.get("rawUsage"), dict) else raw
+    input_tokens = int(metrics.get("input_tokens") or metrics.get("inputTokens") or metrics.get("prompt_tokens") or metrics.get("promptTokens") or 0)
+    output_tokens = int(metrics.get("output_tokens") or metrics.get("outputTokens") or metrics.get("completion_tokens") or metrics.get("completionTokens") or 0)
+    details = metrics.get("prompt_tokens_details") or metrics.get("input_tokens_details") or {}
+    cached = int(details.get("cached_tokens") or details.get("cache_read_input_tokens") or metrics.get("cached_input_tokens") or metrics.get("cached_tokens") or 0)
+    total = int(metrics.get("total_tokens") or metrics.get("totalTokens") or input_tokens + output_tokens)
     return {"inputTokens": input_tokens, "outputTokens": output_tokens, "cachedInputTokens": cached, "totalTokens": total, "raw": raw}
 
 
