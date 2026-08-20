@@ -322,10 +322,11 @@ DEPLOY_ENV=production ./scripts/deploy-local-images.sh
 1. 拒绝脏工作区；
 2. 读取当前完整 Git SHA；
 3. 构建 `mvagent-local/mv-agent-frontend:git-<sha>` 和后端镜像；
-4. 不从远程镜像仓库拉取，先更新 frontend 容器（新 nginx 配置先就绪）；
-5. 平滑切换 backend：用新镜像启动一次性 green 容器 `mv-backend-green`（`compose run` 继承服务的环境/密钥/网络别名），健康检查通过后重建正式容器——整个窗口内始终有健康上游，nginx 不会返回 502；green 未通过健康检查则打印其日志并中止部署，当前版本继续服务；
-6. 等待正式 backend 健康检查后删除 green 容器，并兜底更新其余服务；
-7. 将当前和上一版本写入 `.deployed-version`、`.previous-version`。
+4. 不从远程镜像仓库拉取；首次部署会先启动并等待 PostgreSQL、Redis 健康，后续发布为空操作；
+5. 先更新 frontend 容器（新 nginx 配置先就绪）；
+6. 平滑切换 backend：用新镜像启动一次性 green 容器 `mv-backend-green`（`compose run` 继承服务的环境/密钥/网络别名），健康检查通过后重建正式容器——整个窗口内始终有健康上游，nginx 不会返回 502；green 未通过健康检查则打印其日志并中止部署，当前版本继续服务；
+7. 等待正式 backend 健康检查后删除 green 容器，并兜底更新其余服务；
+8. 将当前和上一版本写入 `.deployed-version`、`.previous-version`。
 
 切换期间新旧 backend 短暂共存并共同承接流量（共享同一数据库），因此每次发布必须保持 API 向后兼容；数据库迁移遵循 expand/contract。
 

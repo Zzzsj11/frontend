@@ -11,6 +11,19 @@ if [[ "${DEPLOY_SKIP_PULL:-0}" != "1" ]]; then
   "${compose[@]}" pull
 fi
 
+# A brand-new server has no data containers yet. Start durable dependencies
+# before the green backend so DNS, migrations, and health checks work on the
+# first deployment as well as on later rolling deployments.
+"${compose[@]}" up -d postgres redis
+for _ in {1..60}; do
+  postgres_status="$("${compose[@]}" ps --format json postgres 2>/dev/null | grep -o '"Health":"[^"]*"' | head -1 || true)"
+  redis_status="$("${compose[@]}" ps --format json redis 2>/dev/null | grep -o '"Health":"[^"]*"' | head -1 || true)"
+  [[ "$postgres_status" == '"Health":"healthy"' && "$redis_status" == '"Health":"healthy"' ]] && break
+  sleep 2
+done
+"${compose[@]}" exec -T postgres pg_isready -U "${POSTGRES_USER:-mvagent}" -d "${POSTGRES_DB:-mvagent}" >/dev/null
+"${compose[@]}" exec -T redis redis-cli ping | grep -qx PONG
+
 # 先更新 frontend：新的 nginx（运行时解析 backend 上游）就绪后，后续 backend 切换才不会 502
 "${compose[@]}" up -d --no-deps frontend
 
