@@ -55,6 +55,8 @@ test('administrator can inspect dashboard, models, errors and audit logs', async
   await page.getByRole('button', { name: '服务器监控' }).click()
   await expect(page.getByRole('heading', { name: '服务器资源监控' })).toBeVisible()
   await expect(page.getByText('月流量仅统计公网出站 · 自然月 300 GiB')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Worker 实例与排空状态' })).toBeVisible()
+  await expect(page.locator('.worker-status.running')).toHaveCount(4)
 })
 
 test('content administrator only sees and operates content configuration', async ({
