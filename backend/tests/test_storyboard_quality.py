@@ -10,6 +10,7 @@ from app.domain import uid
 from app.media_constraints import normalize_video_duration
 from app.models import (
     DigitalHumanModel,
+    GenerationJobModel,
     ProjectCastModel,
     ProjectModel,
     ProjectTaskModel,
@@ -475,6 +476,18 @@ async def test_segment_retry_202_and_409(client):
     r = client.post(f"/api/tasks/{task_id}/storyboard-outline/segments/0/regenerate")
     assert r.status_code == 202
     assert r.json()["status"] == "segment_retrying"
+    assert r.json()["jobId"]
+    async with session_factory() as db:
+        job = await db.get(GenerationJobModel, r.json()["jobId"])
+        assert job is not None
+        assert job.kind == "ass_segment_retry"
+        assert job.project_task_id == task_id
+        assert job.user_id is not None
+        assert job.request["scene_index"] == 0
+        assert job.request["segments"]
+        assert job.request["scene_plan"]
+        assert job.request["story_bible"]
+        assert job.request["selected_humans"]
 
     r2 = client.post(f"/api/tasks/{task_id}/storyboard-outline/segments/0/regenerate")
     assert r2.status_code == 409

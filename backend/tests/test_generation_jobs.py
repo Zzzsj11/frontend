@@ -151,6 +151,29 @@ def test_nested_provider_usage_is_normalized() -> None:
     assert normalized["totalTokens"] == 3079
 
 
+def test_job_cache_is_best_effort_when_redis_is_unavailable(monkeypatch) -> None:
+    from app import redis_store
+
+    class BrokenRedis:
+        async def set(self, *_args, **_kwargs):
+            raise ConnectionError("redis unavailable")
+
+        async def get(self, *_args, **_kwargs):
+            raise ConnectionError("redis unavailable")
+
+        async def publish(self, *_args, **_kwargs):
+            raise ConnectionError("redis unavailable")
+
+    monkeypatch.setattr(redis_store, "redis", BrokenRedis())
+
+    async def scenario() -> None:
+        await redis_store.cache_job("job-offline", {"status": "queued"})
+        await redis_store.notify_worker("ass_outline")
+        assert await redis_store.get_cached_job("job-offline") is None
+
+    asyncio.run(scenario())
+
+
 def test_h3_video_provider_archives_output(monkeypatch) -> None:
     from app import providers
     from app.jobs import Job
@@ -384,6 +407,33 @@ async def test_recover_stale_jobs_resumes_recent_and_fails_orphans(client) -> No
     assert _job_row("job-resumable")["status"] == "succeeded"
     assert "中断" in _job_row("job-orphan")["error"]
     assert "过期" in _job_row("job-expired")["error"]
+
+
+async def test_worker_requeues_replayable_storyboard_job_with_bounded_attempts(client) -> None:
+    from app.worker import _recover_stale
+
+    stale = datetime.now(timezone.utc) - timedelta(minutes=10)
+    _insert_job("job-ass-replay", kind="ass_outline", status="running", updated_at=stale)
+
+    resumed, failed = await _recover_stale(("ass_outline",), ())
+
+    assert (resumed, failed) == (1, 0)
+    row = _job_row("job-ass-replay")
+    assert row["status"] == "queued"
+    assert row["attempt"] == 2
+
+    connection = sqlite3.connect(TEST_DB, timeout=10)
+    try:
+        connection.execute("UPDATE generation_jobs SET status = 'running', attempt = 3, updated_at = ? WHERE id = ?", (stale.strftime("%Y-%m-%d %H:%M:%S.%f"), "job-ass-replay"))
+        connection.commit()
+    finally:
+        connection.close()
+
+    resumed, failed = await _recover_stale(("ass_outline",), ())
+    assert (resumed, failed) == (0, 1)
+    row = _job_row("job-ass-replay")
+    assert row["status"] == "failed"
+    assert "重试次数" in row["error"]
 
 
 async def test_recover_stale_storyboard_jobs_marked_failed(client) -> None:

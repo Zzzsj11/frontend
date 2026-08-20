@@ -125,12 +125,15 @@ erDiagram
   → 创建 project_tasks，source_ass_url 指向 TOS
   → project_cast 写整项候选演员
   → 解析字幕，批量创建 storyboard_lines
-  → 生成歌曲级视觉圣经/场景计划并写 storyboard_config、overall_prompt、每行 shot_options
+  → API将完整人物/字幕段/情感/额外要求快照写 generation_jobs（ass_outline）
+  → worker-storyboard生成歌曲级视觉圣经/场景计划并写 storyboard_config、overall_prompt、每行 shot_options
   → 逐行调用 LLM，写 scene_prompt / shot_prompt / generation_status
   → storyboard_line_cast 固化每行实际演员
 ```
 
 这里要分清：`project_cast` 是候选演员名单，`storyboard_line_cast` 才是某一镜真正出现的人。歌曲情感档案被读入提示词上下文，但不会复制出一条外键关系。
+
+大纲与场景段重试均以 `generation_jobs` 为事实工单：`request` 保存可重放输入，`progress/updated_at` 保存进度与租约心跳，`attempt` 限制自动重放次数。API与工单写入同一事务，因此不会出现任务已显示生成中但没有可领取工单的半状态。
 
 ### 旅程 3B：创建通用分镜
 

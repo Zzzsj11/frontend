@@ -90,6 +90,16 @@ services:
     extends: worker-media
     command: ['--kinds', 'chat', '--concurrency', '${CHAT_WORKER_CONCURRENCY:-2}']
 
+  worker-storyboard:
+    extends: worker-media
+    command:
+      [
+        '--kinds',
+        'ass_outline,general_outline,ass_segment_retry',
+        '--concurrency',
+        '${STORYBOARD_WORKER_CONCURRENCY:-2}',
+      ]
+
   postgres:
     image: postgres:16
     restart: unless-stopped

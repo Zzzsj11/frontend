@@ -11,14 +11,16 @@ from sqlalchemy import select
 from .chat import chat_manager
 from .config import settings, validate_runtime_security
 from .database import close_database, init_database, session_factory
-from .domain import _run_material_export
+from .domain import _run_material_export, run_storyboard_job
 from .jobs import Job, jobs
-from .models import GenerationJobModel, utcnow
+from .models import GenerationJobModel, ProjectTaskModel, utcnow
 from .providers import generate_image, generate_video, resume_generation
 from .redis_store import close_redis
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
 
 logger = logging.getLogger("mvagent.worker")
+REPLAYABLE_INTERNAL_KINDS = {"ass_outline", "general_outline", "ass_segment_retry"}
+MAX_INTERNAL_ATTEMPTS = 3
 
 
 def _job_from_model(model: GenerationJobModel) -> Job:
@@ -72,13 +74,31 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
             provider = str((model.request or {}).get("_provider") or "internal")
             if providers and provider not in providers:
                 continue
-            if model.provider_task_id:
+            if model.kind in REPLAYABLE_INTERNAL_KINDS and model.attempt < MAX_INTERNAL_ATTEMPTS:
+                model.status = "queued"
+                model.started_at = None
+                model.attempt += 1
+                resumed += 1
+            elif model.provider_task_id:
                 model.status = "queued"
                 resumed += 1
             else:
                 model.status = "failed"
-                model.error = "Worker中断且供应商任务ID尚未落库，请重新提交"
+                model.error = "Worker中断且重试次数已耗尽，请重新提交" if model.kind in REPLAYABLE_INTERNAL_KINDS else "Worker中断且供应商任务ID尚未落库，请重新提交"
                 model.finished_at = utcnow()
+                if model.kind in REPLAYABLE_INTERNAL_KINDS and model.project_task_id:
+                    task = await session.get(ProjectTaskModel, model.project_task_id)
+                    if task and task.deleted_at is None:
+                        config = dict(task.storyboard_config or {})
+                        progress = dict(config.get("outlineProgress") or {})
+                        progress.update(error=model.error, jobId=model.id)
+                        if model.kind == "ass_segment_retry":
+                            progress["phase"] = "segment_retry_failed"
+                        else:
+                            progress["phase"] = "error"
+                            task.status = "outline_failed"
+                        config["outlineProgress"] = progress
+                        task.storyboard_config = config
                 failed += 1
         await session.commit()
     return resumed, failed
@@ -101,6 +121,8 @@ def _runner(job: Job):
     if job.kind == "chat":
         session_id = str(request.get("session_id") or "")
         return lambda item: chat_manager.run_persisted(session_id, item)
+    if job.kind in REPLAYABLE_INTERNAL_KINDS:
+        return run_storyboard_job
     raise RuntimeError(f"unsupported worker job kind: {job.kind}")
 
 
@@ -119,7 +141,29 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
 
     async def execute(job: Job) -> None:
         async with slots:
-            await jobs.run_claimed(job, _runner(job))
+            heartbeat_interval = max(5.0, min(30.0, settings.worker_stale_seconds / 3))
+
+            async def heartbeat() -> None:
+                while True:
+                    await asyncio.sleep(heartbeat_interval)
+                    await jobs.heartbeat(job)
+                    if job.kind in REPLAYABLE_INTERNAL_KINDS and job.project_task_id:
+                        async with session_factory() as session:
+                            task = await session.get(ProjectTaskModel, job.project_task_id)
+                            if task and task.deleted_at is None:
+                                config = dict(task.storyboard_config or {})
+                                progress = dict(config.get("outlineProgress") or {})
+                                progress.update(heartbeatAt=utcnow().isoformat(), jobId=job.id)
+                                config["outlineProgress"] = progress
+                                task.storyboard_config = config
+                                await session.commit()
+
+            heartbeat_task = asyncio.create_task(heartbeat())
+            try:
+                await jobs.run_claimed(job, _runner(job))
+            finally:
+                heartbeat_task.cancel()
+                await asyncio.gather(heartbeat_task, return_exceptions=True)
 
     try:
         while not stop.is_set():

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import settings
 from .database import session_factory
@@ -99,6 +100,32 @@ class JobManager:
         project_task_id: str | None = None,
         storyboard_line_id: str | None = None,
     ) -> Job:
+        async with session_factory() as session:
+            job = await self.enqueue(
+                session,
+                kind,
+                request,
+                user_id=user_id,
+                project_id=project_id,
+                project_task_id=project_task_id,
+                storyboard_line_id=storyboard_line_id,
+            )
+            await session.commit()
+        await self.dispatch(job, runner)
+        return job
+
+    async def enqueue(
+        self,
+        session: AsyncSession,
+        kind: str,
+        request: dict[str, Any],
+        *,
+        user_id: str,
+        project_id: str | None = None,
+        project_task_id: str | None = None,
+        storyboard_line_id: str | None = None,
+    ) -> Job:
+        """Add a replayable job to the caller's transaction without dispatching it."""
         now = time.time()
         job = Job(
             id=f"job-{uuid.uuid4().hex}",
@@ -111,19 +138,21 @@ class JobManager:
             storyboard_line_id=storyboard_line_id,
             request=request,
         )
-        async with session_factory() as session:
-            session.add(
-                GenerationJobModel(
-                    id=job.id, kind=kind, request=request, user_id=user_id, project_id=project_id, project_task_id=project_task_id, storyboard_line_id=storyboard_line_id
-                )
+        session.add(
+            GenerationJobModel(
+                id=job.id, kind=kind, request=request, user_id=user_id, project_id=project_id, project_task_id=project_task_id, storyboard_line_id=storyboard_line_id
             )
-            await session.commit()
+        )
+        await session.flush()
+        return job
+
+    async def dispatch(self, job: Job, runner: JobRunner) -> None:
+        """Dispatch only after the transaction that created the job has committed."""
         await cache_job(job.id, job.public())
         if settings.job_execution_mode == "worker":
-            await notify_worker(kind)
+            await notify_worker(job.kind)
         else:
             asyncio.create_task(self._run(job, runner))
-        return job
 
     async def run_claimed(self, job: Job, runner: JobRunner) -> None:
         """Execute a job atomically claimed by an external worker."""
@@ -147,10 +176,21 @@ class JobManager:
         await cache_job(job.id, job.public())
 
     async def update_progress(self, job: Job, progress: int) -> None:
-        # 进度仅供前端展示，高频更新只写 redis；DB 由状态迁移时的 _persist 负责
+        # Progress doubles as the durable worker heartbeat. PostgreSQL remains
+        # authoritative when Redis or the worker process disappears.
         job.progress = max(job.progress, min(progress, 99))
         job.updated_at = time.time()
+        async with session_factory() as session:
+            model = await session.get(GenerationJobModel, job.id)
+            if model and model.status == "running":
+                model.progress = job.progress
+                model.updated_at = utcnow()
+                await session.commit()
         await cache_job(job.id, job.public())
+
+    async def heartbeat(self, job: Job) -> None:
+        """Refresh a running job lease without changing its visible progress."""
+        await self.update_progress(job, job.progress)
 
     async def _run(self, job: Job, runner: JobRunner) -> None:
         self._active.add(job.id)

@@ -5,9 +5,9 @@
 | 环境           | 用途                                     | 入口                         | 数据             |
 | -------------- | ---------------------------------------- | ---------------------------- | ---------------- |
 | 本地开发环境   | 开发、单元测试、完整预检                 | `http://127.0.0.1:5173`      | 本地 Docker 卷   |
-| 服务器测试环境 | 业务方手工验收、远程 API/Playwright 回归 | `http://124.222.219.76:5173` | 服务器 Docker 卷 |
+| 服务器测试环境 | 业务方手工验收、远程 API/Playwright 回归 | `http://120.24.38.200`       | 服务器 Docker 卷 |
 
-v1.0.0 完成前不建设预发布或正式生产环境，也不通过域名执行业务回归。远程测试固定使用服务器 IP 和 `5173` 端口。当前发布方式是在服务器从 Git 获取指定提交，并在服务器本地构建带 Git SHA 的版本化镜像。
+v1.0.0 完成前不建设预发布或正式生产环境，也不通过域名执行业务回归。远程测试固定使用服务器 IP 和 HTTP `80` 端口。当前发布方式是在服务器从 Git 获取指定提交，并在服务器本地构建带 Git SHA 的版本化镜像。
 
 ## 1. 部署原则
 
@@ -61,7 +61,7 @@ git push origin <当前分支>
 当前服务器：
 
 ```text
-主机：124.222.219.76
+主机：120.24.38.200
 用户：ubuntu
 项目目录：/opt/mv-agent-frontend
 Web 端口：5173
@@ -84,7 +84,7 @@ ssh-keygen -t ed25519 -C "mv-agent-deploy" -f ~/.ssh/mv_agent_deploy
 将公钥安装到服务器（该步骤可能需要输入服务器登录密码）：
 
 ```bash
-ssh-copy-id -i ~/.ssh/mv_agent_deploy.pub ubuntu@124.222.219.76
+ssh-copy-id -i ~/.ssh/mv_agent_deploy.pub root@120.24.38.200
 ```
 
 如果开发机没有 `ssh-copy-id`，显示公钥并由服务器管理员把这一整行追加到 `/home/ubuntu/.ssh/authorized_keys`：
@@ -107,8 +107,8 @@ chown -R ubuntu:ubuntu /home/ubuntu/.ssh
 
 ```sshconfig
 Host mv-agent-test
-  HostName 124.222.219.76
-  User ubuntu
+  HostName 120.24.38.200
+  User root
   IdentityFile ~/.ssh/mv_agent_deploy
   IdentitiesOnly yes
   ServerAliveInterval 30
@@ -124,7 +124,7 @@ ssh mv-agent-test
 未配置别名时使用：
 
 ```bash
-ssh -i ~/.ssh/mv_agent_deploy ubuntu@124.222.219.76
+ssh -i ~/.ssh/mv_agent_deploy root@120.24.38.200
 ```
 
 首次连接要核对服务器指纹；不要在不确认主机身份时盲目接受变更后的指纹。登录后先确认身份和主机：
@@ -193,7 +193,7 @@ git remote -v
 ```bash
 git status --short
 git rev-parse HEAD
-git push ssh://ubuntu@124.222.219.76/opt/mv-agent-frontend.git main:main
+git push ssh://root@120.24.38.200/opt/mv-agent-frontend.git main:main
 ```
 
 如使用 `mv-agent-test` SSH 别名，URL 可写成 `ssh://mv-agent-test/opt/mv-agent-frontend.git`。出现“Git LFS locking API 不受支持”的提示不影响当前仓库，因为发布内容不依赖 Git LFS 锁；真正的推送失败必须处理，不能继续部署。
@@ -217,7 +217,7 @@ JWT_SECRET=<至少 32 字节的随机值>
 POSTGRES_DB=mvagent
 POSTGRES_USER=mvagent
 POSTGRES_PASSWORD=<强随机密码>
-FRONTEND_PORT=5173
+FRONTEND_PORT=80
 BACKEND_PORT=8000
 ```
 
@@ -241,14 +241,16 @@ JOB_EXECUTION_MODE=worker
 COMPOSE_PROFILES=workers
 MEDIA_WORKER_CONCURRENCY=4
 EXPORT_WORKER_CONCURRENCY=1
+CHAT_WORKER_CONCURRENCY=2
+STORYBOARD_WORKER_CONCURRENCY=2
 WORKER_STALE_SECONDS=180
 ```
 
-`worker-media` 与 `worker-export` 必须和 backend 使用同一个版本化后端镜像。4核测试机上导出并发固定为1；不要把 `JOB_EXECUTION_MODE` 切为 `worker` 却遗漏 `COMPOSE_PROFILES=workers`，否则新任务只会排队而无人领取。
+`worker-media`、`worker-export`、`worker-chat` 与 `worker-storyboard` 必须和 backend 使用同一个版本化后端镜像。4核测试机上导出并发固定为1，分镜编排并发建议2；不要把 `JOB_EXECUTION_MODE` 切为 `worker` 却遗漏 `COMPOSE_PROFILES=workers`，否则新任务只会排队而无人领取。
 
 统一供应商配置启用 `AIGC_TOKEN` 时，聊天地址和默认文本模型必须来自同一配置组；不要保留指向其他厂商的旧 `LLM_BASE_URL`、`LLM_API_KEY` 或 `LLM_MODEL`。任何核验命令都不得打印 Token。
 
-服务器安全组/防火墙只需对验收人员开放 SSH `22/tcp` 和 Web `5173/tcp`。后端 `8000` 只绑定回环地址，PostgreSQL/Redis 在服务器部署覆盖中不映射宿主机端口。
+当前测试服务器安全组/防火墙只需对验收人员开放 SSH `22/tcp` 和 Web `80/tcp`。后端 `8000` 只绑定回环地址，PostgreSQL/Redis 在服务器部署覆盖中不映射宿主机端口。
 
 ## 5. 每次发布的标准流程
 
@@ -287,7 +289,7 @@ timeout 20 git ls-remote origin HEAD
 curl -I --max-time 10 https://github.com
 ```
 
-两者均超时时，不要持续重试占用发布窗口，也不要改线上源码。改用上一节的服务器裸仓库通道：先在开发机执行 `git push ssh://ubuntu@124.222.219.76/opt/mv-agent-frontend.git main:main`，再在服务器执行：
+两者均超时时，不要持续重试占用发布窗口，也不要改线上源码。改用上一节的服务器裸仓库通道：先在开发机执行 `git push ssh://root@120.24.38.200/opt/mv-agent-frontend.git main:main`，再在服务器执行：
 
 ```bash
 cd /opt/mv-agent-frontend
@@ -351,7 +353,7 @@ printf 'RELEASE_VERSION=%s\n' "$RELEASE_VERSION"
 docker compose --env-file .env.production \
   -f docker-compose.yml -f docker-compose.production.yml ps
 curl -fsS http://127.0.0.1:8000/api/health
-curl -fsS http://127.0.0.1:5173/api/health
+curl -fsS http://127.0.0.1:80/api/health
 ./scripts/online-health-check.sh
 ```
 
@@ -371,7 +373,7 @@ docker compose --env-file .env.production \
 ### 6.2 开发机远程验收
 
 ```bash
-curl -fsS http://124.222.219.76:5173/api/health
+curl -fsS http://120.24.38.200/api/health
 # 凭据写入 e2e/.env（模板见 e2e/.env.example）后免环境变量直跑
 npm run test:remote:api && npm run test:remote:frontend
 ```
@@ -382,11 +384,13 @@ npm run test:remote:api && npm run test:remote:frontend
 
 ```bash
 cd /opt/mv-agent-frontend
-./scripts/install-maintenance-cron.sh
+MAINTENANCE_LOG_DIR=/var/lib/docker/mv-agent-maintenance/logs \
+BACKUP_DIR=/var/lib/docker/mv-agent-maintenance/backups \
+  ./scripts/install-maintenance-cron.sh
 crontab -l
 ```
 
-该脚本安装每 5 分钟健康检查、每分钟宿主机资源采样和每日 03:15 PostgreSQL 备份，日志在项目 `logs/`。资源采样读取默认路由公网网卡，只把发送字节增量计入自然月流量；配额按 `300 × 1024³` 字节计算。备份还需按 [`BACKUP-RESTORE.md`](BACKUP-RESTORE.md) 同步到独立对象存储。
+该脚本安装每5分钟健康检查、每分钟宿主机资源采样、每日03:15 PostgreSQL备份及每周日04:15隔离恢复验证。测试服务器把日志和本机备份放在200 GB数据盘的 `/var/lib/docker/mv-agent-maintenance/`，避免占满40 GB系统盘。资源采样读取默认路由公网网卡，只把发送字节增量计入自然月流量；配额按 `300 × 1024³` 字节计算。备份还需按 [`BACKUP-RESTORE.md`](BACKUP-RESTORE.md) 同步到独立对象存储。
 
 ## 7. 数据库和 Redis 安全访问
 

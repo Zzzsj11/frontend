@@ -7,9 +7,8 @@ import random
 import tempfile
 import uuid
 import zipfile
-from contextlib import suppress
 from pathlib import Path
-from typing import Any, Coroutine
+from typing import Any
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
@@ -821,46 +820,6 @@ def _persist_llm_calls(
         )
 
 
-# 持有大纲后台生成任务的强引用，避免被事件循环 GC（同 chat.py 的 tasks 表惯例）
-_outline_background_tasks: set[asyncio.Task] = set()
-_segment_retry_tasks: set[asyncio.Task] = set()
-
-
-async def _outline_heartbeat(task_id: str) -> None:
-    """大纲生成租约心跳。
-
-    LLM 单次请求期间也定期刷新 updated_at；进程退出后心跳停止，
-    全局巡检器才能安全地把超时 outlining 判定为僵尸任务。
-    """
-    while True:
-        await asyncio.sleep(30)
-        async with session_factory() as session:
-            task = await session.get(ProjectTaskModel, task_id)
-            if not task or task.deleted_at is not None or task.status != "outlining":
-                return
-            config = dict(task.storyboard_config or {})
-            progress = dict(config.get("outlineProgress") or {})
-            progress["heartbeatAt"] = utcnow().isoformat()
-            config["outlineProgress"] = progress
-            task.storyboard_config = config
-            await session.commit()
-
-
-def _start_outline_background(task_id: str, operation: Coroutine[Any, Any, None]) -> None:
-    async def supervised() -> None:
-        heartbeat = asyncio.create_task(_outline_heartbeat(task_id))
-        try:
-            await operation
-        finally:
-            heartbeat.cancel()
-            with suppress(asyncio.CancelledError):
-                await heartbeat
-
-    background = asyncio.create_task(supervised())
-    _outline_background_tasks.add(background)
-    background.add_done_callback(_outline_background_tasks.discard)
-
-
 async def _run_ass_outline_generation(
     *,
     task_id: str,
@@ -871,7 +830,8 @@ async def _run_ass_outline_generation(
     role_ids: list[str],
     emotion: dict,
     extra_requirement: str,
-) -> None:
+    job: Job | None = None,
+) -> dict[str, Any]:
     """后台执行 ASS 两轮大纲生成；进度写 storyboard_config.outlineProgress 供 SSE 轮询推送。"""
 
     async def on_progress(progress: dict) -> None:
@@ -883,6 +843,10 @@ async def _run_ass_outline_generation(
             config["outlineProgress"] = progress
             item.storyboard_config = config
             await progress_session.commit()
+        if job:
+            done = int(progress.get("segmentsDone") or 0)
+            total = max(1, int(progress.get("segmentsTotal") or 1))
+            await jobs.update_progress(job, 10 + min(75, int(done / total * 75)))
 
     async with session_factory() as session:
         task = await session.get(ProjectTaskModel, task_id)
@@ -911,7 +875,7 @@ async def _run_ass_outline_generation(
             task.storyboard_config = config
             task.status = "outline_failed"
             await session.commit()
-            return
+            raise
         story_bible = await build_ass_story_bible(
             segments=segments,
             emotion=emotion,
@@ -945,6 +909,7 @@ async def _run_ass_outline_generation(
             project_task_id=task_id,
         )
         await session.commit()
+        return {"taskId": task_id, "storyBibleVersion": story_bible.get("version") or STORY_BIBLE_VERSION}
 
 
 async def _apply_general_outline_to_lines(db: AsyncSession, lines: list[StoryboardLineModel], shots: list[dict], durations: list[float]) -> None:
@@ -981,7 +946,8 @@ async def _run_general_outline_generation(
     user_id: str,
     project_id: str,
     selected_humans: list[dict],
-) -> None:
+    job: Job | None = None,
+) -> dict[str, Any]:
     """后台执行通用分镜大纲生成；进度写 storyboard_config.outlineProgress 供 SSE 轮询推送。"""
 
     async def on_progress(progress: dict) -> None:
@@ -993,6 +959,10 @@ async def _run_general_outline_generation(
             config["outlineProgress"] = progress
             item.storyboard_config = config
             await progress_session.commit()
+        if job:
+            done = int(progress.get("shotsDone") or 0)
+            total = max(1, int(progress.get("shotsTotal") or 1))
+            await jobs.update_progress(job, 10 + min(75, int(done / total * 75)))
 
     async with session_factory() as session:
         task = await session.get(ProjectTaskModel, task_id)
@@ -1026,7 +996,7 @@ async def _run_general_outline_generation(
             task.storyboard_config = failed_config
             task.status = "outline_failed"
             await session.commit()
-            return
+            raise
         story_bible = await build_general_story_bible(config=config, shots=outline["shots"], durations=durations)
         lines = list(
             (
@@ -1054,13 +1024,18 @@ async def _run_general_outline_generation(
             project_task_id=task_id,
         )
         await session.commit()
+        return {"taskId": task_id, "storyBibleVersion": story_bible.get("version") or STORY_BIBLE_VERSION}
 
 
 @router.post("/tasks/{task_id}/storyboard-outline/regenerate", status_code=202)
 async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
     task = await owned_task(db, user.id, task_id)
+    task = (await db.execute(select(ProjectTaskModel).where(ProjectTaskModel.id == task.id).with_for_update())).scalar_one()
     if task.storyboard_type not in ("ass", "general"):
         raise HTTPException(422, "该分镜类型不支持生成全局大纲")
+    current_progress = (task.storyboard_config or {}).get("outlineProgress") or {}
+    if current_progress.get("phase") == "segment_retry":
+        raise HTTPException(409, "场景段正在重新生成中，请等待本轮完成后再生成全局大纲")
     if task.status == "outlining":
         # 进度回调会持续刷新 updated_at；超过阈值未刷新视为后台任务丢失（服务重启等）的僵尸状态，放行重新生成
         # sqlite 读回的 updated_at 不带时区，与 aware 的 utcnow 相减前需要补齐
@@ -1099,20 +1074,21 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
         config = dict(task.storyboard_config or {})
         shots_total = int(config.get("empty_shot_count", 0)) + int(config.get("character_shot_count", 0))
         progress = {"phase": "generating", "shotsDone": 0, "shotsTotal": shots_total, "startedAt": utcnow().isoformat()}
+        job = await jobs.enqueue(
+            db,
+            "general_outline",
+            {"selected_humans": selected_humans, "_provider": "internal"},
+            user_id=user.id,
+            project_id=task.project_id,
+            project_task_id=task.id,
+        )
+        progress["jobId"] = job.id
         config["outlineProgress"] = progress
         task.storyboard_config = config
         task.status = "outlining"
         await db.commit()
-        _start_outline_background(
-            task.id,
-            _run_general_outline_generation(
-                task_id=task.id,
-                user_id=user.id,
-                project_id=task.project_id,
-                selected_humans=selected_humans,
-            ),
-        )
-        return {"taskId": task.id, "status": "outlining", "progress": progress}
+        await jobs.dispatch(job, run_storyboard_job)
+        return {"taskId": task.id, "jobId": job.id, "status": "outlining", "progress": progress}
 
     lines = list(
         (
@@ -1136,24 +1112,28 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
     ]
     progress = {"phase": "planning", "segmentsDone": 0, "segmentsTotal": 0, "startedAt": utcnow().isoformat()}
     config = dict(task.storyboard_config or {})
+    job = await jobs.enqueue(
+        db,
+        "ass_outline",
+        {
+            "segments": segments,
+            "selected_humans": selected_humans,
+            "role_ids": role_ids,
+            "emotion": (task.storyboard_config or {}).get("songEmotion") or {},
+            "extra_requirement": task.extra_requirement or "",
+            "_provider": "internal",
+        },
+        user_id=user.id,
+        project_id=task.project_id,
+        project_task_id=task.id,
+    )
+    progress["jobId"] = job.id
     config["outlineProgress"] = progress
     task.storyboard_config = config
     task.status = "outlining"
     await db.commit()
-    _start_outline_background(
-        task.id,
-        _run_ass_outline_generation(
-            task_id=task.id,
-            user_id=user.id,
-            project_id=task.project_id,
-            segments=segments,
-            selected_humans=selected_humans,
-            role_ids=role_ids,
-            emotion=(task.storyboard_config or {}).get("songEmotion") or {},
-            extra_requirement=task.extra_requirement or "",
-        ),
-    )
-    return {"taskId": task.id, "status": "outlining", "progress": progress}
+    await jobs.dispatch(job, run_storyboard_job)
+    return {"taskId": task.id, "jobId": job.id, "status": "outlining", "progress": progress}
 
 
 @router.get("/tasks/{task_id}/storyboard-outline/events")
@@ -1207,7 +1187,8 @@ async def _run_segment_retry(
     role_ids: list[str],
     user_id: str,
     project_id: str,
-) -> None:
+    job: Job | None = None,
+) -> dict[str, Any]:
     """后台执行单个场景段的重新生成，完成后更新 storyBible 与分镜行。"""
     old_shots = list(story_bible.get("shots") or [])
     try:
@@ -1230,7 +1211,7 @@ async def _run_segment_retry(
             config["outlineProgress"] = {"phase": "segment_retry_failed", "sceneIndex": scene_index, "error": str(exc)[:300]}
             task.storyboard_config = config
             await session.commit()
-        return
+        raise
     async with session_factory() as session:
         task = await session.get(ProjectTaskModel, task_id)
         if not task or task.deleted_at is not None:
@@ -1276,13 +1257,82 @@ async def _run_segment_retry(
         await _apply_story_bible_to_lines(session, target_lines, segment_plans, now=utcnow())
         _persist_llm_calls(session, result["usageRecords"], default_operation="ass_scene_segment", user_id=user_id, project_id=project_id, project_task_id=task_id)
         await session.commit()
+        if job:
+            await jobs.update_progress(job, 95)
+        return {"taskId": task_id, "sceneIndex": scene_index, "shotStart": shot_start, "shotCount": shot_count}
+
+
+async def run_storyboard_job(job: Job) -> dict[str, Any]:
+    """Replay a persisted outline/segment job using only its durable request snapshot."""
+    request = dict(job.request or {})
+    task_id = str(job.project_task_id or request.get("task_id") or "")
+    if not task_id or not job.user_id or not job.project_id:
+        raise RuntimeError("分镜工单缺少用户、项目或任务标识")
+    try:
+        if job.kind == "ass_outline":
+            return await _run_ass_outline_generation(
+                task_id=task_id,
+                user_id=job.user_id,
+                project_id=job.project_id,
+                segments=list(request.get("segments") or []),
+                selected_humans=list(request.get("selected_humans") or []),
+                role_ids=list(request.get("role_ids") or []),
+                emotion=dict(request.get("emotion") or {}),
+                extra_requirement=str(request.get("extra_requirement") or ""),
+                job=job,
+            )
+        if job.kind == "general_outline":
+            return await _run_general_outline_generation(
+                task_id=task_id,
+                user_id=job.user_id,
+                project_id=job.project_id,
+                selected_humans=list(request.get("selected_humans") or []),
+                job=job,
+            )
+        if job.kind == "ass_segment_retry":
+            return await _run_segment_retry(
+                task_id=task_id,
+                scene_index=int(request["scene_index"]),
+                segments=list(request.get("segments") or []),
+                scene_plan=list(request.get("scene_plan") or []),
+                story_bible=dict(request.get("story_bible") or {}),
+                selected_humans=list(request.get("selected_humans") or []),
+                extra_requirement=str(request.get("extra_requirement") or ""),
+                emotion=dict(request.get("emotion") or {}),
+                role_ids=list(request.get("role_ids") or []),
+                user_id=job.user_id,
+                project_id=job.project_id,
+                job=job,
+            )
+        raise RuntimeError(f"不支持的分镜工单类型：{job.kind}")
+    except Exception as exc:
+        # Catch failures outside the provider call too (for example story-bible
+        # assembly or database application) so the domain state never remains
+        # indefinitely in outlining/segment_retry after a durable job fails.
+        async with session_factory() as session:
+            task = await session.get(ProjectTaskModel, task_id)
+            if task and task.deleted_at is None:
+                config = dict(task.storyboard_config or {})
+                current = dict(config.get("outlineProgress") or {})
+                if job.kind == "ass_segment_retry":
+                    current.update({"phase": "segment_retry_failed", "sceneIndex": request.get("scene_index"), "error": str(exc)[:300], "jobId": job.id})
+                else:
+                    current.update({"phase": "error", "error": f"分镜大纲生成失败：{exc}"[:300], "jobId": job.id})
+                    task.status = "outline_failed"
+                config["outlineProgress"] = current
+                task.storyboard_config = config
+                await session.commit()
+        raise
 
 
 @router.post("/tasks/{task_id}/storyboard-outline/segments/{scene_index}/regenerate", status_code=202)
 async def regenerate_storyboard_outline_segment(task_id: str, scene_index: int, user: CurrentUser, db: AsyncSession = Db) -> dict:
     task = await owned_task(db, user.id, task_id)
+    task = (await db.execute(select(ProjectTaskModel).where(ProjectTaskModel.id == task.id).with_for_update())).scalar_one()
     if task.storyboard_type != "ass":
         raise HTTPException(422, "只有 ASS 分镜支持场景段重试")
+    if task.status == "outlining":
+        raise HTTPException(409, "全局大纲正在生成中，请等待本轮完成后再重试场景段")
     story_bible = dict((task.storyboard_config or {}).get("storyBible") or {})
     scene_plan = story_bible.get("scenePlan") or []
     if not 0 <= scene_index < len(scene_plan):
@@ -1335,33 +1385,36 @@ async def regenerate_storyboard_outline_segment(task_id: str, scene_index: int, 
         raise HTTPException(422, "分镜数据与时间轴不一致，请重新生成全局大纲")
     # 幂等：该场景段正在后台重试中
     current_progress = (task.storyboard_config or {}).get("outlineProgress") or {}
-    if current_progress.get("phase") == "segment_retry" and current_progress.get("sceneIndex") == scene_index:
-        raise HTTPException(409, "该场景段正在重新生成中，请等待本轮完成后再提交")
+    if current_progress.get("phase") == "segment_retry":
+        raise HTTPException(409, "已有场景段正在重新生成中，请等待本轮完成后再提交")
     await consume_daily_quota(db, user_id=user.id, category="chat")
     emotion = (task.storyboard_config or {}).get("songEmotion") or {}
     progress = {"phase": "segment_retry", "sceneIndex": scene_index, "startedAt": utcnow().isoformat()}
     config = dict(task.storyboard_config or {})
+    job = await jobs.enqueue(
+        db,
+        "ass_segment_retry",
+        {
+            "scene_index": scene_index,
+            "segments": segments,
+            "scene_plan": scene_plan,
+            "story_bible": story_bible,
+            "selected_humans": selected_humans,
+            "extra_requirement": task.extra_requirement or "",
+            "emotion": emotion,
+            "role_ids": role_ids,
+            "_provider": "internal",
+        },
+        user_id=user.id,
+        project_id=task.project_id,
+        project_task_id=task.id,
+    )
+    progress["jobId"] = job.id
     config["outlineProgress"] = progress
     task.storyboard_config = config
     await db.commit()
-    background = asyncio.create_task(
-        _run_segment_retry(
-            task_id=task.id,
-            scene_index=scene_index,
-            segments=segments,
-            scene_plan=scene_plan,
-            story_bible=story_bible,
-            selected_humans=selected_humans,
-            extra_requirement=task.extra_requirement or "",
-            emotion=emotion,
-            role_ids=role_ids,
-            user_id=user.id,
-            project_id=task.project_id,
-        )
-    )
-    _segment_retry_tasks.add(background)
-    background.add_done_callback(_segment_retry_tasks.discard)
-    return {"taskId": task.id, "sceneIndex": scene_index, "status": "segment_retrying", "progress": progress}
+    await jobs.dispatch(job, run_storyboard_job)
+    return {"taskId": task.id, "jobId": job.id, "sceneIndex": scene_index, "status": "segment_retrying", "progress": progress}
 
 
 @router.delete("/tasks/{task_id}")

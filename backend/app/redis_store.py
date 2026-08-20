@@ -43,8 +43,13 @@ async def clear_login_attempts(key: str) -> None:
 
 
 async def cache_job(job_id: str, snapshot: dict[str, Any]) -> None:
-    await redis.set(f"job:{job_id}", json.dumps(snapshot, ensure_ascii=False), ex=7 * 24 * 3600)
-    await redis.publish(f"job-events:{job_id}", json.dumps(snapshot, ensure_ascii=False))
+    try:
+        await redis.set(f"job:{job_id}", json.dumps(snapshot, ensure_ascii=False), ex=7 * 24 * 3600)
+        await redis.publish(f"job-events:{job_id}", json.dumps(snapshot, ensure_ascii=False))
+    except Exception:
+        # PostgreSQL is the job source of truth. Cache/event loss may increase
+        # polling latency but must never fail a durable submission or runner.
+        return
 
 
 async def notify_worker(kind: str) -> None:
@@ -57,7 +62,10 @@ async def notify_worker(kind: str) -> None:
 
 
 async def get_cached_job(job_id: str) -> dict[str, Any] | None:
-    raw = await redis.get(f"job:{job_id}")
+    try:
+        raw = await redis.get(f"job:{job_id}")
+    except Exception:
+        return None
     return json.loads(raw) if raw else None
 
 

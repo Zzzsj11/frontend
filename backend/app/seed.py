@@ -396,6 +396,16 @@ async def recover_stale_storyboard_generation() -> None:
     cutoff = utcnow() - timedelta(minutes=10)
     outline_cutoff = utcnow() - timedelta(minutes=5)
     async with session_factory() as session:
+        active_outline_job = (
+            select(GenerationJobModel.id)
+            .where(
+                GenerationJobModel.project_task_id == ProjectTaskModel.id,
+                GenerationJobModel.kind.in_(("ass_outline", "general_outline")),
+                GenerationJobModel.status.in_(("queued", "running")),
+                GenerationJobModel.deleted_at.is_(None),
+            )
+            .exists()
+        )
         stale_outlines = list(
             (
                 await session.execute(
@@ -403,6 +413,7 @@ async def recover_stale_storyboard_generation() -> None:
                         ProjectTaskModel.status == "outlining",
                         ProjectTaskModel.deleted_at.is_(None),
                         ProjectTaskModel.updated_at < outline_cutoff,
+                        ~active_outline_job,
                     )
                 )
             )

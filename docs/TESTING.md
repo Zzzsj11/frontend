@@ -156,5 +156,6 @@ ADMIN_CONSOLE_E2E=1 npx playwright test e2e/admin/admin-console.spec.ts  # 远�
 
 - 导出改动：进度单调递增、完成后归档可读、不同 taskId 状态不覆盖、用户间不可读他人导出、SSE 断开后 GET 状态可恢复。
 - 大纲改动：明确人物动作的歌词不得规划为空镜、连续空镜受限、6 条及以上歌词至少 3 个场景、视觉母题不超过大纲声明次数。
+- 分镜Worker改动：断开 `worker-storyboard` 后API仍能202入队且工单保持 `queued`；恢复Worker后可完成。执行中强制终止Worker后，工单须由PostgreSQL心跳判定为失租、attempt递增并重放；超过3次必须落失败终态，同时更新任务的 `outlineProgress`，不得无限重试或停留在 `outlining`。
 - 系统人物改动：默认分类男/女/儿童且只读、对所有用户可见、儿童提示词保持年龄造型一致、原图与缩略图均为 TOS URL；新增系统图片用 `scripts/sync-system-human-assets.py --asset CODE=/path/to/image` 上传，不得复制到项目目录。
 - 本机 `make preflight` 的 Docker 阶段经 `docker-compose.local-build.yml` 使用国内镜像代理；服务器部署不加载该文件。代理不可用时用 `LOCAL_NODE_BASE_IMAGE`、`LOCAL_NGINX_BASE_IMAGE` 临时覆盖，不得改服务器部署配置。
