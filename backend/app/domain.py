@@ -1926,7 +1926,6 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
     if not payload.force and line.generation_status == "succeeded" and line.prompt_context_hash == context_hash:
         return await line_json(db, line, [item.digital_human_id for item in line_cast])
     await consume_daily_quota(db, user_id=user.id, category="chat")
-    now = utcnow()
     line.generation_status, line.generation_error = "running", None
     line.generation_attempt += 1
     job = GenerationJobModel(
@@ -1936,17 +1935,18 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
         project_task_id=task.id,
         storyboard_line_id=line.id,
         kind="storyboard_line",
-        status="running",
-        progress=10,
+        status="queued",
+        progress=0,
         request={"current": current, "fullContext": full_context},
         attempt=line.generation_attempt,
         idempotency_key=f"storyboard:{line.id}:{context_hash}",
-        started_at=now,
     )
     db.add(job)
     await db.commit()
     try:
         async with storyboard_generation_slots:
+            job.status, job.progress, job.started_at = "running", 10, utcnow()
+            await db.commit()
             result = await generate_storyboard_line(source=task.storyboard_type, current=current, full_context=full_context, allowed_humans=allowed_humans)
         line.scene_prompt, line.shot_prompt = result["scenePrompt"], result["shotPrompt"]
         line.generation_status, line.prompt_context_hash, line.generated_at = "succeeded", context_hash, utcnow()
@@ -1957,7 +1957,8 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
                 db.add(StoryboardLineCastModel(id=uid("linecast"), storyboard_line_id=line.id, digital_human_id=human_id, sort_order=index))
         # job.result 只保留瘦身后的调用记录：请求快照与返回原文体量大，统一入 llm_call_logs
         slim_records = [{key: value for key, value in call.items() if key not in ("requestMessages", "responseText")} for call in result.get("usageRecords") or []]
-        job.status, job.progress, job.result, job.finished_at = "succeeded", 100, {**result, "usageRecords": slim_records}, utcnow()
+        observed_at = utcnow()
+        job.status, job.progress, job.result, job.finished_at, job.first_result_observed_at = "succeeded", 100, {**result, "usageRecords": slim_records}, observed_at, observed_at
         usage_records = result.get("usageRecords") or [{"operation": "storyboard_line", "usage": result.get("usage"), "requestId": result.get("requestId")}]
         _persist_llm_calls(
             db,
@@ -1977,7 +1978,8 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
         return response
     except Exception as exc:
         line.generation_status, line.generation_error = "failed", str(exc)[:2000]
-        job.status, job.error, job.finished_at = "failed", str(exc)[:2000], utcnow()
+        observed_at = utcnow()
+        job.status, job.error, job.finished_at, job.first_result_observed_at = "failed", str(exc)[:2000], observed_at, observed_at
         failed_calls = getattr(exc, "usage_records", None) or [
             {"operation": "storyboard_line_failed", "usage": getattr(exc, "usage", {}), "requestId": getattr(exc, "request_id", None)}
         ]
