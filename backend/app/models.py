@@ -590,3 +590,4 @@ class StoryboardOptionItemModel(LifecycleMixin, Base):
     parent_id: Mapped[str | None] = mapped_column(ForeignKey("storyboard_option_items.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(120))
     sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    cast_policy: Mapped[str | None] = mapped_column(String(32), nullable=True)

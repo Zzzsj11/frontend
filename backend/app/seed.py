@@ -80,7 +80,17 @@ async def seed_storyboard_options(session) -> None:
     async def add_item(kind: str, name: str, parent_id: str | None, path: str, sort_order: int) -> str:
         item_id = seed_item_id(kind, path)
         if not await session.get(StoryboardOptionItemModel, item_id):
-            session.add(StoryboardOptionItemModel(id=item_id, kind=kind, parent_id=parent_id, name=name, sort_order=sort_order))
+            cast_policy = "required" if kind == "genre" and path in {"流行歌曲/爱情积极", "流行歌曲/爱情消极"} else None
+            session.add(
+                StoryboardOptionItemModel(
+                    id=item_id,
+                    kind=kind,
+                    parent_id=parent_id,
+                    name=name,
+                    sort_order=sort_order,
+                    cast_policy=cast_policy,
+                )
+            )
         return item_id
 
     for index, name in enumerate(DEFAULT_SEASONS):

@@ -78,6 +78,21 @@ describe('apiRequest', () => {
     await assertion
     expect(fetchMock).toHaveBeenCalledTimes(5)
   })
+
+  it('throws an expected status without adding a global error notice', async () => {
+    errorBus.dismissAll()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'already running' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    await expect(apiRequest('/outline', { method: 'POST' }, true, [409])).rejects.toMatchObject({
+      status: 409,
+    })
+    expect(errorBus.state.queue).toHaveLength(0)
+  })
 })
 
 describe('apiRequest 主动取消（abort）', () => {

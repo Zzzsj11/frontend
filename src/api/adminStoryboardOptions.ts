@@ -10,6 +10,7 @@ export interface StoryboardOptionItem {
   parentId: string | null
   name: string
   sortOrder: number
+  castPolicy: 'required' | 'optional_random' | null
 }
 
 export const listStoryboardOptions = (kind: StoryboardOptionKind) =>
@@ -20,6 +21,7 @@ export const createStoryboardOption = (input: {
   parentId?: string | null
   name: string
   sortOrder?: number
+  castPolicy?: 'required' | 'optional_random' | null
 }) =>
   apiRequest<StoryboardOptionItem>('/admin/storyboard-options', {
     method: 'POST',
@@ -28,15 +30,24 @@ export const createStoryboardOption = (input: {
       parent_id: input.parentId ?? null,
       name: input.name,
       ...(input.sortOrder !== undefined ? { sort_order: input.sortOrder } : {}),
+      ...(input.castPolicy !== undefined ? { cast_policy: input.castPolicy } : {}),
     }),
   })
 
-export const updateStoryboardOption = (id: string, patch: { name?: string; sortOrder?: number }) =>
+export const updateStoryboardOption = (
+  id: string,
+  patch: {
+    name?: string
+    sortOrder?: number
+    castPolicy?: 'required' | 'optional_random' | null
+  },
+) =>
   apiRequest<StoryboardOptionItem>(`/admin/storyboard-options/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify({
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.sortOrder !== undefined ? { sort_order: patch.sortOrder } : {}),
+      ...(patch.castPolicy !== undefined ? { cast_policy: patch.castPolicy } : {}),
     }),
   })
 

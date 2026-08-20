@@ -130,6 +130,8 @@ export const useProjectStore = defineStore('project', {
     activeTaskId: null as string | null,
     /** 正在切换歌曲（载入脚本中） */
     songSwitching: false,
+    /** 子任务载入序号：较早请求即使后返回，也不得覆盖较新的切换结果 */
+    taskLoadVersion: 0,
     /** 工作区数据属主用户 id：loadSongProjects 发现账号变化时先清空上一账号现场 */
     ownerUserId: '',
     /** 各子项目(任务)的脚本编辑现场缓存(按 taskId)，切回时不丢编辑状态 */
@@ -440,8 +442,21 @@ export const useProjectStore = defineStore('project', {
 
     /** 载入指定子项目(任务)的脚本到编辑区（不负责缓存当前，调用方自行处理） */
     async _loadTask(songId: string, taskId: string | null) {
+      const loadVersion = ++this.taskLoadVersion
       // P1 统一轮询调度：切走旧子项目时立即停止其全部轮询/SSE（后端任务照跑，切回后恢复）
       if (this.activeTaskId && this.activeTaskId !== taskId) cancelTaskWatchers(this.activeTaskId)
+      // 在等待详情接口前立即切断旧任务上下文，避免已取消的旧 watcher 误判为超时并补发生成请求。
+      this.stop()
+      this.editingLineId = null
+      this.activeSongId = songId
+      this.activeTaskId = taskId
+      this.activeStoryBible = null
+      this.activeStoryboardType = null
+      this.activeTaskStatus = null
+      this.castIds = []
+      this.lines = []
+      this.selectedLineId = null
+      this.currentTime = 0
       const script = taskId
         ? await api.fetchSongScript(taskId)
         : {
@@ -451,13 +466,10 @@ export const useProjectStore = defineStore('project', {
             storyBible: undefined,
             status: '',
           }
+      if (loadVersion !== this.taskLoadVersion) return
       if (taskId) this.taskScripts[taskId] = script
-      this.stop()
-      this.editingLineId = null
       this.castIds = [...script.cast]
       this.lines = script.lines
-      this.activeSongId = songId
-      this.activeTaskId = taskId
       const auth = useAuthStore()
       if (songId && auth.user) localStorage.setItem(sidebarKeys(auth.user.id).song, songId)
       if (taskId && auth.user) localStorage.setItem(sidebarKeys(auth.user.id).task, taskId)
@@ -473,10 +485,10 @@ export const useProjectStore = defineStore('project', {
         if (auth.user && localStorage.getItem(batchShotKey(auth.user.id, taskId)))
           void this.generateAllShots()
         if (
-          script.storyboardType === 'ass' &&
+          (script.storyboardType === 'ass' || script.storyboardType === 'general') &&
           (script.status === 'parsed' || script.status === 'outlining')
         ) {
-          // parsed：上传仅完成拆分，自动接续大纲生成；outlining：上次大纲中断遗留，重新生成
+          // parsed：脚本仅完成拆分，自动接续大纲生成；outlining：切回后只恢复订阅
           void this.runOutlineGeneration(taskId)
         } else {
           const pending = this.lines
@@ -748,12 +760,16 @@ export const useProjectStore = defineStore('project', {
      * 订阅大纲生成进度 SSE；返回 true=已到达终态，false=看门狗超时（进度长时间无更新，需重新触发）。
      * 服务端只在 status 离开 outlining 后关闭流；僵尸任务（后台丢失）时流不会关闭，由看门狗兜底。
      */
-    async _watchOutline(taskId: string): Promise<boolean> {
+    async _watchOutline(taskId: string): Promise<'completed' | 'timeout' | 'navigation-cancelled'> {
       // 注册到任务 watcher：切换子项目时 SSE 立即停止（后端大纲生成照跑，切回后重新订阅）
       const controller = registerTaskWatcher(taskId)
       let lastEventAt = Date.now()
+      let watchdogTimedOut = false
       const watchdog = window.setInterval(() => {
-        if (Date.now() - lastEventAt > 150_000) controller.abort()
+        if (Date.now() - lastEventAt > 150_000) {
+          watchdogTimedOut = true
+          controller.abort()
+        }
       }, 1000)
       try {
         await api.streamStoryboardOutline(
@@ -765,12 +781,12 @@ export const useProjectStore = defineStore('project', {
           },
           controller.signal,
         )
-        return true
+        return 'completed'
       } catch (error) {
-        if (controller.signal.aborted) return false
+        if (controller.signal.aborted) return watchdogTimedOut ? 'timeout' : 'navigation-cancelled'
         // SSE 连接失败：降级为直接查询一次任务状态
         const fresh = await api.fetchSongScript(taskId).catch(() => null)
-        return fresh !== null && fresh.status !== 'outlining'
+        return fresh !== null && fresh.status !== 'outlining' ? 'completed' : 'timeout'
       } finally {
         window.clearInterval(watchdog)
       }
@@ -805,7 +821,9 @@ export const useProjectStore = defineStore('project', {
               if (!(error instanceof ApiError && error.status === 409)) throw error
             }
           }
-          if (await this._watchOutline(id)) break
+          const watchResult = await this._watchOutline(id)
+          if (watchResult === 'navigation-cancelled') return
+          if (watchResult === 'completed') break
         }
         if (this.activeTaskId !== id) return
         // 终态后全量刷新（storyBible 含 failedSegments，行含最新大纲规划）
@@ -832,8 +850,10 @@ export const useProjectStore = defineStore('project', {
         this._setTaskStatus(id, 'outline_failed')
         this.outlineError = error instanceof Error ? error.message : '大纲生成失败'
       } finally {
-        this.outlineLoading = false
-        if (this.outlineTaskId === id) this.outlineTaskId = null
+        if (this.outlineTaskId === id) {
+          this.outlineLoading = false
+          this.outlineTaskId = null
+        }
       }
     },
 

@@ -55,7 +55,13 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
               {
                 value: '爱情消极',
                 label: '爱情消极',
+                castPolicy: 'required',
                 children: [{ value: '失恋', label: '失恋' }],
+              },
+              {
+                value: '通用积极',
+                label: '通用积极',
+                children: [{ value: '生活', label: '生活' }],
               },
             ],
           },
@@ -255,10 +261,15 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await expect(general.getByLabel('清晰度 *')).toHaveValue('720p')
   const scaleInputs = general.locator('input[type="number"]')
   await expect(scaleInputs.nth(0)).toHaveValue('4')
-  await expect(scaleInputs.nth(1)).toHaveValue('17')
+  await expect(scaleInputs.nth(1)).toHaveValue('13')
   await expect(scaleInputs.nth(2)).toHaveValue('210')
   await expect(general.getByLabel('视频模型')).toHaveValue('doubao-seedance-2.0')
   await expect(general.getByLabel('视频模型')).toBeEnabled()
   await expect(general.getByLabel('图片模型 *')).toHaveValue('gpt-image-2')
   await expect(general.getByLabel('图片模型 *')).toBeDisabled()
+  const generate = general.getByRole('button', { name: '批量生成', exact: true })
+  await expect(generate).toBeDisabled()
+  await general.getByLabel('二级分类 *').selectOption('通用积极')
+  await expect(general.getByText('未选择时，系统会按性别设定自动匹配系统人物')).toBeVisible()
+  await expect(generate).toBeEnabled()
 })

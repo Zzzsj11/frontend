@@ -30,7 +30,7 @@ const resolution = ref<ShotGenOptions['resolution']>('720p')
 const imageModel = ref(DEFAULT_IMAGE_MODEL)
 const videoModel = ref(DEFAULT_VIDEO_MODEL)
 const emptyShotCount = ref(4)
-const characterShotCount = ref(17)
+const characterShotCount = ref(13)
 const totalDuration = ref(210)
 const extraRequirement = ref('')
 const selectedHumanIds = ref<string[]>([])
@@ -43,6 +43,17 @@ const secondaryOption = computed(() =>
   secondaryOptions.value.find((item) => item.value === secondary.value),
 )
 const tertiaryOptions = computed(() => secondaryOption.value?.children ?? [])
+const tertiaryOption = computed(() =>
+  tertiaryOptions.value.find((item) => item.value === tertiary.value),
+)
+const castPolicy = computed(
+  () =>
+    tertiaryOption.value?.castPolicy ??
+    secondaryOption.value?.castPolicy ??
+    genreOption.value?.castPolicy ??
+    'optional_random',
+)
+const castRequired = computed(() => characterShotCount.value > 0 && castPolicy.value === 'required')
 const totalShots = computed(
   () => Math.max(0, emptyShotCount.value) + Math.max(0, characterShotCount.value),
 )
@@ -61,7 +72,8 @@ const canSubmit = computed(
     !!genre.value &&
     (!secondaryOptions.value.length || !!secondary.value) &&
     totalShots.value > 0 &&
-    durationIsValid.value,
+    durationIsValid.value &&
+    (!castRequired.value || selectedHumanIds.value.length > 0),
 )
 
 const reset = () => {
@@ -80,7 +92,7 @@ const reset = () => {
   videoModel.value = DEFAULT_VIDEO_MODEL
   gender.value = '女'
   emptyShotCount.value = 4
-  characterShotCount.value = 17
+  characterShotCount.value = 13
   totalDuration.value = 210
   extraRequirement.value = ''
   selectedHumanIds.value = []
@@ -311,9 +323,14 @@ const submit = () => {
           </label>
         </section>
         <section class="form-section">
-          <h4>人物素材</h4>
+          <h4>人物素材{{ castRequired ? '（必选）' : '（可选）' }}</h4>
           <div>
-            <p class="field-label">从已有角色库选择 <span>（可多选，人物镜轮流使用）</span></p>
+            <p class="field-label">
+              从已有角色库选择
+              <span v-if="characterShotCount <= 0">（当前没有人物镜，无需选择）</span>
+              <span v-else-if="castRequired">（当前分类必须手动选择至少一位人物）</span>
+              <span v-else>（未选择时，系统会按性别设定自动匹配系统人物）</span>
+            </p>
             <div class="cast-list">
               <button
                 v-for="human in store.digitalHumans"

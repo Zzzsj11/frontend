@@ -386,7 +386,7 @@ export const regenerateStoryboardOutline = (taskId: string) =>
     taskId: string
     status: string
     progress: OutlineProgress
-  }>(`/tasks/${taskId}/storyboard-outline/regenerate`, { method: 'POST' })
+  }>(`/tasks/${taskId}/storyboard-outline/regenerate`, { method: 'POST' }, true, [409])
 export const regenerateStoryboardOutlineSegment = (taskId: string, sceneIndex: number) =>
   apiRequest<{
     sceneIndex: number

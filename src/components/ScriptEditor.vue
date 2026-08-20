@@ -238,6 +238,10 @@ const batchGeneratableCount = computed(
     </div>
 
     <div ref="lineListRef" class="line-list">
+      <div v-if="store.songSwitching" class="task-loading" role="status">
+        <span class="spinner" />
+        正在载入子任务…
+      </div>
       <div
         v-for="(line, index) in store.lines"
         :key="line.id"
@@ -253,7 +257,7 @@ const batchGeneratableCount = computed(
         <ScriptLineItem :line="line" :index="index" />
       </div>
 
-      <p v-if="store.lines.length === 0" class="empty-tip">
+      <p v-if="!store.songSwitching && store.lines.length === 0" class="empty-tip">
         暂无视频，您可以点击下方【单个视频】按钮或顶部「ASS 视频」/【通用 MV 视频】开始创作
       </p>
     </div>
@@ -278,6 +282,15 @@ const batchGeneratableCount = computed(
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+.task-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 160px;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
 }
 .panel-header {
   display: flex;

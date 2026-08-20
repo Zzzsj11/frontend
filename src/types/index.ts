@@ -258,6 +258,7 @@ export interface OutlinePlannedLine {
 export interface StoryboardCategoryOption {
   value: string
   label: string
+  castPolicy?: 'required' | 'optional_random'
   children?: StoryboardCategoryOption[]
 }
 

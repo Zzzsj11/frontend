@@ -308,7 +308,33 @@ def test_general_storyboard_rejects_character_shots_without_cast(client) -> None
         },
     )
     assert response.status_code == 422
-    assert "至少需要选择一个角色" in response.json()["detail"]
+    assert "必须手动选择" in response.json()["detail"]
+
+
+def test_general_storyboard_auto_selects_system_cast_for_non_romance(client) -> None:
+    project = client.post("/api/projects", json={"name": "Automatic cast"}).json()
+    response = client.post(
+        f"/api/projects/{project['id']}/storyboards/general",
+        json={
+            "genre": "流行歌曲",
+            "secondary_category": "通用积极",
+            "tertiary_category": "生活",
+            "season": "秋",
+            "gender": "男女",
+            "age_group": "青年",
+            "visual_style": "电影写实",
+            "empty_shot_count": 1,
+            "character_shot_count": 1,
+            "total_duration": 10,
+            "digital_human_ids": [],
+        },
+    )
+    assert response.status_code == 201
+    result = response.json()
+    assert len(result["cast"]) == 2
+    assert all(human_id.startswith("dh-system-") for human_id in result["cast"])
+    assert result["storyboardConfig"]["cast_selection_mode"] == "automatic"
+    assert result["storyboardConfig"]["cast_policy"] == "optional_random"
 
 
 def test_general_storyboard_enforces_four_to_fifteen_seconds_per_shot(client) -> None:

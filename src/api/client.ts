@@ -64,6 +64,7 @@ export async function apiRequest<T>(
   path: string,
   init: RequestInit = {},
   retry = true,
+  silentStatuses: readonly number[] = [],
 ): Promise<T> {
   const headers = new Headers(init.headers)
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
@@ -118,7 +119,8 @@ export async function apiRequest<T>(
   // 请求完成后才被取消：不走 401 刷新/错误上报，直接按取消抛出（结果反正会被调用方丢弃）
   if (init.signal?.aborted) throw abortError()
   if ((response.status === 401 || response.status === 403) && retry && !path.startsWith('/auth/')) {
-    if (!intentionalLogout && (await refreshAccess())) return apiRequest<T>(path, init, false)
+    if (!intentionalLogout && (await refreshAccess()))
+      return apiRequest<T>(path, init, false, silentStatuses)
     if (intentionalLogout) throw new ApiError('已退出登录', response.status)
     forceLogout()
     throw reportApiError(new ApiError('登录已过期，请重新登录', response.status))
@@ -136,17 +138,17 @@ export async function apiRequest<T>(
       retried,
     })
   }
-  if (!response.ok)
-    throw reportApiError(
-      new ApiError(
-        body.detail ||
-          (response.status === 502 || response.status === 503
-            ? '服务正在重启，请稍后重试'
-            : `请求失败（HTTP ${response.status}）`),
-        response.status,
-        body.errorCode,
-      ),
+  if (!response.ok) {
+    const error = new ApiError(
+      body.detail ||
+        (response.status === 502 || response.status === 503
+          ? '服务正在重启，请稍后重试'
+          : `请求失败（HTTP ${response.status}）`),
+      response.status,
+      body.errorCode,
     )
+    throw silentStatuses.includes(response.status) ? error : reportApiError(error)
+  }
   return body as T
 }
 

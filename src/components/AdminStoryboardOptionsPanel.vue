@@ -167,6 +167,21 @@ const moveItem = async (item: StoryboardOptionItem, delta: -1 | 1) => {
 }
 const isFirst = (item: StoryboardOptionItem) => siblingsOf(item)[0]?.id === item.id
 const isLast = (item: StoryboardOptionItem) => siblingsOf(item).at(-1)?.id === item.id
+const updateCastPolicy = async (item: StoryboardOptionItem, event: Event) => {
+  const value = (event.target as HTMLSelectElement).value
+  busy.value = true
+  error.value = ''
+  try {
+    await updateStoryboardOption(item.id, {
+      castPolicy: value ? (value as 'required' | 'optional_random') : null,
+    })
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '人物策略保存失败'
+  } finally {
+    busy.value = false
+  }
+}
 /** 新增位置标签：根级或具体父分类名 */
 const addingUnderName = computed(() => {
   if (addingUnder.value === undefined) return ''
@@ -218,6 +233,7 @@ const addingUnderName = computed(() => {
       <thead>
         <tr>
           <th>名称</th>
+          <th v-if="kind === 'genre'">人物选择策略</th>
           <th class="ops-col">操作</th>
         </tr>
       </thead>
@@ -243,6 +259,19 @@ const addingUnderName = computed(() => {
               </template>
               <template v-else>{{ row.item.name }}</template>
             </span>
+          </td>
+          <td v-if="kind === 'genre'">
+            <select
+              class="policy-select"
+              :value="row.item.castPolicy ?? ''"
+              :disabled="busy"
+              :aria-label="`${row.item.name}人物选择策略`"
+              @change="updateCastPolicy(row.item, $event)"
+            >
+              <option value="">继承上级（默认自动匹配）</option>
+              <option value="required">必须手动选择</option>
+              <option value="optional_random">可选，未选自动匹配</option>
+            </select>
           </td>
           <td class="ops-col">
             <template v-if="confirmingId === row.item.id">
@@ -293,7 +322,9 @@ const addingUnderName = computed(() => {
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td colspan="2" class="muted">暂无选项，点击右上角「新增{{ kindLabel }}」</td>
+          <td :colspan="kind === 'genre' ? 3 : 2" class="muted">
+            暂无选项，点击右上角「新增{{ kindLabel }}」
+          </td>
         </tr>
       </tbody>
     </table>
@@ -383,6 +414,14 @@ const addingUnderName = computed(() => {
 .name-input:focus {
   outline: none;
   border-color: var(--primary);
+}
+.policy-select {
+  min-width: 190px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
 }
 .options-table {
   width: 100%;

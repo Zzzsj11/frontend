@@ -356,6 +356,42 @@ describe('sidebar selection persistence (per user)', () => {
     expect(store.activeSongId).toBe('song-a')
     expect(store.activeTaskId).toBe('task-a1')
   })
+
+  it('invalidates the previous task before waiting for the new task payload', async () => {
+    let resolveTask!: (response: Response) => void
+    const pendingTask = new Promise<Response>((resolve) => {
+      resolveTask = resolve
+    })
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url === '/api/tasks/task-b1?history=0') return pendingTask
+      if (url.endsWith('/material-exports') || url.endsWith('/generations/active')) return json([])
+      return json({}, 404)
+    })
+    const store = useProjectStore()
+    store.activeSongId = 'song-a'
+    store.activeTaskId = 'task-a1'
+    store.lines = [{ id: 'old-line' } as ScriptLine]
+
+    const switching = store.selectSongTask('song-b', 'task-b1')
+
+    expect(store.activeSongId).toBe('song-b')
+    expect(store.activeTaskId).toBe('task-b1')
+    expect(store.lines).toEqual([])
+    expect(store.songSwitching).toBe(true)
+
+    resolveTask(
+      json({
+        cast: [],
+        storyboardType: 'ass',
+        status: 'ready',
+        storyboardConfig: {},
+        lines: [],
+      }),
+    )
+    await switching
+    expect(store.songSwitching).toBe(false)
+  })
 })
 
 describe('drag ordering with optimistic update', () => {

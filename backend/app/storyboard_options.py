@@ -58,6 +58,8 @@ def seed_item_id(kind: str, path: str) -> str:
 
 def _option_node(item: StoryboardOptionItemModel, children_map: dict[str | None, list[StoryboardOptionItemModel]]) -> dict:
     node: dict = {"value": item.name, "label": item.name}
+    if item.cast_policy:
+        node["castPolicy"] = item.cast_policy
     children = [_option_node(child, children_map) for child in children_map.get(item.id, [])]
     if children:
         node["children"] = children
@@ -89,3 +91,34 @@ async def load_general_storyboard_options(db) -> dict:
         "visualStyles": flat("visual_style"),
         "ratios": list(DEFAULT_RATIOS),
     }
+
+
+async def resolve_genre_cast_policy(db, genre: str, secondary: str | None, tertiary: str | None) -> str:
+    """沿分类路径读取最深层显式策略；未配置时允许后端自动匹配系统人物。"""
+    rows = list(
+        (
+            await db.execute(
+                select(StoryboardOptionItemModel).where(
+                    StoryboardOptionItemModel.kind == "genre",
+                    StoryboardOptionItemModel.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    children: dict[str | None, list[StoryboardOptionItemModel]] = {}
+    for row in rows:
+        children.setdefault(row.parent_id, []).append(row)
+    current_parent: str | None = None
+    policy: str | None = None
+    for name in (genre, secondary, tertiary):
+        if not name:
+            continue
+        item = next((row for row in children.get(current_parent, []) if row.name == name), None)
+        if not item:
+            break
+        if item.cast_policy:
+            policy = item.cast_policy
+        current_parent = item.id
+    return policy or "optional_random"

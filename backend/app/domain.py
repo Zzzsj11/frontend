@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import random
 import tempfile
 import uuid
 import zipfile
@@ -70,7 +71,7 @@ from .schemas import (
 )
 from .storage import download_public_url_to_path, get_storage, is_tos_url, safe_key
 from .story_bible import STORY_BIBLE_VERSION, build_ass_story_bible, build_general_story_bible, exact_durations
-from .storyboard_options import load_general_storyboard_options
+from .storyboard_options import load_general_storyboard_options, resolve_genre_cast_policy
 from .storyboard_prompt import (
     PROMPT_VERSION,
     SCHEMA_VERSION,
@@ -531,12 +532,51 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
     total = payload.empty_shot_count + payload.character_shot_count
     if total < 1:
         raise HTTPException(422, "至少需要一个分镜")
-    if payload.character_shot_count and not payload.digital_human_ids:
-        raise HTTPException(422, "人物镜数量大于 0 时至少需要选择一个角色")
-    visible = await visible_humans(db, user.id, payload.digital_human_ids)
-    if len({item.id for item in visible}) != len(set(payload.digital_human_ids)):
+    cast_policy = await resolve_genre_cast_policy(db, payload.genre, payload.secondary_category, payload.tertiary_category)
+    cast_ids = list(dict.fromkeys(payload.digital_human_ids))
+    cast_selection_mode = "manual" if cast_ids else "none"
+    if payload.character_shot_count and not cast_ids:
+        if cast_policy == "required":
+            raise HTTPException(422, "当前分类必须手动选择至少一个角色")
+        gender_plan = {
+            "女": ["女"],
+            "男": ["男"],
+            "男女": ["女", "男"],
+            "女女": ["女", "女"],
+            "男男": ["男", "男"],
+            "多女（三人以上）": ["女", "女", "女"],
+            "多男（三人以上）": ["男", "男", "男"],
+            "多人有男有女（三人以上）": ["女", "男", "女"],
+        }[payload.gender]
+        system_humans = list(
+            (
+                await db.execute(
+                    select(DigitalHumanModel).where(
+                        DigitalHumanModel.scope == "system",
+                        DigitalHumanModel.status == "active",
+                        DigitalHumanModel.deleted_at.is_(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        chosen: list[str] = []
+        rng = random.SystemRandom()
+        for gender in gender_plan:
+            candidates = [human.id for human in system_humans if human.gender == gender and human.id not in chosen]
+            if not candidates:
+                raise HTTPException(422, f"暂无可用于自动匹配的{gender}性系统人物，请手动选择角色")
+            chosen.append(rng.choice(candidates))
+        cast_ids = chosen
+        cast_selection_mode = "automatic"
+    visible = await visible_humans(db, user.id, cast_ids)
+    if len({item.id for item in visible}) != len(set(cast_ids)):
         raise HTTPException(422, "包含不可用角色")
     config = payload.model_dump(mode="json")
+    config["digital_human_ids"] = cast_ids
+    config["cast_policy"] = cast_policy
+    config["cast_selection_mode"] = cast_selection_mode
     title = f"通用分镜-{utcnow().astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d-%H-%M-%S')}"
     try:
         durations = exact_durations(payload.total_duration, total)
@@ -554,7 +594,7 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
     )
     db.add(task)
     await db.flush()
-    for index, human_id in enumerate(payload.digital_human_ids):
+    for index, human_id in enumerate(cast_ids):
         db.add(ProjectCastModel(id=uid("cast"), project_task_id=task.id, digital_human_id=human_id, sort_order=index))
     # 占位 lines：大纲生成前只确定数量与时长，shotType 与大纲字段由后台任务回填
     output = []
@@ -599,7 +639,7 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
         "projectId": project_id,
         "title": title,
         "status": "parsed",
-        "cast": payload.digital_human_ids,
+        "cast": cast_ids,
         "totalDuration": payload.total_duration,
         "storyboardConfig": config,
         "lines": output,
@@ -637,47 +677,30 @@ async def get_task(task_id: str, user: CurrentUser, db: AsyncSession = Db, histo
     casts: dict[str, list[str]] = {}
     for link in line_cast:
         casts.setdefault(link.storyboard_line_id, []).append(link.digital_human_id)
-    # P2 切换路径瘦身：批量预取全部行的媒体资产（3 条 IN 查询 + 按行分组），
-    # 替代逐行各查 3 条的 N+1；history=false 时每行只回传当前选用资产 + 历史版本计数
+    # P2 切换路径瘦身：history=false 只读取当前资产，历史数量单独 GROUP BY 统计，
+    # 避免已完成任务的全部历史媒体对象进入 ORM 和 Python 内存。
     line_ids = [line.id for line in lines]
+    asset_counts: dict[str, dict[str, int]] = {"scene": {}, "shot": {}, "voice": {}}
+
+    async def _asset_rows(model, kind: str):
+        conditions = [
+            model.storyboard_line_id.in_(line_ids) if line_ids else False,
+            model.deleted_at.is_(None),
+        ]
+        if not history:
+            count_rows = (await db.execute(select(model.storyboard_line_id, func.count(model.id)).where(*conditions).group_by(model.storyboard_line_id))).all()
+            asset_counts[kind] = {line_id: int(count) for line_id, count in count_rows}
+            conditions.append(model.is_current.is_(True))
+        return list((await db.execute(select(model).where(*conditions).order_by(model.created_at))).scalars().all())
+
     scenes_by_line: dict[str, list[SceneAssetModel]] = {}
-    for asset in (
-        (
-            await db.execute(
-                select(SceneAssetModel)
-                .where(SceneAssetModel.storyboard_line_id.in_(line_ids) if line_ids else False, SceneAssetModel.deleted_at.is_(None))
-                .order_by(SceneAssetModel.created_at)
-            )
-        )
-        .scalars()
-        .all()
-    ):
+    for asset in await _asset_rows(SceneAssetModel, "scene"):
         scenes_by_line.setdefault(asset.storyboard_line_id, []).append(asset)
     shots_by_line: dict[str, list[ShotAssetModel]] = {}
-    for asset in (
-        (
-            await db.execute(
-                select(ShotAssetModel)
-                .where(ShotAssetModel.storyboard_line_id.in_(line_ids) if line_ids else False, ShotAssetModel.deleted_at.is_(None))
-                .order_by(ShotAssetModel.created_at)
-            )
-        )
-        .scalars()
-        .all()
-    ):
+    for asset in await _asset_rows(ShotAssetModel, "shot"):
         shots_by_line.setdefault(asset.storyboard_line_id, []).append(asset)
     voices_by_line: dict[str, list[VoiceAssetModel]] = {}
-    for asset in (
-        (
-            await db.execute(
-                select(VoiceAssetModel)
-                .where(VoiceAssetModel.storyboard_line_id.in_(line_ids) if line_ids else False, VoiceAssetModel.deleted_at.is_(None))
-                .order_by(VoiceAssetModel.created_at)
-            )
-        )
-        .scalars()
-        .all()
-    ):
+    for asset in await _asset_rows(VoiceAssetModel, "voice"):
         voices_by_line.setdefault(asset.storyboard_line_id, []).append(asset)
     return {
         **task_json(task),
@@ -690,6 +713,13 @@ async def get_task(task_id: str, user: CurrentUser, db: AsyncSession = Db, histo
                 shots_by_line.get(line.id, []),
                 voices_by_line.get(line.id, []),
                 include_history=history,
+                asset_counts={
+                    "scene": asset_counts["scene"].get(line.id, 0),
+                    "shot": asset_counts["shot"].get(line.id, 0),
+                    "voice": asset_counts["voice"].get(line.id, 0),
+                }
+                if not history
+                else None,
             )
             for line in lines
         ],
@@ -1595,6 +1625,7 @@ def _line_json_from_assets(
     voices: list[VoiceAssetModel],
     *,
     include_history: bool = True,
+    asset_counts: dict[str, int] | None = None,
 ) -> dict:
     """组装单行脚本 JSON（纯函数，资产由调用方预取）。
 
@@ -1641,9 +1672,9 @@ def _line_json_from_assets(
         payload["sceneAssets"] = [item for item in scene_items if item["isCurrent"]]
         payload["shotAssets"] = [item for item in shot_items if item["isCurrent"]]
         payload["voiceAssets"] = [item for item in voice_items if item["isCurrent"]]
-        payload["sceneAssetCount"] = len(scenes)
-        payload["shotAssetCount"] = len(shots)
-        payload["voiceAssetCount"] = len(voices)
+        payload["sceneAssetCount"] = (asset_counts or {}).get("scene", len(scenes))
+        payload["shotAssetCount"] = (asset_counts or {}).get("shot", len(shots))
+        payload["voiceAssetCount"] = (asset_counts or {}).get("voice", len(voices))
     return payload
 
 

@@ -45,7 +45,7 @@ describe('general storyboard defaults', () => {
     wrapper.unmount()
   })
 
-  it('defaults the generation scale to 4+17 shots over 210 seconds', async () => {
+  it('defaults the generation scale to 4+13 shots over 210 seconds', async () => {
     const store = useProjectStore()
     store.generalStoryboardOptions = {
       genres: [{ value: 'pop', label: '流行歌曲' }],
@@ -64,7 +64,7 @@ describe('general storyboard defaults', () => {
       document.body.querySelectorAll('input[type="number"]'),
     ) as HTMLInputElement[]
     // 空镜数量 / 人物镜数量 / 总时长（秒）
-    expect(numbers.map((el) => el.value)).toEqual(['4', '17', '210'])
+    expect(numbers.map((el) => el.value)).toEqual(['4', '13', '210'])
     wrapper.unmount()
   })
 
@@ -110,6 +110,32 @@ describe('general storyboard defaults', () => {
     const wrapper = mount(GeneralStoryboardModal, { attachTo: document.body })
     await vi.waitFor(() => expect(document.body.querySelector('.cast-item')).not.toBeNull())
     expect(document.body.querySelectorAll('.cast-item.active')).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('requires a manual cast only when the selected category policy requires it', async () => {
+    const store = useProjectStore()
+    store.generalStoryboardOptions = {
+      genres: [
+        {
+          value: 'pop',
+          label: '流行歌曲',
+          children: [{ value: 'love', label: '爱情积极', castPolicy: 'required' }],
+        },
+      ],
+      seasons: ['秋'],
+      ageGroups: ['青年'],
+      visualStyles: ['电影写实'],
+      ratios: ['16:9'],
+    }
+    store.generalStoryboardOpen = true
+    const wrapper = mount(GeneralStoryboardModal, { attachTo: document.body })
+    await vi.waitFor(() =>
+      expect(document.body.querySelector('.modal h4')?.textContent).toContain('音乐属性'),
+    )
+    const submit = document.body.querySelector('.modal-footer .btn-primary') as HTMLButtonElement
+    expect(document.body.textContent).toContain('当前分类必须手动选择至少一位人物')
+    expect(submit.disabled).toBe(true)
     wrapper.unmount()
   })
 })

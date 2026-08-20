@@ -13,6 +13,7 @@ def test_general_storyboard_options_seeded(client):
     first = next(g for g in data["genres"] if g["value"] == "流行歌曲")
     assert first["label"] == "流行歌曲"
     second = next(c for c in first["children"] if c["value"] == "爱情消极")
+    assert second["castPolicy"] == "required"
     assert [leaf["value"] for leaf in second["children"]] == ["失恋", "爱而不得", "背叛", "土味情歌"]
     # 戏曲无下级分类 → 不挂 children 键（前端据此允许二级留空）
     opera = next(g for g in data["genres"] if g["value"] == "戏曲")
@@ -40,6 +41,8 @@ def test_storyboard_option_admin_crud_and_genre_cascade(client):
     # genre 树：三级可建，第四级 422；非 genre 带 parent 422；删除一级级联子孙
     root = client.post("/api/admin/storyboard-options", json={"kind": "genre", "name": "测试曲风"}).json()
     branch = client.post("/api/admin/storyboard-options", json={"kind": "genre", "parent_id": root["id"], "name": "测试二级"}).json()
+    policy = client.patch(f"/api/admin/storyboard-options/{branch['id']}", json={"cast_policy": "optional_random"})
+    assert policy.status_code == 200 and policy.json()["castPolicy"] == "optional_random"
     leaf = client.post("/api/admin/storyboard-options", json={"kind": "genre", "parent_id": branch["id"], "name": "测试三级"})
     assert leaf.status_code == 201
     too_deep = client.post("/api/admin/storyboard-options", json={"kind": "genre", "parent_id": leaf.json()["id"], "name": "测试四级"})

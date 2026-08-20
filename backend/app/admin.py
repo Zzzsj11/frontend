@@ -1352,15 +1352,32 @@ class StoryboardOptionIn(BaseModel):
     parent_id: str | None = None
     name: str
     sort_order: int | None = None
+    cast_policy: str | None = None
 
 
 class StoryboardOptionPatch(BaseModel):
     name: str | None = None
     sort_order: int | None = None
+    cast_policy: str | None = None
 
 
 def _option_summary(x: StoryboardOptionItemModel) -> dict:
-    return {"id": x.id, "kind": x.kind, "parentId": x.parent_id, "name": x.name, "sortOrder": x.sort_order}
+    return {
+        "id": x.id,
+        "kind": x.kind,
+        "parentId": x.parent_id,
+        "name": x.name,
+        "sortOrder": x.sort_order,
+        "castPolicy": x.cast_policy,
+    }
+
+
+def _validate_cast_policy(kind: str, value: str | None) -> str | None:
+    if value is None:
+        return None
+    if kind != "genre" or value not in {"required", "optional_random"}:
+        raise HTTPException(422, "人物选择策略无效")
+    return value
 
 
 def _validate_option_name(name: str) -> str:
@@ -1438,7 +1455,14 @@ async def storyboard_option_create(payload: StoryboardOptionIn, request: Request
         sort_order = (
             int((await db.execute(select(func.coalesce(func.max(StoryboardOptionItemModel.sort_order), -1)).where(*_sibling_where(payload.kind, parent_id)))).scalar_one()) + 1
         )
-    item = StoryboardOptionItemModel(id=f"soi-{uuid.uuid4().hex[:16]}", kind=payload.kind, parent_id=parent_id, name=name, sort_order=sort_order)
+    item = StoryboardOptionItemModel(
+        id=f"soi-{uuid.uuid4().hex[:16]}",
+        kind=payload.kind,
+        parent_id=parent_id,
+        name=name,
+        sort_order=sort_order,
+        cast_policy=_validate_cast_policy(payload.kind, payload.cast_policy),
+    )
     db.add(item)
     await audit(db, request, user, "storyboard_option.create", "storyboard_option_item", item.id, None, _option_summary(item))
     await db.commit()
@@ -1468,6 +1492,8 @@ async def storyboard_option_update(item_id: str, payload: StoryboardOptionPatch,
         item.name = name
     if payload.sort_order is not None:
         item.sort_order = payload.sort_order
+    if "cast_policy" in payload.model_fields_set:
+        item.cast_policy = _validate_cast_policy(item.kind, payload.cast_policy)
     await audit(db, request, user, "storyboard_option.update", "storyboard_option_item", item.id, before, _option_summary(item))
     await db.commit()
     return _option_summary(item)

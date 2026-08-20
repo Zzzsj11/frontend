@@ -91,6 +91,15 @@ describe('admin storyboard options panel', () => {
     wrapper.unmount()
   })
 
+  it('configures an inheritable cast policy for a genre node', async () => {
+    const wrapper = mount(AdminStoryboardOptionsPanel)
+    await flush()
+    const select = wrapper.get('select[aria-label="爱情消极人物选择策略"]')
+    await select.setValue('required')
+    expect(updateStoryboardOption).toHaveBeenCalledWith('g2', { castPolicy: 'required' })
+    wrapper.unmount()
+  })
+
   it('deletes an option after inline confirmation', async () => {
     const wrapper = mount(AdminStoryboardOptionsPanel)
     await flush()
