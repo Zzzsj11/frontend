@@ -91,6 +91,7 @@ MAX_REFERENCE_IMAGES = 6
 MAX_REFERENCE_VIDEOS = 1
 MAX_REFERENCE_AUDIOS = 3
 MAX_REFERENCE_FILES = 10
+VIDEO_COMBINE_CLASS = "VHS_VideoCombine"
 
 # ResolutionSelector（LayerUtility）的合法宽高比字符串；"16:9 (Widescreen)" 已经工作流默认验证
 ASPECT_RATIOS: tuple[str, ...] = (
@@ -338,6 +339,7 @@ def build_reference_workflow(
     seed: int | None = None,
     stage1_megapixels: float = DEFAULT_STAGE1_MEGAPIXELS,
     stage2_megapixels: float = DEFAULT_STAGE2_MEGAPIXELS,
+    generate_audio: bool = False,
 ) -> dict[str, Any]:
     """Build a clean Ref2VA graph with only the supplied multimodal references."""
     prompt = prompt.strip()
@@ -416,7 +418,17 @@ def build_reference_workflow(
     if seed is not None:
         for offset, node_id in enumerate(REFERENCE_NODE_SEEDS):
             workflow[node_id]["inputs"]["noise_seed"] = seed + offset
+    _configure_output_audio(workflow, generate_audio)
     return workflow
+
+
+def _configure_output_audio(workflow: dict[str, Any], generate_audio: bool) -> None:
+    """Keep H3's generated audio only when the product request enables it."""
+    if generate_audio:
+        return
+    for node in workflow.values():
+        if node.get("class_type") == VIDEO_COMBINE_CLASS:
+            node.get("inputs", {}).pop("audio", None)
 
 
 async def submit_reference_task(
@@ -430,6 +442,7 @@ async def submit_reference_task(
     seed: int | None = None,
     stage1_megapixels: float = DEFAULT_STAGE1_MEGAPIXELS,
     stage2_megapixels: float = DEFAULT_STAGE2_MEGAPIXELS,
+    generate_audio: bool = False,
 ) -> dict[str, Any]:
     workflow = build_reference_workflow(
         prompt=prompt,
@@ -441,6 +454,7 @@ async def submit_reference_task(
         seed=seed,
         stage1_megapixels=stage1_megapixels,
         stage2_megapixels=stage2_megapixels,
+        generate_audio=generate_audio,
     )
     return await _submit_custom_workflow_json(workflow, [], "多参考生成")
 
@@ -452,6 +466,7 @@ async def submit_text_task(
     aspect_ratio: str,
     seed: int | None = None,
     megapixels: float = DEFAULT_TEXT_MEGAPIXELS,
+    generate_audio: bool = False,
 ) -> dict[str, Any]:
     """使用完整 workflow JSON 提交 H3 纯文生视频任务。"""
     node_info = build_text_node_info_list(
@@ -461,7 +476,7 @@ async def submit_text_task(
         seed=seed,
         megapixels=megapixels,
     )
-    return await _submit_custom_workflow(TEXT_WORKFLOW_PATH, node_info, "纯文生视频")
+    return await _submit_custom_workflow(TEXT_WORKFLOW_PATH, node_info, "纯文生视频", generate_audio=generate_audio)
 
 
 async def submit_first_frame_task(
@@ -472,6 +487,7 @@ async def submit_first_frame_task(
     image: str,
     seed: int | None = None,
     megapixels: float = DEFAULT_FIRST_FRAME_MEGAPIXELS,
+    generate_audio: bool = False,
 ) -> dict[str, Any]:
     """使用完整 workflow JSON 提交 H3 首帧生视频任务。"""
     node_info = build_first_frame_node_info_list(
@@ -482,7 +498,7 @@ async def submit_first_frame_task(
         seed=seed,
         megapixels=megapixels,
     )
-    return await _submit_custom_workflow(FIRST_FRAME_WORKFLOW_PATH, node_info, "首帧生视频")
+    return await _submit_custom_workflow(FIRST_FRAME_WORKFLOW_PATH, node_info, "首帧生视频", generate_audio=generate_audio)
 
 
 async def submit_first_last_frame_task(
@@ -494,6 +510,7 @@ async def submit_first_last_frame_task(
     last_image: str,
     seed: int | None = None,
     megapixels: float = DEFAULT_FIRST_LAST_MEGAPIXELS,
+    generate_audio: bool = False,
 ) -> dict[str, Any]:
     """使用官方 FL2VA 工作流提交首尾帧生视频任务。"""
     node_info = build_first_last_frame_node_info_list(
@@ -505,17 +522,23 @@ async def submit_first_last_frame_task(
         seed=seed,
         megapixels=megapixels,
     )
-    return await _submit_custom_workflow(FIRST_LAST_FRAME_WORKFLOW_PATH, node_info, "首尾帧生视频")
+    return await _submit_custom_workflow(FIRST_LAST_FRAME_WORKFLOW_PATH, node_info, "首尾帧生视频", generate_audio=generate_audio)
 
 
-async def _submit_custom_workflow(workflow_path: Path, node_info: list[dict[str, Any]], label: str) -> dict[str, Any]:
+async def _submit_custom_workflow(
+    workflow_path: Path,
+    node_info: list[dict[str, Any]],
+    label: str,
+    *,
+    generate_audio: bool = False,
+) -> dict[str, Any]:
     """通过高级接口提交随代码版本管理的完整 ComfyUI 工作流。"""
     try:
-        workflow = workflow_path.read_text(encoding="utf-8")
-        json.loads(workflow)
+        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise RunningHubError(f"H3 {label}工作流读取失败：{exc}") from exc
 
+    _configure_output_audio(workflow, generate_audio)
     return await _submit_custom_workflow_json(workflow, node_info, label)
 
 

@@ -576,6 +576,7 @@ async def generate_h3_video(request: VideoGenerationCreate, job: Job) -> dict[st
                 duration=float(request.duration),
                 aspect_ratio=_h3_first_frame_aspect_ratio(request.ratio),
                 megapixels=stage2,
+                generate_audio=request.generate_audio,
             )
         elif mode == "first_frame":
             if len(images) != 1 or videos or audios:
@@ -587,6 +588,7 @@ async def generate_h3_video(request: VideoGenerationCreate, job: Job) -> dict[st
                 aspect_ratio=_h3_first_frame_aspect_ratio(request.ratio),
                 image=image_name,
                 megapixels=stage2,
+                generate_audio=request.generate_audio,
             )
         elif mode == "first_last":
             if len(images) != 2 or videos or audios:
@@ -599,6 +601,7 @@ async def generate_h3_video(request: VideoGenerationCreate, job: Job) -> dict[st
                 first_image=uploaded[0][0],
                 last_image=uploaded[1][0],
                 megapixels=stage2,
+                generate_audio=request.generate_audio,
             )
         else:
             if audios and not (images or videos):
@@ -617,6 +620,7 @@ async def generate_h3_video(request: VideoGenerationCreate, job: Job) -> dict[st
                 audios=[name for name, _ in audio_uploads],
                 stage1_megapixels=stage1,
                 stage2_megapixels=stage2,
+                generate_audio=request.generate_audio,
             )
     except RunningHubError as exc:
         raise ProviderError(f"H3 提交失败：{exc}") from exc

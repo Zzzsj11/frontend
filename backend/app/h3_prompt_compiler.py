@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from .schemas import VideoGenerationCreate
 
 COMPILER_NAME = "h3-prompt-writing"
-COMPILER_VERSION = "1.1.0"
+COMPILER_VERSION = "1.2.0"
 BASE_SECTIONS = ("integrated_multimodal_description:", "overall_soundscape:", "non_diegetic_music:")
 REFERENCE_SECTIONS = ("subject_definitions:", "summary:", "retention_analysis:", "detailed_description:", "overall_soundscape:", "non_diegetic_music:")
 
@@ -36,6 +36,20 @@ def _already_structured(prompt: str, sections: tuple[str, ...]) -> bool:
     return all(position >= 0 for position in positions) and positions == sorted(positions)
 
 
+def _silence_structured_prompt(prompt: str) -> str:
+    soundscape = prompt.find("overall_soundscape:")
+    music = prompt.find("non_diegetic_music:", soundscape)
+    return (
+        (
+            prompt[:soundscape]
+            + "overall_soundscape:\nN/A — generate a silent video with no audio track, ambience, dialogue, sound effects, or music.\n\n"
+            + "non_diegetic_music:\nN/A"
+        )
+        if soundscape >= 0 and music >= 0
+        else prompt
+    )
+
+
 def _bindings(payload: VideoGenerationCreate) -> dict[str, dict[str, str]]:
     bindings: dict[str, dict[str, str]] = {}
     for index, url in enumerate(payload.image_urls, 1):
@@ -54,7 +68,15 @@ def compile_h3_prompt(payload: VideoGenerationCreate) -> H3PromptCompilation:
     bindings = _bindings(payload)
     sections = REFERENCE_SECTIONS if mode == "reference" else BASE_SECTIONS
     if _already_structured(source, sections):
-        return H3PromptCompilation(source, source, mode, COMPILER_NAME, COMPILER_VERSION, bindings)
+        compiled = source if payload.generate_audio else _silence_structured_prompt(source)
+        return H3PromptCompilation(compiled, source, mode, COMPILER_NAME, COMPILER_VERSION, bindings)
+
+    soundscape = (
+        "Preserve physically plausible ambience and synchronized action sounds; do not add dialogue unless explicitly requested."
+        if payload.generate_audio
+        else "N/A — generate a silent video with no audio track, ambience, dialogue, sound effects, or music."
+    )
+    music = "Follow the creative direction; use N/A when no audience-only music is requested." if payload.generate_audio else "N/A"
 
     if mode != "reference":
         instruction = ""
@@ -70,8 +92,8 @@ def compile_h3_prompt(payload: VideoGenerationCreate) -> H3PromptCompilation:
             picture_note = " Begin exactly from Picture 1, describe a continuous visible transition, and converge exactly to Picture 2 at the end."
         compiled = (
             f"{instruction}integrated_multimodal_description: [Shot 1] Create a {payload.duration}-second {payload.ratio} target video.{picture_note} Creative direction: {source}\n\n"
-            "overall_soundscape: Preserve physically plausible ambience and synchronized action sounds; do not add dialogue unless explicitly requested.\n\n"
-            "non_diegetic_music: Follow the creative direction; use N/A when no audience-only music is requested."
+            f"overall_soundscape: {soundscape}\n\n"
+            f"non_diegetic_music: {music}"
         )
         return H3PromptCompilation(compiled, source, mode, COMPILER_NAME, COMPILER_VERSION, bindings)
 
@@ -97,9 +119,13 @@ def compile_h3_prompt(payload: VideoGenerationCreate) -> H3PromptCompilation:
         task_types.append("audio reuse" if payload.h3_audio_usage == "reuse" else "audio reference")
     labels = ", ".join(f"<{label}>" for label in bindings) or "the supplied references"
     music = (
-        "Reuse <Audio 1> as the complete audience-only score, trimming only at the target-video boundary."
-        if payload.audio_urls and payload.h3_audio_usage == "reuse"
-        else "Reference the supplied audio labels according to retention_analysis; use N/A when no music is requested."
+        (
+            "Reuse <Audio 1> as the complete audience-only score, trimming only at the target-video boundary."
+            if payload.audio_urls and payload.h3_audio_usage == "reuse"
+            else "Reference the supplied audio labels according to retention_analysis; use N/A when no music is requested."
+        )
+        if payload.generate_audio
+        else "N/A"
     )
     compiled = (
         "subject_definitions:\n" + "\n".join(definitions) + "\n\n"
@@ -107,7 +133,7 @@ def compile_h3_prompt(payload: VideoGenerationCreate) -> H3PromptCompilation:
         "retention_analysis:\n" + "\n".join(retention) + "\n\n"
         f"detailed_description:\nThe target video follows this creative direction in playback order: {source}\n"
         "Keep labels consistent, preserve identity and continuity, and avoid blur, identity drift, duplicate subjects, malformed anatomy, unintended cuts, text, logos, and watermarks.\n\n"
-        "overall_soundscape:\nUse restrained, physically plausible ambience and synchronized action sounds. Do not add dialogue unless explicitly requested.\n\n"
+        f"overall_soundscape:\n{soundscape}\n\n"
         f"non_diegetic_music:\n{music}"
     )
     warnings = () if definitions else ("Ref2VA prompt has no bound reference definitions.",)

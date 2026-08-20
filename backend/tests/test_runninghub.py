@@ -99,6 +99,19 @@ def test_reference_workflow_uses_product_limits_and_removes_empty_defaults():
     assert all(node not in workflow for node in ("100", "103", "130", "169", "173", "177"))
     assert workflow["243"]["inputs"]["noise_seed"] == 10
     assert workflow["300"]["inputs"]["noise_seed"] == 11
+    assert "audio" not in workflow["386"]["inputs"]
+
+
+def test_reference_workflow_keeps_output_audio_when_enabled():
+    workflow = build_reference_workflow(
+        prompt="测试",
+        duration=8,
+        aspect_ratio="16:9 (Widescreen)",
+        images=["1.png"],
+        generate_audio=True,
+    )
+
+    assert workflow["386"]["inputs"]["audio"] == ["364", 0]
 
 
 def test_reference_workflow_enforces_cross_media_rules():

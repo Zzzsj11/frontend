@@ -26,10 +26,20 @@ def test_h3_mode_detection_and_reference_compilation():
 
 def test_h3_compiler_preserves_expert_prompt_verbatim():
     prompt = "\n\n".join(f"{section}\nvalue" for section in REFERENCE_SECTIONS)
-    payload = VideoGenerationCreate(prompt=prompt, image_urls=["a.png", "b.png"])
+    payload = VideoGenerationCreate(prompt=prompt, image_urls=["a.png", "b.png"], generate_audio=True)
     compiled = compile_h3_prompt(payload)
     assert compiled.prompt == prompt
     assert compiled.source_prompt == prompt
+
+
+def test_h3_compiler_only_rewrites_audio_sections_for_silent_expert_prompt():
+    prompt = "\n\n".join(f"{section}\nvalue" for section in REFERENCE_SECTIONS)
+    compiled = compile_h3_prompt(VideoGenerationCreate(prompt=prompt, image_urls=["a.png", "b.png"], generate_audio=False))
+
+    assert compiled.source_prompt == prompt
+    assert "subject_definitions:\nvalue" in compiled.prompt
+    assert "overall_soundscape:\nN/A" in compiled.prompt
+    assert compiled.prompt.endswith("non_diegetic_music:\nN/A")
 
 
 def test_h3_base_modes():
@@ -38,6 +48,17 @@ def test_h3_base_modes():
     assert detect_h3_mode(text) == "text"
     assert detect_h3_mode(first) == "first_frame"
     assert compile_h3_prompt(text).prompt.startswith("integrated_multimodal_description:")
+    assert "generate a silent video with no audio track" in compile_h3_prompt(text).prompt
+
+
+def test_h3_compiler_keeps_audio_only_when_enabled():
+    enabled = VideoGenerationCreate(prompt="雨中的城市", generate_audio=True)
+    disabled = VideoGenerationCreate(prompt="雨中的城市", generate_audio=False)
+
+    assert "physically plausible ambience" in compile_h3_prompt(enabled).prompt
+    assert "non_diegetic_music: Follow the creative direction" in compile_h3_prompt(enabled).prompt
+    assert "no audio track" in compile_h3_prompt(disabled).prompt
+    assert "non_diegetic_music: N/A" in compile_h3_prompt(disabled).prompt
 
 
 def test_h3_first_last_prompt_has_exact_alignment_instruction():
