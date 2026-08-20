@@ -121,9 +121,10 @@ async def lifespan(_app: FastAPI):
     await recover_stale_storyboard_generation()
     # 数字人虚拟资产补注册由 cron 脚本每分钟执行（scripts/ensure_asset_avatars.py，带防重入锁），
     # 不再在启动时重复扫描，避免与 cron 并发导致同一人物重复注册资产
-    recovered = await jobs.recover_stale_jobs(resume_generation)
-    if recovered["resumed"] or recovered["failed"]:
-        logger.info("媒体生成任务恢复：续跑 %s 个，判败 %s 个", recovered["resumed"], recovered["failed"])
+    if settings.job_execution_mode != "worker":
+        recovered = await jobs.recover_stale_jobs(resume_generation)
+        if recovered["resumed"] or recovered["failed"]:
+            logger.info("媒体生成任务恢复：续跑 %s 个，判败 %s 个", recovered["resumed"], recovered["failed"])
     reaper = asyncio.create_task(stale_generation_reaper())
     try:
         yield

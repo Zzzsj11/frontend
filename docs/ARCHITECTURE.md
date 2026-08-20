@@ -8,7 +8,7 @@
 
 统一供应商配置通过 Docker Secret `provider_config` 挂载。检测到其中的 `AIGC_TOKEN` 时，文本模型 Token、聊天 API 地址和默认模型作为同一个配置组生效，优先于遗留的 `LLM_*` 环境变量，避免共享 Token 被误发往其他供应商；只有未配置统一供应商 Secret 时才启用独立 `LLM_*` 配置。
 
-当前任务执行仍在 API 进程内。H3 已按模型级并发上限 2 排队，但多进程/多实例时进程内信号量不能提供全局上限；后续迁移 Worker 时必须保持 `generation_jobs` 状态机和接口契约，以 Redis/队列实现“供应商 + 模型”全局并发配额，先双写/灰度，再切换执行器。新模型接入现状和剩余清单见 `TODO_MODEL_EXPANSION.md`。
+媒体生成与素材导出支持两种执行模式：默认 `inline` 保持原单进程行为；服务器设置 `JOB_EXECUTION_MODE=worker` 后，API 只把工单持久化到 `generation_jobs`，`worker-media` 与 `worker-export` 使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 领取。Redis只承担低延迟唤醒、热状态与事件，短暂不可用不会丢失数据库工单。单机Worker进程内继续按模型注册中心的 `executionPool/executionConcurrency` 限流，H3上限为2；扩到多机/K8s前仍需把该限制升级为Redis原子租约。Chat大纲和场景段重试目前仍在API后台协程，待媒体链路稳定后迁移。新模型接入现状和剩余清单见 `TODO_MODEL_EXPANSION.md`。
 
 数据库结构只由 Alembic 管理，应用启动仅验证连接；测试用 SQLite 可在隔离数据库中由 metadata 建表。认证采用短 access token、数据库 refresh token 与 `users.auth_version`，改密可即时撤销历史会话。
 

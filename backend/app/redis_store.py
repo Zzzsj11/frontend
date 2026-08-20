@@ -47,6 +47,15 @@ async def cache_job(job_id: str, snapshot: dict[str, Any]) -> None:
     await redis.publish(f"job-events:{job_id}", json.dumps(snapshot, ensure_ascii=False))
 
 
+async def notify_worker(kind: str) -> None:
+    """Best-effort wakeup only; PostgreSQL remains the durable queue."""
+    try:
+        await redis.publish("worker:wakeup", kind)
+    except Exception:
+        # A temporary Redis outage must not lose a database-backed job.
+        return
+
+
 async def get_cached_job(job_id: str) -> dict[str, Any] | None:
     raw = await redis.get(f"job:{job_id}")
     return json.loads(raw) if raw else None

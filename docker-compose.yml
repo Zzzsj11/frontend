@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-5173}:80"
+      - '${FRONTEND_PORT:-5173}:80'
     depends_on:
       backend:
         condition: service_healthy
@@ -16,7 +16,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+      - '127.0.0.1:${BACKEND_PORT:-8000}:8000'
     env_file:
       - path: ./backend/.env.chat
         required: false
@@ -31,17 +31,54 @@ services:
       LLM_API_MODE: ${LLM_API_MODE:-openai}
       STORAGE_BACKEND: tos
       JWT_SECRET: ${JWT_SECRET:-development-only-change-me-at-least-32-bytes}
+      JOB_EXECUTION_MODE: ${JOB_EXECUTION_MODE:-inline}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')",
+        ]
       interval: 10s
       timeout: 5s
       retries: 20
       start_period: 20s
+
+  worker-media:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    entrypoint: ['./worker-entrypoint.sh']
+    command: ['--kinds', 'image,video', '--concurrency', '${MEDIA_WORKER_CONCURRENCY:-4}']
+    profiles: ['workers']
+    env_file:
+      - path: ./backend/.env.chat
+        required: false
+      - path: ./backend/.env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgresql+asyncpg://mvagent:mvagent@postgres:5432/mvagent
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-development-only-change-me-at-least-32-bytes}
+      STORAGE_BACKEND: tos
+      JOB_EXECUTION_MODE: worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker-export:
+    extends: worker-media
+    command: ['--kinds', 'export', '--concurrency', '${EXPORT_WORKER_CONCURRENCY:-1}']
 
   postgres:
     image: postgres:16
@@ -51,11 +88,11 @@ services:
       POSTGRES_USER: mvagent
       POSTGRES_PASSWORD: mvagent
     ports:
-      - "${POSTGRES_PORT:-5433}:5432"
+      - '${POSTGRES_PORT:-5433}:5432'
     volumes:
       - mvagent_postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mvagent -d mvagent"]
+      test: ['CMD-SHELL', 'pg_isready -U mvagent -d mvagent']
       interval: 5s
       timeout: 3s
       retries: 20
@@ -65,11 +102,11 @@ services:
     restart: unless-stopped
     command: redis-server --appendonly yes
     ports:
-      - "${REDIS_PORT:-6380}:6379"
+      - '${REDIS_PORT:-6380}:6379'
     volumes:
       - mvagent_redis:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
       timeout: 3s
       retries: 20

@@ -103,6 +103,30 @@ def test_job_manager_applies_independent_model_execution_pools(monkeypatch) -> N
     asyncio.run(scenario())
 
 
+def test_external_worker_reconstructs_media_request(monkeypatch) -> None:
+    from app import worker
+    from app.jobs import Job
+
+    captured = {}
+
+    async def fake_generate(request, job):
+        captured.update(request.model_dump())
+        return {"job": job.id}
+
+    monkeypatch.setattr(worker, "generate_image", fake_generate)
+    job = Job(
+        id="job-worker-image",
+        kind="image",
+        request={"prompt": "测试画面", "model": "image-model", "_provider": "yinghe", "_executionPool": "images"},
+    )
+    result = asyncio.run(worker._runner(job)(job))
+
+    assert result == {"job": "job-worker-image"}
+    assert captured["prompt"] == "测试画面"
+    assert captured["model"] == "image-model"
+    assert "_provider" not in captured
+
+
 def test_h3_video_provider_archives_output(monkeypatch) -> None:
     from app import providers
     from app.jobs import Job

@@ -234,6 +234,18 @@ openssl rand -base64 36
 chmod 600 backend/.provider_config.py
 ```
 
+启用单机Worker拆分时，在服务器 `.env.production` 增加：
+
+```dotenv
+JOB_EXECUTION_MODE=worker
+COMPOSE_PROFILES=workers
+MEDIA_WORKER_CONCURRENCY=4
+EXPORT_WORKER_CONCURRENCY=1
+WORKER_STALE_SECONDS=180
+```
+
+`worker-media` 与 `worker-export` 必须和 backend 使用同一个版本化后端镜像。4核测试机上导出并发固定为1；不要把 `JOB_EXECUTION_MODE` 切为 `worker` 却遗漏 `COMPOSE_PROFILES=workers`，否则新任务只会排队而无人领取。
+
 统一供应商配置启用 `AIGC_TOKEN` 时，聊天地址和默认文本模型必须来自同一配置组；不要保留指向其他厂商的旧 `LLM_BASE_URL`、`LLM_API_KEY` 或 `LLM_MODEL`。任何核验命令都不得打印 Token。
 
 服务器安全组/防火墙只需对验收人员开放 SSH `22/tcp` 和 Web `5173/tcp`。后端 `8000` 只绑定回环地址，PostgreSQL/Redis 在服务器部署覆盖中不映射宿主机端口。

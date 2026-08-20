@@ -18,6 +18,7 @@ COPY migrations ./migrations
 COPY app ./app
 COPY scripts ./scripts
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
-RUN chmod +x ./docker-entrypoint.sh
+COPY worker-entrypoint.sh ./worker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh ./worker-entrypoint.sh
 EXPOSE 8000
 ENTRYPOINT ["./docker-entrypoint.sh"]

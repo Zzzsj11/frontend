@@ -12,7 +12,7 @@ from sqlalchemy import select
 from .config import settings
 from .database import session_factory
 from .models import GenerationJobModel, SceneAssetModel, ShotAssetModel, utcnow
-from .redis_store import cache_job, get_cached_job
+from .redis_store import cache_job, get_cached_job, notify_worker
 from .token_usage import add_token_usage
 
 JobRunner = Callable[["Job"], Awaitable[dict[str, Any]]]
@@ -119,8 +119,15 @@ class JobManager:
             )
             await session.commit()
         await cache_job(job.id, job.public())
-        asyncio.create_task(self._run(job, runner))
+        if settings.job_execution_mode == "worker":
+            await notify_worker(kind)
+        else:
+            asyncio.create_task(self._run(job, runner))
         return job
+
+    async def run_claimed(self, job: Job, runner: JobRunner) -> None:
+        """Execute a job atomically claimed by an external worker."""
+        await self._run(job, runner)
 
     async def _persist(self, job: Job) -> None:
         job.updated_at = time.time()
