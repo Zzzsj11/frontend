@@ -19,6 +19,9 @@ test('administrator can inspect dashboard, models, errors and audit logs', async
   await page.goto('/admin')
   await expect(page.locator('.app-header')).toHaveCount(0)
   await expect(page.locator('.admin-topbar')).toBeVisible()
+  await expect(page.locator('[data-test="deployment-badge"]')).toContainText(
+    /部署 .* · [0-9a-f]{7}/,
+  )
   await expect(page.getByRole('link', { name: '返回工作台' })).toHaveAttribute('href', '/projects')
   await expect(page.getByRole('heading', { name: '仪表盘' })).toBeVisible()
   await expect(page.getByText('累计 Token')).toBeVisible()
