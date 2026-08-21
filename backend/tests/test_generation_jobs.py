@@ -613,13 +613,14 @@ def test_worker_claim_priority_balances_active_jobs_across_project_tasks() -> No
     assert selected is idle
 
 
-async def test_worker_does_not_recover_live_lease_and_never_replays_uncertain_provider_submit(client) -> None:
+async def test_worker_recovers_idempotent_submit_but_not_legacy_uncertain_submit(client) -> None:
     from app.worker import _recover_stale
 
     stale = datetime.now(timezone.utc) - timedelta(minutes=10)
     future = datetime.now(timezone.utc) + timedelta(minutes=2)
     _insert_job("job-live-lease", kind="video", status="running", updated_at=stale)
     _insert_job("job-uncertain-submit", kind="video", status="running", updated_at=stale)
+    _insert_job("job-idempotent-image", kind="image", status="running", updated_at=stale)
     connection = sqlite3.connect(TEST_DB, timeout=10)
     try:
         connection.execute(
@@ -630,17 +631,25 @@ async def test_worker_does_not_recover_live_lease_and_never_replays_uncertain_pr
             "UPDATE generation_jobs SET phase = 'submitting_provider', lease_expires_at = ? WHERE id = ?",
             (stale.strftime("%Y-%m-%d %H:%M:%S.%f"), "job-uncertain-submit"),
         )
+        connection.execute(
+            "UPDATE generation_jobs SET phase = 'submitting_provider', idempotency_key = ?, lease_expires_at = ? WHERE id = ?",
+            ("job-idempotent-image:image", stale.strftime("%Y-%m-%d %H:%M:%S.%f"), "job-idempotent-image"),
+        )
         connection.commit()
     finally:
         connection.close()
 
-    resumed, failed = await _recover_stale(("video",), ())
-    assert (resumed, failed) == (0, 1)
+    resumed, failed = await _recover_stale(("image", "video"), ())
+    assert (resumed, failed) == (1, 1)
     assert _job_row("job-live-lease")["status"] == "running"
     uncertain = _job_row("job-uncertain-submit")
     assert uncertain["status"] == "failed"
     assert uncertain["phase"] == "manual_review"
     assert "不支持幂等创建" in uncertain["error"]
+    replayable = _job_row("job-idempotent-image")
+    assert replayable["status"] == "queued"
+    assert replayable["phase"] == "queued"
+    assert replayable["attempt"] == 2
 
 
 async def test_recover_stale_storyboard_jobs_marked_failed(client) -> None:
@@ -1036,6 +1045,55 @@ def test_poll_translates_seedance_error() -> None:
     message = asyncio.run(scenario())
     assert "疑似包含真实人物" in message
     assert "请求ID：def987654321" in message
+
+
+async def test_generate_image_uses_stable_job_idempotency_key(client, monkeypatch) -> None:
+    import httpx
+
+    from app import providers
+    from app.schemas import ImageGenerationCreate
+
+    class FakeImageClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url: str, headers=None, json=None) -> httpx.Response:
+            assert url.endswith("/image/generation/tasks")
+            assert headers["Idempotency-Key"] == "job-image-idem:image"
+            return httpx.Response(200, json={"code": 200, "data": {"taskId": "image-task-1", "status": "queued"}}, request=httpx.Request("POST", url))
+
+        async def get(self, url: str, headers=None) -> httpx.Response:
+            assert headers["Idempotency-Key"] == "job-image-idem:image"
+            return httpx.Response(
+                200,
+                json={"code": 200, "data": {"status": "SUCCESS", "resultUrls": ["https://upstream.test/image.png"]}},
+                request=httpx.Request("GET", url),
+            )
+
+    async def fake_import_remote_image(url, prefix):
+        return (f"https://tos.test/{prefix}/image.png", f"https://tos.test/{prefix}/thumb.png")
+
+    monkeypatch.setattr(providers, "_image_config", lambda: ("https://api-aigc.test", {"Authorization": "Bearer test", "Idempotency-Key": "random"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeImageClient)
+    monkeypatch.setattr(providers, "import_remote_image", fake_import_remote_image)
+
+    _insert_job("job-image-idem", kind="image")
+    from app.jobs import jobs as job_manager
+
+    job = await job_manager.get("job-image-idem")
+    assert job is not None
+    job.user_id = "u1"
+    result = await providers.generate_image(ImageGenerationCreate(prompt="测试"), job)
+
+    assert result["providerTaskId"] == "image-task-1"
+    assert job.idempotency_key == "job-image-idem:image"
+    assert _job_row("job-image-idem")["idempotency_key"] == "job-image-idem:image"
 
 
 async def test_generate_video_v3_seedance_flow(client, monkeypatch) -> None:

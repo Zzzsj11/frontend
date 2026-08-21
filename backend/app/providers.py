@@ -424,6 +424,11 @@ async def list_video_models() -> list[dict[str, Any]]:
 
 async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, Any]:
     base, headers = _image_config()
+    # 供应商以 Header 中的 Idempotency-Key 去重创建。键必须在发请求前由
+    # 本地持久化工单 ID 确定，不能使用 _headers() 的随机默认值，否则进程
+    # 在“供应商已受理、taskId 尚未落库”的窗口恢复时仍可能重复生图。
+    job.idempotency_key = f"{job.id}:image"
+    headers["Idempotency-Key"] = job.idempotency_key
     payload: dict[str, Any] = {
         "model": request.model or settings.image_model,
         "prompt": request.prompt,

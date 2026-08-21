@@ -123,13 +123,21 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
                 model.status = "queued"
                 model.phase = "provider_running"
                 resumed += 1
+            elif model.phase == "submitting_provider" and model.idempotency_key and (model.kind == "image" or (model.kind == "video" and provider != "runninghub")):
+                # gpt-image-2 与 Seedance 创建均使用已持久化的稳定幂等键。
+                # 即使上次请求已被供应商受理，重放也只会取回原任务 ID。
+                model.status = "queued"
+                model.phase = "queued"
+                model.started_at = None
+                model.attempt += 1
+                resumed += 1
             else:
                 model.status = "failed"
                 model.phase = "manual_review" if model.phase == "submitting_provider" else "failed"
                 model.error = (
                     "Worker中断且重试次数已耗尽，请重新提交"
                     if model.kind in REPLAYABLE_INTERNAL_KINDS
-                    else "Worker在供应商提交窗口中断；因供应商不支持幂等创建，已停止自动重提，请先人工核对供应商任务"
+                    else "Worker在供应商提交窗口中断；当前供应商不支持幂等创建，已停止自动重提，请先人工核对供应商任务"
                     if model.phase == "manual_review"
                     else "Worker中断且供应商任务ID尚未落库，请重新提交"
                 )

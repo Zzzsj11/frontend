@@ -14,7 +14,7 @@
 
 使用 dev01 登录 → 创建项目 → 上传 ASS → 匹配歌曲情感库 → 选择系统/私有人物 → 提交 ASS 大纲 → 重试一个场景段 → 逐镜头生成提示词 → 同时提交图片、Seedance 与 H3 视频 → 发起通用 Chat → 导出成片 → 管理后台查看模型用量、队列、资源与告警。该旅程依次触发 Nginx、前端、API、PostgreSQL、Redis、四类 worker、Chat/Image/Video provider、TOS、FFmpeg、SSE/轮询和监控采集。
 
-边界注入：前端重复提交（本地业务工单去重）、Redis 中断（数据库轮询兜底）、provider 429/超时、worker 被杀（租约到期后恢复）、TOS 上传失败（任务失败且保留输入）、Export 与视频同时运行（CPU/iowait 监测）、系统盘/数据盘接近阈值、网络出站接近月配额、数据库连接耗尽。供应商创建接口当前没有幂等键：已经取得 taskId 的任务只续轮询；`submitting_provider` 阶段崩溃且没有 taskId 的任务停止自动重放并进入人工核对，以“不重复扣量”优先于自动恢复。
+边界注入：前端重复提交（本地业务工单去重）、Redis 中断（数据库轮询兜底）、provider 429/超时、worker 被杀（租约到期后恢复）、TOS 上传失败（任务失败且保留输入）、Export 与视频同时运行（CPU/iowait 监测）、系统盘/数据盘接近阈值、网络出站接近月配额、数据库连接耗尽。gpt-image-2 与 Seedance 创建请求发送由本地工单 ID 派生的稳定 `Idempotency-Key`：已经取得 taskId 的任务只续轮询；`submitting_provider` 阶段崩溃且没有 taskId 的任务使用原键安全重放。未声明幂等能力的其他供应商仍停止自动重放并进入人工核对。
 
 ## 容量口径与实测
 
