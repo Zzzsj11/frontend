@@ -58,10 +58,18 @@ export interface WaitForImageOptions {
   signal?: AbortSignal
 }
 
+// 后端在供应商受理满10分钟时判失败；前端多留一分钟给最后一次状态轮询和结果解析，
+// 避免供应商耗时5–10分钟时沿用旧的5分钟窗口而误报超时。
+export const DEFAULT_IMAGE_WAIT_TIMEOUT_MS = 11 * 60_000
+
 /** 轮询直至任务完成，返回首张图片地址（经统一轮询调度器，全前端共享一个 3s tick） */
 export async function waitForImageAsset(
   taskId: string,
-  { intervalMs: _intervalMs = 3000, timeoutMs = 300_000, signal }: WaitForImageOptions = {},
+  {
+    intervalMs: _intervalMs = 3000,
+    timeoutMs = DEFAULT_IMAGE_WAIT_TIMEOUT_MS,
+    signal,
+  }: WaitForImageOptions = {},
 ): Promise<{ url: string; thumbnailUrl?: string }> {
   void _intervalMs // 周期由统一调度器管理，保留参数仅为兼容旧调用签名
   return watchGenerationJob<{ url: string; thumbnailUrl?: string }>(taskId, {
