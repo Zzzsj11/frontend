@@ -58,7 +58,15 @@ class TosStorage:
         import tos
 
         try:
-            self.client = tos.TosClientV2(settings.tos_access_key, settings.tos_secret_key, settings.tos_endpoint, settings.tos_region)
+            self.client = tos.TosClientV2(
+                settings.tos_access_key,
+                settings.tos_secret_key,
+                settings.tos_endpoint,
+                settings.tos_region,
+                request_timeout=settings.tos_request_timeout_seconds,
+                socket_timeout=settings.tos_socket_timeout_seconds,
+                max_retry_count=settings.tos_max_retry_count,
+            )
         except TypeError:
             self.client = tos.TosClientV2(settings.tos_access_key, settings.tos_secret_key, settings.tos_endpoint)
 

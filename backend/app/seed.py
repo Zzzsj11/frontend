@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from sqlalchemy import select, update
 
+from .config import settings
 from .database import session_factory
 from .error_logging import log_background_error
 from .models import (
@@ -395,6 +396,7 @@ async def recover_stale_storyboard_generation() -> None:
     """收编已丢失执行协程的大纲和逐句生成任务。"""
     cutoff = utcnow() - timedelta(minutes=10)
     outline_cutoff = utcnow() - timedelta(minutes=5)
+    inline_replay_ids: list[str] = []
     async with session_factory() as session:
         active_outline_job = (
             select(GenerationJobModel.id)
@@ -427,24 +429,51 @@ async def recover_stale_storyboard_generation() -> None:
             config["outlineProgress"] = progress
             task.storyboard_config = config
             task.status = "outline_failed"
-        await session.execute(
-            update(StoryboardLineModel)
-            .where(
-                StoryboardLineModel.generation_status == "running",
-                StoryboardLineModel.deleted_at.is_(None),
-                StoryboardLineModel.updated_at < cutoff,
+        # Worker 模式由租约恢复器接管逐镜工单，API 启动不能抢先把可重放任务判失败。
+        if settings.job_execution_mode != "worker":
+            stale_jobs = list(
+                (
+                    await session.execute(
+                        select(GenerationJobModel).where(
+                            GenerationJobModel.kind == "storyboard_line",
+                            GenerationJobModel.status.in_(("queued", "running")),
+                            GenerationJobModel.deleted_at.is_(None),
+                            GenerationJobModel.updated_at < cutoff,
+                        )
+                    )
+                ).scalars()
             )
-            .values(generation_status="pending", generation_error="上次生成中断，已恢复等待队列")
-        )
-        # 同步收编 generation_jobs 里的分镜行僵尸任务（行表恢复后，任务表不能永远停 running）
-        await session.execute(
-            update(GenerationJobModel)
-            .where(
-                GenerationJobModel.kind == "storyboard_line",
-                GenerationJobModel.status.in_(("queued", "running")),
-                GenerationJobModel.deleted_at.is_(None),
-                GenerationJobModel.updated_at < cutoff,
+            replayable_line_ids: set[str] = set()
+            for job in stale_jobs:
+                request = dict(job.request or {})
+                if job.attempt < 3 and request.get("full_context") is not None and request.get("allowed_humans") is not None:
+                    job.status, job.phase, job.error = "queued", "queued", None
+                    job.started_at = job.finished_at = None
+                    job.worker_id = None
+                    job.attempt += 1
+                    inline_replay_ids.append(job.id)
+                    if job.storyboard_line_id:
+                        replayable_line_ids.add(job.storyboard_line_id)
+                else:
+                    job.status = "failed"
+                    job.error = "上次生成中断，可重新生成"
+                    job.finished_at = utcnow()
+            await session.execute(
+                update(StoryboardLineModel)
+                .where(
+                    StoryboardLineModel.generation_status == "running",
+                    StoryboardLineModel.deleted_at.is_(None),
+                    StoryboardLineModel.updated_at < cutoff,
+                    ~StoryboardLineModel.id.in_(replayable_line_ids) if replayable_line_ids else True,
+                )
+                .values(generation_status="pending", generation_error="上次生成中断，已恢复等待队列")
             )
-            .values(status="failed", error="上次生成中断，可重新生成", finished_at=utcnow())
-        )
         await session.commit()
+    if inline_replay_ids:
+        # 延迟导入避免 seed/domain 初始化环；inline 与外部 Worker 共用同一个快照 runner。
+        from .domain import run_storyboard_job
+        from .jobs import jobs
+
+        for job_id in inline_replay_ids:
+            if job := await jobs.get(job_id):
+                await jobs.dispatch(job, run_storyboard_job)

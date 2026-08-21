@@ -134,6 +134,8 @@ export interface ShotGenOptions {
   outlineStatus?: 'pending' | 'ready' | 'failed'
   /** 所属场景段序号（第一轮场景规划结果） */
   sceneIndex?: number
+  /** ASS 大场景为各角色规划的本场服装；切换大场景时必须换装。 */
+  wardrobeByCharacter?: Record<string, string>
 }
 
 /** 脚本行（每一条 = 一个分镜） */
@@ -179,6 +181,7 @@ export interface StoryOutlineShot {
   outlineStatus?: 'pending' | 'ready' | 'failed'
   /** 所属场景段序号 */
   sceneIndex?: number
+  wardrobeByCharacter?: Record<string, string>
   intent?: string
   outlineScene?: string
   outlineShot?: string
@@ -225,6 +228,7 @@ export interface StoryScenePlan {
   emotion?: string
   visualTone?: string
   narrativePurpose?: string
+  wardrobeByCharacter?: Record<string, string>
 }
 
 /** 大纲生成失败的场景段（段级重试入口） */

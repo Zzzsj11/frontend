@@ -7,7 +7,7 @@
 - Ubuntu 24.04.4 LTS，4 vCPU，30 GiB 内存；数据盘配置4 GiB低优先级应急Swap（`vm.swappiness=10`）。
 - 40 GB 系统盘；200 GB NVMe 数据盘已格式化为 ext4，并按 UUID 持久挂载到 `/var/lib/docker`。
 - Docker 29.7.2、Compose 5.5.0；应用使用精确 Git SHA 的版本化镜像。
-- PostgreSQL、Redis、API、Web、`worker-chat`、`worker-media`、`worker-export`、`worker-storyboard` 均为独立容器；数据库、Redis和后端端口不对公网开放。
+- PostgreSQL、Redis、API、Web、`worker-chat`、`worker-image`、`worker-media`（仅视频）、`worker-export`、`worker-storyboard` 均为独立容器；数据库、Redis和后端端口不对公网开放。
 - 健康检查、每分钟资源采样和每日 PostgreSQL 备份已安装为独立宿主机 cron。
 
 ## 验证结果

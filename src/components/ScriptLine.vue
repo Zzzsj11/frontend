@@ -107,7 +107,7 @@ const onGenerateShot = async () => {
 
     <!-- 出演角色（叠放展示，空 = 空镜头） -->
     <div
-      v-if="humans.length"
+      v-if="!isGeneral && humans.length"
       class="dh-chips"
       :title="`编辑人物 · 出演：${humans.map((h) => h.name).join(' / ')}`"
       @click.stop="store.openEditor(line.id, 'cast')"

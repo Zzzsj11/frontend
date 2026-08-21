@@ -25,6 +25,9 @@ mkdirSync(output, { recursive: true })
 const generalOnly = process.env.REAL_E2E_PHASE === 'general'
 const exportOnly = process.env.REAL_E2E_PHASE === 'general-export'
 const assOnly = process.env.REAL_E2E_PHASE === 'ass'
+const assExpectedLines = Number(process.env.REAL_E2E_ASS_EXPECTED_LINES || '3')
+const resumeAssProject = process.env.REAL_E2E_RESUME_ASS_PROJECT
+const resumeAssTaskTitle = process.env.REAL_E2E_RESUME_ASS_TASK_TITLE
 let shot = exportOnly ? 21 : generalOnly ? 12 : 0
 const capture = async (page: Page, name: string) => {
   shot += 1
@@ -52,9 +55,11 @@ async function createProject(page: Page, name: string) {
 
 async function waitForPrompts(page: Page, expected: number, prefix: string) {
   await expect(page.locator('.line-wrapper')).toHaveCount(expected, { timeout: 30_000 })
-  await expect(page.getByText(`已生成 ${expected}/${expected}`)).toBeVisible({
-    timeout: 10 * 60_000,
-  })
+  if (!resumeAssProject) {
+    await expect(page.getByText(`已生成 ${expected}/${expected}`)).toBeVisible({
+      timeout: 10 * 60_000,
+    })
+  }
   await expect(page.locator('.prompt-generation-state.failed')).toHaveCount(0)
   await capture(page, `${prefix}-all-prompts-complete`)
 }
@@ -131,21 +136,30 @@ test('ASS and general storyboard complete real frontend journeys through generat
   if (!generalOnly) await capture(page, 'login-and-empty-workspace')
 
   if (!generalOnly) {
-    await createProject(page, `ASS 全链路真实验收${projectSuffix}`)
-    await page
-      .locator('.script-editor .header-actions')
-      .getByRole('button', { name: 'ASS 视频', exact: true })
-      .click()
-    await page.locator('input[type="file"][accept=".ass"]').setInputFiles(assFixture)
-    await page.locator('.role-card').nth(0).click()
-    await page.locator('.role-card').nth(16).click()
-    await capture(page, 'ass-input-and-cast-selected')
-    await page.getByRole('button', { name: '生成', exact: true }).click()
+    if (resumeAssProject) {
+      await page.getByText(resumeAssProject, { exact: true }).click()
+      if (!resumeAssTaskTitle) throw new Error('REAL_E2E_RESUME_ASS_TASK_TITLE is required')
+      await page
+        .locator('.task-item')
+        .filter({ has: page.locator('.task-title', { hasText: resumeAssTaskTitle }) })
+        .locator('.task-main')
+        .click()
+    } else {
+      await createProject(page, `ASS 全链路真实验收${projectSuffix}`)
+      await page
+        .locator('.script-editor .header-actions')
+        .getByRole('button', { name: 'ASS 视频', exact: true })
+        .click()
+      await page.locator('input[type="file"][accept=".ass"]').setInputFiles(assFixture)
+      await page.locator('.role-card').nth(0).click()
+      await page.locator('.role-card').nth(16).click()
+      await capture(page, 'ass-input-and-cast-selected')
+      await page.getByRole('button', { name: '生成', exact: true }).click()
+    }
     await expect(page.locator('.line-wrapper').first()).toBeVisible({ timeout: 5 * 60_000 })
     await capture(page, 'ass-storyboard-outline-generating')
-    // 夹具拆分出 3 行：2 歌词行 + 1 尾奏空行（outro），全部参与逐句生成
-    await waitForPrompts(page, 3, 'ass')
-    await generateAllMedia(page, 3, 'ass')
+    await waitForPrompts(page, assExpectedLines, 'ass')
+    await generateAllMedia(page, assExpectedLines, 'ass')
   }
 
   if (assOnly) {

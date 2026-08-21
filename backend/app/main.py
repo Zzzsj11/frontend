@@ -650,22 +650,40 @@ async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str]) ->
     return [lookup.get(url, url) for url in image_urls]
 
 
+async def _strip_general_character_references(db: AsyncSession, task_id: str | None, image_urls: list[str]) -> list[str]:
+    """通用 MV 人物逐镜自由生成：服务端兜底移除数字人头像，仅保留场景等非人物参考图。"""
+    if not task_id or not image_urls:
+        return image_urls
+    task = await db.get(ProjectTaskModel, task_id)
+    if not task or task.storyboard_type != "general":
+        return image_urls
+    humans = list((await db.execute(select(DigitalHumanModel).where(DigitalHumanModel.deleted_at.is_(None)))).scalars())
+    character_urls = {url for human in humans for url in (human.avatar_url, human.avatar_thumbnail_url, human.asset_avatar_url) if url}
+    return [url for url in image_urls if url not in character_urls]
+
+
 @app.post("/api/generations/videos", status_code=202)
 async def create_video_generation(payload: VideoGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
     model, provider = await require_active_model(db, payload.model or settings.video_model, "video")
+    project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
+    payload.image_urls = await _strip_general_character_references(db, task_id, payload.image_urls)
     validate_video_references(payload, dict(model.capabilities or {}))
     if provider.code == "runninghub":
         validate_h3_mode_inputs(payload)
-    project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
     await _check_concurrency(db, user.id, "video", settings.video_generation_concurrency)
     await consume_daily_quota(db, user_id=user.id, category="video")
-    # 数字人头像优先用平台虚拟资产（asset://），其余 URL（如场景图）原样保留
+    # ASS 数字人头像优先用平台虚拟资产（asset://），其余 URL（如场景图）原样保留
     if provider.code == "yinghe":
         payload.image_urls = await _resolve_asset_avatar_urls(db, payload.image_urls)
     h3_compilation = compile_h3_prompt(payload) if provider.code == "runninghub" else None
     if h3_compilation:
         payload.prompt = h3_compilation.prompt
     snapshot = generation_request_snapshot(payload, model, provider)
+    if task_id and line_id:
+        task = await db.get(ProjectTaskModel, task_id)
+        line = await db.get(StoryboardLineModel, line_id)
+        if task and task.storyboard_type == "general" and line and line.shot_type == "character":
+            snapshot["_generalCharacterTextFallback"] = True
     if h3_compilation:
         snapshot.update(
             {

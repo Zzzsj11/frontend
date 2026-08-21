@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import settings
 from .database import session_factory
 from .models import GenerationJobModel, SceneAssetModel, ShotAssetModel, utcnow
-from .redis_store import cache_job, get_cached_job, notify_worker
+from .redis_store import acquire_execution_lease, cache_job, get_cached_job, notify_worker, release_execution_lease, renew_execution_lease
 from .token_usage import add_token_usage
 
 JobRunner = Callable[["Job"], Awaitable[dict[str, Any]]]
@@ -48,6 +48,7 @@ class Job:
     request: dict[str, Any] | None = None
     provider: str | None = None
     provider_task_id: str | None = None
+    provider_submitted_at: float | None = None
     idempotency_key: str | None = None
     worker_id: str | None = None
     phase: str = "queued"
@@ -203,9 +204,12 @@ class JobManager:
     async def _run(self, job: Job, runner: JobRunner) -> None:
         self._active.add(job.id)
         slots = self._execution_slot(job)
+        distributed_lease: tuple[str, str] | None = None
+        lease_heartbeat: asyncio.Task | None = None
         try:
             if slots:
                 async with slots:
+                    distributed_lease, lease_heartbeat = await self._acquire_distributed_slot(job)
                     await self._execute(job, runner)
             else:
                 await self._execute(job, runner)
@@ -213,8 +217,34 @@ class JobManager:
             job.status, job.phase = "cancelled", "cancelled"
             raise
         finally:
+            if lease_heartbeat:
+                lease_heartbeat.cancel()
+                await asyncio.gather(lease_heartbeat, return_exceptions=True)
+            if distributed_lease:
+                await release_execution_lease(*distributed_lease)
             self._active.discard(job.id)
             await self._persist(job)
+
+    async def _acquire_distributed_slot(self, job: Job) -> tuple[tuple[str, str] | None, asyncio.Task | None]:
+        request = job.request or {}
+        pool = str(request.get("_executionPool") or "").strip()
+        raw_limit = request.get("_executionConcurrency")
+        if not pool or raw_limit is None:
+            return None, None
+        limit = max(1, min(1000, int(raw_limit)))
+        ttl = max(60, settings.worker_stale_seconds)
+        while True:
+            token = await acquire_execution_lease(pool, limit, ttl)
+            if token:
+                break
+            await asyncio.sleep(min(1.0, settings.worker_poll_seconds))
+
+        async def heartbeat() -> None:
+            while True:
+                await asyncio.sleep(max(5.0, ttl / 3))
+                await renew_execution_lease(pool, token, ttl)
+
+        return (pool, token), asyncio.create_task(heartbeat())
 
     async def _execute(self, job: Job, runner: JobRunner) -> None:
         """拿到执行槽位后才进入 running，供应商调用完成前一直占用槽位。"""
@@ -225,7 +255,7 @@ class JobManager:
             job.progress, job.status, job.phase = 100, "succeeded", "succeeded"
             await self._persist_asset(job)
         except Exception as exc:
-            uncertain_submission = job.phase == "submitting_provider"
+            uncertain_submission = job.phase == "submitting_provider" and not bool(getattr(exc, "submission_certain", False))
             job.status = "failed"
             job.phase = "manual_review" if uncertain_submission else "failed"
             prefix = "供应商创建结果不确定且不支持幂等重提，请先人工核对供应商任务；" if uncertain_submission else ""
@@ -328,6 +358,7 @@ class JobManager:
         if idempotency_key:
             job.idempotency_key = idempotency_key
         job.updated_at = time.time()
+        job.provider_submitted_at = job.updated_at
         async with session_factory() as session:
             model = await session.get(GenerationJobModel, job.id)
             if model:
@@ -358,18 +389,21 @@ class JobManager:
             request=model.request,
             provider=model.provider,
             provider_task_id=model.provider_task_id,
+            provider_submitted_at=_timestamp(model.provider_submitted_at) if model.provider_submitted_at else None,
             idempotency_key=model.idempotency_key,
             worker_id=model.worker_id,
             phase=model.phase or "queued",
         )
 
     async def mark_provider_submitting(self, job: Job) -> None:
-        """在无供应商幂等能力时标记危险窗口；崩溃恢复不得自动重复创建。"""
+        """标记供应商创建窗口，并在发请求前持久化已确定的幂等键。"""
         job.phase = "submitting_provider"
         async with session_factory() as session:
             model = await session.get(GenerationJobModel, job.id)
             if model and (not job.worker_id or model.worker_id == job.worker_id):
                 model.phase = job.phase
+                if job.idempotency_key:
+                    model.idempotency_key = job.idempotency_key
                 await session.commit()
         await cache_job(job.id, job.public())
 

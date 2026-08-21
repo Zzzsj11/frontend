@@ -60,3 +60,7 @@ scripts/local/
 /QUEST-SESSION-RESTORE.md
 /restore_quest_tasks.py
 test-artifacts/verify-*.png
+# H3/视频模型本地临时对比报告；正式固化报告使用 *-report.html 命名并可继续入库
+test-artifacts/h3-*-comparison.html
+# 本地并发压测原始采样；正式结论固化到 docs/reports
+test-artifacts/load-monitor/

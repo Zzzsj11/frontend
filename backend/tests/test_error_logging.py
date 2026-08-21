@@ -165,6 +165,7 @@ async def test_scene_plan_parse_failure_logged_then_retried(client) -> None:
                     "emotion": "平静",
                     "visualTone": "暖调",
                     "narrativePurpose": "收束",
+                    "wardrobeByCharacter": {},
                 }
             ],
         }

@@ -122,7 +122,8 @@ watch(
     scenePromptDraft.value = line?.scenePrompt ?? ''
     shotPromptDraft.value = line?.shotPrompt ?? ''
     optionsDraft.value = normalizeShotOptions(line?.shotOptions ?? DEFAULT_SHOT_OPTIONS)
-    activeTab.value = store.editingTab
+    activeTab.value =
+      line?.source === 'general' && store.editingTab === 'cast' ? 'shot' : store.editingTab
     previewAsset.value = null
     // 脚本载入只带当前选用资产（P2 响应裁剪），打开弹窗时懒加载完整历史版本
     if (line) void store.ensureShotHistory(line.id)
@@ -192,12 +193,14 @@ const cancel = () => store.closeEditor()
     <template #title>编辑视频内容</template>
     <template v-if="store.editingLine">
       <div class="modal-body">
-        <p class="body-tip">选择人物、视频或场景，调整对应内容</p>
+        <p class="body-tip">
+          {{ isGeneral ? '选择视频或场景，调整对应内容' : '选择人物、视频或场景，调整对应内容' }}
+        </p>
 
         <!-- 三个预览：人物 / 分镜 / 场景 -->
-        <div class="preview-cards">
+        <div class="preview-cards" :class="{ 'without-cast': isGeneral }">
           <!-- 人物 -->
-          <div class="pcard" :class="{ open: activeTab === 'cast' }">
+          <div v-if="!isGeneral" class="pcard" :class="{ open: activeTab === 'cast' }">
             <div class="pcard-media" title="点击展开人物调整" @click="activeTab = 'cast'">
               <div v-if="castOfLine.length" class="pcard-avatars">
                 <CharacterPortrait
@@ -285,7 +288,7 @@ const cancel = () => store.closeEditor()
         </div>
 
         <!-- 人物调整面板 -->
-        <div v-if="activeTab === 'cast'" class="tab-panel">
+        <div v-if="!isGeneral && activeTab === 'cast'" class="tab-panel">
           <div class="panel-head">
             <span class="panel-title">出演角色</span>
             <button class="btn-outline regen-btn" @click="store.openLibrary()">
@@ -493,6 +496,9 @@ const cancel = () => store.closeEditor()
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
+}
+.preview-cards.without-cast {
+  grid-template-columns: repeat(2, 1fr);
 }
 .pcard {
   border: 1px solid var(--border);

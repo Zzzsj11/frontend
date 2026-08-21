@@ -45,7 +45,25 @@ services:
       resources:
         limits:
           cpus: '1.50'
-          memory: 4G
+          memory: 2G
+  worker-image:
+    image: ${REGISTRY:?set REGISTRY}/mv-agent-backend:${RELEASE_VERSION:?set RELEASE_VERSION}
+    build: !reset null
+    secrets:
+      - runtime_secrets
+    environment:
+      APP_ENV: production
+      JWT_SECRET: ''
+      DATABASE_URL: ''
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-mvagent}
+      POSTGRES_DB: ${POSTGRES_DB:-mvagent}
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 1G
   worker-export:
     image: ${REGISTRY:?set REGISTRY}/mv-agent-backend:${RELEASE_VERSION:?set RELEASE_VERSION}
     build: !reset null

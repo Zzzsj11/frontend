@@ -102,7 +102,12 @@ class Settings:
     # 单个素材导出任务最多同时拉取 20 个源文件；下载过程按 1 MiB 分块落盘，不整文件驻留内存。
     export_download_concurrency: int = max(1, min(20, int(os.getenv("EXPORT_DOWNLOAD_CONCURRENCY", "20"))))
     export_upload_concurrency: int = max(1, min(8, int(os.getenv("EXPORT_UPLOAD_CONCURRENCY", "4"))))
-    export_upload_part_size_mb: int = max(5, min(64, int(os.getenv("EXPORT_UPLOAD_PART_SIZE_MB", "16"))))
+    # TOS SDK 单分片请求默认约30秒超时；实测弱上传链路下16 MiB会在99%后失败。
+    # 5 MiB让单分片保持在超时窗内，同时由task_num维持总体吞吐。
+    export_upload_part_size_mb: int = max(5, min(64, int(os.getenv("EXPORT_UPLOAD_PART_SIZE_MB", "5"))))
+    tos_request_timeout_seconds: int = max(30, min(600, int(os.getenv("TOS_REQUEST_TIMEOUT_SECONDS", "180"))))
+    tos_socket_timeout_seconds: int = max(30, min(600, int(os.getenv("TOS_SOCKET_TIMEOUT_SECONDS", "180"))))
+    tos_max_retry_count: int = max(1, min(10, int(os.getenv("TOS_MAX_RETRY_COUNT", "5"))))
     # 默认只记录带 X-Test-Run-Id 头的测试流量；置 true 后全量请求入库（排查用，注意数据量）
     api_request_log_all: bool = os.getenv("API_REQUEST_LOG_ALL", "false").lower() == "true"
     daily_quota_timezone: str = os.getenv("DAILY_QUOTA_TIMEZONE", "Asia/Shanghai")

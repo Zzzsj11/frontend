@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import time
+import uuid
 from typing import Any
 
 from .config import settings
@@ -58,6 +61,80 @@ async def notify_worker(kind: str) -> None:
         await redis.publish("worker:wakeup", kind)
     except Exception:
         # A temporary Redis outage must not lose a database-backed job.
+        return
+
+
+async def wait_for_worker_wakeup(timeout_seconds: float) -> None:
+    """Wait for a best-effort wakeup, falling back to the caller's poll timeout."""
+    pubsub = redis.pubsub()
+    try:
+        await pubsub.subscribe("worker:wakeup")
+        # ``get_message(ignore_subscribe_messages=True)`` may consume the
+        # subscription acknowledgement and return immediately instead of
+        # waiting for ``timeout``.  Workers then spin on an empty queue and can
+        # consume an entire CPU core.  ``listen`` blocks for the next Pub/Sub
+        # event; the timeout preserves PostgreSQL polling as the durable
+        # fallback when no notification arrives.
+        async with asyncio.timeout(max(0.0, timeout_seconds)):
+            async for message in pubsub.listen():
+                if message.get("type") == "message":
+                    return
+    except TimeoutError:
+        return
+    except Exception:
+        return
+    finally:
+        try:
+            await pubsub.aclose()
+        except Exception:
+            pass
+
+
+_ACQUIRE_POOL_LEASE = """
+local key, now, expires, limit, token = KEYS[1], tonumber(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3]), ARGV[4]
+redis.call('ZREMRANGEBYSCORE', key, '-inf', now)
+if redis.call('ZCARD', key) >= limit then return 0 end
+redis.call('ZADD', key, expires, token)
+redis.call('EXPIRE', key, math.max(1, math.ceil((expires-now)/1000)))
+return 1
+"""
+
+
+async def acquire_execution_lease(pool: str, limit: int, ttl_seconds: int) -> str | None:
+    """Atomically acquire a cross-process model execution slot in Redis."""
+    token = uuid.uuid4().hex
+    now_ms = int(time.time() * 1000)
+    try:
+        acquired = await redis.eval(
+            _ACQUIRE_POOL_LEASE,
+            1,
+            f"execution-pool:{pool}",
+            now_ms,
+            now_ms + ttl_seconds * 1000,
+            limit,
+            token,
+        )
+        return token if int(acquired or 0) == 1 else None
+    except Exception:
+        # PostgreSQL remains durable; local semaphores still provide a safe single-process fallback.
+        return "redis-unavailable"
+
+
+async def renew_execution_lease(pool: str, token: str, ttl_seconds: int) -> None:
+    if token == "redis-unavailable":
+        return
+    try:
+        await redis.zadd(f"execution-pool:{pool}", {token: int(time.time() * 1000) + ttl_seconds * 1000}, xx=True)
+    except Exception:
+        return
+
+
+async def release_execution_lease(pool: str, token: str) -> None:
+    if token == "redis-unavailable":
+        return
+    try:
+        await redis.zrem(f"execution-pool:{pool}", token)
+    except Exception:
         return
 
 

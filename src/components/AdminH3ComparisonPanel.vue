@@ -236,14 +236,14 @@ onBeforeUnmount(() => pollTimers.forEach((timer) => clearTimeout(timer)))
               </div>
               <div class="reference-list">
                 <button
-                  v-for="ref in source.referenceCandidates"
-                  :key="ref.id"
+                  v-for="candidate in source.referenceCandidates"
+                  :key="candidate.id"
                   type="button"
                   class="reference-pill"
-                  :class="{ active: isSelectedRef(source, ref.url) }"
-                  @click="setReference(source, ref.url)"
+                  :class="{ active: isSelectedRef(source, candidate.url) }"
+                  @click="setReference(source, candidate.url)"
                 >
-                  {{ ref.label }}
+                  {{ candidate.label }}
                 </button>
               </div>
             </div>

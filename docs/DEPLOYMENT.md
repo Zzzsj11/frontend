@@ -240,8 +240,13 @@ scripts/validate-secret-layout.sh
 ```dotenv
 JOB_EXECUTION_MODE=worker
 COMPOSE_PROFILES=workers
-MEDIA_WORKER_CONCURRENCY=4
-EXPORT_WORKER_CONCURRENCY=1
+IMAGE_WORKER_CONCURRENCY=32
+VIDEO_WORKER_CONCURRENCY=32
+EXPORT_WORKER_CONCURRENCY=3
+EXPORT_UPLOAD_PART_SIZE_MB=5
+TOS_REQUEST_TIMEOUT_SECONDS=180
+TOS_SOCKET_TIMEOUT_SECONDS=180
+TOS_MAX_RETRY_COUNT=5
 CHAT_WORKER_CONCURRENCY=2
 STORYBOARD_WORKER_CONCURRENCY=2
 WORKER_STALE_SECONDS=180
@@ -249,7 +254,7 @@ WORKER_STALE_SECONDS=180
 
 生产单机建议使用 `sudo PROJECT_DIR=/opt/mv-agent-frontend scripts/install-monitoring-systemd.sh` 安装 30 秒监控 timer；`install-maintenance-cron.sh` 会检测该 timer，仅在未启用时保留一分钟采集兜底。监控字段、容量口径和告警阈值见 `docs/ARCHITECTURE-CAPACITY-AND-OBSERVABILITY.md`。
 
-`worker-media`、`worker-export`、`worker-chat` 与 `worker-storyboard` 必须和 backend 使用同一个版本化后端镜像。4核测试机上导出并发固定为1，分镜编排并发建议2；不要把 `JOB_EXECUTION_MODE` 切为 `worker` 却遗漏 `COMPOSE_PROFILES=workers`，否则新任务只会排队而无人领取。
+`worker-image`、`worker-media`（仅视频）、`worker-export`、`worker-chat` 与 `worker-storyboard` 必须和 backend 使用同一个版本化后端镜像。图片和视频使用独立并发池，避免长视频轮询占满图片执行槽。12 vCPU / 8 GiB 的实测环境以图片32、视频32起步；供应商视频并发上限为200，若 429、失败率、数据库连接数和 P95 轮询延迟均稳定，可依次把视频提升到64、96。导出 Worker 建议3并发，每个任务内部最多20路流式下载；4核测试机建议图片8、视频8、导出1。分镜编排并发建议2；不要把 `JOB_EXECUTION_MODE` 切为 `worker` 却遗漏 `COMPOSE_PROFILES=workers`，否则新任务只会排队而无人领取。
 
 统一供应商配置启用 `AIGC_TOKEN` 时，聊天地址和默认文本模型必须来自同一个 `runtime_secrets` 配置组。任何核验命令都不得打印 Token。
 

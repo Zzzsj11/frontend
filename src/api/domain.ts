@@ -132,9 +132,13 @@ export async function fetchStoryboardLine(taskId: string, lineId: string): Promi
 
 /** GET /api/tasks/{id}/generations/active — 任务下仍在排队/执行中的媒体生成任务（刷新后恢复等待态） */
 export const fetchActiveGenerations = (taskId: string) =>
-  apiRequest<Array<{ id: string; kind: 'image' | 'video'; storyboardLineId: string | null }>>(
-    `/tasks/${taskId}/generations/active`,
-  )
+  apiRequest<
+    Array<{
+      id: string
+      kind: 'image' | 'video' | 'storyboard_line'
+      storyboardLineId: string | null
+    }>
+  >(`/tasks/${taskId}/generations/active`)
 
 /** 按任务 ID 恢复媒体生成任务的轮询等待（页面刷新后续跑；成功时资产已由后端落库） */
 export const waitGenerationJob = (id: string, signal?: AbortSignal) =>
@@ -272,12 +276,28 @@ export const createDigitalHumanStyle = (name: string) =>
   })
 export const deleteDigitalHumanStyle = (id: string) =>
   apiRequest(`/digital-human-styles/${id}`, { method: 'DELETE' })
+
+/**
+ * Data URL 是页面内存中的图片，不应通过 fetch 读取：生产 CSP 的 connect-src
+ * 不允许 data:，浏览器会在上传请求发出前抛出 `Failed to fetch`。
+ */
+export function dataUrlToBlob(dataUrl: string): Blob {
+  const comma = dataUrl.indexOf(',')
+  if (comma < 0 || !dataUrl.startsWith('data:')) throw new TypeError('无效的图片数据')
+  const metadata = dataUrl.slice(5, comma)
+  const encoded = dataUrl.slice(comma + 1)
+  const base64 = metadata.endsWith(';base64')
+  const mimeType = metadata.replace(/;base64$/, '') || 'application/octet-stream'
+  const binary = base64 ? atob(encoded) : decodeURIComponent(encoded)
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+  return new Blob([bytes], { type: mimeType })
+}
+
 export async function uploadDataUrl(
   dataUrl: string,
   filename: string,
 ): Promise<{ url: string; thumbnailUrl?: string }> {
-  const response = await fetch(dataUrl)
-  const blob = await response.blob()
+  const blob = dataUrlToBlob(dataUrl)
   const form = new FormData()
   form.append('file', blob, filename)
   return apiRequest<{ url: string; thumbnailUrl?: string }>('/uploads?category=digital-humans', {

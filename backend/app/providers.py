@@ -32,6 +32,12 @@ class ProviderError(RuntimeError):
     pass
 
 
+class ProviderRejectedError(ProviderError):
+    """The provider returned a definite rejection before creating a task."""
+
+    submission_certain = True
+
+
 # AIGC 供应商错误码 → 用户友好提示
 _AIGC_FRIENDLY_ERRORS: dict[str, str] = {
     "VID-4030": "视频生成额度已用尽，请联系管理员充值或更换 API Key",
@@ -87,13 +93,13 @@ def _raise_for_status(response: httpx.Response) -> None:
             code = (body.get("data") or {}).get("code", "")
             msg = body.get("msg", "")
         except Exception:
-            raise ProviderError(str(exc)) from exc
+            raise ProviderRejectedError(str(exc)) from exc
         friendly = _AIGC_FRIENDLY_ERRORS.get(code)
         if friendly:
-            raise ProviderError(friendly) from exc
+            raise ProviderRejectedError(friendly) from exc
         if msg:
-            raise ProviderError(translate_provider_error(msg)) from exc
-        raise ProviderError(str(exc)) from exc
+            raise ProviderRejectedError(translate_provider_error(msg)) from exc
+        raise ProviderRejectedError(str(exc)) from exc
 
 
 def _headers(api_key: str, *, x_api_key: bool = False) -> dict[str, str]:
@@ -107,7 +113,7 @@ def _unwrap(body: dict[str, Any]) -> dict[str, Any]:
     if "code" not in body:
         return body
     if body.get("code") != 200:
-        raise ProviderError(translate_provider_error(body.get("msg") or f"上游接口返回错误：{body.get('code')}"))
+        raise ProviderRejectedError(translate_provider_error(body.get("msg") or f"上游接口返回错误：{body.get('code')}"))
     return body.get("data") or {}
 
 
@@ -118,7 +124,8 @@ def _usage(data: dict[str, Any]) -> dict[str, Any]:
     return {key: data[key] for key in keys if key in data}
 
 
-IMAGE_POLL_TIMEOUT_SECONDS = 360
+# gpt-image-2 的业务终止线：供应商受理后 10 分钟仍未进入终态即失败。
+IMAGE_POLL_TIMEOUT_SECONDS = 10 * 60
 VIDEO_POLL_TIMEOUT_SECONDS = 900
 H3_POLL_INTERVAL_SECONDS = 15
 H3_POLL_TIMEOUT_SECONDS = 2400
@@ -235,6 +242,7 @@ class _ScheduledPoll:
     deadline: float
     future: asyncio.Future[dict[str, Any]]
     consecutive_errors: int = 0
+    timeout_error: str = "生成任务超时，请稍后查询"
 
 
 class ProviderPollScheduler:
@@ -256,11 +264,26 @@ class ProviderPollScheduler:
     def batch_size(self) -> int:
         return _poll_batch_size(self.active_count, self.coverage_seconds)
 
-    async def watch(self, url: str, headers: dict[str, str], job: Job, *, timeout_seconds: int) -> dict[str, Any]:
+    async def watch(
+        self,
+        url: str,
+        headers: dict[str, str],
+        job: Job,
+        *,
+        timeout_seconds: float,
+        timeout_error: str = "生成任务超时，请稍后查询",
+    ) -> dict[str, Any]:
         if job.id in self._entries:
             raise ProviderError(f"生成任务已在轮询：{job.id}")
         future = asyncio.get_running_loop().create_future()
-        self._entries[job.id] = _ScheduledPoll(job, url, headers, time.monotonic() + timeout_seconds, future)
+        self._entries[job.id] = _ScheduledPoll(
+            job,
+            url,
+            headers,
+            time.monotonic() + max(0, timeout_seconds),
+            future,
+            timeout_error=timeout_error,
+        )
         self._queue.append(job.id)
         if self._runner is None or self._runner.done():
             self._runner = asyncio.create_task(self._run())
@@ -293,7 +316,7 @@ class ProviderPollScheduler:
                 now = time.monotonic()
                 for job_id, entry in list(self._entries.items()):
                     if now >= entry.deadline:
-                        self._finish_error(job_id, ProviderError("生成任务超时，请稍后查询"))
+                        self._finish_error(job_id, ProviderError(entry.timeout_error))
                 batch = self._take_batch()
                 if batch:
                     await asyncio.gather(*(self._query_one(client, entry) for entry in batch))
@@ -350,8 +373,22 @@ def _poll_scheduler() -> ProviderPollScheduler:
     return scheduler
 
 
-async def _poll_scheduled(url: str, headers: dict[str, str], job: Job, *, timeout_seconds: int) -> dict[str, Any]:
-    return await _poll_scheduler().watch(url, headers, job, timeout_seconds=timeout_seconds)
+async def _poll_scheduled(
+    url: str,
+    headers: dict[str, str],
+    job: Job,
+    *,
+    timeout_seconds: float,
+    timeout_error: str = "生成任务超时，请稍后查询",
+) -> dict[str, Any]:
+    return await _poll_scheduler().watch(url, headers, job, timeout_seconds=timeout_seconds, timeout_error=timeout_error)
+
+
+def _remaining_provider_timeout(job: Job, timeout_seconds: int) -> float:
+    """恢复轮询时仍以首次供应商受理时间计时，重启不能刷新超时预算。"""
+    if job.provider_submitted_at is None:
+        return float(timeout_seconds)
+    return max(0.0, timeout_seconds - (time.time() - job.provider_submitted_at))
 
 
 def _result_semaphore(kind: str) -> asyncio.Semaphore:
@@ -405,7 +442,13 @@ async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, 
         if not task_id:
             raise ProviderError("生图接口未返回 taskId")
         await jobs.set_provider_task(job, "yinghe", task_id, idempotency_key=headers.get("Idempotency-Key"))
-    data = await _poll_scheduled(f"{base}/image/generation/tasks/{task_id}", headers, job, timeout_seconds=IMAGE_POLL_TIMEOUT_SECONDS)
+    data = await _poll_scheduled(
+        f"{base}/image/generation/tasks/{task_id}",
+        headers,
+        job,
+        timeout_seconds=_remaining_provider_timeout(job, IMAGE_POLL_TIMEOUT_SECONDS),
+        timeout_error="gpt-image-2 生成超过10分钟，已判定失败",
+    )
     return await _store_image_result(job, task_id, data, created)
 
 
@@ -431,12 +474,14 @@ async def _store_image_result_inner(job: Job, task_id: str, data: dict[str, Any]
     }
 
 
-async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
-    if (job.request or {}).get("_provider") == "runninghub":
-        return await generate_h3_video(request, job)
+async def _submit_seedance_video(request: VideoGenerationCreate, job: Job, image_urls: list[str]) -> tuple[str, dict[str, Any], str, dict[str, str]]:
     base, headers = _video_config()
+    # 同一逻辑创建在网络重试时始终使用相同键；文本降级是另一份请求体，必须使用独立键。
+    variant = "reference" if image_urls else "text"
+    job.idempotency_key = f"{job.id}:{variant}"
+    headers["Idempotency-Key"] = job.idempotency_key
     content: list[dict[str, Any]] = [{"type": "text", "text": request.prompt}]
-    content.extend({"type": "image_url", "image_url": {"url": url}, "role": "reference_image"} for url in request.image_urls)
+    content.extend({"type": "image_url", "image_url": {"url": url}, "role": "reference_image"} for url in image_urls)
     payload = {
         "model": request.model or settings.video_model,
         "content": content,
@@ -458,7 +503,28 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         if not task_id:
             raise ProviderError("视频接口未返回任务 id")
         await jobs.set_provider_task(job, "yinghe", task_id, idempotency_key=headers.get("Idempotency-Key"))
-    data = await _poll_scheduled(f"{base}/v3/video/tasks/{task_id}", headers, job, timeout_seconds=VIDEO_POLL_TIMEOUT_SECONDS)
+    return task_id, created, base, headers
+
+
+async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
+    if (job.request or {}).get("_provider") == "runninghub":
+        return await generate_h3_video(request, job)
+    task_id, created, base, headers = await _submit_seedance_video(request, job, request.image_urls)
+    try:
+        data = await _poll_scheduled(f"{base}/v3/video/tasks/{task_id}", headers, job, timeout_seconds=VIDEO_POLL_TIMEOUT_SECONDS)
+    except ProviderError as exc:
+        message = str(exc)
+        allow_fallback = bool((job.request or {}).get("_generalCharacterTextFallback"))
+        real_person_blocked = "疑似包含真实人物" in message or bool(re.search(r"may contain real person", message, re.IGNORECASE))
+        if not (allow_fallback and request.image_urls and real_person_blocked):
+            raise
+        # 通用人物镜不要求跨镜身份一致。若 AI 场景首帧被上游误判为
+        # 真人参考，安全降级为纯文本视频，避免整条全量任务被阻断。
+        task_id, created, base, headers = await _submit_seedance_video(request, job, [])
+        data = await _poll_scheduled(f"{base}/v3/video/tasks/{task_id}", headers, job, timeout_seconds=VIDEO_POLL_TIMEOUT_SECONDS)
+        result = await _store_video_result(job, task_id, data, created)
+        result["referenceFallback"] = "text-to-video-real-person-policy"
+        return result
     return await _store_video_result(job, task_id, data, created)
 
 
@@ -713,12 +779,15 @@ async def resume_generation(job: Job) -> dict[str, Any]:
     if job.kind == "image":
         base, headers = _image_config()
         url, timeout = f"{base}/image/generation/tasks/{job.provider_task_id}", IMAGE_POLL_TIMEOUT_SECONDS
+        timeout = _remaining_provider_timeout(job, timeout)
+        timeout_error = "gpt-image-2 生成超过10分钟，已判定失败"
     elif job.kind == "video":
         base, headers = _video_config()
         url, timeout = f"{base}/v3/video/tasks/{job.provider_task_id}", VIDEO_POLL_TIMEOUT_SECONDS
+        timeout_error = "生成任务超时，请稍后查询"
     else:
         raise ProviderError(f"不支持恢复的任务类型：{job.kind}")
-    data = await _poll_scheduled(url, headers, job, timeout_seconds=timeout)
+    data = await _poll_scheduled(url, headers, job, timeout_seconds=timeout, timeout_error=timeout_error)
     return await store_provider_result(job, data)
 
 

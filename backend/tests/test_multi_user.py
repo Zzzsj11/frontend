@@ -238,6 +238,65 @@ def test_general_storyboard_outline_generation_is_async(client, monkeypatch) -> 
     assert all(line["shotOptions"]["outlineStatus"] == "ready" for line in lines)
 
 
+def test_general_storyboard_all_empty_outline_needs_no_cast(client, monkeypatch) -> None:
+    import time
+
+    from app import domain
+
+    async def fake_general_outline(*, config, selected_humans, on_progress=None):
+        assert selected_humans == []
+        return {
+            "shots": [
+                {
+                    "index": 0,
+                    "shotType": "empty",
+                    "outlineScene": "雨夜空街",
+                    "outlineShot": "缓慢横移",
+                    "requiredCharacterIds": [],
+                    "intent": "建立氛围",
+                    "characterAction": "雨水落下",
+                    "emotionalFocus": "孤寂",
+                    "cameraPurpose": "交代环境",
+                }
+            ],
+            "usageRecords": [],
+            "usage": {},
+            "requestId": "empty-outline",
+        }
+
+    monkeypatch.setattr(domain, "generate_general_story_outline", fake_general_outline)
+    _, headers = create_and_login_user(client, "empty-outline-user")
+    project = client.post("/api/projects", headers=headers, json={"name": "Empty MV"}).json()
+    created = client.post(
+        f"/api/projects/{project['id']}/storyboards/general",
+        headers=headers,
+        json={
+            "genre": "流行歌曲",
+            "season": "秋",
+            "gender": "女",
+            "age_group": "青年",
+            "visual_style": "电影写实",
+            "empty_shot_count": 1,
+            "character_shot_count": 0,
+            "total_duration": 5,
+            "digital_human_ids": [],
+        },
+    )
+    task_id = created.json()["taskId"]
+    trigger = client.post(f"/api/tasks/{task_id}/storyboard-outline/regenerate", headers=headers)
+    assert trigger.status_code == 202, trigger.text
+    deadline = time.monotonic() + 3
+    task = None
+    while time.monotonic() < deadline:
+        task = client.get(f"/api/tasks/{task_id}", headers=headers).json()
+        if task["status"] != "outlining":
+            break
+        time.sleep(0.02)
+    assert task is not None and task["status"] == "generating"
+    assert task["lines"][0]["shotType"] == "empty"
+    assert task["lines"][0]["digitalHumanIds"] == []
+
+
 def test_material_exports_are_isolated_between_users(client, monkeypatch) -> None:
     from app import domain
 
@@ -455,6 +514,40 @@ def test_material_export_supersedes_finished_history(client, monkeypatch) -> Non
             connection.commit()
         finally:
             connection.close()
+
+
+def test_material_export_progress_counters_never_regress(client, monkeypatch) -> None:
+    import asyncio
+
+    from app import domain
+    from app.database import session_factory
+    from app.jobs import Job
+    from app.models import MaterialExportModel
+
+    user_id, headers = create_and_login_user(client, "export-progress-owner")
+    project = client.post("/api/projects", headers=headers, json={"name": "progress"}).json()
+    task = client.post(f"/api/projects/{project['id']}/tasks", headers=headers, json={"title": "progress"}).json()
+    export_id = "export-progress-monotonic"
+
+    async def scenario() -> None:
+        async with session_factory() as session:
+            session.add(MaterialExportModel(id=export_id, user_id=user_id, project_task_id=task["id"]))
+            await session.commit()
+
+        async def no_job_progress(_job, _progress):
+            return None
+
+        monkeypatch.setattr(domain.jobs, "update_progress", no_job_progress)
+        job = Job(id="job-export-progress", kind="export")
+        await domain._set_export_progress(export_id, job, 20, "下载中", processed_assets=5, processed_bytes=12_000, total_bytes=20_000)
+        await domain._set_export_progress(export_id, job, 21, "下载中", processed_assets=3, processed_bytes=9_000, total_bytes=18_000)
+        async with session_factory() as session:
+            item = await session.get(MaterialExportModel, export_id)
+            assert item.processed_assets == 5
+            assert item.processed_bytes == 12_000
+            assert item.total_bytes == 20_000
+
+    asyncio.run(scenario())
 
 
 def test_private_humans_sort_before_system(client) -> None:

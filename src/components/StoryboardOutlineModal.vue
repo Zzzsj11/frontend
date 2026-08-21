@@ -107,6 +107,12 @@ const regenerate = async () => {
                 <span v-if="scene.narrativePurpose"
                   ><b>叙事功能：</b>{{ scene.narrativePurpose }}</span
                 >
+                <span
+                  v-for="(outfit, humanId) in scene.wardrobeByCharacter"
+                  :key="humanId"
+                  class="wardrobe-item"
+                  ><b>{{ roleNames([humanId]) }}服装：</b>{{ outfit }}</span
+                >
               </div>
             </div>
           </article>
@@ -181,6 +187,9 @@ const regenerate = async () => {
                 <span v-if="shot.cameraPurpose"><b>镜头目的：</b>{{ shot.cameraPurpose }}</span>
                 <span v-if="shot.motifIds?.length"
                   ><b>视觉母题：</b>{{ motifNames(shot.motifIds) }}</span
+                >
+                <span v-for="(outfit, humanId) in shot.wardrobeByCharacter" :key="humanId"
+                  ><b>{{ roleNames([humanId]) }}服装：</b>{{ outfit }}</span
                 >
                 <span v-if="shot.sourceDuration !== undefined"
                   ><b>歌词显示：</b>{{ shot.sourceDuration }} 秒</span

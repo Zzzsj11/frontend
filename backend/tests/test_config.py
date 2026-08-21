@@ -15,6 +15,10 @@ def test_shared_provider_configuration_is_kept_as_one_group(monkeypatch) -> None
 
 def test_material_export_downloads_allow_twenty_parallel_files() -> None:
     assert config.settings.export_download_concurrency == 20
+    assert config.settings.export_upload_part_size_mb == 5
+    assert config.settings.tos_request_timeout_seconds == 180
+    assert config.settings.tos_socket_timeout_seconds == 180
+    assert config.settings.tos_max_retry_count == 5
 
 
 def test_media_generation_defaults_support_large_batches() -> None:

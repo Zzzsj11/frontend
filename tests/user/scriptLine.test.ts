@@ -38,4 +38,31 @@ describe('ScriptLine thumbnail playback', () => {
     expect(wrapper.find('.image-zoom-trigger').exists()).toBe(false)
     store.pause()
   })
+
+  it('hides planned character chips for general MV lines', () => {
+    const store = useProjectStore()
+    store.digitalHumans = [
+      {
+        id: 'dh-general',
+        name: '仅用于大纲的人物',
+        avatar: '/human.png',
+        source: 'system',
+        scope: 'system',
+      },
+    ]
+    const line = {
+      ...videoLine,
+      id: 'line-general',
+      source: 'general',
+      shotType: 'character',
+      digitalHumanIds: ['dh-general'],
+    } as ScriptLineType
+    store.lines = [line]
+
+    const wrapper = mount(ScriptLine, { props: { line, index: 0 } })
+
+    expect(wrapper.find('.dh-chips').exists()).toBe(false)
+    expect(wrapper.text()).toContain('人物镜')
+    expect(wrapper.text()).not.toContain('仅用于大纲的人物')
+  })
 })

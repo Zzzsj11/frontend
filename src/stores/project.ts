@@ -542,7 +542,14 @@ export const useProjectStore = defineStore('project', {
           }
           localGeneratingLines.add(lineId)
           try {
-            const item = await api.generateStoryboardLine(taskId, lineId, force)
+            let item = await api.generateStoryboardLine(taskId, lineId, force)
+            if (item.id && ['queued', 'running'].includes(String(item.status || ''))) {
+              await api.waitGenerationJob(String(item.id))
+              item = (await api.fetchStoryboardLine(taskId, lineId)) as unknown as Record<
+                string,
+                unknown
+              >
+            }
             const current = this.lines.find((line) => line.id === lineId)
             if (current && this.activeTaskId === taskId) {
               current.scenePrompt = String(item.scenePrompt || '')
@@ -614,6 +621,28 @@ export const useProjectStore = defineStore('project', {
         if (!job.storyboardLineId || resumedGenerationJobs.has(job.id)) continue
         const line = this.lines.find((item) => item.id === job.storyboardLineId)
         if (!line) continue
+        if (job.kind === 'storyboard_line') {
+          line.generationStatus = 'running'
+          resumedGenerationJobs.add(job.id)
+          void (async () => {
+            try {
+              await api.waitGenerationJob(job.id)
+              const fresh = await api.fetchStoryboardLine(taskId, job.storyboardLineId!)
+              const index = this.lines.findIndex((item) => item.id === job.storyboardLineId)
+              if (this.activeTaskId === taskId && index >= 0) this.lines[index] = fresh
+            } catch (error) {
+              const current = this.lines.find((item) => item.id === job.storyboardLineId)
+              if (current) {
+                current.generationStatus = 'failed'
+                current.generationError =
+                  error instanceof Error ? error.message : '单条视频提示词生成失败'
+              }
+            } finally {
+              resumedGenerationJobs.delete(job.id)
+            }
+          })()
+          continue
+        }
         const slot = job.kind === 'video' ? line.shot : line.scene
         if (slot.status === 'generating') continue
         slot.status = 'generating'
@@ -1748,9 +1777,13 @@ export const useProjectStore = defineStore('project', {
       line.shot.error = undefined
       // 历史版本总数（含未懒加载的），用于资产版本序号
       const variant = line.shot.assetCount ?? line.shot.assets.length
-      const characterUrls = line.digitalHumanIds
-        .map((id) => this.digitalHumans.find((h) => h.id === id)?.avatar)
-        .filter(Boolean) as string[]
+      // 通用 MV 的人物镜由视频模型逐镜自由生成，不发送数字人参考图；ASS 仍用头像保护面部身份。
+      const characterUrls =
+        line.source === 'general'
+          ? []
+          : (line.digitalHumanIds
+              .map((id) => this.digitalHumans.find((h) => h.id === id)?.avatar)
+              .filter(Boolean) as string[])
       // P1：轮询挂到任务 watcher 上，切换子项目即被取消（后端任务照跑，切回后恢复）
       const watcher = this.activeTaskId ? registerTaskWatcher(this.activeTaskId) : null
       try {

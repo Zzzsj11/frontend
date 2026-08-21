@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>三任务并发压测与上线容量评估</title>
+    <style>
+      :root {
+        --bg: #f4f7fb;
+        --card: #fff;
+        --ink: #132238;
+        --muted: #627089;
+        --line: #dbe3ee;
+        --blue: #246bfd;
+        --green: #07865c;
+        --orange: #d96316;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          15px/1.65 system-ui,
+          -apple-system,
+          'Segoe UI',
+          'PingFang SC',
+          sans-serif;
+      }
+      .wrap {
+        max-width: 1180px;
+        margin: auto;
+        padding: 36px 22px 60px;
+      }
+      header {
+        padding: 34px;
+        border-radius: 22px;
+        background: linear-gradient(125deg, #10233e, #1c4d85);
+        color: #fff;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 34px;
+        line-height: 1.25;
+      }
+      header p {
+        margin: 4px 0;
+        color: #d9e7fb;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px;
+        margin: 20px 0;
+      }
+      .kpi,
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+      }
+      .kpi {
+        padding: 18px;
+      }
+      .kpi b {
+        display: block;
+        font-size: 27px;
+        color: var(--green);
+      }
+      .kpi span,
+      .muted {
+        color: var(--muted);
+      }
+      .card {
+        padding: 24px;
+        margin: 16px 0;
+      }
+      h2 {
+        font-size: 22px;
+        margin: 0 0 14px;
+      }
+      h3 {
+        font-size: 17px;
+        margin: 20px 0 8px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      th,
+      td {
+        padding: 10px 9px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        color: #45556e;
+        background: #f7f9fc;
+      }
+      .note {
+        border-left: 4px solid var(--orange);
+        padding: 10px 14px;
+        background: #fff7ed;
+      }
+      .arch {
+        width: 100%;
+        height: auto;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: #f8fafc;
+      }
+      .two {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      .formula {
+        padding: 14px;
+        background: #0f172a;
+        color: #dbeafe;
+        border-radius: 10px;
+        font:
+          13px/1.7 ui-monospace,
+          monospace;
+        white-space: pre-wrap;
+      }
+      .ok {
+        color: var(--green);
+        font-weight: 700;
+      }
+      .foot {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      code {
+        word-break: break-all;
+      }
+      @media (max-width: 800px) {
+        .grid,
+        .two {
+          grid-template-columns: 1fr;
+        }
+        .wrap {
+          padding: 18px 12px;
+        }
+        .card {
+          overflow: auto;
+        }
+        h1 {
+          font-size: 27px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <header>
+        <h1>三任务并发压测与上线容量评估</h1>
+        <p>ASS《七里香》×1、通用 MV ×2｜Seedance 2.0｜16:9｜480p</p>
+        <p>最终口径：PostgreSQL 工单与资产 + Token 账本 + Worker 心跳 + Docker 资源采样</p>
+      </header>
+      <section class="grid">
+        <div class="kpi"><span>提示词</span><b>47 / 47</b></div>
+        <div class="kpi"><span>场景图</span><b>47 / 47</b></div>
+        <div class="kpi"><span>视频</span><b>47 / 47</b></div>
+        <div class="kpi"><span>视频在途峰值</span><b>20</b></div>
+      </section>
+      <section class="card">
+        <h2>管理结论</h2>
+        <p>
+          <strong>三项真实全量任务最终全部完成，图片与视频已拆成独立 32+32 并发 Worker。</strong
+          >扩容复测达到 20 路视频在途，供应商 429=0、超时=0；媒体 Worker burst 进程约 92–102
+          MiB/个，当前主要容量边界是供应商额度与上游耗时，而不是本机 CPU/内存。
+        </p>
+        <div class="note">
+          20 路是本轮真实峰值，不等同于 32 路持续 SLA。上线后继续观察 14 天
+          P50/P95/P99、失败率、最老排队时间和 Key 消耗，再决定是否提升到 64/96。
+        </div>
+      </section>
+      <section class="card">
+        <h2>三任务最终对账</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>任务</th>
+              <th>子任务 ID</th>
+              <th>规模</th>
+              <th>提示词</th>
+              <th>场景图</th>
+              <th>视频</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>ASS《七里香》</td>
+              <td><code>task-9a458d21887548bba93910fba7b4d28f</code></td>
+              <td>13 镜</td>
+              <td class="ok">13/13</td>
+              <td class="ok">13/13</td>
+              <td class="ok">13/13</td>
+            </tr>
+            <tr>
+              <td>通用 MV A</td>
+              <td><code>task-fae5aa98836d41b6b979f3cd39e9aa8d</code></td>
+              <td>17 镜 / 210s</td>
+              <td class="ok">17/17</td>
+              <td class="ok">17/17</td>
+              <td class="ok">17/17</td>
+            </tr>
+            <tr>
+              <td>通用 MV B</td>
+              <td><code>task-9905e89b152f439a85e8fa45454bf1f7</code></td>
+              <td>17 镜 / 210s</td>
+              <td class="ok">17/17</td>
+              <td class="ok">17/17</td>
+              <td class="ok">17/17</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="muted">
+          数据库最终核验：47 条 storyboard lines、47 个有效场景资产、47
+          个有效视频资产。历史失败工单保留审计，不计入当前资产完成数。
+        </p>
+      </section>
+      <section class="card">
+        <h2>最终架构与容量边界</h2>
+        <svg
+          class="arch"
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 1400 860"
+          role="img"
+          aria-labelledby="svg-title svg-desc"
+        >
+          <title id="svg-title">三任务全量并发压测最终架构</title>
+          <desc id="svg-desc">图片和视频使用独立32并发Worker，视频峰值20在途，无429和超时。</desc>
+          <defs>
+            <marker id="a" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+              <path d="M0 0L0 6L9 3Z" fill="#64748b" />
+            </marker>
+            <style>
+              .b {
+                fill: #fff;
+                stroke: #334155;
+                stroke-width: 2;
+              }
+              .o {
+                fill: #ecfdf5;
+                stroke: #059669;
+                stroke-width: 2;
+              }
+              .i {
+                fill: #eff6ff;
+                stroke: #2563eb;
+                stroke-width: 2;
+              }
+              .ac {
+                fill: #eef2ff;
+                stroke: #4f46e5;
+                stroke-width: 2;
+              }
+              .w {
+                fill: #fff7ed;
+                stroke: #ea580c;
+                stroke-width: 2;
+              }
+              .tt {
+                font: 700 20px system-ui;
+                fill: #0f172a;
+              }
+              .ss {
+                font: 15px system-ui;
+                fill: #334155;
+              }
+              .tn {
+                font: 13px system-ui;
+                fill: #475569;
+              }
+              .m {
+                font: 800 28px system-ui;
+                fill: #047857;
+              }
+              .e {
+                stroke: #64748b;
+                stroke-width: 2.5;
+                fill: none;
+                marker-end: url(#a);
+              }
+            </style>
+          </defs>
+          <rect width="1400" height="860" fill="#f8fafc" />
+          <text x="50" y="52" class="tt" font-size="29">三任务全量并发：最终架构与容量边界</text>
+          <text x="50" y="82" class="ss">47/47 提示词 · 47/47 场景图 · 47/47 Seedance 视频</text>
+          <rect x="50" y="130" width="225" height="175" rx="16" class="b" />
+          <text x="75" y="168" class="tt">3 个真实任务</text>
+          <text x="75" y="207" class="ss">ASS：13 镜</text>
+          <text x="75" y="238" class="ss">通用 A：17 镜</text>
+          <text x="75" y="269" class="ss">通用 B：17 镜</text>
+          <rect x="350" y="145" width="215" height="135" rx="16" class="i" />
+          <text x="403" y="187" class="tt">FastAPI</text>
+          <text x="380" y="222" class="ss">异步受理 · green 切换</text>
+          <path d="M275 215H350" class="e" />
+          <rect x="650" y="105" width="245" height="125" rx="16" class="i" />
+          <text x="686" y="147" class="tt">PostgreSQL 队列</text>
+          <text x="688" y="182" class="ss">事实源 · 租约 · 心跳</text>
+          <path d="M565 200H650" class="e" />
+          <rect x="990" y="80" width="340" height="130" rx="16" class="o" />
+          <text x="1044" y="122" class="tt">Storyboard Worker ×2</text>
+          <text x="1050" y="164" class="m">47 / 47</text>
+          <text x="1170" y="164" class="ss">成功</text>
+          <path d="M895 158H990" class="e" />
+          <rect x="965" y="260" width="365" height="145" rx="16" class="ac" />
+          <text x="1005" y="303" class="tt">worker-image · 独立池</text>
+          <text x="1007" y="342" class="m">并发 32</text>
+          <text x="1140" y="342" class="ss">47/47 图</text>
+          <text x="1007" y="377" class="tn">不再被长视频占槽</text>
+          <path d="M895 190C935 190 935 330 965 330" class="e" />
+          <rect x="965" y="445" width="365" height="185" rx="16" class="o" />
+          <text x="1005" y="488" class="tt">worker-media · 视频池</text>
+          <text x="1007" y="527" class="m">并发 32</text>
+          <text x="1140" y="527" class="ss">47/47 视频</text>
+          <text x="1007" y="562" class="ss">峰值20 · 429=0 · 超时=0</text>
+          <text x="1007" y="595" class="tn">公平领取 · 合规自动T2V</text>
+          <path d="M895 205C930 205 930 535 965 535" class="e" />
+          <rect x="80" y="450" width="385" height="210" rx="16" class="w" />
+          <text x="115" y="493" class="tt">容量结论</text>
+          <text x="115" y="536" class="m">20 路视频健康</text>
+          <text x="115" y="573" class="ss">burst：92–102 MiB/个</text>
+          <text x="115" y="607" class="ss">边界：Key 与上游耗时</text>
+          <text x="115" y="637" class="tn">32路持续SLA仍需验证</text>
+          <rect x="185" y="715" width="1030" height="82" rx="16" class="b" />
+          <text x="220" y="748" class="tt">正式部署</text>
+          <text x="220" y="779" class="ss">
+            deploy-local-images.sh → green backend → Workers逐类graceful drain
+          </text>
+        </svg>
+      </section>
+      <section class="two">
+        <div class="card">
+          <h2>扩容复测</h2>
+          <table>
+            <tr>
+              <th>指标</th>
+              <th>值</th>
+            </tr>
+            <tr>
+              <td>图片 / 视频并发</td>
+              <td>32 / 32</td>
+            </tr>
+            <tr>
+              <td>视频峰值在途</td>
+              <td>20</td>
+            </tr>
+            <tr>
+              <td>429 / 超时</td>
+              <td>0 / 0</td>
+            </tr>
+            <tr>
+              <td>burst Worker 内存</td>
+              <td>92–102 MiB/个</td>
+            </tr>
+          </table>
+        </div>
+        <div class="card">
+          <h2>通用 A 恢复</h2>
+          <p>
+            只补 8 个缺片，未重复已有 9 个视频。探针 354 秒；其余端到端耗时
+            158、342、458、546、740、738、671 秒。全部 attempt=1，新失败=0，实际 fallback=0。
+          </p>
+          <p>恢复新增视频用量：967,568；通用 A 成功视频累计：2,056,082。</p>
+        </div>
+      </section>
+      <section class="card">
+        <h2>正式部署</h2>
+        <div class="formula">
+          JOB_EXECUTION_MODE=worker COMPOSE_PROFILES=workers IMAGE_WORKER_CONCURRENCY=32
+          VIDEO_WORKER_CONCURRENCY=32 cd /opt/mv-agent-frontend git status --short git rev-parse
+          HEAD chmod +x scripts/deploy-local-images.sh scripts/deploy.sh DEPLOY_ENV=production
+          ./scripts/deploy-local-images.sh
+        </div>
+        <p>
+          部署脚本按 Git SHA 构建版本化镜像：先更新 frontend，以 green backend 保持 API 可用，再按
+          chat → storyboard → image → video → export 顺序逐类 graceful drain。已有 provider taskId
+          的工单只恢复轮询，不重复提交。
+        </p>
+      </section>
+      <section class="card">
+        <h2>上线监控线</h2>
+        <ul>
+          <li>视频最老排队超过 300 秒：检查 Key、上游耗时和在途分布。</li>
+          <li>429/限流率超过 1%：降低并发，禁止继续扩 Worker。</li>
+          <li>单 Worker 内存持续超过 512 MiB：检查下载、multipart 与结果聚合。</li>
+          <li>Key remaining 20% / 10% / 0：分级告警、切 Key、停止新媒体任务。</li>
+        </ul>
+      </section>
+      <p class="foot">
+        结论边界：本轮证明20路视频在途无429/超时、32+32架构完成三个全量项目；不代表32路视频持续稳态或多机集群SLA。
+      </p>
+    </main>
+  </body>
+</html>

@@ -1007,6 +1007,42 @@ describe('batch shot video generation', () => {
     expect(store.lines.find((line) => line.id === 'l-draft')?.shot.status).toBe('none')
   })
 
+  it('does not submit digital-human reference images for general MV shots', async () => {
+    const store = useProjectStore()
+    store.activeTaskId = 'task-general'
+    store.activeStoryboardType = 'general'
+    store.digitalHumans = [
+      {
+        id: 'dh-1',
+        name: '人物一',
+        avatar: '/media/human.png',
+        source: 'system',
+        scope: 'system',
+      },
+    ]
+    const line = shotLine('general-line', 'succeeded', 'none')
+    line.source = 'general'
+    line.digitalHumanIds = ['dh-1']
+    line.scene = {
+      status: 'done',
+      imageUrl: '/media/scene.png',
+      originalImageUrl: '/media/scene-original.png',
+    }
+    store.lines = [line]
+    let submittedImages: string[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      if (String(input) === '/api/generations/videos') {
+        submittedImages = JSON.parse(String(init?.body)).image_urls
+        return json({ id: 'general-video-job', status: 'queued', progress: 0 })
+      }
+      return succeededJob()
+    })
+
+    await store.generateShotFor(line.id)
+
+    expect(submittedImages).toEqual(['/media/scene.png'])
+  })
+
   it('runs up to two hundred video generations concurrently', async () => {
     const store = useProjectStore()
     store.activeTaskId = 'task-1'

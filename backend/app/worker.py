@@ -9,7 +9,7 @@ import socket
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 
 from .chat import chat_manager
 from .config import settings, validate_runtime_security
@@ -18,12 +18,16 @@ from .domain import _run_material_export, run_storyboard_job
 from .jobs import Job, jobs
 from .models import GenerationJobModel, ProjectTaskModel, WorkerInstanceModel, utcnow
 from .providers import generate_image, generate_video, resume_generation
-from .redis_store import close_redis
+from .redis_store import close_redis, wait_for_worker_wakeup
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
 
 logger = logging.getLogger("mvagent.worker")
-REPLAYABLE_INTERNAL_KINDS = {"ass_outline", "general_outline", "ass_segment_retry"}
+REPLAYABLE_INTERNAL_KINDS = {"ass_outline", "general_outline", "ass_segment_retry", "storyboard_line"}
 MAX_INTERNAL_ATTEMPTS = 3
+
+
+def _claim_priority(model: GenerationJobModel, active_by_task: dict[str, int]) -> tuple[int, object]:
+    return active_by_task.get(model.project_task_id or "", 0), model.created_at
 
 
 def _job_from_model(model: GenerationJobModel) -> Job:
@@ -41,12 +45,33 @@ async def _claim(kinds: tuple[str, ...], providers: tuple[str, ...], worker_id: 
             )
             .order_by(GenerationJobModel.created_at)
             .with_for_update(skip_locked=True)
-            .limit(20)
+            .limit(100)
         )
         rows = list((await session.execute(query)).scalars())
-        model = next(
-            (row for row in rows if not providers or str((row.request or {}).get("_provider") or "internal") in providers),
-            None,
+        candidates = [row for row in rows if not providers or str((row.request or {}).get("_provider") or "internal") in providers]
+        task_ids = {row.project_task_id for row in candidates if row.project_task_id}
+        active_by_task: dict[str, int] = {}
+        if task_ids:
+            active_by_task = dict(
+                (
+                    await session.execute(
+                        select(GenerationJobModel.project_task_id, func.count(GenerationJobModel.id))
+                        .where(
+                            GenerationJobModel.project_task_id.in_(task_ids),
+                            GenerationJobModel.status == "running",
+                            GenerationJobModel.deleted_at.is_(None),
+                        )
+                        .group_by(GenerationJobModel.project_task_id)
+                    )
+                ).all()
+            )
+        # Keep FIFO within a task, but distribute scarce worker slots across
+        # concurrently active subprojects.  A large batch can no longer occupy
+        # every media slot while another user's first image waits behind it.
+        model = min(
+            candidates,
+            key=lambda row: _claim_priority(row, active_by_task),
+            default=None,
         )
         if model is None:
             return None
@@ -109,7 +134,14 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
                     else "Worker中断且供应商任务ID尚未落库，请重新提交"
                 )
                 model.finished_at = utcnow()
-                if model.kind in REPLAYABLE_INTERNAL_KINDS and model.project_task_id:
+                if model.kind == "storyboard_line" and model.storyboard_line_id:
+                    from .models import StoryboardLineModel
+
+                    line = await session.get(StoryboardLineModel, model.storyboard_line_id)
+                    if line and line.deleted_at is None:
+                        line.generation_status = "failed"
+                        line.generation_error = model.error
+                elif model.kind in REPLAYABLE_INTERNAL_KINDS and model.project_task_id:
                     task = await session.get(ProjectTaskModel, model.project_task_id)
                     if task and task.deleted_at is None:
                         config = dict(task.storyboard_config or {})
@@ -239,10 +271,12 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
                     active.add(task)
                     task.add_done_callback(active.discard)
                     continue
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=settings.worker_poll_seconds)
-            except TimeoutError:
-                pass
+            wakeup = asyncio.create_task(wait_for_worker_wakeup(settings.worker_poll_seconds))
+            stopping = asyncio.create_task(stop.wait())
+            done, pending = await asyncio.wait({wakeup, stopping}, return_when=asyncio.FIRST_COMPLETED)
+            for item in pending:
+                item.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
     finally:
         await update_instance("draining")
         if active:

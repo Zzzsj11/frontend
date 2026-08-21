@@ -62,7 +62,7 @@ docker rm -f "$green" >/dev/null || echo "warn: failed to remove $green" >&2
 # 单机逐类排空：旧进程先收到 SIGTERM、停止领取并在各自 stop_grace_period 内完成
 # 在途任务，再启动同类新进程。供应商不支持创建幂等键时，不让新旧版本并行提交
 # 比缩短发布耗时更重要；该类排空期间新任务继续安全留在 PostgreSQL 队列。
-for worker in worker-chat worker-storyboard worker-media worker-export; do
+for worker in worker-chat worker-storyboard worker-image worker-media worker-export; do
   "${compose[@]}" up -d --no-deps --force-recreate "$worker"
   for _ in {1..60}; do
     status="$("${compose[@]}" ps --format json "$worker" 2>/dev/null | grep -o '"Health":"[^"]*"' | head -1 || true)"

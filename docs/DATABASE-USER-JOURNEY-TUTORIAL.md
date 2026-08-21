@@ -127,7 +127,7 @@ erDiagram
   → 解析字幕，批量创建 storyboard_lines
   → API将完整人物/字幕段/情感/额外要求快照写 generation_jobs（ass_outline）
   → worker-storyboard生成歌曲级视觉圣经/场景计划并写 storyboard_config、overall_prompt、每行 shot_options
-  → 逐行调用 LLM，写 scene_prompt / shot_prompt / generation_status
+  → 逐行创建 storyboard_line 工单，由 worker-storyboard 调用 LLM并写 scene_prompt / shot_prompt / generation_status
   → storyboard_line_cast 固化每行实际演员
 ```
 

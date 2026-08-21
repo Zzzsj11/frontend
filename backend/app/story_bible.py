@@ -5,7 +5,7 @@ from typing import Any
 from .media_constraints import MAX_VIDEO_DURATION, MIN_VIDEO_DURATION, normalize_video_duration
 from .prompts import get_prompt
 
-STORY_BIBLE_VERSION = "story-bible-v5"
+STORY_BIBLE_VERSION = "story-bible-v6"
 
 
 def _stage(index: int, total: int) -> str:

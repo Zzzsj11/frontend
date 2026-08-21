@@ -103,6 +103,58 @@ def test_job_manager_applies_independent_model_execution_pools(monkeypatch) -> N
     asyncio.run(scenario())
 
 
+def test_model_execution_pool_is_shared_across_job_managers(monkeypatch) -> None:
+    from app import jobs as jobs_module
+    from app.jobs import Job, JobManager
+
+    async def scenario() -> None:
+        held: set[str] = set()
+        serial = 0
+
+        async def acquire(_pool: str, limit: int, _ttl: int) -> str | None:
+            nonlocal serial
+            if len(held) >= limit:
+                return None
+            serial += 1
+            token = f"lease-{serial}"
+            held.add(token)
+            return token
+
+        async def release(_pool: str, token: str) -> None:
+            held.discard(token)
+
+        async def renew(_pool: str, _token: str, _ttl: int) -> None:
+            return None
+
+        monkeypatch.setattr(jobs_module, "acquire_execution_lease", acquire)
+        monkeypatch.setattr(jobs_module, "release_execution_lease", release)
+        monkeypatch.setattr(jobs_module, "renew_execution_lease", renew)
+        managers = [JobManager(), JobManager()]
+        for manager in managers:
+            monkeypatch.setattr(manager, "_persist", lambda _job: asyncio.sleep(0))
+            monkeypatch.setattr(manager, "_persist_asset", lambda _job: asyncio.sleep(0))
+        gate = asyncio.Event()
+        started: list[str] = []
+
+        async def runner(job: Job) -> dict:
+            started.append(job.id)
+            await gate.wait()
+            return {}
+
+        request = {"_executionPool": "shared", "_executionConcurrency": 1}
+        tasks = [
+            asyncio.create_task(managers[0]._run(Job(id="one", kind="video", request=request), runner)),
+            asyncio.create_task(managers[1]._run(Job(id="two", kind="video", request=request), runner)),
+        ]
+        await asyncio.sleep(0.05)
+        assert len(started) == 1
+        gate.set()
+        await asyncio.gather(*tasks)
+        assert sorted(started) == ["one", "two"]
+
+    asyncio.run(scenario())
+
+
 def test_uncertain_provider_submission_requires_manual_review(monkeypatch) -> None:
     from app import jobs as jobs_module
     from app.jobs import Job, JobManager
@@ -125,6 +177,33 @@ def test_uncertain_provider_submission_requires_manual_review(monkeypatch) -> No
         assert job.status == "failed"
         assert job.phase == "manual_review"
         assert "不支持幂等重提" in (job.error or "")
+
+    asyncio.run(scenario())
+
+
+def test_definite_provider_rejection_is_not_marked_for_manual_review(monkeypatch) -> None:
+    from app import jobs as jobs_module
+    from app.jobs import Job, JobManager
+    from app.providers import ProviderRejectedError
+
+    async def scenario() -> None:
+        manager = JobManager()
+
+        async def fake_persist(_job: Job) -> None:
+            return None
+
+        monkeypatch.setattr(manager, "_persist", fake_persist)
+        monkeypatch.setattr(jobs_module, "add_token_usage", lambda *_args, **_kwargs: None)
+
+        async def rejected(job: Job) -> dict:
+            job.phase = "submitting_provider"
+            raise ProviderRejectedError("额度已用尽")
+
+        job = Job(id="rejected-provider", kind="image")
+        await manager._run(job, rejected)
+        assert job.status == "failed"
+        assert job.phase == "failed"
+        assert job.error == "额度已用尽"
 
     asyncio.run(scenario())
 
@@ -196,6 +275,35 @@ def test_job_cache_is_best_effort_when_redis_is_unavailable(monkeypatch) -> None
         await redis_store.cache_job("job-offline", {"status": "queued"})
         await redis_store.notify_worker("ass_outline")
         assert await redis_store.get_cached_job("job-offline") is None
+
+    asyncio.run(scenario())
+
+
+def test_worker_wakeup_wait_blocks_until_poll_timeout(monkeypatch) -> None:
+    from app import redis_store
+
+    class IdlePubSub:
+        async def subscribe(self, *_channels):
+            return None
+
+        async def listen(self):
+            yield {"type": "subscribe"}
+            await asyncio.Event().wait()
+
+        async def aclose(self):
+            return None
+
+    class IdleRedis:
+        def pubsub(self):
+            return IdlePubSub()
+
+    monkeypatch.setattr(redis_store, "redis", IdleRedis())
+
+    async def scenario() -> None:
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        await redis_store.wait_for_worker_wakeup(0.03)
+        assert loop.time() - started >= 0.02
 
     asyncio.run(scenario())
 
@@ -406,6 +514,19 @@ def test_provider_poll_scheduler_spreads_200_tasks_over_30_ticks() -> None:
     asyncio.run(scenario())
 
 
+def test_gpt_image_timeout_is_ten_minutes_and_survives_worker_restart(monkeypatch) -> None:
+    from app import providers
+    from app.jobs import Job
+
+    assert providers.IMAGE_POLL_TIMEOUT_SECONDS == 600
+    monkeypatch.setattr(providers.time, "time", lambda: 1_000.0)
+    fresh = Job(id="image-fresh", kind="image", provider_submitted_at=700.0)
+    expired = Job(id="image-expired", kind="image", provider_submitted_at=399.0)
+
+    assert providers._remaining_provider_timeout(fresh, providers.IMAGE_POLL_TIMEOUT_SECONDS) == 300.0
+    assert providers._remaining_provider_timeout(expired, providers.IMAGE_POLL_TIMEOUT_SECONDS) == 0.0
+
+
 async def test_recover_stale_jobs_resumes_recent_and_fails_orphans(client) -> None:
     from app.jobs import jobs as job_manager
 
@@ -476,6 +597,20 @@ async def test_worker_claim_records_owner_and_lease(client) -> None:
     assert row["worker_id"] == "worker-test-owner"
     assert row["phase"] == "claimed"
     assert row["claimed_at"] and row["heartbeat_at"] and row["lease_expires_at"]
+
+
+def test_worker_claim_priority_balances_active_jobs_across_project_tasks() -> None:
+    from types import SimpleNamespace
+
+    from app.worker import _claim_priority
+
+    now = datetime.now(timezone.utc)
+    busy = SimpleNamespace(project_task_id="task-busy", created_at=now - timedelta(minutes=1))
+    idle = SimpleNamespace(project_task_id="task-idle", created_at=now)
+
+    selected = min([busy, idle], key=lambda row: _claim_priority(row, {"task-busy": 4}))
+
+    assert selected is idle
 
 
 async def test_worker_does_not_recover_live_lease_and_never_replays_uncertain_provider_submit(client) -> None:
@@ -922,6 +1057,7 @@ async def test_generate_video_v3_seedance_flow(client, monkeypatch) -> None:
 
         async def post(self, url: str, headers=None, json=None) -> httpx.Response:
             assert url.endswith("/v3/video/tasks")
+            assert headers["Idempotency-Key"] == "job-v3-video:reference"
             assert json.get("return_last_frame") is True
             return httpx.Response(200, json={"id": "cgt-test-1", "status": "queued", "model": "doubao-seedance-2.0"}, request=httpx.Request("POST", url))
 
@@ -964,6 +1100,66 @@ async def test_generate_video_v3_seedance_flow(client, monkeypatch) -> None:
     assert result["coverUrl"] == "https://tos.test/users/u1/generated/covers/cover.png"
     assert result["sourceUrl"] == "https://upstream.test/v.mp4"
     assert result["usage"]["total_tokens"] == 60682
+
+
+async def test_general_character_video_retries_without_reference_on_real_person_block(monkeypatch) -> None:
+    from app import providers
+    from app.jobs import Job
+    from app.schemas import VideoGenerationCreate
+
+    submitted: list[list[dict]] = []
+
+    class Response:
+        def __init__(self, task_id: str):
+            self._task_id = task_id
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"id": self._task_id}
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, _url, *, headers, json):
+            submitted.append(json["content"])
+            return Response(f"video-{len(submitted)}")
+
+    async def fake_set_provider_task(job, _provider, task_id, **_kwargs):
+        job.provider_task_id = task_id
+
+    polls = 0
+
+    async def fake_poll(*_args, **_kwargs):
+        nonlocal polls
+        polls += 1
+        if polls == 1:
+            raise providers.ProviderError("输入参考图疑似包含真实人物")
+        return {"content": {"video_url": "https://upstream.test/result.mp4"}}
+
+    async def fake_store(_job, task_id, _data, _created):
+        return {"providerTaskId": task_id}
+
+    monkeypatch.setattr(providers, "_video_config", lambda: ("https://api.test", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", lambda **_kwargs: Client())
+    monkeypatch.setattr(providers.jobs, "mark_provider_submitting", lambda _job: asyncio.sleep(0))
+    monkeypatch.setattr(providers.jobs, "set_provider_task", fake_set_provider_task)
+    monkeypatch.setattr(providers, "_poll_scheduled", fake_poll)
+    monkeypatch.setattr(providers, "_store_video_result", fake_store)
+    request = VideoGenerationCreate(prompt="人物走在街道", image_urls=["https://tos.test/scene-with-person.png"])
+    job = Job(id="job-general-fallback", kind="video", request={"_generalCharacterTextFallback": True})
+
+    result = await providers.generate_video(request, job)
+
+    assert len(submitted) == 2
+    assert [item["type"] for item in submitted[0]] == ["text", "image_url"]
+    assert [item["type"] for item in submitted[1]] == ["text"]
+    assert result["referenceFallback"] == "text-to-video-real-person-policy"
 
 
 def test_create_real_face_asset_polls_to_active(client, monkeypatch) -> None:
@@ -1109,6 +1305,34 @@ def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) ->
             connection.commit()
         finally:
             connection.close()
+
+
+async def test_general_video_server_strips_character_reference_images(client) -> None:
+    from app.database import session_factory
+    from app.main import _strip_general_character_references
+    from app.models import DigitalHumanModel, ProjectModel, ProjectTaskModel
+
+    async with session_factory() as db:
+        db.add(ProjectModel(id="project-general-random", user_id="user-admin", name="General random"))
+        db.add(ProjectTaskModel(id="task-general-random", project_id="project-general-random", title="General", storyboard_type="general"))
+        db.add(
+            DigitalHumanModel(
+                id="dh-general-random",
+                user_id="user-admin",
+                name="Reference person",
+                avatar_url="https://tos.test/human.png",
+                avatar_thumbnail_url="https://tos.test/human-thumb.png",
+                asset_avatar_url="asset://human",
+                scope="private",
+            )
+        )
+        await db.commit()
+        filtered = await _strip_general_character_references(
+            db,
+            "task-general-random",
+            ["https://tos.test/scene.png", "https://tos.test/human.png", "asset://human"],
+        )
+    assert filtered == ["https://tos.test/scene.png"]
 
 
 def test_h3_endpoint_enforces_official_reference_capabilities(client) -> None:

@@ -57,7 +57,8 @@ services:
     restart: unless-stopped
     stop_grace_period: 20m
     entrypoint: ['./worker-entrypoint.sh']
-    command: ['--kinds', 'image,video', '--concurrency', '${MEDIA_WORKER_CONCURRENCY:-4}']
+    # 视频轮询会长时间占用执行槽，必须与图片拆池，避免全量视频批次饿死图片任务。
+    command: ['--kinds', 'video', '--concurrency', '${VIDEO_WORKER_CONCURRENCY:-32}']
     profiles: ['workers']
     env_file:
       - path: ./backend/.env.chat
@@ -84,10 +85,14 @@ services:
       retries: 3
       start_period: 10s
 
+  worker-image:
+    extends: worker-media
+    command: ['--kinds', 'image', '--concurrency', '${IMAGE_WORKER_CONCURRENCY:-32}']
+
   worker-export:
     extends: worker-media
     stop_grace_period: 30m
-    command: ['--kinds', 'export', '--concurrency', '${EXPORT_WORKER_CONCURRENCY:-1}']
+    command: ['--kinds', 'export', '--concurrency', '${EXPORT_WORKER_CONCURRENCY:-3}']
 
   worker-chat:
     extends: worker-media
@@ -100,7 +105,7 @@ services:
     command:
       [
         '--kinds',
-        'ass_outline,general_outline,ass_segment_retry',
+        'ass_outline,general_outline,ass_segment_retry,storyboard_line',
         '--concurrency',
         '${STORYBOARD_WORKER_CONCURRENCY:-2}',
       ]

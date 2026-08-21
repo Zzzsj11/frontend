@@ -14,7 +14,7 @@ from .error_logging import log_background_error
 from .media_constraints import normalize_video_duration
 from .prompts import get_prompt
 
-PROMPT_VERSION = "storyboard-v6"
+PROMPT_VERSION = "storyboard-v7"
 SCHEMA_VERSION = "storyboard-line-v2"
 
 STRUCTURAL_TYPES = {"intro", "interlude", "outro"}
@@ -46,7 +46,7 @@ class StoryboardPromptError(ValueError):
         self.request_id = self.usage_records[-1].get("requestId") if self.usage_records else None
 
 
-def _check_scene_plan(body: dict[str, Any], *, lyric_count: int, expected_scenes: int) -> dict[str, Any]:
+def _check_scene_plan(body: dict[str, Any], *, lyric_count: int, expected_scenes: int, role_ids: list[str] | None = None) -> dict[str, Any]:
     """第一轮场景规划的结构完整性检查（非审美校验）。"""
     if set(body) != {"globalVisual", "scenes"}:
         raise ValueError("场景规划必须严格包含 globalVisual、scenes")
@@ -59,15 +59,31 @@ def _check_scene_plan(body: dict[str, Any], *, lyric_count: int, expected_scenes
     if not isinstance(scenes, list) or len(scenes) != expected_scenes:
         raise ValueError(f"必须规划 {expected_scenes} 个大场景")
     normalized = []
+    allowed_roles = set(role_ids or [])
+    previous_wardrobe: dict[str, str] = {}
     for scene in scenes:
-        required = {"lineStart", "lineEnd", "locationName", "mood", "emotion", "visualTone", "narrativePurpose"}
+        required = {"lineStart", "lineEnd", "locationName", "mood", "emotion", "visualTone", "narrativePurpose", "wardrobeByCharacter"}
         if not isinstance(scene, dict) or set(scene) != required:
             raise ValueError(f"每个场景必须严格包含：{sorted(required)}")
         if not isinstance(scene["lineStart"], int) or not isinstance(scene["lineEnd"], int) or not 0 <= scene["lineStart"] <= scene["lineEnd"] < lyric_count:
             raise ValueError(f"场景行号范围必须在 0 到 {lyric_count - 1} 之间且 lineStart 不大于 lineEnd")
         if not all(isinstance(scene.get(key), str) and scene[key].strip() for key in ("locationName", "mood", "emotion", "visualTone", "narrativePurpose")):
             raise ValueError("场景地点、意境、情绪、视觉基调与叙事功能不能为空")
-        normalized.append({**scene, "locationName": scene["locationName"].strip()})
+        wardrobe = scene["wardrobeByCharacter"]
+        if not isinstance(wardrobe, dict) or set(wardrobe) != allowed_roles:
+            raise ValueError("每个大场景必须为全部已选人物提供 wardrobeByCharacter 服装方案")
+        normalized_wardrobe = {}
+        for human_id, outfit in wardrobe.items():
+            if not isinstance(outfit, str) or not outfit.strip():
+                raise ValueError("每个人物的场景服装必须是非空描述")
+            normalized_outfit = outfit.strip()
+            if re.search(r"换成|换上|改穿|更换为|脱下.{0,20}穿上|室内.{0,30}出门", normalized_outfit):
+                raise ValueError("同一大场景内每个人物只能有一套服装，不得描述场景内换装")
+            if previous_wardrobe.get(human_id) == normalized_outfit:
+                raise ValueError("同一人物在相邻大场景必须更换明显不同的整套服装")
+            normalized_wardrobe[human_id] = normalized_outfit
+        previous_wardrobe = normalized_wardrobe
+        normalized.append({**scene, "locationName": scene["locationName"].strip(), "wardrobeByCharacter": normalized_wardrobe})
     ordered = sorted(normalized, key=lambda item: item["lineStart"])
     if ordered[0]["lineStart"] != 0 or ordered[-1]["lineEnd"] != lyric_count - 1 or any(right["lineStart"] != left["lineEnd"] + 1 for left, right in zip(ordered, ordered[1:])):
         raise ValueError(f"各场景必须按顺序连续覆盖第 0 到 {lyric_count - 1} 句歌词，不得重叠或遗漏")
@@ -221,10 +237,19 @@ async def _plan_ass_scenes(
                 "lighting": "统一光线规则",
                 "weather": "统一天气",
                 "timeOfDay": "统一或合理推进的时间",
-                "continuityRules": ["人物服装不变", "空间移动必须可解释"],
+                "continuityRules": ["人物面部与身份全片一致", "同一大场景内服装一致、切换大场景必须换装", "空间移动必须可解释"],
             },
             "scenes": [
-                {"lineStart": 0, "lineEnd": 7, "locationName": "明确地点", "mood": "场景意境", "emotion": "情绪状态", "visualTone": "视觉基调", "narrativePurpose": "叙事功能"}
+                {
+                    "lineStart": 0,
+                    "lineEnd": 7,
+                    "locationName": "明确地点",
+                    "mood": "场景意境",
+                    "emotion": "情绪状态",
+                    "visualTone": "视觉基调",
+                    "narrativePurpose": "叙事功能",
+                    "wardrobeByCharacter": {role_id: "该人物在本大场景的完整服装、鞋履与配饰" for role_id in [item["id"] for item in selected_humans]},
+                }
             ],
         },
     }
@@ -241,7 +266,7 @@ async def _plan_ass_scenes(
             # API 层错误（网络、4xx/5xx）携带留痕记录后中止：重试只针对结构检查失败
             raise StoryboardPromptError(str(exc), usage_records=usage_records) from exc
         try:
-            return _check_scene_plan(_extract_json(text), lyric_count=len(lyric_lines), expected_scenes=expected_scenes)
+            return _check_scene_plan(_extract_json(text), lyric_count=len(lyric_lines), expected_scenes=expected_scenes, role_ids=[item["id"] for item in selected_humans])
         except ValueError as exc:
             last_error = exc
             await log_background_error(
@@ -298,7 +323,10 @@ async def _generate_scene_shots(
     payload = {
         "songEmotion": emotion,
         "globalVisual": global_visual,
-        "sceneContext": {key: scene[key] for key in ("locationName", "mood", "emotion", "visualTone", "narrativePurpose")},
+        "sceneContext": {
+            **{key: scene[key] for key in ("locationName", "mood", "emotion", "visualTone", "narrativePurpose")},
+            "wardrobeByCharacter": scene.get("wardrobeByCharacter") or {},
+        },
         "sceneSegments": segment_items,
         "selectedCharacters": selected_humans,
         "overallRequirement": extra_requirement,
@@ -426,7 +454,13 @@ async def generate_ass_story_outline(
             segment_shots = result["shots"]
             all_motifs.extend(result["motifs"])
         for local_index, shot in enumerate(segment_shots):
-            shot.update(index=len(all_shots), locationId=scenes[position]["locationId"], locationChange=local_index == 0, sceneIndex=position)
+            shot.update(
+                index=len(all_shots),
+                locationId=scenes[position]["locationId"],
+                locationChange=local_index == 0,
+                sceneIndex=position,
+                wardrobeByCharacter=scenes[position]["wardrobeByCharacter"],
+            )
             all_shots.append(shot)
     finalize_shot_durations(all_shots, segments)
     return {
@@ -440,7 +474,7 @@ async def generate_ass_story_outline(
                 "locationId": scene["locationId"],
                 "lineStart": scene["lineStart"],
                 "lineEnd": scene["lineEnd"],
-                **{key: scene[key] for key in ("locationName", "mood", "emotion", "visualTone", "narrativePurpose")},
+                **{key: scene[key] for key in ("locationName", "mood", "emotion", "visualTone", "narrativePurpose", "wardrobeByCharacter")},
             }
             for position, scene in enumerate(scenes)
         ],
@@ -485,7 +519,12 @@ async def regenerate_ass_scene_segment(
     )
     shots = []
     for local_index, shot in enumerate(result["shots"]):
-        shot.update(locationId=scene_plan[scene_index]["locationId"], locationChange=local_index == 0, sceneIndex=scene_index)
+        shot.update(
+            locationId=scene_plan[scene_index]["locationId"],
+            locationChange=local_index == 0,
+            sceneIndex=scene_index,
+            wardrobeByCharacter=scene_plan[scene_index].get("wardrobeByCharacter") or {},
+        )
         shots.append(shot)
     return {
         "shots": shots,
@@ -700,7 +739,7 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
 # ---------------------------------------------------------------------------
 
 
-def _check_general_outline(body: dict[str, Any], *, expected_count: int, role_ids: list[str]) -> dict[str, Any]:
+def _check_general_outline(body: dict[str, Any], *, expected_count: int, empty_count: int, character_count: int, role_ids: list[str]) -> dict[str, Any]:
     """通用分镜大纲的结构完整性检查。"""
     if set(body) != {"shots"}:
         raise ValueError("大纲必须严格只包含 shots 字段")
@@ -738,6 +777,10 @@ def _check_general_outline(body: dict[str, Any], *, expected_count: int, role_id
                 "cameraPurpose": shot["cameraPurpose"].strip(),
             }
         )
+    actual_empty = sum(shot["shotType"] == "empty" for shot in normalized)
+    actual_character = len(normalized) - actual_empty
+    if actual_empty != empty_count or actual_character != character_count:
+        raise ValueError(f"镜头类型配额不一致：要求空镜 {empty_count} 条、人物镜 {character_count} 条，实际为空镜 {actual_empty} 条、人物镜 {actual_character} 条")
     return {"shots": normalized}
 
 
@@ -816,6 +859,8 @@ async def generate_general_story_outline(
                 "shots": _check_general_outline(
                     _extract_json(text),
                     expected_count=expected_count,
+                    empty_count=empty_count,
+                    character_count=character_count,
                     role_ids=role_ids,
                 )["shots"],
                 "usageRecords": usage_records,

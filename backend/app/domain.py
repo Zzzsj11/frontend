@@ -760,6 +760,7 @@ async def _apply_story_bible_to_lines(db: AsyncSession, lines: list[StoryboardLi
             "motifIds": plan["motifIds"],
             "outlineStatus": plan.get("outlineStatus", "ready"),
             "sceneIndex": plan.get("sceneIndex"),
+            "wardrobeByCharacter": plan.get("wardrobeByCharacter") or {},
         }
         line.scene_prompt = ""
         line.shot_prompt = ""
@@ -1070,7 +1071,8 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
         for human_id in role_ids
         if (item := human_by_id.get(human_id))
     ]
-    if not selected_humans:
+    config_for_cast = dict(task.storyboard_config or {})
+    if not selected_humans and (task.storyboard_type != "general" or int(config_for_cast.get("character_shot_count", 0)) > 0):
         raise HTTPException(422, "该任务还未选择人物，请先在人物栏选择人物后再生成分镜大纲")
     await consume_daily_quota(db, user_id=user.id, category="chat")
 
@@ -1282,6 +1284,81 @@ async def _run_segment_retry(
         return {"taskId": task_id, "sceneIndex": scene_index, "shotStart": shot_start, "shotCount": shot_count}
 
 
+async def _run_storyboard_line_generation(job: Job) -> dict[str, Any]:
+    """Replay one storyboard prompt job exclusively from its durable request snapshot."""
+    request = dict(job.request or {})
+    line_id = str(job.storyboard_line_id or "")
+    task_id = str(job.project_task_id or "")
+    if not line_id or not task_id or not job.user_id:
+        raise RuntimeError("逐镜分镜工单缺少用户、任务或分镜标识")
+    async with session_factory() as session:
+        line = await session.get(StoryboardLineModel, line_id)
+        task = await session.get(ProjectTaskModel, task_id)
+        if not line or line.deleted_at is not None or not task or task.deleted_at is not None:
+            raise RuntimeError("逐镜分镜工单关联的数据不存在")
+        try:
+            async with storyboard_generation_slots:
+                result = await generate_storyboard_line(
+                    source=str(request.get("source") or task.storyboard_type),
+                    current=dict(request.get("current") or {}),
+                    full_context=dict(request.get("full_context") or {}),
+                    allowed_humans=list(request.get("allowed_humans") or []),
+                )
+            line.scene_prompt, line.shot_prompt = result["scenePrompt"], result["shotPrompt"]
+            line.generation_status = "succeeded"
+            line.prompt_context_hash = str(request.get("context_hash") or "") or None
+            line.generated_at = utcnow()
+            if task.storyboard_type == "ass":
+                links = list(
+                    (
+                        await session.execute(
+                            select(StoryboardLineCastModel).where(
+                                StoryboardLineCastModel.storyboard_line_id == line.id,
+                                StoryboardLineCastModel.deleted_at.is_(None),
+                            )
+                        )
+                    ).scalars()
+                )
+                for item in links:
+                    item.deleted_at = utcnow()
+                for index, human_id in enumerate(result["digitalHumanIds"]):
+                    session.add(StoryboardLineCastModel(id=uid("linecast"), storyboard_line_id=line.id, digital_human_id=human_id, sort_order=index))
+            usage_records = result.get("usageRecords") or [{"operation": "storyboard_line", "usage": result.get("usage"), "requestId": result.get("requestId")}]
+            _persist_llm_calls(
+                session,
+                usage_records,
+                default_operation="storyboard_line",
+                user_id=job.user_id,
+                project_id=job.project_id,
+                project_task_id=task.id,
+                storyboard_line_id=line.id,
+                generation_job_id=job.id,
+            )
+            await _refresh_storyboard_status(session, task)
+            await session.commit()
+            slim_records = [{key: value for key, value in call.items() if key not in ("requestMessages", "responseText")} for call in result.get("usageRecords") or []]
+            return {**result, "usageRecords": slim_records}
+        except Exception as exc:
+            line.generation_status, line.generation_error = "failed", str(exc)[:2000]
+            failed_calls = getattr(exc, "usage_records", None) or [
+                {"operation": "storyboard_line_failed", "usage": getattr(exc, "usage", {}), "requestId": getattr(exc, "request_id", None)}
+            ]
+            _persist_llm_calls(
+                session,
+                failed_calls,
+                default_operation="storyboard_line_failed",
+                user_id=job.user_id,
+                project_id=job.project_id,
+                project_task_id=task.id,
+                storyboard_line_id=line.id,
+                generation_job_id=job.id,
+                operation_suffix="_failed",
+            )
+            await _refresh_storyboard_status(session, task)
+            await session.commit()
+            raise
+
+
 async def run_storyboard_job(job: Job) -> dict[str, Any]:
     """Replay a persisted outline/segment job using only its durable request snapshot."""
     request = dict(job.request or {})
@@ -1309,6 +1386,8 @@ async def run_storyboard_job(job: Job) -> dict[str, Any]:
                 selected_humans=list(request.get("selected_humans") or []),
                 job=job,
             )
+        if job.kind == "storyboard_line":
+            return await _run_storyboard_line_generation(job)
         if job.kind == "ass_segment_retry":
             return await _run_segment_retry(
                 task_id=task_id,
@@ -1928,75 +2007,41 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
     await consume_daily_quota(db, user_id=user.id, category="chat")
     line.generation_status, line.generation_error = "running", None
     line.generation_attempt += 1
-    job = GenerationJobModel(
-        id=uid("job"),
+    queued = await jobs.enqueue(
+        db,
+        "storyboard_line",
+        {
+            "source": task.storyboard_type,
+            "current": current,
+            "full_context": full_context,
+            "allowed_humans": allowed_humans,
+            "context_hash": context_hash,
+            "_provider": "internal",
+        },
         user_id=user.id,
         project_id=task.project_id,
         project_task_id=task.id,
         storyboard_line_id=line.id,
-        kind="storyboard_line",
-        status="queued",
-        progress=0,
-        request={"current": current, "fullContext": full_context},
-        attempt=line.generation_attempt,
-        idempotency_key=f"storyboard:{line.id}:{context_hash}",
     )
-    db.add(job)
+    queued.idempotency_key = f"storyboard:{line.id}:{context_hash}"
+    persisted_job = await db.get(GenerationJobModel, queued.id)
+    if persisted_job:
+        persisted_job.attempt = line.generation_attempt
+        persisted_job.idempotency_key = queued.idempotency_key
     await db.commit()
-    try:
-        async with storyboard_generation_slots:
-            job.status, job.progress, job.started_at = "running", 10, utcnow()
-            await db.commit()
-            result = await generate_storyboard_line(source=task.storyboard_type, current=current, full_context=full_context, allowed_humans=allowed_humans)
-        line.scene_prompt, line.shot_prompt = result["scenePrompt"], result["shotPrompt"]
-        line.generation_status, line.prompt_context_hash, line.generated_at = "succeeded", context_hash, utcnow()
-        if task.storyboard_type == "ass":
-            for item in line_cast:
-                item.deleted_at = utcnow()
-            for index, human_id in enumerate(result["digitalHumanIds"]):
-                db.add(StoryboardLineCastModel(id=uid("linecast"), storyboard_line_id=line.id, digital_human_id=human_id, sort_order=index))
-        # job.result 只保留瘦身后的调用记录：请求快照与返回原文体量大，统一入 llm_call_logs
-        slim_records = [{key: value for key, value in call.items() if key not in ("requestMessages", "responseText")} for call in result.get("usageRecords") or []]
-        observed_at = utcnow()
-        job.status, job.progress, job.result, job.finished_at, job.first_result_observed_at = "succeeded", 100, {**result, "usageRecords": slim_records}, observed_at, observed_at
-        usage_records = result.get("usageRecords") or [{"operation": "storyboard_line", "usage": result.get("usage"), "requestId": result.get("requestId")}]
-        _persist_llm_calls(
-            db,
-            usage_records,
-            default_operation="storyboard_line",
-            user_id=user.id,
-            project_id=task.project_id,
-            project_task_id=task.id,
-            storyboard_line_id=line.id,
-            generation_job_id=job.id,
-        )
-        await _refresh_storyboard_status(db, task)
-        await db.commit()
-        response = await line_json(db, line, result["digitalHumanIds"])
-        normalized = normalize_usage(result.get("usage"))
-        response["usage"] = {key: normalized[key] for key in ("inputTokens", "outputTokens", "cachedInputTokens", "totalTokens")}
-        return response
-    except Exception as exc:
-        line.generation_status, line.generation_error = "failed", str(exc)[:2000]
-        observed_at = utcnow()
-        job.status, job.error, job.finished_at, job.first_result_observed_at = "failed", str(exc)[:2000], observed_at, observed_at
-        failed_calls = getattr(exc, "usage_records", None) or [
-            {"operation": "storyboard_line_failed", "usage": getattr(exc, "usage", {}), "requestId": getattr(exc, "request_id", None)}
-        ]
-        _persist_llm_calls(
-            db,
-            failed_calls,
-            default_operation="storyboard_line_failed",
-            user_id=user.id,
-            project_id=task.project_id,
-            project_task_id=task.id,
-            storyboard_line_id=line.id,
-            generation_job_id=job.id,
-            operation_suffix="_failed",
-        )
-        await _refresh_storyboard_status(db, task)
-        await db.commit()
-        raise HTTPException(502, f"单条分镜生成失败：{exc}") from exc
+    if settings.job_execution_mode == "worker":
+        await jobs.dispatch(queued, run_storyboard_job)
+        return queued.public()
+    # 本地 inline 也通过同一持久化 runner 执行，保证两种模式拥有一致的落库和恢复语义。
+    await jobs.run_claimed(queued, run_storyboard_job)
+    if queued.status != "succeeded":
+        raise HTTPException(502, f"单条分镜生成失败：{queued.error}")
+    fresh = await owned_line(db, user.id, line.id)
+    await db.refresh(fresh)
+    response = await line_json(db, fresh, list((queued.result or {}).get("digitalHumanIds") or planned_role_ids))
+    normalized = normalize_usage((queued.result or {}).get("usage"))
+    response["usage"] = {key: normalized[key] for key in ("inputTokens", "outputTokens", "cachedInputTokens", "totalTokens")}
+    return response
 
 
 @router.post("/tasks/{task_id}/storyboard/retry-failed")
@@ -2098,7 +2143,12 @@ async def _set_export_progress(
             if item.started_at is None:
                 item.started_at = utcnow()
             for key, value in values.items():
-                setattr(item, key, value)
+                # 多文件并发下载的回调会乱序到达；累计量必须与百分比一样保持单调，
+                # 否则管理监控和用户界面会看到已下载字节数短暂倒退。
+                if key in {"processed_assets", "processed_bytes", "total_bytes", "archive_size"} and value is not None:
+                    setattr(item, key, max(getattr(item, key) or 0, value))
+                else:
+                    setattr(item, key, value)
             await session.commit()
         await jobs.update_progress(job, progress)
 
@@ -2254,12 +2304,21 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
                             )
 
                     async with download_slots:
-                        _, _, size = await download_public_url_to_path(
-                            item["url"],
-                            target,
-                            progress_callback=on_download,
-                            client=download_client,
-                        )
+                        for attempt in range(3):
+                            try:
+                                _, _, size = await download_public_url_to_path(
+                                    item["url"],
+                                    target,
+                                    progress_callback=on_download,
+                                    client=download_client,
+                                )
+                                break
+                            except (httpx.TimeoutException, httpx.NetworkError):
+                                target.unlink(missing_ok=True)
+                                in_flight.pop(position, None)
+                                if attempt == 2:
+                                    raise
+                                await asyncio.sleep(0.5 * (2**attempt))
                     in_flight.pop(position, None)
                     item["path"] = target
                     processed_assets += 1
@@ -2347,7 +2406,7 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
             if export:
                 export.status = "failed"
                 export.stage = "导出失败"
-                export.error = str(exc)
+                export.error = str(exc).strip() or type(exc).__name__
                 export.finished_at = utcnow()
                 await session.commit()
         raise

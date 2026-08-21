@@ -21,6 +21,7 @@ from app.schemas import GeneralStoryboardCreate, VideoGenerationCreate
 from app.story_bible import build_ass_story_bible, build_general_story_bible, exact_durations
 from app.storyboard_prompt import (
     _assign_scene_segments,
+    _check_general_outline,
     _check_scene_plan,
     _check_segment_body,
     _extract_json,
@@ -85,7 +86,7 @@ def make_outline(segments, empty_indexes=(), role_ids=("a",)):
     }
 
 
-def make_scene(line_start, line_end, name="雨夜街道"):
+def make_scene(line_start, line_end, name="雨夜街道", wardrobe=None):
     return {
         "lineStart": line_start,
         "lineEnd": line_end,
@@ -94,6 +95,7 @@ def make_scene(line_start, line_end, name="雨夜街道"):
         "emotion": "克制",
         "visualTone": "冷蓝夜景",
         "narrativePurpose": "推进叙事",
+        "wardrobeByCharacter": wardrobe or {},
     }
 
 
@@ -117,6 +119,26 @@ def test_exact_durations_preserve_total_and_provider_limits() -> None:
     durations = exact_durations(31.7, 7)
     assert sum(durations) == pytest.approx(31.7)
     assert all(4 <= value <= 15 for value in durations)
+
+
+def test_general_outline_rejects_changed_shot_type_quota() -> None:
+    def shot(index: int, shot_type: str) -> dict:
+        return {
+            "index": index,
+            "shotType": shot_type,
+            "outlineScene": "雨夜街道",
+            "outlineShot": "人物缓慢走近" if shot_type == "character" else "雨滴落在路面",
+            "requiredCharacterIds": ["human-1"] if shot_type == "character" else [],
+            "intent": "推进叙事",
+            "characterAction": "缓慢行走" if shot_type == "character" else "霓虹倒影变化",
+            "emotionalFocus": "克制",
+            "cameraPurpose": "建立空间",
+        }
+
+    body = {"shots": [shot(0, "empty"), shot(1, "empty"), shot(2, "character")]}
+
+    with pytest.raises(ValueError, match="镜头类型配额不一致"):
+        _check_general_outline(body, expected_count=3, empty_count=1, character_count=2, role_ids=["human-1"])
     with pytest.raises(ValueError, match="28–105"):
         exact_durations(10, 7)
 
@@ -165,6 +187,38 @@ def test_scene_plan_requires_exact_count_and_full_coverage() -> None:
     missing_tail[-1] = {**missing_tail[-1], "lineEnd": 36}
     with pytest.raises(ValueError, match="连续覆盖"):
         _check_scene_plan({"globalVisual": global_visual, "scenes": missing_tail}, lyric_count=39, expected_scenes=5)
+
+
+def test_scene_plan_requires_distinct_wardrobe_for_each_big_scene() -> None:
+    global_visual = {
+        "visualStyle": "电影写实",
+        "colorPalette": "冷蓝",
+        "lighting": "夜景",
+        "weather": "雨",
+        "timeOfDay": "夜",
+        "continuityRules": ["面部一致、按场景换装"],
+    }
+    scenes = [
+        make_scene(0, 0, wardrobe={"a": "黑色风衣、白衬衫、皮靴"}),
+        make_scene(1, 1, "天台", wardrobe={"a": "米色针织衫、深蓝长裤、运动鞋"}),
+    ]
+    normalized = _check_scene_plan({"globalVisual": global_visual, "scenes": scenes}, lyric_count=2, expected_scenes=2, role_ids=["a"])
+    assert normalized["scenes"][1]["wardrobeByCharacter"]["a"].startswith("米色")
+    repeated = [scenes[0], {**scenes[1], "wardrobeByCharacter": scenes[0]["wardrobeByCharacter"]}]
+    with pytest.raises(ValueError, match="必须更换明显不同"):
+        _check_scene_plan({"globalVisual": global_visual, "scenes": repeated}, lyric_count=2, expected_scenes=2, role_ids=["a"])
+
+    changes_inside_scene = [
+        make_scene(0, 0, wardrobe={"a": "室内穿浅色睡衣；出门后换成白衬衫与牛仔裤"}),
+        scenes[1],
+    ]
+    with pytest.raises(ValueError, match="不得描述场景内换装"):
+        _check_scene_plan(
+            {"globalVisual": global_visual, "scenes": changes_inside_scene},
+            lyric_count=2,
+            expected_scenes=2,
+            role_ids=["a"],
+        )
 
 
 def test_segment_body_checks_structure_and_repairs_minor_issues() -> None:
