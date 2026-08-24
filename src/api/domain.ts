@@ -138,6 +138,8 @@ export const fetchActiveGenerations = (taskId: string) =>
       id: string
       kind: 'image' | 'video' | 'storyboard_line'
       storyboardLineId: string | null
+      createdAt: string
+      providerSubmittedAt?: string | null
     }>
   >(`/tasks/${taskId}/generations/active`)
 
@@ -516,6 +518,7 @@ export async function generateShotVideo(
   projectTaskId?: string,
   storyboardLineId?: string,
   signal?: AbortSignal,
+  onSubmitted?: (submittedAt: string) => void,
 ): Promise<{ coverUrl: string; coverThumbnailUrl?: string; videoUrl: string; duration: number }> {
   return mediaGen.generateShotVideo(
     [scenePrompt, shotPrompt].filter(Boolean).join('。'),
@@ -533,5 +536,6 @@ export async function generateShotVideo(
     projectTaskId,
     storyboardLineId,
     signal,
+    onSubmitted,
   )
 }

@@ -217,7 +217,15 @@ describe('project user journey state', () => {
 
     const responses = [
       // 刷新后先拉取仍在执行的生成任务
-      [{ id: 'job-video-1', kind: 'video', storyboardLineId: 'line-resume', progress: 40 }],
+      [
+        {
+          id: 'job-video-1',
+          kind: 'video',
+          storyboardLineId: 'line-resume',
+          progress: 40,
+          createdAt: '2026-08-24T11:40:00+00:00',
+        },
+      ],
       // 恢复轮询：任务已成功（后端已把资产落库）
       {
         id: 'job-video-1',
@@ -254,6 +262,7 @@ describe('project user journey state', () => {
 
     await store.resumeActiveGenerations('task-resume')
     expect(line.shot.status).toBe('generating')
+    expect(line.shot.generationSubmittedAt).toBe('2026-08-24T11:40:00+00:00')
     await vi.waitFor(() => expect(line.shot.status).toBe('done'))
     expect(line.shot.assets[0]?.videoUrl).toBe('/shot.mp4')
     expect(line.shot.currentAssetId).toBe('asset-1')

@@ -10,6 +10,7 @@ interface GenerationJob<T = Record<string, unknown>> {
   progress: number
   result?: T
   error?: string | null
+  created_at?: number
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -80,6 +81,7 @@ export async function generateShotVideo(
   projectTaskId?: string,
   storyboardLineId?: string,
   signal?: AbortSignal,
+  onSubmitted?: (submittedAt: string) => void,
 ): Promise<{ coverUrl: string; coverThumbnailUrl?: string; videoUrl: string; duration: number }> {
   const mode = options.h3Mode ?? 'auto'
   const automaticImages = [referenceImageUrl, ...characterImageUrls].filter(Boolean) as string[]
@@ -116,6 +118,8 @@ export async function generateShotVideo(
       storyboard_line_id: storyboardLineId,
     }),
   })
+  // 以服务端工单创建时间为准；客户端只负责逐秒展示，不自行猜测起点。
+  if (job.created_at) onSubmitted?.(new Date(job.created_at * 1000).toISOString())
   const result = await waitForJob<{
     coverUrl?: string
     coverThumbnailUrl?: string

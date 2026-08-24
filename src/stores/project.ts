@@ -651,6 +651,9 @@ export const useProjectStore = defineStore('project', {
         if (slot.status === 'generating') continue
         slot.status = 'generating'
         slot.error = undefined
+        if (job.kind === 'video') {
+          line.shot.generationSubmittedAt = job.createdAt
+        }
         resumedGenerationJobs.add(job.id)
         void this._watchGenerationJob(taskId, job.id, job.storyboardLineId, job.kind)
       }
@@ -1875,6 +1878,10 @@ export const useProjectStore = defineStore('project', {
           this.activeTaskId ?? undefined,
           lineId,
           watcher?.signal ?? undefined,
+          (submittedAt) => {
+            const current = this.lines.find((item) => item.id === lineId)
+            if (current) current.shot.generationSubmittedAt = submittedAt
+          },
         )
         const still = this.lines.find((l) => l.id === lineId)
         if (still) {

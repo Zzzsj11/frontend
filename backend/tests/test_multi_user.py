@@ -385,6 +385,8 @@ def test_active_generations_reflect_running_jobs_only(client) -> None:
     assert [job["id"] for job in active] == ["job-active-v"]
     assert active[0]["storyboardLineId"] == line_id
     assert active[0]["kind"] == "video"
+    assert active[0]["createdAt"]
+    assert active[0]["providerSubmittedAt"] is None
     assert client.get(f"/api/tasks/{task_id}/generations/active", headers=other).status_code == 404
 
 

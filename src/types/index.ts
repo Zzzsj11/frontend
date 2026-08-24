@@ -84,6 +84,8 @@ export interface SceneInfo {
 /** 分镜信息 */
 export interface ShotInfo {
   status: GenStatus
+  /** 视频生成工单在服务端的提交时间；生成中按钮据此显示已等待秒数。 */
+  generationSubmittedAt?: string
   /** 当前选用资产的封面（冗余字段，方便列表/时间轴/播放器直接展示） */
   imageUrl?: string
   /** 当前选用的资产 id */

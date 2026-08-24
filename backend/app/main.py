@@ -779,7 +779,18 @@ async def list_active_task_generations(task_id: str, user: CurrentUser, db: Asyn
         .scalars()
         .all()
     )
-    return [{"id": row.id, "kind": row.kind, "storyboardLineId": row.storyboard_line_id, "progress": row.progress} for row in rows]
+    return [
+        {
+            "id": row.id,
+            "kind": row.kind,
+            "storyboardLineId": row.storyboard_line_id,
+            "progress": row.progress,
+            # 前端刷新后用服务端落库时间恢复等待秒数，避免从 0 重新计时。
+            "createdAt": row.created_at.isoformat(),
+            "providerSubmittedAt": row.provider_submitted_at.isoformat() if row.provider_submitted_at else None,
+        }
+        for row in rows
+    ]
 
 
 @app.get("/api/generations/{job_id}/events")

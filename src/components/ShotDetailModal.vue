@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { DEFAULT_SHOT_OPTIONS, useProjectStore } from '../stores/project'
 import type { ShotAsset, ShotGenOptions } from '../types'
 import AppIcon from './AppIcon.vue'
@@ -27,6 +27,20 @@ const activeTab = ref<TabKey | null>(null)
 
 // 分镜视频生成参数草稿（清晰度 / 时长 / 画幅 / 模型），重新生成分镜时生效
 const optionsDraft = ref<ShotGenOptions>({ ...DEFAULT_SHOT_OPTIONS })
+const clockNow = ref(Date.now())
+const clockTimer = window.setInterval(() => {
+  clockNow.value = Date.now()
+}, 1000)
+onBeforeUnmount(() => window.clearInterval(clockTimer))
+
+const shotWaitingSeconds = computed(() => {
+  const submittedAt = store.editingLine?.shot.generationSubmittedAt
+  if (!submittedAt) return 0
+  const submittedMs = Date.parse(submittedAt)
+  return Number.isFinite(submittedMs)
+    ? Math.max(0, Math.floor((clockNow.value - submittedMs) / 1000))
+    : 0
+})
 
 // 歌词非中文（不含汉字）且存在译文时，在歌词下方展示中文翻译
 const lyricsTranslation = computed(() => {
@@ -389,7 +403,13 @@ const cancel = () => store.closeEditor()
               >
                 <span v-if="store.editingLine.shot.status === 'generating'" class="spinner" />
                 <AppIcon v-else name="movie" :size="14" />
-                {{ store.editingLine.shot.assets.length ? '重新生成视频' : '生成视频' }}
+                {{
+                  store.editingLine.shot.status === 'generating'
+                    ? `视频已提交生成 ${shotWaitingSeconds} 秒`
+                    : store.editingLine.shot.assets.length
+                      ? '重新生成视频'
+                      : '生成视频'
+                }}
               </button>
             </div>
           </div>
