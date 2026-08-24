@@ -19,7 +19,7 @@ SCHEMA_VERSION = "storyboard-line-v2"
 
 STRUCTURAL_TYPES = {"intro", "interlude", "outro"}
 
-# 大纲生成进度回调：{"phase": "planning" | "segments", "segmentsDone": int, "segmentsTotal": int}
+# 大纲生成进度回调：V1 使用 planning/segments，V2 使用 planning/shots 两阶段。
 ProgressCallback = Callable[[dict[str, Any]], Awaitable[None]]
 LlmCallOverride = Callable[..., Awaitable[str]]
 
@@ -536,7 +536,10 @@ async def generate_ass_story_outline(
     expected_scenes = 5 if lyric_count >= 15 else (4 if lyric_count >= 9 else max(2, min(3, lyric_count)))
     client, usage_records = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url), []
     if on_progress:
-        await on_progress({"phase": "planning", "segmentsDone": 0, "segmentsTotal": 0})
+        progress = {"phase": "planning", "segmentsDone": 0, "segmentsTotal": 0}
+        if settings.outline_protocol_version == "v2":
+            progress.update(stagesDone=0, stagesTotal=2)
+        await on_progress(progress)
     plan = await _plan_ass_scenes(
         client,
         lyric_lines=lyric_lines,
@@ -549,11 +552,10 @@ async def generate_ass_story_outline(
     )
     scenes = [{**scene, "locationId": f"loc-{position + 1}"} for position, scene in enumerate(plan["scenes"])]
     scene_groups = _assign_scene_segments(segments, scenes)
-    progress = {"phase": "segments", "segmentsDone": 0, "segmentsTotal": len(scenes)}
-    if on_progress:
-        await on_progress(dict(progress))
-
     if settings.outline_protocol_version == "v2":
+        progress = {"phase": "shots", "stagesDone": 1, "stagesTotal": 2}
+        if on_progress:
+            await on_progress(dict(progress))
         all_shots = await _generate_ass_shots_v2(
             client,
             segments=segments,
@@ -563,7 +565,7 @@ async def generate_ass_story_outline(
             extra_requirement=extra_requirement,
             usage_records=usage_records,
         )
-        progress["segmentsDone"] = len(scenes)
+        progress["stagesDone"] = 2
         if on_progress:
             await on_progress(dict(progress))
         finalize_shot_durations(all_shots, segments)
@@ -588,6 +590,10 @@ async def generate_ass_story_outline(
             "usage": _sum_usage(usage_records),
             "requestId": usage_records[-1].get("requestId") if usage_records else None,
         }
+
+    progress = {"phase": "segments", "segmentsDone": 0, "segmentsTotal": len(scenes)}
+    if on_progress:
+        await on_progress(dict(progress))
 
     async def run_scene(position: int, scene: dict[str, Any]) -> dict[str, Any]:
         try:

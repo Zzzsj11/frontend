@@ -242,9 +242,11 @@ export interface OutlineFailedSegment {
   error: string
 }
 
-/** 大纲后台生成的进度（SSE 事件与任务快照共用；ASS 为分段多轮，通用为单轮 generating） */
+/** 大纲后台生成的进度（V2 ASS 为 planning/shots 两阶段；V1 ASS 保留 segments）。 */
 export interface OutlineProgress {
-  phase?: 'planning' | 'segments' | 'generating' | 'error'
+  phase?: 'planning' | 'shots' | 'segments' | 'generating' | 'error'
+  stagesDone?: number
+  stagesTotal?: number
   segmentsDone?: number
   segmentsTotal?: number
   shotsDone?: number

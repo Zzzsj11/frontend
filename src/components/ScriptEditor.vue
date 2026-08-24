@@ -71,17 +71,19 @@ watch(
 )
 onBeforeUnmount(() => window.clearInterval(outlineTimer))
 
-/** 通用分镜大纲为单轮 LLM 调用（约 1 分钟），ASS 为分段多轮（约 2.5 分钟） */
+/** 线上 V2 实测：通用约 24 秒，ASS 两阶段约 75 秒。 */
 const isGeneralOutline = computed(() => store.activeStoryboardType === 'general')
 
 const outlinePercent = computed(() => {
   const progress = store.outlineProgress
   // 时间爬升：按预估总时长估算，封顶 95%，无进度事件期间也保持缓慢递增
-  const estimateSec = isGeneralOutline.value ? 60 : 150
+  const estimateSec = isGeneralOutline.value ? 30 : 90
   const timeBased = Math.min(95, (outlineElapsed.value / 1000 / estimateSec) * 100)
   let stageBased = 5
   if (progress?.phase === 'segments' && progress.segmentsTotal)
     stageBased = 15 + 75 * ((progress.segmentsDone ?? 0) / progress.segmentsTotal)
+  else if (progress?.phase === 'shots' && progress.stagesTotal)
+    stageBased = 10 + 80 * ((progress.stagesDone ?? 0) / progress.stagesTotal)
   else if (progress?.phase === 'planning' || progress?.phase === 'generating') stageBased = 10
   return Math.round(Math.max(timeBased, stageBased))
 })
@@ -95,9 +97,10 @@ const outlineStageText = computed(() => {
   const progress = store.outlineProgress
   if (isGeneralOutline.value)
     return progress?.shotsTotal ? `共 ${progress.shotsTotal} 个镜头` : '整体规划中'
+  if (progress?.phase === 'shots') return '全曲镜头大纲生成中（第 2/2 阶段）'
   if (progress?.phase === 'segments' && progress.segmentsTotal)
     return `分段大纲生成中 ${progress.segmentsDone ?? 0}/${progress.segmentsTotal}`
-  return '场景规划中'
+  return '大场景规划中（第 1/2 阶段）'
 })
 
 /** 逐句提示词生成进度（ASS/通用统一） */

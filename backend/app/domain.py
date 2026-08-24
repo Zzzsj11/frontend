@@ -954,8 +954,8 @@ async def _run_ass_outline_generation(
             item.storyboard_config = config
             await progress_session.commit()
         if job:
-            done = int(progress.get("segmentsDone") or 0)
-            total = max(1, int(progress.get("segmentsTotal") or 1))
+            done = int(progress.get("stagesDone") or progress.get("segmentsDone") or 0)
+            total = max(1, int(progress.get("stagesTotal") or progress.get("segmentsTotal") or 1))
             await jobs.update_progress(job, 10 + min(75, int(done / total * 75)))
 
     async with session_factory() as session:

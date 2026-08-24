@@ -230,6 +230,7 @@ async def test_ass_outline_v2_has_one_plan_and_one_full_song_shot_stage(monkeypa
 
     monkeypatch.setattr(storyboard_prompt, "settings", dataclasses.replace(settings, outline_protocol_version="v2", llm_api_key="test"))
     stages = []
+    progress_events = []
 
     async def fake_plan(*_args, **_kwargs):
         stages.append("plan")
@@ -250,6 +251,9 @@ async def test_ass_outline_v2_has_one_plan_and_one_full_song_shot_stage(monkeypa
             ensure_ascii=False,
         )
 
+    async def capture_progress(progress):
+        progress_events.append(progress)
+
     monkeypatch.setattr(storyboard_prompt, "_plan_ass_scenes", fake_plan)
     monkeypatch.setattr(storyboard_prompt, "_call", fake_call)
     result = await generate_ass_story_outline(
@@ -260,10 +264,16 @@ async def test_ass_outline_v2_has_one_plan_and_one_full_song_shot_stage(monkeypa
         emotion={},
         selected_humans=[{"id": "human-1", "name": "女主"}],
         extra_requirement="",
+        on_progress=capture_progress,
     )
     assert stages == ["plan", "ass_shots_v2"]
     assert result["protocolVersion"] == "v2"
     assert [shot["sceneIndex"] for shot in result["shots"]] == [0, 1]
+    assert [(item["phase"], item.get("stagesDone"), item.get("stagesTotal")) for item in progress_events] == [
+        ("planning", 0, 2),
+        ("shots", 1, 2),
+        ("shots", 2, 2),
+    ]
 
 
 def test_ass_timeline_splits_gaps_with_two_part_rule_and_chinese_labels() -> None:
