@@ -7,7 +7,7 @@
 - 后端模型注册中心：模型存库，管理后台「模型管理」CRUD 与启停，公开端点 `GET /api/model-options` 动态下发。
 - 前端选择器动态化：`src/generationModels.ts` 的 `loadGenerationModels()` 从 `/model-options` 拉取并覆盖内置默认，注册中心不可用时回退默认模型，不再硬编码禁用。
 - H3 已进入项目视频生成主流程，UI 支持 T2VA、I2VA、FL2VA、Ref2VA（当前产品明确不开放 L2VA）；Ref2VA 产品上限为 6 图、1 视频、3 音频，视觉素材必需，音频不能单独提交。
-- H3 任务、请求、结果和 RunningHub 输入输出均持久化；当前单 API 实例内并发上限为 2。
+- H3 保留 RunningHub 工作流模型（前端标注并发上限 2），并新增 MiniMax-H3 直连模型（前端显示 H3）；直连协议使用 `/video/generation/tasks`、稳定 `Idempotency-Key`、`task_id` 和 `task.content.url`，768P/2K 分别由产品侧 480p/720p 与 1080p 映射。
 
 ## 剩余待办
 

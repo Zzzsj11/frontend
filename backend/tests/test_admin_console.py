@@ -27,7 +27,12 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     options = client.get("/api/model-options", headers=headers).json()
     assert any(x["id"] == "gpt-image-2" for x in options)
     h3 = next(x for x in options if x["id"] == "minimax-h3-runninghub")
+    direct_h3 = next(x for x in options if x["id"] == "minimax-h3")
+    assert h3["name"] == "H3"
     assert h3["capabilities"]["executionConcurrency"] == 2
+    assert direct_h3["name"] == "H3"
+    assert direct_h3["capabilities"]["executionConcurrency"] == 200
+    assert direct_h3["capabilities"]["executionPool"] == "yinghe-h3"
     assert h3["capabilities"]["referenceImage"] == {"min": 0, "max": 6}
     assert h3["capabilities"]["referenceVideo"] == {"min": 0, "max": 1}
     assert h3["capabilities"]["referenceAudio"] == {"min": 0, "max": 3}
@@ -35,6 +40,7 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     assert h3["capabilities"]["referenceImage"]["max"] == 6
     assert h3["capabilities"]["referenceVideo"]["max"] == 1
     assert "first_last" in h3["capabilities"]["h3Modes"]
+    assert "first_last" in direct_h3["capabilities"]["h3Modes"]
     client.delete(f"/api/admin/users/{created['id']}")
     # Restore the shared TestClient's refresh cookie for subsequent auth tests.
     restored = client.post("/api/auth/login", json={"username": "admin", "password": "secure-admin-123"})

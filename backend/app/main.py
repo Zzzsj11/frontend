@@ -668,14 +668,15 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
     payload.image_urls = await _strip_general_character_references(db, task_id, payload.image_urls)
     validate_video_references(payload, dict(model.capabilities or {}))
-    if provider.code == "runninghub":
+    is_h3 = bool((model.capabilities or {}).get("h3Modes"))
+    if is_h3:
         validate_h3_mode_inputs(payload)
     await _check_concurrency(db, user.id, "video", settings.video_generation_concurrency)
     await consume_daily_quota(db, user_id=user.id, category="video")
     # ASS 数字人头像优先用平台虚拟资产（asset://），其余 URL（如场景图）原样保留
-    if provider.code == "yinghe":
+    if provider.code == "yinghe" and model.provider_model_id != "MiniMax-H3":
         payload.image_urls = await _resolve_asset_avatar_urls(db, payload.image_urls)
-    h3_compilation = compile_h3_prompt(payload) if provider.code == "runninghub" else None
+    h3_compilation = compile_h3_prompt(payload) if is_h3 else None
     if h3_compilation:
         payload.prompt = h3_compilation.prompt
     snapshot = generation_request_snapshot(payload, model, provider)

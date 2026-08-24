@@ -404,6 +404,98 @@ def test_h3_video_provider_archives_output(monkeypatch) -> None:
     assert result["generationMode"] == "first_frame"
 
 
+def test_direct_h3_video_uses_documented_contract_and_archives_output(monkeypatch) -> None:
+    import httpx
+
+    from app import providers
+    from app.jobs import Job
+    from app.schemas import VideoGenerationCreate
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            captured.update(url=url, headers=headers, payload=json)
+            return httpx.Response(200, json={"task_id": "direct-h3-1"}, request=httpx.Request("POST", url))
+
+        async def get(self, url, headers=None):
+            return httpx.Response(
+                200,
+                json={
+                    "task": {
+                        "id": "direct-h3-1",
+                        "status": "succeeded",
+                        "content": {"url": "https://upstream.test/h3.mp4"},
+                        "resolution": "768P",
+                        "ratio": "16:9",
+                        "duration": 5,
+                        "usage": {"total_seconds": 5, "input_image_count": 1},
+                    }
+                },
+                request=httpx.Request("GET", url),
+            )
+
+    async def fake_mark(job):
+        job.phase = "submitting_provider"
+
+    async def fake_set(job, provider, task_id, **kwargs):
+        job.provider, job.provider_task_id = provider, task_id
+        job.idempotency_key = kwargs.get("idempotency_key")
+
+    async def fake_progress(_job, _progress):
+        return None
+
+    async def fake_import(_url, _prefix, _filename):
+        return "https://tos.test/h3.mp4"
+
+    async def fake_cover(_url, _task_id, _user_id):
+        return "https://tos.test/h3.jpg", "https://tos.test/h3-thumb.jpg"
+
+    monkeypatch.setattr(providers, "_video_config", lambda: ("https://aigc.test", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(providers.jobs, "mark_provider_submitting", fake_mark)
+    monkeypatch.setattr(providers.jobs, "set_provider_task", fake_set)
+    monkeypatch.setattr(providers.jobs, "update_progress", fake_progress)
+    monkeypatch.setattr(providers, "import_remote", fake_import)
+    monkeypatch.setattr(providers, "_video_first_frame", fake_cover)
+    monkeypatch.setattr(providers, "H3_POLL_INTERVAL_SECONDS", 0)
+
+    request = VideoGenerationCreate(
+        prompt="故宫舞蹈",
+        duration=5,
+        ratio="16:9",
+        resolution="720p",
+        image_urls=["https://tos.test/person.jpg"],
+        h3_mode="first_frame",
+        model="minimax-h3",
+    )
+    job = Job(
+        id="job-direct-h3",
+        kind="video",
+        user_id="user-1",
+        request={"model": "minimax-h3", "_provider": "yinghe", "_providerModelId": "MiniMax-H3", "_h3Mode": "first_frame"},
+    )
+    result = asyncio.run(providers.generate_video(request, job))
+
+    assert captured["url"] == "https://aigc.test/video/generation/tasks"
+    assert captured["headers"]["Idempotency-Key"] == "job-direct-h3:h3:first_frame"
+    assert captured["payload"]["model"] == "MiniMax-H3"
+    assert captured["payload"]["resolution"] == "768P"
+    assert captured["payload"]["content"][1]["role"] == "first_frame"
+    assert result["provider"] == "yinghe-h3"
+    assert result["videoUrl"] == "https://tos.test/h3.mp4"
+    assert result["usage"]["total_seconds"] == 5
+
+
 def _insert_job(
     job_id: str,
     *,

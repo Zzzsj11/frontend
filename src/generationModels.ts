@@ -29,6 +29,15 @@ export const videoModelConcurrency = (modelId?: string): number => {
     ?.executionConcurrency
   return Number.isFinite(configured) ? Math.max(1, Number(configured)) : 200
 }
+export const isH3VideoModel = (modelId?: string): boolean => {
+  if (!modelId) return false
+  const option = VIDEO_MODEL_OPTIONS.find((item) => item.value === modelId)
+  return (
+    Boolean(option?.capabilities?.h3Modes?.length) ||
+    modelId === 'minimax-h3-runninghub' ||
+    modelId === 'minimax-h3'
+  )
+}
 export const generationModelLabel = (option: GenerationModelOption): string => {
   const concurrency = option.capabilities?.executionConcurrency
   return Number.isFinite(concurrency) && Number(concurrency) < 200

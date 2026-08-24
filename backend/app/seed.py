@@ -195,7 +195,7 @@ async def seed_system_data() -> None:
                 "model-h3-runninghub",
                 runninghub_provider.id,
                 "minimax-h3-runninghub",
-                "MiniMax H3",
+                "H3",
                 "video",
                 "minimax-h3-ref2va",
                 {
@@ -228,6 +228,32 @@ async def seed_system_data() -> None:
                 },
                 False,
             ),
+            (
+                "model-h3-direct",
+                provider.id,
+                "minimax-h3",
+                "H3",
+                "video",
+                "MiniMax-H3",
+                {
+                    "durations": {"min": 4, "max": 15},
+                    "ratios": ["16:9", "9:16", "4:3", "1:1"],
+                    "resolutions": ["720p", "1080p"],
+                    "h3Modes": ["auto", "text", "first_frame", "first_last", "reference"],
+                    "referenceImage": {"min": 0, "max": 6},
+                    "referenceVideo": {"min": 0, "max": 1},
+                    "referenceAudio": {"min": 0, "max": 3},
+                    "referenceTotalMax": 10,
+                    "referenceAudioRequiresVisual": True,
+                    "workflowVersion": "minimax-h3-direct-v1",
+                    "promptCompiler": "h3-prompt-writing",
+                    "promptCompilerVersion": "1.2.0",
+                    "nativeAudio": True,
+                    "executionPool": "yinghe-h3",
+                    "executionConcurrency": 200,
+                },
+                False,
+            ),
         ]
         for mid, model_provider_id, code, name, modality, provider_id, capabilities, is_default in defaults:
             model = await session.get(AiModelModel, mid)
@@ -246,8 +272,9 @@ async def seed_system_data() -> None:
                         is_default=is_default,
                     )
                 )
-            elif code == "minimax-h3-runninghub":
+            elif code in {"minimax-h3-runninghub", "minimax-h3"}:
                 # 模型能力属于系统种子配置；启动时同步升级已有环境，避免仅新库生效。
+                model.name = name
                 model.provider_model_id = provider_id or code
                 model.capabilities = capabilities
                 model.status = "active"

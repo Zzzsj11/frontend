@@ -6,6 +6,7 @@ import {
   IMAGE_MODEL_OPTIONS,
   VIDEO_MODEL_OPTIONS,
   generationModelLabel,
+  isH3VideoModel,
 } from '../generationModels'
 import { DEFAULT_VIDEO_DURATION, VIDEO_DURATION_CHOICES } from '../mediaConstraints'
 import type { ShotGenOptions } from '../types'
@@ -24,9 +25,7 @@ const popoverStyle = ref<Record<string, string>>({})
 const resolutionChoices: ShotGenOptions['resolution'][] = ['480p', '720p', '1080p']
 const ratioChoices: ShotGenOptions['ratio'][] = ['16:9', '9:16', '4:3', '1:1']
 const durationChoices = VIDEO_DURATION_CHOICES
-const isH3 = computed(
-  () => props.mode === 'shot' && props.modelValue.videoModel === 'minimax-h3-runninghub',
-)
+const isH3 = computed(() => props.mode === 'shot' && isH3VideoModel(props.modelValue.videoModel))
 
 const summary = computed(() => {
   const parts = [props.modelValue.ratio, props.modelValue.resolution.toUpperCase()]

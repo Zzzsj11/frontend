@@ -511,9 +511,103 @@ async def _submit_seedance_video(request: VideoGenerationCreate, job: Job, image
     return task_id, created, base, headers
 
 
+def _direct_h3_content(request: VideoGenerationCreate, mode: str) -> list[dict[str, Any]]:
+    content: list[dict[str, Any]] = [{"type": "text", "text": request.prompt}]
+    for index, url in enumerate(request.image_urls):
+        role = "reference_image"
+        if mode == "first_frame":
+            role = "first_frame"
+        elif mode == "first_last":
+            role = "first_frame" if index == 0 else "last_frame"
+        content.append({"type": "image_url", "role": role, "image_url": {"url": url}})
+    content.extend({"type": "video_url", "role": "reference_video", "video_url": {"url": url}} for url in request.video_urls)
+    content.extend({"type": "audio_url", "role": "reference_audio", "audio_url": {"url": url}} for url in request.audio_urls)
+    return content
+
+
+async def _poll_direct_h3(base: str, headers: dict[str, str], job: Job) -> dict[str, Any]:
+    deadline = time.monotonic() + H3_POLL_TIMEOUT_SECONDS
+    consecutive_errors = 0
+    async with httpx.AsyncClient(timeout=60) as client:
+        while time.monotonic() < deadline:
+            await asyncio.sleep(H3_POLL_INTERVAL_SECONDS)
+            try:
+                response = await client.get(f"{base}/video/generation/tasks/{job.provider_task_id}", headers=headers)
+                _raise_for_status(response)
+                body = _unwrap(response.json())
+                task = body.get("task") if isinstance(body.get("task"), dict) else body
+            except (httpx.HTTPError, ValueError, ProviderError) as exc:
+                consecutive_errors += 1
+                if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS:
+                    raise ProviderError(f"H3 状态查询连续失败：{exc}") from exc
+                continue
+            consecutive_errors = 0
+            status = str(task.get("status") or "").lower()
+            await jobs.update_progress(job, job.progress + 3)
+            if status == "succeeded":
+                return task
+            if status in {"failed", "cancelled"}:
+                reason = task.get("error") or task.get("message") or f"H3 生成任务状态：{status}"
+                raise ProviderError(f"H3 生成失败：{reason}")
+    raise ProviderError("H3 生成任务超时，请稍后查询")
+
+
+async def generate_direct_h3_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
+    base, headers = _video_config()
+    mode = str((job.request or {}).get("_h3Mode") or request.h3_mode)
+    if mode == "auto":
+        mode = "reference" if request.video_urls or request.audio_urls or len(request.image_urls) > 1 else ("first_frame" if request.image_urls else "text")
+    job.idempotency_key = f"{job.id}:h3:{mode}"
+    headers["Idempotency-Key"] = job.idempotency_key
+    payload = {
+        "model": str((job.request or {}).get("_providerModelId") or "MiniMax-H3"),
+        "content": _direct_h3_content(request, mode),
+        "resolution": "2K" if request.resolution == "1080p" else "768P",
+        "duration": request.duration,
+        "ratio": request.ratio,
+        "aigc_watermark": request.watermark,
+    }
+    await jobs.mark_provider_submitting(job)
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(f"{base}/video/generation/tasks", headers=headers, json=payload)
+        _raise_for_status(response)
+        created = _unwrap(response.json())
+    task_id = str(created.get("task_id") or "")
+    if not task_id:
+        raise ProviderError("H3 提交成功但未返回 task_id")
+    await jobs.set_provider_task(job, "yinghe-h3", task_id, idempotency_key=job.idempotency_key)
+    return await _store_direct_h3_result(job, await _poll_direct_h3(base, headers, job))
+
+
+async def _store_direct_h3_result(job: Job, task: dict[str, Any]) -> dict[str, Any]:
+    content = task.get("content") if isinstance(task.get("content"), dict) else {}
+    source_url = str(content.get("url") or "")
+    if not source_url:
+        raise ProviderError("H3 生成成功但未返回视频地址")
+    task_id = job.provider_task_id or str(task.get("id") or "")
+    owner_prefix = f"users/{job.user_id}/generated"
+    stored_url = await import_remote(source_url, f"{owner_prefix}/videos", f"h3-{task_id}.mp4")
+    stored_cover, stored_cover_thumbnail = await _video_first_frame(source_url, f"h3-{task_id}", job.user_id)
+    request = job.request or {}
+    return {
+        "provider": "yinghe-h3",
+        "providerTaskId": task_id,
+        "model": request.get("model") or "minimax-h3",
+        "usage": task.get("usage") or {},
+        "videoUrl": stored_url,
+        "coverUrl": stored_cover,
+        "coverThumbnailUrl": stored_cover_thumbnail,
+        "sourceUrl": source_url,
+        "duration": task.get("duration") or request.get("duration"),
+        "ratio": task.get("ratio") or request.get("ratio"),
+    }
+
+
 async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
     if (job.request or {}).get("_provider") == "runninghub":
         return await generate_h3_video(request, job)
+    if (job.request or {}).get("_providerModelId") == "MiniMax-H3":
+        return await generate_direct_h3_video(request, job)
     task_id, created, base, headers = await _submit_seedance_video(request, job, request.image_urls)
     try:
         data = await _poll_scheduled(f"{base}/v3/video/tasks/{task_id}", headers, job, timeout_seconds=VIDEO_POLL_TIMEOUT_SECONDS)
@@ -781,6 +875,9 @@ async def resume_generation(job: Job) -> dict[str, Any]:
         raise ProviderError("缺少供应商任务ID，无法恢复")
     if (job.request or {}).get("_provider") == "runninghub":
         return await _store_h3_video_result(job, await _poll_runninghub(job))
+    if job.provider == "yinghe-h3" or (job.request or {}).get("_providerModelId") == "MiniMax-H3":
+        base, headers = _video_config()
+        return await _store_direct_h3_result(job, await _poll_direct_h3(base, headers, job))
     if job.kind == "image":
         base, headers = _image_config()
         url, timeout = f"{base}/image/generation/tasks/{job.provider_task_id}", IMAGE_POLL_TIMEOUT_SECONDS
@@ -803,6 +900,13 @@ async def query_provider_task(kind: str, task_id: str, provider: str | None = No
             return await runninghub_query_task(task_id)
         except RunningHubError as exc:
             raise ProviderError(f"RunningHub 状态查询失败：{exc}") from exc
+    if provider == "yinghe-h3":
+        base, headers = _video_config()
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.get(f"{base}/video/generation/tasks/{task_id}", headers=headers)
+            _raise_for_status(response)
+            body = _unwrap(response.json())
+        return body.get("task") if isinstance(body.get("task"), dict) else body
     if kind == "image":
         base, headers = _image_config()
         url = f"{base}/image/generation/tasks/{task_id}"
@@ -819,6 +923,8 @@ async def store_provider_result(job: Job, data: dict[str, Any]) -> dict[str, Any
     """供应商成功结果下载落库（重启恢复与对账同步共用）"""
     if (job.request or {}).get("_provider") == "runninghub":
         return await _store_h3_video_result(job, data)
+    if job.provider == "yinghe-h3" or (job.request or {}).get("_providerModelId") == "MiniMax-H3":
+        return await _store_direct_h3_result(job, data)
     task_id = job.provider_task_id or ""
     if job.kind == "image":
         return await _store_image_result(job, task_id, data, {})

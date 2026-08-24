@@ -1,5 +1,6 @@
 import type { ShotGenOptions } from '../types'
 import type { ImageModelId } from '../generationModels'
+import { isH3VideoModel } from '../generationModels'
 import { apiRequest } from './client'
 import { watchGenerationJob, type GenerationJobSnapshot } from '../utils/generationPoller'
 
@@ -84,7 +85,7 @@ export async function generateShotVideo(
   const automaticImages = [referenceImageUrl, ...characterImageUrls].filter(Boolean) as string[]
   const explicitFirst = options.h3FirstFrameUrl || referenceImageUrl
   const imageUrls =
-    options.videoModel !== 'minimax-h3-runninghub' || mode === 'auto'
+    !isH3VideoModel(options.videoModel) || mode === 'auto'
       ? automaticImages
       : mode === 'text'
         ? []
@@ -120,7 +121,7 @@ export async function generateShotVideo(
     coverThumbnailUrl?: string
     videoUrl: string
     duration: number
-  }>(job.id, options.videoModel === 'minimax-h3-runninghub' ? 2_700_000 : 660_000, { signal })
+  }>(job.id, isH3VideoModel(options.videoModel) ? 2_700_000 : 660_000, { signal })
   return {
     coverUrl: result.coverUrl || referenceImageUrl || '',
     coverThumbnailUrl: result.coverThumbnailUrl,
