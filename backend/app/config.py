@@ -114,6 +114,8 @@ class Settings:
     daily_chat_limit: int = max(1, int(os.getenv("DAILY_CHAT_LIMIT", "1000")))
     daily_image_limit: int = max(1, int(os.getenv("DAILY_IMAGE_LIMIT", "1000")))
     daily_video_limit: int = max(1, int(os.getenv("DAILY_VIDEO_LIMIT", "1000")))
+    # v2 将大纲限制为紧凑决策协议；设为 v1 可无迁移快速回滚旧提示词链路。
+    outline_protocol_version: str = os.getenv("OUTLINE_PROTOCOL_VERSION", "v2").lower()
     image_generation_concurrency: int = max(1, min(1000, int(os.getenv("IMAGE_GENERATION_CONCURRENCY", "200"))))
     video_generation_concurrency: int = max(1, min(1000, int(os.getenv("VIDEO_GENERATION_CONCURRENCY", "200"))))
     # 图片/视频共用同一个上游账户并发池，避免两类各 200 时合计超发。

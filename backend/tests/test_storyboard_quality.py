@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import dataclasses
+import json
+
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import select
 
 from app.ass_storyboard import AssCue, group_cues
+from app.config import settings
 from app.database import session_factory
 from app.domain import uid
 from app.media_constraints import normalize_video_duration
@@ -22,12 +26,15 @@ from app.story_bible import build_ass_story_bible, build_general_story_bible, ex
 from app.storyboard_prompt import (
     _assign_scene_segments,
     _check_general_outline,
+    _check_general_outline_v2,
     _check_scene_plan,
     _check_segment_body,
     _extract_json,
     _placeholder_shot,
     _validate,
     finalize_shot_durations,
+    generate_ass_story_outline,
+    generate_general_story_outline,
 )
 
 
@@ -141,6 +148,122 @@ def test_general_outline_rejects_changed_shot_type_quota() -> None:
         _check_general_outline(body, expected_count=3, empty_count=1, character_count=2, role_ids=["human-1"])
     with pytest.raises(ValueError, match="28–105"):
         exact_durations(10, 7)
+
+
+def test_general_outline_v2_expands_compact_decisions() -> None:
+    body = {
+        "shots": [
+            {"i": 0, "t": "e", "s": "雨夜街道", "b": "建立", "c": [], "a": "雨滴落地", "e": "孤独", "m": "广角静止"},
+            {"i": 1, "t": "c", "s": "车站站台", "b": "推进", "c": ["human-1"], "a": "人物回望", "e": "克制", "m": "中景推近"},
+        ]
+    }
+    result = _check_general_outline_v2(body, expected_count=2, empty_count=1, character_count=1, role_ids=["human-1"])
+    assert result["shots"][1]["outlineScene"] == "车站站台"
+    assert result["shots"][1]["outlineShot"] == "人物回望；中景推近"
+
+
+@pytest.mark.asyncio
+async def test_general_outline_v2_uses_one_compact_call(monkeypatch) -> None:
+    from app import storyboard_prompt
+
+    monkeypatch.setattr(storyboard_prompt, "settings", dataclasses.replace(settings, outline_protocol_version="v2", llm_api_key="test"))
+    calls = []
+
+    async def fake_call(_client, _messages, max_tokens, **kwargs):
+        calls.append((max_tokens, kwargs["operation"]))
+        return json.dumps(
+            {
+                "shots": [
+                    {"i": 0, "t": "e", "s": "海岸", "b": "建立", "c": [], "a": "浪花起伏", "e": "平静", "m": "广角横移"},
+                    {"i": 1, "t": "c", "s": "公路", "b": "推进", "c": [], "a": "陌生人物前行", "e": "自由", "m": "中景跟拍"},
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    result = await generate_general_story_outline(
+        config={"genre": "流行", "empty_shot_count": 1, "character_shot_count": 1, "total_duration": 10},
+        selected_humans=[],
+        call_override=fake_call,
+    )
+    assert calls == [(2600, "general_story_outline_v2")]
+    assert result["protocolVersion"] == "v2"
+
+
+@pytest.mark.asyncio
+async def test_general_outline_v1_switch_keeps_legacy_protocol(monkeypatch) -> None:
+    from app import storyboard_prompt
+
+    monkeypatch.setattr(storyboard_prompt, "settings", dataclasses.replace(settings, outline_protocol_version="v1", llm_api_key="test"))
+
+    async def fake_call(_client, _messages, _max_tokens, **_kwargs):
+        return json.dumps(
+            {
+                "shots": [
+                    {
+                        "index": 0,
+                        "shotType": "empty",
+                        "outlineScene": "海岸",
+                        "outlineShot": "浪花起伏",
+                        "requiredCharacterIds": [],
+                        "intent": "建立",
+                        "characterAction": "浪花起伏",
+                        "emotionalFocus": "平静",
+                        "cameraPurpose": "广角横移",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    result = await generate_general_story_outline(
+        config={"genre": "流行", "empty_shot_count": 1, "character_shot_count": 0, "total_duration": 5},
+        selected_humans=[],
+        call_override=fake_call,
+    )
+    assert result["protocolVersion"] == "v1"
+
+
+@pytest.mark.asyncio
+async def test_ass_outline_v2_has_one_plan_and_one_full_song_shot_stage(monkeypatch) -> None:
+    from app import storyboard_prompt
+
+    monkeypatch.setattr(storyboard_prompt, "settings", dataclasses.replace(settings, outline_protocol_version="v2", llm_api_key="test"))
+    stages = []
+
+    async def fake_plan(*_args, **_kwargs):
+        stages.append("plan")
+        return {
+            "globalVisual": {"visualStyle": "电影", "colorPalette": "蓝", "lighting": "柔光", "weather": "晴", "timeOfDay": "夜", "continuityRules": []},
+            "scenes": [make_scene(0, 0, "海边", {"human-1": "白色风衣"}), make_scene(1, 1, "公路", {"human-1": "蓝色夹克"})],
+        }
+
+    async def fake_call(_client, _messages, _max_tokens, **kwargs):
+        stages.append(kwargs["operation"])
+        return json.dumps(
+            {
+                "shots": [
+                    {"i": 0, "t": "c", "b": "建立", "c": ["human-1"], "a": "人物眺望", "e": "克制", "m": "中景推近"},
+                    {"i": 1, "t": "c", "b": "推进", "c": ["human-1"], "a": "人物奔跑", "e": "释放", "m": "广角跟拍"},
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    monkeypatch.setattr(storyboard_prompt, "_plan_ass_scenes", fake_plan)
+    monkeypatch.setattr(storyboard_prompt, "_call", fake_call)
+    result = await generate_ass_story_outline(
+        segments=[
+            {"index": 0, "start": 0, "end": 5, "lyrics": "第一句", "segmentType": "lyric"},
+            {"index": 1, "start": 5, "end": 10, "lyrics": "第二句", "segmentType": "lyric"},
+        ],
+        emotion={},
+        selected_humans=[{"id": "human-1", "name": "女主"}],
+        extra_requirement="",
+    )
+    assert stages == ["plan", "ass_shots_v2"]
+    assert result["protocolVersion"] == "v2"
+    assert [shot["sceneIndex"] for shot in result["shots"]] == [0, 1]
 
 
 def test_ass_timeline_splits_gaps_with_two_part_rule_and_chinese_labels() -> None:

@@ -1007,6 +1007,7 @@ async def _run_ass_outline_generation(
         )
         config = dict(task.storyboard_config or {})
         config["storyBible"] = story_bible
+        config["outlineProtocolVersion"] = outline.get("protocolVersion", "v1")
         config.pop("outlineProgress", None)
         task.storyboard_config = config
         task.status = "generating"
@@ -1124,6 +1125,7 @@ async def _run_general_outline_generation(
         )
         done_config = dict(task.storyboard_config or {})
         done_config["storyBible"] = story_bible
+        done_config["outlineProtocolVersion"] = outline.get("protocolVersion", "v1")
         done_config.pop("outlineProgress", None)
         task.storyboard_config = done_config
         task.status = "generating"

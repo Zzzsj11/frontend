@@ -29,6 +29,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://mvagent:mvagent@postgres:5432/mvagent
       REDIS_URL: redis://redis:6379/0
       LLM_API_MODE: ${LLM_API_MODE:-openai}
+      OUTLINE_PROTOCOL_VERSION: ${OUTLINE_PROTOCOL_VERSION:-v2}
       STORAGE_BACKEND: tos
       JWT_SECRET: ${JWT_SECRET:-development-only-change-me-at-least-32-bytes}
       JOB_EXECUTION_MODE: ${JOB_EXECUTION_MODE:-inline}
@@ -73,6 +74,7 @@ services:
       STORAGE_BACKEND: tos
       JOB_EXECUTION_MODE: worker
       RELEASE_VERSION: ${RELEASE_VERSION:-development}
+      OUTLINE_PROTOCOL_VERSION: ${OUTLINE_PROTOCOL_VERSION:-v2}
     depends_on:
       postgres:
         condition: service_healthy

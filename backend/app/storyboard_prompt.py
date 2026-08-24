@@ -227,7 +227,7 @@ async def _plan_ass_scenes(
         "songEmotion": emotion,
         "lyricLines": lyric_lines,
         "structuralSegments": structural_notes,
-        "selectedCharacters": selected_humans,
+        "selectedCharacters": _compact_characters(selected_humans) if settings.outline_protocol_version == "v2" else selected_humans,
         "overallRequirement": extra_requirement,
         "rules": rules_prompt.render_json(),
         "schema": {
@@ -380,6 +380,135 @@ async def _generate_scene_shots(
     raise StoryboardPromptError(str(last_error), usage_records=usage_records[base:])
 
 
+def _compact_characters(selected_humans: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """大纲只需要选角索引，不重复发送定妆系统提示词等大段描述。"""
+    return [
+        {
+            "id": str(item.get("id") or ""),
+            "name": str(item.get("name") or ""),
+            "gender": str(item.get("gender") or ""),
+            "age": str(item.get("ageDescription") or ""),
+        }
+        for item in selected_humans
+    ]
+
+
+def _check_ass_shots_v2(
+    body: dict[str, Any],
+    *,
+    flattened: list[tuple[int, dict[str, Any]]],
+    scenes: list[dict[str, Any]],
+    role_ids: list[str],
+) -> list[dict[str, Any]]:
+    if set(body) != {"shots"} or not isinstance(body["shots"], list) or len(body["shots"]) != len(flattened):
+        raise ValueError(f"shots 必须严格包含 {len(flattened)} 条")
+    allowed = set(role_ids)
+    normalized: list[dict[str, Any]] = []
+    for position, (raw, (scene_index, segment)) in enumerate(zip(body["shots"], flattened, strict=True)):
+        required = {"i", "t", "b", "c", "a", "e", "m"}
+        if not isinstance(raw, dict) or set(raw) != required or raw.get("i") != position:
+            raise ValueError(f"第 {position} 镜字段或序号不正确")
+        structural = segment.get("segmentType") in STRUCTURAL_TYPES
+        shot_type = "empty" if raw.get("t") == "e" else "character" if raw.get("t") == "c" else ""
+        if not shot_type or (structural and shot_type != "empty"):
+            raise ValueError(f"第 {position} 镜类型不正确")
+        cast = [value for value in raw.get("c", []) if isinstance(value, str) and value in allowed] if isinstance(raw.get("c"), list) else []
+        if shot_type == "empty":
+            cast = []
+        elif not cast:
+            raise ValueError(f"第 {position} 个人物镜缺少合法人物")
+        values = {key: str(raw.get(key) or "").strip() for key in ("b", "a", "e", "m")}
+        if not all(values.values()):
+            raise ValueError(f"第 {position} 镜存在空决策字段")
+        scene = scenes[scene_index]
+        normalized.append(
+            {
+                "index": position,
+                "shotType": shot_type,
+                "intent": values["b"],
+                "requiredCharacterIds": cast,
+                "characterAction": values["a"],
+                "emotionalFocus": values["e"],
+                "cameraPurpose": values["m"],
+                "motifIds": [],
+                "gapAfterAllocation": "none",
+                "locationId": scene["locationId"],
+                "locationChange": position == 0 or flattened[position - 1][0] != scene_index,
+                "sceneIndex": scene_index,
+                "wardrobeByCharacter": scene.get("wardrobeByCharacter") or {},
+            }
+        )
+    return normalized
+
+
+async def _generate_ass_shots_v2(
+    client: AsyncOpenAI,
+    *,
+    segments: list[dict[str, Any]],
+    scenes: list[dict[str, Any]],
+    emotion: dict[str, Any],
+    selected_humans: list[dict[str, Any]],
+    extra_requirement: str,
+    usage_records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    scene_groups = _assign_scene_segments(segments, scenes)
+    flattened = [(scene_index, segment) for scene_index, group in enumerate(scene_groups) for segment in group]
+    system_prompt = await get_prompt("ass.shots_v2.system")
+    suffix_prompt = await get_prompt("common.pure_json_suffix")
+    payload = {
+        "emotion": emotion,
+        "requirement": extra_requirement,
+        "characters": _compact_characters(selected_humans),
+        "scenes": [
+            {
+                "i": index,
+                "location": scene["locationName"],
+                "mood": scene["mood"],
+                "tone": scene["visualTone"],
+                "purpose": scene["narrativePurpose"],
+                "wardrobe": scene.get("wardrobeByCharacter") or {},
+            }
+            for index, scene in enumerate(scenes)
+        ],
+        "segments": [
+            {
+                "i": index,
+                "scene": scene_index,
+                "kind": segment.get("segmentType", "lyric"),
+                "text": segment.get("lyrics") or segment.get("timelineLabel") or "",
+                "seconds": round(max(0.0, float(segment.get("end") or 0) - float(segment.get("start") or 0)), 2),
+            }
+            for index, (scene_index, segment) in enumerate(flattened)
+        ],
+        "rules": [
+            f"shots 恰好 {len(flattened)} 条且 i 从0连续；每条严格只有 i,t,b,c,a,e,m",
+            "intro/interlude/outro 必须 t=e 且 c=[]；其他空镜同样 c=[]",
+            "人物镜 t=c，c 只能引用 characters.id；相邻镜头的动作、构图和运镜不得雷同",
+            _empty_ratio_rule(sum(1 for item in segments if item.get("segmentType", "lyric") == "lyric")),
+        ],
+        "schema": {"shots": [{"i": 0, "t": "e|c", "b": "短节拍", "c": [], "a": "短动作", "e": "短情绪", "m": "短运镜"}]},
+    }
+    messages = [
+        {"role": "system", "content": system_prompt.render()},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + suffix_prompt.render()},
+    ]
+    last_error: Exception | None = None
+    for attempt in range(2):
+        operation = "ass_shots_v2" if attempt == 0 else "ass_shots_v2_retry"
+        text = await _call(client, messages, 3200, usage_records=usage_records, operation=operation, prompt_key=system_prompt.key, prompt_version=system_prompt.version)
+        try:
+            return _check_ass_shots_v2(_extract_json(text), flattened=flattened, scenes=scenes, role_ids=[item["id"] for item in selected_humans])
+        except ValueError as exc:
+            last_error = exc
+            messages.extend(
+                [
+                    {"role": "assistant", "content": text},
+                    {"role": "user", "content": f"结构错误：{exc}。修正并重新输出完整纯 JSON。"},
+                ]
+            )
+    raise StoryboardPromptError(str(last_error), usage_records=usage_records)
+
+
 async def generate_ass_story_outline(
     *,
     segments: list[dict[str, Any]],
@@ -423,6 +552,42 @@ async def generate_ass_story_outline(
     progress = {"phase": "segments", "segmentsDone": 0, "segmentsTotal": len(scenes)}
     if on_progress:
         await on_progress(dict(progress))
+
+    if settings.outline_protocol_version == "v2":
+        all_shots = await _generate_ass_shots_v2(
+            client,
+            segments=segments,
+            scenes=scenes,
+            emotion=emotion,
+            selected_humans=selected_humans,
+            extra_requirement=extra_requirement,
+            usage_records=usage_records,
+        )
+        progress["segmentsDone"] = len(scenes)
+        if on_progress:
+            await on_progress(dict(progress))
+        finalize_shot_durations(all_shots, segments)
+        return {
+            "globalVisual": plan["globalVisual"],
+            "locations": [{"id": scene["locationId"], "name": scene["locationName"], "purpose": scene["narrativePurpose"]} for scene in scenes],
+            "motifs": [],
+            "shots": all_shots,
+            "scenePlan": [
+                {
+                    "sceneIndex": position,
+                    "locationId": scene["locationId"],
+                    "lineStart": scene["lineStart"],
+                    "lineEnd": scene["lineEnd"],
+                    **{key: scene[key] for key in ("locationName", "mood", "emotion", "visualTone", "narrativePurpose", "wardrobeByCharacter")},
+                }
+                for position, scene in enumerate(scenes)
+            ],
+            "failedSegments": [],
+            "protocolVersion": "v2",
+            "usageRecords": usage_records,
+            "usage": _sum_usage(usage_records),
+            "requestId": usage_records[-1].get("requestId") if usage_records else None,
+        }
 
     async def run_scene(position: int, scene: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -479,6 +644,7 @@ async def generate_ass_story_outline(
             for position, scene in enumerate(scenes)
         ],
         "failedSegments": failed_segments,
+        "protocolVersion": "v1",
         "usageRecords": usage_records,
         "usage": _sum_usage(usage_records),
         "requestId": usage_records[-1].get("requestId") if usage_records else None,
@@ -784,6 +950,109 @@ def _check_general_outline(body: dict[str, Any], *, expected_count: int, empty_c
     return {"shots": normalized}
 
 
+def _check_general_outline_v2(body: dict[str, Any], *, expected_count: int, empty_count: int, character_count: int, role_ids: list[str]) -> dict[str, Any]:
+    if set(body) != {"shots"} or not isinstance(body["shots"], list) or len(body["shots"]) != expected_count:
+        raise ValueError(f"shots 必须严格包含 {expected_count} 条")
+    allowed = set(role_ids)
+    normalized: list[dict[str, Any]] = []
+    required_fields = {"i", "t", "s", "b", "c", "a", "e", "m"}
+    for position, raw in enumerate(body["shots"]):
+        if not isinstance(raw, dict) or set(raw) != required_fields or raw.get("i") != position:
+            raise ValueError(f"第 {position} 镜字段或序号不正确")
+        shot_type = "empty" if raw.get("t") == "e" else "character" if raw.get("t") == "c" else ""
+        if not shot_type:
+            raise ValueError(f"第 {position} 镜 t 必须为 e 或 c")
+        cast = [value for value in raw.get("c", []) if isinstance(value, str) and value in allowed] if isinstance(raw.get("c"), list) else []
+        if shot_type == "empty":
+            cast = []
+        elif role_ids and not cast:
+            raise ValueError(f"第 {position} 个人物镜缺少合法人物")
+        values = {key: str(raw.get(key) or "").strip() for key in ("s", "b", "a", "e", "m")}
+        if not all(values.values()):
+            raise ValueError(f"第 {position} 镜存在空决策字段")
+        normalized.append(
+            {
+                "index": position,
+                "shotType": shot_type,
+                "outlineScene": values["s"],
+                "outlineShot": f"{values['a']}；{values['m']}",
+                "requiredCharacterIds": cast,
+                "intent": values["b"],
+                "characterAction": values["a"],
+                "emotionalFocus": values["e"],
+                "cameraPurpose": values["m"],
+            }
+        )
+    actual_empty = sum(item["shotType"] == "empty" for item in normalized)
+    if actual_empty != empty_count or len(normalized) - actual_empty != character_count:
+        raise ValueError(f"镜头类型配额不一致：要求空镜 {empty_count} 条、人物镜 {character_count} 条")
+    return {"shots": normalized}
+
+
+async def _generate_general_story_outline_v2(
+    *,
+    config: dict[str, Any],
+    selected_humans: list[dict[str, Any]],
+    on_progress: ProgressCallback | None,
+    call_override: LlmCallOverride | None,
+) -> dict[str, Any]:
+    empty_count = int(config.get("empty_shot_count", 0))
+    character_count = int(config.get("character_shot_count", 0))
+    expected_count = empty_count + character_count
+    role_ids = [item["id"] for item in selected_humans]
+    if on_progress:
+        await on_progress({"phase": "generating", "shotsDone": 0, "shotsTotal": expected_count})
+    system_prompt = await get_prompt("general.story_outline_v2.system")
+    suffix_prompt = await get_prompt("common.pure_json_suffix")
+    payload = {
+        "music": [config.get("genre"), config.get("secondary_category"), config.get("tertiary_category")],
+        "look": [config.get("season"), config.get("age_group"), config.get("visual_style")],
+        "counts": {"total": expected_count, "empty": empty_count, "character": character_count},
+        "seconds": config.get("total_duration", 0),
+        "requirement": config.get("extra_requirement", ""),
+        "characters": _compact_characters(selected_humans),
+        "rules": [
+            "shots 按叙事建立、推进、高潮、收束排列；相邻场景、景别、动作和运镜不得雷同",
+            "每条严格只有 i,t,s,b,c,a,e,m；i 从0连续；t=e为空镜、t=c为人物镜",
+            f"必须恰好 {empty_count} 条 t=e 和 {character_count} 条 t=c",
+            "空镜 c=[]；有人物可选时人物镜 c 只能引用 characters.id；没有人物可选时人物镜 c=[]并自由设计人物",
+            "s、b、a、e、m 使用具体但短小的中文短语，不得写成长段落",
+        ],
+        "schema": {"shots": [{"i": 0, "t": "e|c", "s": "短场景", "b": "短节拍", "c": [], "a": "短动作", "e": "短情绪", "m": "短运镜"}]},
+    }
+    messages = [
+        {"role": "system", "content": system_prompt.render()},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + suffix_prompt.render()},
+    ]
+    client, usage_records = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url), []
+    last_error: Exception | None = None
+    for attempt in range(2):
+        operation = "general_story_outline_v2" if attempt == 0 else "general_story_outline_v2_retry"
+        try:
+            call = call_override or _call
+            text = await call(client, messages, 2600, usage_records=usage_records, operation=operation, prompt_key=system_prompt.key, prompt_version=system_prompt.version)
+            shots = _check_general_outline_v2(
+                _extract_json(text),
+                expected_count=expected_count,
+                empty_count=empty_count,
+                character_count=character_count,
+                role_ids=role_ids,
+            )["shots"]
+            return {
+                "shots": shots,
+                "protocolVersion": "v2",
+                "usageRecords": usage_records,
+                "usage": _sum_usage(usage_records),
+                "requestId": usage_records[-1].get("requestId") if usage_records else None,
+            }
+        except ValueError as exc:
+            last_error = exc
+            messages.extend([{"role": "assistant", "content": text}, {"role": "user", "content": f"结构错误：{exc}。修正并重新输出完整纯 JSON。"}])
+        except Exception as exc:
+            raise StoryboardPromptError(str(exc), usage_records=usage_records) from exc
+    raise StoryboardPromptError(str(last_error), usage_records=usage_records)
+
+
 async def generate_general_story_outline(
     *,
     config: dict[str, Any],
@@ -794,6 +1063,13 @@ async def generate_general_story_outline(
     """通用分镜大纲生成：单轮 LLM 调用，根据曲风/季节/人物/镜头数量规划完整 MV 分镜。"""
     if not settings.llm_api_key:
         raise RuntimeError("LLM_API_KEY 未配置")
+    if settings.outline_protocol_version == "v2":
+        return await _generate_general_story_outline_v2(
+            config=config,
+            selected_humans=selected_humans,
+            on_progress=on_progress,
+            call_override=call_override,
+        )
     empty_count: int = config.get("empty_shot_count", 0)
     character_count: int = config.get("character_shot_count", 0)
     expected_count = empty_count + character_count
@@ -866,6 +1142,7 @@ async def generate_general_story_outline(
                 "usageRecords": usage_records,
                 "usage": _sum_usage(usage_records),
                 "requestId": usage_records[-1].get("requestId") if usage_records else None,
+                "protocolVersion": "v1",
             }
         except ValueError as exc:
             last_error = exc
