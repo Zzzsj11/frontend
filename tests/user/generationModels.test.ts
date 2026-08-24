@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { generationModelLabel, isH3VideoModel } from '../../src/generationModels'
+import {
+  generationModelLabel,
+  isH3VideoModel,
+  sortVideoModelOptions,
+} from '../../src/generationModels'
 
 describe('generation model labels', () => {
   it('shows a finite model concurrency limit in every model picker', () => {
@@ -10,7 +14,7 @@ describe('generation model labels', () => {
         label: 'H3',
         capabilities: { executionConcurrency: 2 },
       }),
-    ).toBe('H3（并发上限 2）')
+    ).toBe('H3（临时测试可用，并发限制为2）')
   })
 
   it('does not annotate the effectively unlimited default pool', () => {
@@ -27,5 +31,15 @@ describe('generation model labels', () => {
     expect(isH3VideoModel('minimax-h3-runninghub')).toBe(true)
     expect(isH3VideoModel('minimax-h3')).toBe(true)
     expect(isH3VideoModel('doubao-seedance-2.0')).toBe(false)
+  })
+
+  it('keeps the temporary RunningHub H3 option at the end', () => {
+    expect(
+      sortVideoModelOptions([
+        { value: 'minimax-h3-runninghub', label: 'H3' },
+        { value: 'doubao-seedance-2.0', label: 'SD2.0' },
+        { value: 'minimax-h3', label: 'H3' },
+      ]).map((option) => option.value),
+    ).toEqual(['doubao-seedance-2.0', 'minimax-h3', 'minimax-h3-runninghub'])
   })
 })

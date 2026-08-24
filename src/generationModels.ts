@@ -39,11 +39,22 @@ export const isH3VideoModel = (modelId?: string): boolean => {
   )
 }
 export const generationModelLabel = (option: GenerationModelOption): string => {
+  if (option.value === 'minimax-h3-runninghub') {
+    return 'H3（临时测试可用，并发限制为2）'
+  }
   const concurrency = option.capabilities?.executionConcurrency
   return Number.isFinite(concurrency) && Number(concurrency) < 200
     ? `${option.label}（并发上限 ${Number(concurrency)}）`
     : option.label
 }
+export const sortVideoModelOptions = (
+  options: Array<GenerationModelOption>,
+): Array<GenerationModelOption> =>
+  [...options].sort(
+    (left, right) =>
+      Number(left.value === 'minimax-h3-runninghub') -
+      Number(right.value === 'minimax-h3-runninghub'),
+  )
 let loaded = false
 export async function loadGenerationModels(force = false): Promise<void> {
   if (loaded && !force) return
@@ -59,9 +70,11 @@ export async function loadGenerationModels(force = false): Promise<void> {
     const images = items
       .filter((x) => x.modality === 'image')
       .map((x) => ({ value: x.id, label: x.name, capabilities: x.capabilities }))
-    const videos = items
-      .filter((x) => x.modality === 'video')
-      .map((x) => ({ value: x.id, label: x.name, capabilities: x.capabilities }))
+    const videos = sortVideoModelOptions(
+      items
+        .filter((x) => x.modality === 'video')
+        .map((x) => ({ value: x.id, label: x.name, capabilities: x.capabilities })),
+    )
     if (images.length) IMAGE_MODEL_OPTIONS.splice(0, IMAGE_MODEL_OPTIONS.length, ...images)
     if (videos.length) VIDEO_MODEL_OPTIONS.splice(0, VIDEO_MODEL_OPTIONS.length, ...videos)
     loaded = true
