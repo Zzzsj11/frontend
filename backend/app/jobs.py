@@ -18,8 +18,14 @@ from .token_usage import add_token_usage
 
 JobRunner = Callable[["Job"], Awaitable[dict[str, Any]]]
 
+
 # 重启后可续跑挽回的窗口：供应商任务保留期内、本机协程丢失的僵尸任务重新挂轮询
 RECOVERY_WINDOW_SECONDS = 2 * 3600
+VIDEO_JOB_TIMEOUT_SECONDS = 20 * 60
+
+
+class JobExpiredError(RuntimeError):
+    """The durable video job exceeded its end-to-end deadline."""
 
 
 def _timestamp(value: datetime | float) -> float:
@@ -167,6 +173,13 @@ class JobManager:
         async with session_factory() as session:
             model = await session.get(GenerationJobModel, job.id)
             if model:
+                # The deadline reaper may fail a task while this worker is
+                # awaiting the provider. Never let stale in-memory state revive it.
+                if model.status in {"failed", "cancelled"} and job.status not in {"failed", "cancelled"}:
+                    job.status, job.phase = model.status, model.phase
+                    job.error = model.error
+                    await cache_job(job.id, job.public())
+                    return
                 if job.worker_id and model.worker_id != job.worker_id:
                     return
                 model.status, model.progress, model.result, model.error = job.status, job.progress, job.result, job.error
@@ -189,6 +202,11 @@ class JobManager:
         job.updated_at = time.time()
         async with session_factory() as session:
             model = await session.get(GenerationJobModel, job.id)
+            if model and model.status in {"failed", "cancelled"}:
+                job.status, job.phase = model.status, model.phase
+                job.error = model.error
+                await cache_job(job.id, job.public())
+                raise JobExpiredError(job.error or "生成任务已结束")
             if model and model.status == "running" and (not job.worker_id or model.worker_id == job.worker_id):
                 model.progress = job.progress
                 now = utcnow()
@@ -254,6 +272,8 @@ class JobManager:
             job.result = await runner(job)
             job.progress, job.status, job.phase = 100, "succeeded", "succeeded"
             await self._persist_asset(job)
+        except JobExpiredError:
+            pass
         except Exception as exc:
             uncertain_submission = job.phase == "submitting_provider" and not bool(getattr(exc, "submission_certain", False))
             job.status = "failed"
@@ -280,6 +300,8 @@ class JobManager:
         if not job.result:
             return
         async with session_factory() as session:
+            model = await session.get(GenerationJobModel, job.id)
+            terminal = bool(model and model.status in {"failed", "cancelled"})
             if job.kind in {"image", "video"}:
                 add_token_usage(
                     session,
@@ -294,7 +316,10 @@ class JobManager:
                     generation_job_id=job.id,
                     request_id=job.result.get("providerTaskId"),
                 )
-            if job.storyboard_line_id and job.kind == "image" and job.result.get("urls"):
+            if terminal:
+                job.status, job.phase = model.status, model.phase
+                job.error = model.error if model else job.error
+            elif job.storyboard_line_id and job.kind == "image" and job.result.get("urls"):
                 current = (
                     (
                         await session.execute(
@@ -351,6 +376,34 @@ class JobManager:
                     )
                 )
             await session.commit()
+
+    async def expire_overdue_video_jobs(self) -> int:
+        """Fail video jobs 20 minutes after creation, including queue time."""
+        threshold = utcnow() - timedelta(seconds=VIDEO_JOB_TIMEOUT_SECONDS)
+        expired: list[Job] = []
+        async with session_factory() as session:
+            rows = list(
+                (
+                    await session.execute(
+                        select(GenerationJobModel).where(
+                            GenerationJobModel.kind == "video",
+                            GenerationJobModel.status.in_(("queued", "running")),
+                            GenerationJobModel.created_at <= threshold,
+                            GenerationJobModel.deleted_at.is_(None),
+                        )
+                    )
+                ).scalars()
+            )
+            for model in rows:
+                model.status = "failed"
+                model.phase = "failed"
+                model.error = "视频生成超过20分钟，已判定失败，请重新生成"
+                model.finished_at = utcnow()
+                expired.append(self._from_model(model))
+            await session.commit()
+        for job in expired:
+            await cache_job(job.id, job.public())
+        return len(expired)
 
     async def set_provider_task(self, job: Job, provider: str, task_id: str, *, idempotency_key: str | None = None) -> None:
         """供应商 taskId 即时落库：重启恢复与后台对账都依赖它，成功失败都要保留"""

@@ -126,9 +126,8 @@ def _usage(data: dict[str, Any]) -> dict[str, Any]:
 
 # gpt-image-2 的业务终止线：供应商受理后 10 分钟仍未进入终态即失败。
 IMAGE_POLL_TIMEOUT_SECONDS = 10 * 60
-VIDEO_POLL_TIMEOUT_SECONDS = 900
+VIDEO_POLL_TIMEOUT_SECONDS = 20 * 60
 H3_POLL_INTERVAL_SECONDS = 15
-H3_POLL_TIMEOUT_SECONDS = 2400
 H3_REFERENCE_FILE_MAX_BYTES = 100 * 1024 * 1024
 POLL_INTERVAL_SECONDS = 30
 POLL_MAX_CONSECUTIVE_ERRORS = 5
@@ -391,6 +390,13 @@ def _remaining_provider_timeout(job: Job, timeout_seconds: int) -> float:
     return max(0.0, timeout_seconds - (time.time() - job.provider_submitted_at))
 
 
+def _remaining_video_job_timeout(job: Job) -> float:
+    """Video SLA is end-to-end from local job creation, not provider acceptance."""
+    if job.created_at <= 0:
+        return float(VIDEO_POLL_TIMEOUT_SECONDS)
+    return max(0.0, VIDEO_POLL_TIMEOUT_SECONDS - (time.time() - job.created_at))
+
+
 def _result_semaphore(kind: str) -> asyncio.Semaphore:
     loop = asyncio.get_running_loop()
     slots = _result_semaphores.get(loop)
@@ -526,7 +532,7 @@ def _direct_h3_content(request: VideoGenerationCreate, mode: str) -> list[dict[s
 
 
 async def _poll_direct_h3(base: str, headers: dict[str, str], job: Job) -> dict[str, Any]:
-    deadline = time.monotonic() + H3_POLL_TIMEOUT_SECONDS
+    deadline = time.monotonic() + _remaining_video_job_timeout(job)
     consecutive_errors = 0
     async with httpx.AsyncClient(timeout=60) as client:
         while time.monotonic() < deadline:
@@ -549,7 +555,7 @@ async def _poll_direct_h3(base: str, headers: dict[str, str], job: Job) -> dict[
             if status in {"failed", "cancelled"}:
                 reason = task.get("error") or task.get("message") or f"H3 生成任务状态：{status}"
                 raise ProviderError(f"H3 生成失败：{reason}")
-    raise ProviderError("H3 生成任务超时，请稍后查询")
+    raise ProviderError("视频生成超过20分钟，已判定失败，请重新生成")
 
 
 async def generate_direct_h3_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
@@ -610,7 +616,13 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         return await generate_direct_h3_video(request, job)
     task_id, created, base, headers = await _submit_seedance_video(request, job, request.image_urls)
     try:
-        data = await _poll_scheduled(f"{base}/v3/video/tasks/{task_id}", headers, job, timeout_seconds=VIDEO_POLL_TIMEOUT_SECONDS)
+        data = await _poll_scheduled(
+            f"{base}/v3/video/tasks/{task_id}",
+            headers,
+            job,
+            timeout_seconds=_remaining_video_job_timeout(job),
+            timeout_error="视频生成超过20分钟，已判定失败，请重新生成",
+        )
     except ProviderError as exc:
         message = str(exc)
         allow_fallback = bool((job.request or {}).get("_generalCharacterTextFallback"))
@@ -620,7 +632,13 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         # 通用人物镜不要求跨镜身份一致。若 AI 场景首帧被上游误判为
         # 真人参考，安全降级为纯文本视频，避免整条全量任务被阻断。
         task_id, created, base, headers = await _submit_seedance_video(request, job, [])
-        data = await _poll_scheduled(f"{base}/v3/video/tasks/{task_id}", headers, job, timeout_seconds=VIDEO_POLL_TIMEOUT_SECONDS)
+        data = await _poll_scheduled(
+            f"{base}/v3/video/tasks/{task_id}",
+            headers,
+            job,
+            timeout_seconds=_remaining_video_job_timeout(job),
+            timeout_error="视频生成超过20分钟，已判定失败，请重新生成",
+        )
         result = await _store_video_result(job, task_id, data, created)
         result["referenceFallback"] = "text-to-video-real-person-policy"
         return result
@@ -654,7 +672,7 @@ def _h3_megapixels(resolution: str) -> tuple[float, float]:
 
 
 async def _poll_runninghub(job: Job) -> dict[str, Any]:
-    deadline = time.monotonic() + H3_POLL_TIMEOUT_SECONDS
+    deadline = time.monotonic() + _remaining_video_job_timeout(job)
     consecutive_errors = 0
     while time.monotonic() < deadline:
         await asyncio.sleep(H3_POLL_INTERVAL_SECONDS)
@@ -673,7 +691,7 @@ async def _poll_runninghub(job: Job) -> dict[str, Any]:
         if status in {"FAILED", "CANCELLED"} or "FAIL" in status:
             reason = data.get("errorMessage") or data.get("failedReason") or f"H3 生成任务状态：{status}"
             raise ProviderError(f"H3 生成失败：{reason}")
-    raise ProviderError("H3 生成任务超时，请稍后查询")
+    raise ProviderError("视频生成超过20分钟，已判定失败，请重新生成")
 
 
 async def _h3_media_duration(content: bytes, suffix: str) -> float:
@@ -885,8 +903,8 @@ async def resume_generation(job: Job) -> dict[str, Any]:
         timeout_error = "gpt-image-2 生成超过10分钟，已判定失败"
     elif job.kind == "video":
         base, headers = _video_config()
-        url, timeout = f"{base}/v3/video/tasks/{job.provider_task_id}", VIDEO_POLL_TIMEOUT_SECONDS
-        timeout_error = "生成任务超时，请稍后查询"
+        url, timeout = f"{base}/v3/video/tasks/{job.provider_task_id}", _remaining_video_job_timeout(job)
+        timeout_error = "视频生成超过20分钟，已判定失败，请重新生成"
     else:
         raise ProviderError(f"不支持恢复的任务类型：{job.kind}")
     data = await _poll_scheduled(url, headers, job, timeout_seconds=timeout, timeout_error=timeout_error)

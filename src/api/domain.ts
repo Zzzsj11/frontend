@@ -141,8 +141,8 @@ export const fetchActiveGenerations = (taskId: string) =>
   >(`/tasks/${taskId}/generations/active`)
 
 /** 按任务 ID 恢复媒体生成任务的轮询等待（页面刷新后续跑；成功时资产已由后端落库） */
-export const waitGenerationJob = (id: string, signal?: AbortSignal) =>
-  mediaGen.waitForJob(id, 660_000, { signal })
+export const waitGenerationJob = (id: string, signal?: AbortSignal, timeoutMs = 660_000) =>
+  mediaGen.waitForJob(id, timeoutMs, { signal })
 
 export const acknowledgeGenerationResults = (ids: string[]) =>
   ids.length

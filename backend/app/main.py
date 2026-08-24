@@ -111,6 +111,9 @@ async def stale_generation_reaper() -> None:
         await asyncio.sleep(60)
         try:
             await recover_stale_storyboard_generation()
+            expired = await jobs.expire_overdue_video_jobs()
+            if expired:
+                logger.warning("视频生成超过20分钟自动判败：%s 个", expired)
         except Exception:
             logger.exception("僵尸生成任务巡检失败")
 
@@ -122,6 +125,7 @@ async def lifespan(_app: FastAPI):
     await seed_admin()
     await seed_system_data()
     await recover_stale_storyboard_generation()
+    await jobs.expire_overdue_video_jobs()
     # 数字人虚拟资产补注册由 cron 脚本每分钟执行（scripts/ensure_asset_avatars.py，带防重入锁），
     # 不再在启动时重复扫描，避免与 cron 并发导致同一人物重复注册资产
     if settings.job_execution_mode != "worker":

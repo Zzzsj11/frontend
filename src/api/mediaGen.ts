@@ -121,7 +121,7 @@ export async function generateShotVideo(
     coverThumbnailUrl?: string
     videoUrl: string
     duration: number
-  }>(job.id, isH3VideoModel(options.videoModel) ? 2_700_000 : 660_000, { signal })
+  }>(job.id, 1_260_000, { signal })
   return {
     coverUrl: result.coverUrl || referenceImageUrl || '',
     coverThumbnailUrl: result.coverThumbnailUrl,

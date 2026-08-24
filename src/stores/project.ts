@@ -661,7 +661,7 @@ export const useProjectStore = defineStore('project', {
       const watcher = registerTaskWatcher(taskId)
       let failed: string | undefined
       try {
-        await api.waitGenerationJob(jobId, watcher.signal)
+        await api.waitGenerationJob(jobId, watcher.signal, kind === 'video' ? 1_260_000 : 660_000)
       } catch (error) {
         // 切换子项目被取消：后端任务照跑且资产落库，切回时会重新恢复，静默退出
         if (error instanceof PollingCancelledError) return

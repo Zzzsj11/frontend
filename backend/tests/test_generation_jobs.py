@@ -61,6 +61,36 @@ def test_job_manager_keeps_excess_provider_calls_queued(monkeypatch) -> None:
     asyncio.run(scenario())
 
 
+async def test_overdue_video_jobs_fail_after_twenty_minutes(client) -> None:
+    from app.database import session_factory
+    from app.jobs import jobs
+    from app.models import GenerationJobModel, utcnow
+
+    job_id = "job-overdue-video"
+    async with session_factory() as db:
+        db.add(
+            GenerationJobModel(
+                id=job_id,
+                kind="video",
+                status="running",
+                phase="provider_running",
+                request={"prompt": "timeout"},
+                user_id="user-admin",
+                created_at=utcnow() - timedelta(minutes=21),
+            )
+        )
+        await db.commit()
+
+    assert await jobs.expire_overdue_video_jobs() == 1
+    async with session_factory() as db:
+        row = await db.get(GenerationJobModel, job_id)
+        assert row is not None
+        assert row.status == "failed"
+        assert row.phase == "failed"
+        assert row.finished_at is not None
+        assert row.error == "视频生成超过20分钟，已判定失败，请重新生成"
+
+
 def test_job_manager_applies_independent_model_execution_pools(monkeypatch) -> None:
     from app.jobs import Job, JobManager
 
