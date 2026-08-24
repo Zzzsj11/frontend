@@ -415,16 +415,22 @@ def test_random_general_storyboard_skips_outline_and_builds_shot_type_prompts(cl
     assert [line["shotType"] for line in result["lines"]].count("empty") == 1
     assert [line["shotType"] for line in result["lines"]].count("character") == 2
     assert {line["generationStatus"] for line in result["lines"]} == {"succeeded"}
-    prompts = {line["shotType"]: line["shotPrompt"] for line in result["lines"]}
-    assert "流行歌曲 / 通用积极 / 生活" in prompts["empty"]
-    assert "生成规模：共3个镜头，其中1个空镜、2个人物镜" in prompts["empty"]
-    assert "夏日公路旅行" in prompts["empty"]
-    assert "不得出现人物" in prompts["empty"]
-    assert "必须以人物为明确视觉主体" in prompts["character"]
+    empty_prompt = next(line["shotPrompt"] for line in result["lines"] if line["shotType"] == "empty")
+    character_prompts = [line["shotPrompt"] for line in result["lines"] if line["shotType"] == "character"]
+    assert "流行歌曲 / 通用积极 / 生活" in empty_prompt
+    assert "生成规模：共3个镜头，其中1个空镜、2个人物镜" in empty_prompt
+    assert "夏日公路旅行" in empty_prompt
+    assert "不得出现人物" in empty_prompt
+    assert all("必须以人物为明确视觉主体" in prompt for prompt in character_prompts)
+    assert len(set(character_prompts)) == 2
+    assert "独立选角编号 R1-1" in character_prompts[0]
+    assert "独立选角编号 R1-2" in character_prompts[1]
+    assert all("不得复用相同演员、相同面孔" in prompt for prompt in character_prompts)
     task = client.get(f"/api/tasks/{result['taskId']}").json()
     assert task["storyboardType"] == "general_random"
     assert task["status"] == "ready"
     assert task["storyboardConfig"]["outlineSkipped"] is True
+    assert task["storyboardConfig"]["character_prompt_policy"] == "unique_cast_per_shot_v1"
 
 
 def test_general_storyboard_enforces_four_to_fifteen_seconds_per_shot(client) -> None:
