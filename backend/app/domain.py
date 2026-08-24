@@ -1996,6 +1996,8 @@ async def get_storyboard_line(task_id: str, line_id: str, user: CurrentUser, db:
 
 
 async def _refresh_storyboard_status(db: AsyncSession, task: ProjectTaskModel) -> None:
+    # 多条提示词可同时完成；仅串行化最终状态汇总，避免旧快照晚提交把 ready 覆盖回 generating。
+    await db.execute(select(ProjectTaskModel.id).where(ProjectTaskModel.id == task.id).with_for_update())
     statuses = list(
         (await db.execute(select(StoryboardLineModel.generation_status).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None))))
         .scalars()
