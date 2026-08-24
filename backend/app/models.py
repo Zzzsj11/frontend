@@ -238,6 +238,7 @@ class ShotAssetModel(LifecycleMixin, Base):
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     storyboard_line_id: Mapped[str] = mapped_column(ForeignKey("storyboard_lines.id"), index=True)
     generation_job_id: Mapped[str | None] = mapped_column(ForeignKey("generation_jobs.id"), nullable=True)
+    model_code: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
     cover_url: Mapped[str] = mapped_column(Text)
     cover_thumbnail_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     video_url: Mapped[str] = mapped_column(Text)

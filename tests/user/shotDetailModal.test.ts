@@ -78,4 +78,53 @@ describe('ShotDetailModal general MV character controls', () => {
     wrapper.unmount()
     vi.useRealTimers()
   })
+
+  it('marks H3 video assets but leaves SD2 assets unmarked', async () => {
+    const store = useProjectStore()
+    const line = {
+      id: 'model-badge-line',
+      source: 'general',
+      shotType: 'character',
+      plannedDuration: 5,
+      lyrics: '',
+      scenePrompt: '城市夜景',
+      shotPrompt: '人物行走',
+      digitalHumanIds: [],
+      voice: { status: 'none' },
+      scene: { status: 'none' },
+      shot: {
+        status: 'done',
+        currentAssetId: 'h3-asset',
+        assets: [
+          {
+            id: 'h3-asset',
+            coverUrl: '/h3.jpg',
+            videoUrl: '/h3.mp4',
+            duration: 5,
+            model: 'minimax-h3',
+            digitalHumanIds: [],
+          },
+          {
+            id: 'sd-asset',
+            coverUrl: '/sd.jpg',
+            videoUrl: '/sd.mp4',
+            duration: 5,
+            model: 'doubao-seedance-2.0',
+            digitalHumanIds: [],
+          },
+        ],
+      },
+      generationStatus: 'succeeded',
+    } as ScriptLine
+    store.lines = [line]
+    store.editingLineId = line.id
+    store.editingTab = 'shot'
+
+    const wrapper = mount(ShotDetailModal, { attachTo: document.body })
+    await wrapper.vm.$nextTick()
+    expect(document.body.querySelectorAll('.model-badge')).toHaveLength(1)
+    expect(document.body.querySelectorAll('.asset-model-badge')).toHaveLength(1)
+    expect(document.body.querySelector('.asset-model-badge')?.textContent).toBe('H3')
+    wrapper.unmount()
+  })
 })

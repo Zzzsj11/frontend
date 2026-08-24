@@ -66,6 +66,8 @@ export interface ShotAsset {
   videoUrl: string
   /** 片段时长（秒） */
   duration: number
+  /** 实际生成该片段的模型代码；H3 片段据此展示徽标。 */
+  model?: string
   /** 生成时出演的数字人（可为空 = 空镜头） */
   digitalHumanIds: string[]
 }

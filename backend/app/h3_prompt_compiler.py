@@ -10,6 +10,9 @@ COMPILER_NAME = "h3-prompt-writing"
 COMPILER_VERSION = "1.2.0"
 BASE_SECTIONS = ("integrated_multimodal_description:", "overall_soundscape:", "non_diegetic_music:")
 REFERENCE_SECTIONS = ("subject_definitions:", "summary:", "retention_analysis:", "detailed_description:", "overall_soundscape:", "non_diegetic_music:")
+NO_VISUAL_TEXT_CONSTRAINT = (
+    "visual_text_constraints: The video must contain no subtitles, captions, lyrics, titles, credits, logos, watermarks, UI text, signs, or any other readable on-screen text."
+)
 
 
 @dataclass(frozen=True)
@@ -50,6 +53,11 @@ def _silence_structured_prompt(prompt: str) -> str:
     )
 
 
+def _enforce_no_visual_text(prompt: str) -> str:
+    """H3 产品级硬约束：无论用户提示词采用哪种结构，都禁止模型渲染字幕。"""
+    return f"{prompt.rstrip()}\n\n{NO_VISUAL_TEXT_CONSTRAINT}"
+
+
 def _bindings(payload: VideoGenerationCreate) -> dict[str, dict[str, str]]:
     bindings: dict[str, dict[str, str]] = {}
     for index, url in enumerate(payload.image_urls, 1):
@@ -69,7 +77,7 @@ def compile_h3_prompt(payload: VideoGenerationCreate) -> H3PromptCompilation:
     sections = REFERENCE_SECTIONS if mode == "reference" else BASE_SECTIONS
     if _already_structured(source, sections):
         compiled = source if payload.generate_audio else _silence_structured_prompt(source)
-        return H3PromptCompilation(compiled, source, mode, COMPILER_NAME, COMPILER_VERSION, bindings)
+        return H3PromptCompilation(_enforce_no_visual_text(compiled), source, mode, COMPILER_NAME, COMPILER_VERSION, bindings)
 
     soundscape = (
         "Preserve physically plausible ambience and synchronized action sounds; do not add dialogue unless explicitly requested."
@@ -95,7 +103,7 @@ def compile_h3_prompt(payload: VideoGenerationCreate) -> H3PromptCompilation:
             f"overall_soundscape: {soundscape}\n\n"
             f"non_diegetic_music: {music}"
         )
-        return H3PromptCompilation(compiled, source, mode, COMPILER_NAME, COMPILER_VERSION, bindings)
+        return H3PromptCompilation(_enforce_no_visual_text(compiled), source, mode, COMPILER_NAME, COMPILER_VERSION, bindings)
 
     definitions: list[str] = []
     retention: list[str] = []
@@ -137,4 +145,4 @@ def compile_h3_prompt(payload: VideoGenerationCreate) -> H3PromptCompilation:
         f"non_diegetic_music:\n{music}"
     )
     warnings = () if definitions else ("Ref2VA prompt has no bound reference definitions.",)
-    return H3PromptCompilation(compiled, source, mode, COMPILER_NAME, COMPILER_VERSION, bindings, warnings)
+    return H3PromptCompilation(_enforce_no_visual_text(compiled), source, mode, COMPILER_NAME, COMPILER_VERSION, bindings, warnings)

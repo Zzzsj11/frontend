@@ -365,6 +365,7 @@ class JobManager:
                         id=f"shot-{uuid.uuid4().hex}",
                         storyboard_line_id=job.storyboard_line_id,
                         generation_job_id=job.id,
+                        model_code=str(request.get("model") or "") or None,
                         cover_url=job.result["coverUrl"],
                         cover_thumbnail_url=job.result.get("coverThumbnailUrl"),
                         video_url=job.result["videoUrl"],

@@ -81,6 +81,11 @@ const shotOriginalCover = computed(() => {
     shotCover.value
   )
 })
+const currentShotAsset = computed(() => {
+  const line = store.editingLine
+  return line?.shot.assets.find((asset) => asset.id === line.shot.currentAssetId)
+})
+const isH3Asset = (asset?: ShotAsset) => Boolean(asset?.model?.startsWith('minimax-h3'))
 
 /** 历史版本总数（含未懒加载的），用于「N 版」徽章 */
 const shotAssetTotal = computed(() => {
@@ -246,6 +251,7 @@ const cancel = () => store.closeEditor()
               <span v-else class="pcard-empty"><AppIcon name="movie" :size="24" />暂无视频</span>
               <ImageZoom :src="shotOriginalCover" alt="视频封面原图预览" />
               <span v-if="shotAssetTotal > 1" class="pcard-badge">{{ shotAssetTotal }} 版</span>
+              <span v-if="isH3Asset(currentShotAsset)" class="model-badge">H3</span>
               <div v-if="store.editingLine.shot.status === 'generating'" class="pcard-loading">
                 <span class="spinner light" />
               </div>
@@ -367,6 +373,7 @@ const cancel = () => store.closeEditor()
                 <img v-else :src="asset.coverUrl" alt="" />
                 <span class="asset-play"><AppIcon name="play" :size="12" /></span>
                 <span class="asset-duration">{{ asset.duration }}s</span>
+                <span v-if="isH3Asset(asset)" class="asset-model-badge">H3</span>
                 <ImageZoom
                   :src="asset.originalCoverUrl || asset.coverUrl"
                   :alt="`片段 v${i + 1} 原图预览`"
@@ -586,6 +593,25 @@ const cancel = () => store.closeEditor()
   font-size: 10px;
   padding: 1px 6px;
   border-radius: var(--radius-sm);
+}
+.model-badge,
+.asset-model-badge {
+  position: absolute;
+  left: 5px;
+  top: 5px;
+  z-index: 1;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 90, 44, 0.92);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 6px;
+}
+.asset-model-badge {
+  left: 3px;
+  top: 3px;
+  padding: 2px 5px;
 }
 .pcard-loading {
   position: absolute;

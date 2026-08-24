@@ -1891,6 +1891,7 @@ export const useProjectStore = defineStore('project', {
             originalCoverUrl: coverUrl,
             videoUrl,
             duration,
+            model: genOptions.videoModel,
             digitalHumanIds: [...line.digitalHumanIds],
           }
           still.shot.assets.push(asset)

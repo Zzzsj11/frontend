@@ -24,11 +24,12 @@ def test_h3_mode_detection_and_reference_compilation():
     assert "fully_copy" in compiled.prompt
 
 
-def test_h3_compiler_preserves_expert_prompt_verbatim():
+def test_h3_compiler_preserves_expert_structure_and_forces_no_subtitles():
     prompt = "\n\n".join(f"{section}\nvalue" for section in REFERENCE_SECTIONS)
     payload = VideoGenerationCreate(prompt=prompt, image_urls=["a.png", "b.png"], generate_audio=True)
     compiled = compile_h3_prompt(payload)
-    assert compiled.prompt == prompt
+    assert compiled.prompt.startswith(prompt)
+    assert "no subtitles, captions" in compiled.prompt
     assert compiled.source_prompt == prompt
 
 
@@ -39,7 +40,8 @@ def test_h3_compiler_only_rewrites_audio_sections_for_silent_expert_prompt():
     assert compiled.source_prompt == prompt
     assert "subject_definitions:\nvalue" in compiled.prompt
     assert "overall_soundscape:\nN/A" in compiled.prompt
-    assert compiled.prompt.endswith("non_diegetic_music:\nN/A")
+    assert "non_diegetic_music:\nN/A" in compiled.prompt
+    assert compiled.prompt.endswith("any other readable on-screen text.")
 
 
 def test_h3_base_modes():

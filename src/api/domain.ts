@@ -82,6 +82,7 @@ function mapScriptLine(item: Record<string, unknown>): ScriptLine {
       originalCoverUrl?: string
       videoUrl: string
       duration: number
+      model?: string
       isCurrent: boolean
     }>) || []
   const currentScene = sceneAssets.find((a) => a.isCurrent)
