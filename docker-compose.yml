@@ -75,6 +75,7 @@ services:
       JOB_EXECUTION_MODE: worker
       RELEASE_VERSION: ${RELEASE_VERSION:-development}
       OUTLINE_PROTOCOL_VERSION: ${OUTLINE_PROTOCOL_VERSION:-v2}
+      STORYBOARD_GENERATION_CONCURRENCY: ${STORYBOARD_GENERATION_CONCURRENCY:-64}
     depends_on:
       postgres:
         condition: service_healthy
@@ -109,7 +110,7 @@ services:
         '--kinds',
         'ass_outline,general_outline,ass_segment_retry,storyboard_line',
         '--concurrency',
-        '${STORYBOARD_WORKER_CONCURRENCY:-2}',
+        '${STORYBOARD_WORKER_CONCURRENCY:-64}',
       ]
 
   postgres:

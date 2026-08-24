@@ -111,7 +111,7 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
 
     async def fake_storyboard_line(**kwargs):
         assert kwargs["current"]["lyrics"] == "First line"
-        assert len(kwargs["full_context"]["allLyrics"]) == 3
+        assert len(kwargs["full_context"]["timelineWindow"]) == 3
         assert "图片ID：020" in kwargs["allowed_humans"][0]["systemPrompt"]
         return {
             "scenePrompt": "sunlit room",
@@ -379,6 +379,17 @@ def test_ass_storyboard_generates_each_lyric_and_long_gap_with_full_context(clie
             assert repeated.status_code == 200
     assert [call["current"]["lyrics"] for call in received] == ["First", "", "Second", ""]
     assert received[0]["full_context"]["songEmotion"]["songName"] == "他不爱我"
-    assert [[item["lyrics"] for item in call["full_context"]["allLyrics"]] for call in received] == [["First", "", "Second", ""]] * 4
+    assert [[item["lyrics"] for item in call["full_context"]["timelineWindow"]] for call in received] == [
+        ["First", "", "Second"],
+        ["First", "", "Second", ""],
+        ["First", "", "Second", ""],
+        ["", "Second", ""],
+    ]
+    batch = client.post(
+        f"/api/tasks/{body['taskId']}/storyboard-lines/generate-batch",
+        json={"line_ids": [item["id"] for item in body["lines"]], "force": True},
+    )
+    assert batch.status_code == 202, batch.text
+    assert batch.json()["count"] == 4
     task = client.get(f"/api/tasks/{body['taskId']}").json()
     assert task["status"] == "ready"

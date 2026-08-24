@@ -498,7 +498,7 @@ export const useProjectStore = defineStore('project', {
           const pending = this.lines
             .filter((line) => line.generationStatus === 'pending' && this._outlineReady(line))
             .map((line) => line.id)
-          if (pending.length) void this._generateStoryboardQueue(taskId, pending)
+          if (pending.length) void this._generateStoryboardBatch(taskId, pending)
         }
         // 刷新前仍在逐句生成的行：后端孤儿请求仍会跑完，轮询待其落定后合并
         if (this.lines.some((line) => line.generationStatus === 'running'))
@@ -592,6 +592,43 @@ export const useProjectStore = defineStore('project', {
       if (this.activeTaskId === taskId) this._cacheCurrentTask()
     },
 
+    /** 一次性将整批提示词工单交给服务端，浏览器只负责等待持久化工单落定。 */
+    async _generateStoryboardBatch(taskId: string, lineIds: string[], force = false) {
+      const uniqueIds = [...new Set(lineIds)].slice(0, 100)
+      if (!uniqueIds.length) return
+      for (const line of this.lines) {
+        if (uniqueIds.includes(line.id)) {
+          line.generationStatus = 'running'
+          line.generationError = undefined
+        }
+      }
+      try {
+        const result = await api.generateStoryboardLinesBatch(taskId, uniqueIds, force)
+        await Promise.allSettled(
+          result.jobs
+            .map((item) => String(item.id || ''))
+            .filter(Boolean)
+            .map((jobId) => api.waitGenerationJob(jobId)),
+        )
+        const script = await api.fetchSongScript(taskId)
+        if (this.activeTaskId === taskId) {
+          this.taskScripts[taskId] = script
+          this.lines = script.lines
+          this.activeTaskStatus = script.status || this.activeTaskStatus
+          this._cacheCurrentTask()
+        }
+      } catch (error) {
+        for (const line of this.lines) {
+          if (uniqueIds.includes(line.id) && line.generationStatus === 'running') {
+            line.generationStatus = 'pending'
+            line.generationError = error instanceof Error ? error.message : '批量提示词提交失败'
+          }
+        }
+        if (error instanceof ApiError && error.status === 429) return
+        throw error
+      }
+    },
+
     async retryStoryboardLine(lineId: string) {
       if (!this.activeTaskId) return
       await this._generateStoryboardQueue(this.activeTaskId, [lineId], true)
@@ -600,10 +637,10 @@ export const useProjectStore = defineStore('project', {
     async retryFailedStoryboardLines() {
       if (!this.activeTaskId) return
       const { lineIds } = await api.resetFailedStoryboardLines(this.activeTaskId)
-      await this._generateStoryboardQueue(this.activeTaskId, lineIds, true)
+      await this._generateStoryboardBatch(this.activeTaskId, lineIds, true)
     },
 
-    /** 批量生成：收集当前任务大纲就绪且「未生成/失败」的分镜行走统一队列（并发 4 不变；单账号 100 上限由后端 429 兜底） */
+    /** 批量生成：一次提交最多100条持久工单，执行并发由 storyboard worker 统一控制。 */
     async generateAllPendingStoryboardLines() {
       const taskId = this.activeTaskId
       if (!taskId) return
@@ -615,7 +652,7 @@ export const useProjectStore = defineStore('project', {
         )
         .map((line) => line.id)
       if (!lineIds.length) return
-      await this._generateStoryboardQueue(taskId, lineIds)
+      await this._generateStoryboardBatch(taskId, lineIds)
     },
 
     /** 刷新/切任务后恢复仍在排队或执行中的媒体生成（场景图/视频）等待态；结果由后端落库，落定后重新拉取合并 */
@@ -885,7 +922,7 @@ export const useProjectStore = defineStore('project', {
         const readyIds = fresh.lines
           .filter((line) => line.shotOptions?.outlineStatus !== 'failed')
           .map((line) => line.id)
-        if (readyIds.length) void this._generateStoryboardQueue(id, readyIds)
+        if (readyIds.length) void this._generateStoryboardBatch(id, readyIds)
       } catch (error) {
         this._setTaskStatus(id, 'outline_failed')
         this.outlineError = error instanceof Error ? error.message : '大纲生成失败'
@@ -928,7 +965,7 @@ export const useProjectStore = defineStore('project', {
             !this.lines.find((line) => line.id === id)?.generationStatus ||
             this.lines.find((line) => line.id === id)?.generationStatus === 'pending',
         )
-        if (newIds.length) void this._generateStoryboardQueue(taskId, newIds)
+        if (newIds.length) void this._generateStoryboardBatch(taskId, newIds)
       } catch (error) {
         reportApiError(error, '场景段大纲重新生成失败')
       } finally {
@@ -1702,12 +1739,63 @@ export const useProjectStore = defineStore('project', {
         this.selectedLineId = lines[0]?.id ?? null
         this.currentTime = 0
         this.randomGeneralStoryboardOpen = false
-        void this.generateAllShots()
+        void this._generateRandomShotsBatch(task.id, lines)
       } catch (err) {
         this.randomGeneralStoryboardError =
           err instanceof Error ? err.message : '随机通用分镜生成失败'
       } finally {
         this.randomGeneralStoryboardLoading = false
+      }
+    },
+
+    /** 随机通用没有图片/人物参考，创建任务后一次性把全部纯文本视频持久化入队。 */
+    async _generateRandomShotsBatch(taskId: string, lines: ScriptLine[]) {
+      const targets = lines.filter((line) => line.shot.status !== 'done')
+      if (!targets.length) return
+      for (const line of targets) {
+        line.shot.status = 'generating'
+        line.shot.error = undefined
+      }
+      try {
+        const result = await api.submitVideoGenerationsBatch(
+          targets.map((line) => {
+            const options = normalizeShotOptions(line.shotOptions ?? DEFAULT_SHOT_OPTIONS)
+            return {
+              prompt: line.shotPrompt,
+              duration: options.duration,
+              ratio: options.ratio,
+              resolution: options.resolution,
+              model: options.videoModel,
+              image_urls: [],
+              video_urls: [],
+              audio_urls: [],
+              generate_audio: options.generateAudio ?? false,
+              watermark: options.watermark ?? false,
+              project_task_id: taskId,
+              storyboard_line_id: line.id,
+            }
+          }),
+        )
+        await Promise.allSettled(
+          result.jobs
+            .map((item) => String(item.id || ''))
+            .filter(Boolean)
+            .map((jobId) => api.waitGenerationJob(jobId)),
+        )
+        const script = await api.fetchSongScript(taskId)
+        if (this.activeTaskId === taskId) {
+          this.taskScripts[taskId] = script
+          this.lines = script.lines
+          this.activeTaskStatus = script.status || this.activeTaskStatus
+          this._cacheCurrentTask()
+        }
+      } catch (error) {
+        for (const line of targets) {
+          if (line.shot.status === 'generating') {
+            line.shot.status = 'failed'
+            line.shot.error = error instanceof Error ? error.message : '批量视频提交失败'
+          }
+        }
       }
     },
 

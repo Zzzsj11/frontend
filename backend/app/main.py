@@ -73,6 +73,7 @@ from .schemas import (
     PasswordChange,
     PortraitPromptParams,
     RemoteImportCreate,
+    VideoGenerationBatchCreate,
     VideoGenerationCreate,
 )
 from .seed import recover_stale_storyboard_generation, seed_system_data
@@ -702,6 +703,17 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
         storyboard_line_id=line_id,
     )
     return job.public()
+
+
+@app.post("/api/generations/videos/batch", status_code=202)
+async def create_video_generations_batch(
+    payload: VideoGenerationBatchCreate,
+    user: CurrentUser,
+    db: AsyncSession = Depends(database_session),
+) -> dict:
+    """一次受理最多200个视频工单；每个工单仍独立持久化、计费、重试和回填素材。"""
+    jobs_output = [await create_video_generation(item, user, db) for item in payload.items]
+    return {"count": len(jobs_output), "jobs": jobs_output}
 
 
 @app.get("/api/generations/{job_id}")

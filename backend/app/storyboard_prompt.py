@@ -230,6 +230,13 @@ async def _plan_ass_scenes(
         "selectedCharacters": _compact_characters(selected_humans) if settings.outline_protocol_version == "v2" else selected_humans,
         "overallRequirement": extra_requirement,
         "rules": rules_prompt.render_json(),
+        "conciseLimits": {
+            "locationName": 12,
+            "moodEmotionTonePurpose": 20,
+            "globalVisualField": 30,
+            "continuityRule": 20,
+            "wardrobePerCharacter": 36,
+        },
         "schema": {
             "globalVisual": {
                 "visualStyle": "全片视觉风格",
@@ -485,6 +492,7 @@ async def _generate_ass_shots_v2(
             "intro/interlude/outro 必须 t=e 且 c=[]；其他空镜同样 c=[]",
             "人物镜 t=c，c 只能引用 characters.id；相邻镜头的动作、构图和运镜不得雷同",
             _empty_ratio_rule(sum(1 for item in segments if item.get("segmentType", "lyric") == "lyric")),
+            "长度硬约束：b/e/m各不超过12个汉字，a不超过24个汉字；不得复述歌词或场景设定",
         ],
         "schema": {"shots": [{"i": 0, "t": "e|c", "b": "短节拍", "c": [], "a": "短动作", "e": "短情绪", "m": "短运镜"}]},
     }
@@ -831,9 +839,7 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
     if not settings.llm_api_key:
         raise RuntimeError("LLM_API_KEY 未配置")
     planned = current.get("plannedDigitalHumanIds") or []
-    # KV-cache 前缀稳定化：payload 中任务级静态字段（source/globalContext/allowedCharacters/outputSchema/requirements）全部前置且
-    # 不含逐句差异文本，逐句变化的 currentShot 与 roleConstraint 固定后置；同任务 N 次逐句调用的 prompt 前缀字节级一致，
-    # 让供应商侧前缀缓存可命中（cachedInputTokens > 0），降低时延与成本。
+    # full_context 已由领域层裁剪为当前场景、前后两镜和局部歌词窗口；避免逐镜重复发送全片 story bible。
     system_prompt = await get_prompt("storyboard_line.system")
     requirements_prompt = await get_prompt("storyboard_line.requirements")
     role_constraint_prompt = await get_prompt("storyboard_line.role_constraint")
@@ -849,6 +855,7 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
         "allowedCharacters": allowed_humans,
         "outputSchema": {"scenePrompt": "string", "shotPrompt": "string", "digitalHumanIds": ["allowed character id"]},
         "requirements": requirements_prompt.render_json(),
+        "outputLengthLimits": {"scenePromptChineseCharacters": 220, "shotPromptChineseCharacters": 180},
         "currentShot": current,
         "roleConstraint": role_constraint,
     }
@@ -1023,6 +1030,7 @@ async def _generate_general_story_outline_v2(
             f"必须恰好 {empty_count} 条 t=e 和 {character_count} 条 t=c",
             "空镜 c=[]；有人物可选时人物镜 c 只能引用 characters.id；没有人物可选时人物镜 c=[]并自由设计人物",
             "s、b、a、e、m 使用具体但短小的中文短语，不得写成长段落",
+            "长度硬约束：s/a不超过20个汉字，b/e/m各不超过12个汉字",
         ],
         "schema": {"shots": [{"i": 0, "t": "e|c", "s": "短场景", "b": "短节拍", "c": [], "a": "短动作", "e": "短情绪", "m": "短运镜"}]},
     }

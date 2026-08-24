@@ -176,6 +176,11 @@ class StoryboardLineGenerate(BaseModel):
     force: bool = False
 
 
+class StoryboardLinesBatchGenerate(BaseModel):
+    line_ids: list[str] = Field(default_factory=list, max_length=100)
+    force: bool = False
+
+
 class ChatSessionCreate(BaseModel):
     """system_prompt 留空时由后端以提示词注册中心的 chat.default_system 填充。"""
 
@@ -222,6 +227,10 @@ class VideoGenerationCreate(BaseModel):
     model: str | None = Field(default=None, max_length=160)
     project_task_id: str | None = None
     storyboard_line_id: str | None = None
+
+
+class VideoGenerationBatchCreate(BaseModel):
+    items: list[VideoGenerationCreate] = Field(min_length=1, max_length=200)
 
 
 class GenerationStatusBatchRequest(BaseModel):

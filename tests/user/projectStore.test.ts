@@ -914,19 +914,38 @@ describe('batch storyboard line generation', () => {
       batchLine('l-done', 'succeeded'),
       batchLine('l-no-outline', 'pending', 'pending'),
     ]
-    const requested: string[] = []
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    const requested: Array<{ url: string; body?: string }> = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input)
-      requested.push(url)
-      return json({ scenePrompt: 's', shotPrompt: 'p', digitalHumanIds: [], generationAttempt: 2 })
+      requested.push({ url, body: String(init?.body || '') })
+      if (url.endsWith('/storyboard-lines/generate-batch'))
+        return json({ taskId: 'task-1', count: 2, jobs: [] }, 202)
+      return json({
+        cast: [],
+        storyboardType: 'ass',
+        status: 'ready',
+        storyboardConfig: {},
+        lines: [
+          { id: 'l-pending', generationStatus: 'succeeded', shotOptions: {} },
+          { id: 'l-failed', generationStatus: 'succeeded', shotOptions: {} },
+          { id: 'l-running', generationStatus: 'running', shotOptions: {} },
+          { id: 'l-done', generationStatus: 'succeeded', shotOptions: {} },
+          {
+            id: 'l-no-outline',
+            generationStatus: 'pending',
+            shotOptions: { outlineStatus: 'pending' },
+          },
+        ],
+      })
     })
 
     await store.generateAllPendingStoryboardLines()
 
-    expect([...requested].sort()).toEqual([
-      '/api/tasks/task-1/storyboard-lines/l-failed/generate',
-      '/api/tasks/task-1/storyboard-lines/l-pending/generate',
+    expect(requested.map((item) => item.url)).toEqual([
+      '/api/tasks/task-1/storyboard-lines/generate-batch',
+      '/api/tasks/task-1?history=0',
     ])
+    expect(JSON.parse(requested[0]!.body || '{}').line_ids).toEqual(['l-pending', 'l-failed'])
     expect(store.lines.find((line) => line.id === 'l-pending')?.generationStatus).toBe('succeeded')
     expect(store.lines.find((line) => line.id === 'l-failed')?.generationStatus).toBe('succeeded')
     expect(store.lines.find((line) => line.id === 'l-running')?.generationStatus).toBe('running')
@@ -1491,7 +1510,7 @@ describe('random general storyboard', () => {
     const store = useProjectStore()
     store.activeSongId = 'song-random'
     store.songProjects = [{ id: 'song-random', name: '随机项目', tasks: [] }]
-    const generateAllShots = vi.spyOn(store, 'generateAllShots').mockResolvedValue()
+    const generateRandomShots = vi.spyOn(store, '_generateRandomShotsBatch').mockResolvedValue()
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -1541,7 +1560,7 @@ describe('random general storyboard', () => {
       shotPrompt: '完全相同的提示词',
       generationStatus: 'succeeded',
     })
-    expect(generateAllShots).toHaveBeenCalledOnce()
+    expect(generateRandomShots).toHaveBeenCalledOnce()
   })
 })
 

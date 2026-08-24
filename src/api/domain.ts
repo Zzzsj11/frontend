@@ -412,6 +412,14 @@ export const generateStoryboardLine = (taskId: string, lineId: string, force = f
     method: 'POST',
     body: JSON.stringify({ force }),
   })
+export const generateStoryboardLinesBatch = (taskId: string, lineIds: string[], force = false) =>
+  apiRequest<{ taskId: string; count: number; jobs: Array<Record<string, unknown>> }>(
+    `/tasks/${taskId}/storyboard-lines/generate-batch`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ line_ids: lineIds, force }),
+    },
+  )
 export const resetFailedStoryboardLines = (taskId: string) =>
   apiRequest<{ lineIds: string[] }>(`/tasks/${taskId}/storyboard/retry-failed`, { method: 'POST' })
 export const regenerateStoryboardOutline = (taskId: string) =>
@@ -540,3 +548,24 @@ export async function generateShotVideo(
     onSubmitted,
   )
 }
+
+export interface VideoBatchItem {
+  prompt: string
+  duration: number
+  ratio: ShotGenOptions['ratio']
+  resolution: ShotGenOptions['resolution']
+  model: string
+  image_urls?: string[]
+  video_urls?: string[]
+  audio_urls?: string[]
+  generate_audio?: boolean
+  watermark?: boolean
+  project_task_id: string
+  storyboard_line_id: string
+}
+
+export const submitVideoGenerationsBatch = (items: VideoBatchItem[]) =>
+  apiRequest<{ count: number; jobs: Array<Record<string, unknown>> }>('/generations/videos/batch', {
+    method: 'POST',
+    body: JSON.stringify({ items }),
+  })

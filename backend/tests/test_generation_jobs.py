@@ -968,6 +968,13 @@ def test_generation_concurrency_limit_returns_429(client, monkeypatch) -> None:
 
         # 类型独立：图片占满不影响视频提交
         assert client.post("/api/generations/videos", json={"prompt": "v", "duration": 5}).status_code == 202
+        batch = client.post(
+            "/api/generations/videos/batch",
+            json={"items": [{"prompt": "batch-a", "duration": 5}, {"prompt": "batch-b", "duration": 5}]},
+        )
+        assert batch.status_code == 202
+        assert batch.json()["count"] == 2
+        assert len(batch.json()["jobs"]) == 2
 
         # 用户隔离：其它用户占满图片额度不影响当前用户
         for index in range(200):

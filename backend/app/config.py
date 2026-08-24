@@ -96,7 +96,7 @@ class Settings:
     llm_api_key: str = LLM_API_KEY
     llm_model: str = LLM_MODEL
     llm_api_mode: str = os.getenv("LLM_API_MODE", "openai").lower()
-    storyboard_generation_concurrency: int = max(1, min(8, int(os.getenv("STORYBOARD_GENERATION_CONCURRENCY", "4"))))
+    storyboard_generation_concurrency: int = max(1, min(200, int(os.getenv("STORYBOARD_GENERATION_CONCURRENCY", "64"))))
     export_concurrency: int = max(1, min(8, int(os.getenv("EXPORT_CONCURRENCY", "4"))))
     export_per_user_concurrency: int = max(1, min(4, int(os.getenv("EXPORT_PER_USER_CONCURRENCY", "2"))))
     # 单个素材导出任务最多同时拉取 20 个源文件；下载过程按 1 MiB 分块落盘，不整文件驻留内存。

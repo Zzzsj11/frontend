@@ -60,6 +60,7 @@ from .schemas import (
     ReorderLines,
     StoryboardLineCreate,
     StoryboardLineGenerate,
+    StoryboardLinesBatchGenerate,
     StoryboardLineUpdate,
     StyleCreate,
     TaskCreate,
@@ -1402,19 +1403,26 @@ async def _run_storyboard_line_generation(job: Job) -> dict[str, Any]:
     task_id = str(job.project_task_id or "")
     if not line_id or not task_id or not job.user_id:
         raise RuntimeError("逐镜分镜工单缺少用户、任务或分镜标识")
-    async with session_factory() as session:
-        line = await session.get(StoryboardLineModel, line_id)
-        task = await session.get(ProjectTaskModel, task_id)
+    # 模型调用期间不持有数据库连接；高并发提示词只占网络协程，DB仅用于前后两个短事务。
+    async with session_factory() as read_session:
+        line = await read_session.get(StoryboardLineModel, line_id)
+        task = await read_session.get(ProjectTaskModel, task_id)
         if not line or line.deleted_at is not None or not task or task.deleted_at is not None:
             raise RuntimeError("逐镜分镜工单关联的数据不存在")
-        try:
-            async with storyboard_generation_slots:
-                result = await generate_storyboard_line(
-                    source=str(request.get("source") or task.storyboard_type),
-                    current=dict(request.get("current") or {}),
-                    full_context=dict(request.get("full_context") or {}),
-                    allowed_humans=list(request.get("allowed_humans") or []),
-                )
+        storyboard_type = task.storyboard_type
+    try:
+        async with storyboard_generation_slots:
+            result = await generate_storyboard_line(
+                source=str(request.get("source") or storyboard_type),
+                current=dict(request.get("current") or {}),
+                full_context=dict(request.get("full_context") or {}),
+                allowed_humans=list(request.get("allowed_humans") or []),
+            )
+        async with session_factory() as session:
+            line = await session.get(StoryboardLineModel, line_id)
+            task = await session.get(ProjectTaskModel, task_id)
+            if not line or line.deleted_at is not None or not task or task.deleted_at is not None:
+                raise RuntimeError("逐镜分镜工单完成时关联数据已被删除")
             line.scene_prompt, line.shot_prompt = result["scenePrompt"], result["shotPrompt"]
             line.generation_status = "succeeded"
             line.prompt_context_hash = str(request.get("context_hash") or "") or None
@@ -1449,7 +1457,12 @@ async def _run_storyboard_line_generation(job: Job) -> dict[str, Any]:
             await session.commit()
             slim_records = [{key: value for key, value in call.items() if key not in ("requestMessages", "responseText")} for call in result.get("usageRecords") or []]
             return {**result, "usageRecords": slim_records}
-        except Exception as exc:
+    except Exception as exc:
+        async with session_factory() as session:
+            line = await session.get(StoryboardLineModel, line_id)
+            task = await session.get(ProjectTaskModel, task_id)
+            if not line or line.deleted_at is not None or not task or task.deleted_at is not None:
+                raise
             line.generation_status, line.generation_error = "failed", str(exc)[:2000]
             failed_calls = getattr(exc, "usage_records", None) or [
                 {"operation": "storyboard_line_failed", "usage": getattr(exc, "usage", {}), "requestId": getattr(exc, "request_id", None)}
@@ -1467,7 +1480,7 @@ async def _run_storyboard_line_generation(job: Job) -> dict[str, Any]:
             )
             await _refresh_storyboard_status(session, task)
             await session.commit()
-            raise
+        raise
 
 
 async def run_storyboard_job(job: Job) -> dict[str, Any]:
@@ -1998,6 +2011,53 @@ async def _refresh_storyboard_status(db: AsyncSession, task: ProjectTaskModel) -
         task.status = "generating"
 
 
+def _compact_storyboard_line_context(task: ProjectTaskModel, lines: list[StoryboardLineModel], line: StoryboardLineModel) -> dict[str, Any]:
+    """逐镜模型只接收当前场景与相邻镜头，避免每一镜重复发送整部 story bible。"""
+    config = dict(task.storyboard_config or {})
+    bible = dict(config.get("storyBible") or {})
+    shots = list(bible.get("shots") or [])
+    scene_plan = list(bible.get("scenePlan") or [])
+    current_outline = dict(line.shot_options or {})
+    scene_index = current_outline.get("sceneIndex")
+    current_scene = next((item for item in scene_plan if item.get("sceneIndex") == scene_index), None)
+    position = next((index for index, item in enumerate(lines) if item.id == line.id), 0)
+    start, end = max(0, position - 2), min(len(lines), position + 3)
+
+    def compact_shot(item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: item.get(key)
+            for key in (
+                "index",
+                "shotType",
+                "intent",
+                "characterAction",
+                "emotionalFocus",
+                "cameraPurpose",
+                "sceneIndex",
+                "locationId",
+                "requiredCharacterIds",
+                "wardrobeByCharacter",
+            )
+            if item.get(key) not in (None, "", [], {})
+        }
+
+    timeline = [{"index": item.sort_order, "lyrics": item.lyrics, "start": item.start_time, "end": item.end_time} for item in lines[start:end]]
+    return {
+        "songId": config.get("songId"),
+        "songEmotion": config.get("songEmotion"),
+        "globalVisual": bible.get("globalVisual"),
+        "currentScene": current_scene,
+        "continuity": {
+            "visual": bible.get("visualContinuity"),
+            "character": bible.get("characterPolicy"),
+            "technical": bible.get("technicalPolicy"),
+        },
+        "timelineWindow": timeline,
+        "shotWindow": [compact_shot(dict(item)) for item in shots[start:end]],
+        "overallRequirement": task.extra_requirement,
+    }
+
+
 @router.post("/tasks/{task_id}/storyboard-lines/{line_id}/generate")
 async def generate_one_storyboard_line(task_id: str, line_id: str, payload: StoryboardLineGenerate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     task = await owned_task(db, user.id, task_id)
@@ -2036,12 +2096,6 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
         .scalars()
         .all()
     )
-    cast_links = list(
-        (await db.execute(select(ProjectCastModel).where(ProjectCastModel.project_task_id == task.id, ProjectCastModel.deleted_at.is_(None)).order_by(ProjectCastModel.sort_order)))
-        .scalars()
-        .all()
-    )
-    task_cast_ids = [item.digital_human_id for item in cast_links]
     line_cast = list(
         (
             await db.execute(
@@ -2054,7 +2108,8 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
         .all()
     )
     planned_role_ids = [item.digital_human_id for item in line_cast]
-    allowed_ids = planned_role_ids if task.storyboard_type == "general" else task_cast_ids
+    # 大纲已经固定本镜出演人物，逐镜生成不再发送整部片的全部阵容。
+    allowed_ids = planned_role_ids
     human_models = list(
         (await db.execute(select(DigitalHumanModel).where(DigitalHumanModel.id.in_(allowed_ids) if allowed_ids else False, DigitalHumanModel.deleted_at.is_(None)))).scalars().all()
     )
@@ -2084,20 +2139,7 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
         "plannedDigitalHumanIds": planned_role_ids,
         "outline": line.shot_options,
     }
-    if task.storyboard_type == "ass":
-        full_context = {
-            "songId": task.storyboard_config.get("songId"),
-            "songEmotion": task.storyboard_config.get("songEmotion"),
-            "storyBible": task.storyboard_config.get("storyBible"),
-            "allLyrics": [{"index": item.sort_order, "lyrics": item.lyrics, "start": item.start_time, "end": item.end_time} for item in lines],
-            "overallRequirement": task.extra_requirement,
-        }
-    else:
-        full_context = {
-            "storyboardConfig": task.storyboard_config,
-            "shotOutline": [{"index": item.sort_order, "shotType": item.shot_type, "plannedDuration": item.planned_duration, "outline": item.shot_options} for item in lines],
-            "overallRequirement": task.extra_requirement,
-        }
+    full_context = _compact_storyboard_line_context(task, lines, line)
     context_hash = hashlib.sha256(
         json.dumps(
             {
@@ -2154,6 +2196,49 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
     normalized = normalize_usage((queued.result or {}).get("usage"))
     response["usage"] = {key: normalized[key] for key in ("inputTokens", "outputTokens", "cachedInputTokens", "totalTokens")}
     return response
+
+
+@router.post("/tasks/{task_id}/storyboard-lines/generate-batch", status_code=202)
+async def generate_storyboard_lines_batch(
+    task_id: str,
+    payload: StoryboardLinesBatchGenerate,
+    user: CurrentUser,
+    db: AsyncSession = Db,
+) -> dict[str, Any]:
+    """一次请求将最多100条逐镜提示词工单全部持久化，页面无需维持低并发提交循环。"""
+    await owned_task(db, user.id, task_id)
+    line_ids = list(dict.fromkeys(payload.line_ids))
+    if not line_ids:
+        raise HTTPException(422, "至少选择一条分镜")
+    running_count = int(
+        (
+            await db.execute(
+                select(func.count(StoryboardLineModel.id))
+                .join(ProjectTaskModel, StoryboardLineModel.project_task_id == ProjectTaskModel.id)
+                .join(ProjectModel, ProjectTaskModel.project_id == ProjectModel.id)
+                .where(
+                    ProjectModel.user_id == user.id,
+                    ProjectModel.deleted_at.is_(None),
+                    ProjectTaskModel.deleted_at.is_(None),
+                    StoryboardLineModel.deleted_at.is_(None),
+                    StoryboardLineModel.generation_status == "running",
+                )
+            )
+        ).scalar_one()
+    )
+    if running_count + len(line_ids) > 100:
+        raise HTTPException(429, "同时进行的提示词生成已达上限（100 条），请等待部分完成后再试")
+    jobs_output: list[dict[str, Any]] = []
+    for line_id in line_ids:
+        result = await generate_one_storyboard_line(
+            task_id,
+            line_id,
+            StoryboardLineGenerate(force=payload.force),
+            user,
+            db,
+        )
+        jobs_output.append(result)
+    return {"taskId": task_id, "jobs": jobs_output, "count": len(jobs_output)}
 
 
 @router.post("/tasks/{task_id}/storyboard/retry-failed")
