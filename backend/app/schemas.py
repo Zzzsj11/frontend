@@ -166,7 +166,8 @@ class RandomGeneralStoryboardCreate(BaseModel):
     ratio: Literal["16:9", "9:16", "1:1", "4:3"] = "16:9"
     resolution: Literal["480p", "720p", "1080p"] = "720p"
     video_model: str = Field(default="doubao-seedance-2.0", min_length=1, max_length=160)
-    shot_count: int = Field(ge=1, le=100)
+    empty_shot_count: int = Field(default=3, ge=0, le=100)
+    character_shot_count: int = Field(default=17, ge=0, le=100)
     total_duration: float = Field(gt=0, le=3600)
     extra_requirement: str = Field(default="", max_length=20_000)
 

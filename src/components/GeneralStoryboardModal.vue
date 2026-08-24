@@ -37,7 +37,6 @@ const imageModel = ref(DEFAULT_IMAGE_MODEL)
 const videoModel = ref(DEFAULT_VIDEO_MODEL)
 const emptyShotCount = ref(4)
 const characterShotCount = ref(13)
-const shotCount = ref(17)
 const totalDuration = ref(210)
 const extraRequirement = ref('')
 const selectedHumanIds = ref<string[]>([])
@@ -61,10 +60,8 @@ const castPolicy = computed(
     'optional_random',
 )
 const castRequired = computed(() => characterShotCount.value > 0 && castPolicy.value === 'required')
-const totalShots = computed(() =>
-  props.random
-    ? Math.max(0, shotCount.value)
-    : Math.max(0, emptyShotCount.value) + Math.max(0, characterShotCount.value),
+const totalShots = computed(
+  () => Math.max(0, emptyShotCount.value) + Math.max(0, characterShotCount.value),
 )
 const minimumTotalDuration = computed(() => totalShots.value * MIN_VIDEO_DURATION)
 const maximumTotalDuration = computed(() => totalShots.value * MAX_VIDEO_DURATION)
@@ -100,9 +97,8 @@ const reset = () => {
   imageModel.value = DEFAULT_IMAGE_MODEL
   videoModel.value = DEFAULT_VIDEO_MODEL
   gender.value = '女'
-  emptyShotCount.value = 4
-  characterShotCount.value = 13
-  shotCount.value = 17
+  emptyShotCount.value = props.random ? 3 : 4
+  characterShotCount.value = props.random ? 17 : 13
   totalDuration.value = 210
   extraRequirement.value = ''
   selectedHumanIds.value = []
@@ -159,7 +155,8 @@ const submit = () => {
       ratio: ratio.value,
       resolution: resolution.value,
       videoModel: videoModel.value,
-      shotCount: Math.max(1, Math.round(shotCount.value)),
+      emptyShotCount: Math.max(0, Math.round(emptyShotCount.value)),
+      characterShotCount: Math.max(0, Math.round(characterShotCount.value)),
       totalDuration: Math.round(totalDuration.value),
       extraRequirement: extraRequirement.value.trim() || undefined,
     }
@@ -259,7 +256,7 @@ const submit = () => {
         <section v-if="!random" class="form-section">
           <h4>视觉与人物设定</h4>
           <div class="field-grid five">
-            <label v-if="!random"
+            <label
               ><span>季节</span
               ><select v-model="season">
                 <option v-for="item in store.generalStoryboardOptions.seasons" :key="item">
@@ -267,7 +264,7 @@ const submit = () => {
                 </option>
               </select></label
             >
-            <label v-if="!random"
+            <label
               ><span>性别</span
               ><select v-model="gender">
                 <option v-for="item in GENERAL_GENDER_OPTIONS" :key="item" :value="item">
@@ -305,15 +302,11 @@ const submit = () => {
         <section class="form-section">
           <h4>生成规模</h4>
           <div class="field-grid three">
-            <label v-if="!random"
+            <label
               ><span>空镜数量</span
               ><input v-model.number="emptyShotCount" type="number" min="0" max="50"
             /></label>
-            <label v-if="random"
-              ><span>总镜头数</span
-              ><input v-model.number="shotCount" type="number" min="1" max="100"
-            /></label>
-            <label v-if="!random"
+            <label
               ><span>人物镜数量</span
               ><input v-model.number="characterShotCount" type="number" min="0" max="50"
             /></label>
@@ -327,9 +320,10 @@ const submit = () => {
             /></label>
           </div>
           <p class="estimate" :class="{ invalid: totalShots > 0 && !durationIsValid }">
-            将生成 <strong>{{ totalShots }}</strong> 个视频<span v-if="!random"
-              >：{{ emptyShotCount }} 个空镜、{{ characterShotCount }} 个人物镜</span
-            >，平均每镜约 <strong>{{ averageDuration }} 秒</strong>；允许总时长
+            将生成 <strong>{{ totalShots }}</strong> 个视频：{{ emptyShotCount }} 个空镜、{{
+              characterShotCount
+            }}
+            个人物镜，平均每镜约 <strong>{{ averageDuration }} 秒</strong>；允许总时长
             <strong>{{ minimumTotalDuration }}–{{ maximumTotalDuration }} 秒</strong>（每镜 4–15
             秒）
           </p>

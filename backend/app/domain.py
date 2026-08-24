@@ -629,21 +629,30 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
     ).scalar_one_or_none()
     if not model:
         raise HTTPException(422, f"不支持或已停用的视频模型：{payload.video_model}")
+    total = payload.empty_shot_count + payload.character_shot_count
+    if total < 1:
+        raise HTTPException(422, "至少需要一个分镜")
     try:
-        durations = exact_durations(payload.total_duration, payload.shot_count)
+        durations = exact_durations(payload.total_duration, total)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     music_path = " / ".join(value for value in (payload.genre, payload.secondary_category, payload.tertiary_category) if value)
-    prompt_parts = [
+    common_prompt_parts = [
         f"音乐属性：{music_path}。",
-        f"生成规模：共{payload.shot_count}个镜头，{payload.ratio}画幅，{payload.resolution}清晰度。",
+        f"生成规模：共{total}个镜头，其中{payload.empty_shot_count}个空镜、{payload.character_shot_count}个人物镜，{payload.ratio}画幅，{payload.resolution}清晰度。",
     ]
     if payload.extra_requirement.strip():
-        prompt_parts.append(f"额外要求：{payload.extra_requirement.strip()}。")
-    prompt_parts.append("请自由设计适合音乐氛围的视频画面、人物、动作、场景和镜头运动。")
-    prompt = "".join(prompt_parts)
+        common_prompt_parts.append(f"额外要求：{payload.extra_requirement.strip()}。")
+    common_prompt = "".join(common_prompt_parts)
+    empty_prompt = common_prompt + "本镜为空镜：画面中不得出现人物、人影或可识别的人体主体；请自由设计环境、景物、光影与镜头运动。"
+    character_prompt = common_prompt + "本镜为人物镜：必须以人物为明确视觉主体；请自由设计人物外貌、服装、动作、场景和镜头运动。"
     title = f"随机通用分镜-{utcnow().astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d-%H-%M-%S')}"
-    config = {**payload.model_dump(mode="json"), "shared_prompt": prompt, "outlineSkipped": True}
+    config = {
+        **payload.model_dump(mode="json"),
+        "empty_prompt": empty_prompt,
+        "character_prompt": character_prompt,
+        "outlineSkipped": True,
+    }
     task = ProjectTaskModel(
         id=uid("task"),
         project_id=project_id,
@@ -651,13 +660,18 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
         storyboard_type="general_random",
         status="ready",
         extra_requirement=payload.extra_requirement,
-        overall_prompt=prompt,
+        overall_prompt=common_prompt,
         storyboard_config=config,
     )
     db.add(task)
     await db.flush()
     output = []
-    for index, duration in enumerate(durations):
+    # Evenly distribute empty shots across the timeline instead of placing all
+    # environment shots at the beginning.
+    empty_positions = {min(total - 1, int(index * total / payload.empty_shot_count)) for index in range(payload.empty_shot_count)} if payload.empty_shot_count else set()
+    shot_types = ["empty" if index in empty_positions else "character" for index in range(total)]
+    for index, (duration, shot_type) in enumerate(zip(durations, shot_types, strict=True)):
+        prompt = empty_prompt if shot_type == "empty" else character_prompt
         options = {
             "ratio": payload.ratio,
             "resolution": payload.resolution,
@@ -669,7 +683,7 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
             project_task_id=task.id,
             sort_order=index,
             source="general_random",
-            shot_type="random",
+            shot_type=shot_type,
             planned_duration=duration,
             scene_prompt="",
             shot_prompt=prompt,
@@ -681,7 +695,7 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
         output.append(
             {
                 "id": line.id,
-                "shotType": "random",
+                "shotType": shot_type,
                 "plannedDuration": duration,
                 "scenePrompt": "",
                 "shotPrompt": prompt,

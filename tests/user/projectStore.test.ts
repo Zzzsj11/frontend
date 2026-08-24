@@ -1517,7 +1517,8 @@ describe('random general storyboard', () => {
       ratio: '16:9',
       resolution: '480p',
       videoModel: 'doubao-seedance-2.0',
-      shotCount: 1,
+      emptyShotCount: 0,
+      characterShotCount: 1,
       totalDuration: 5,
     })
 

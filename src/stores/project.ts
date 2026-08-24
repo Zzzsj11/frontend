@@ -1662,7 +1662,7 @@ export const useProjectStore = defineStore('project', {
         const lines: ScriptLine[] = result.lines.map((item) => ({
           id: item.id || nextId(),
           source: 'general_random',
-          shotType: 'random',
+          shotType: item.shotType,
           plannedDuration: item.plannedDuration,
           lyrics: '',
           scenePrompt: '',

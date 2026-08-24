@@ -317,7 +317,8 @@ export interface RandomGeneralStoryboardRequest {
   ratio: ShotGenOptions['ratio']
   resolution: ShotGenOptions['resolution']
   videoModel: VideoModelId
-  shotCount: number
+  emptyShotCount: number
+  characterShotCount: number
   totalDuration: number
   extraRequirement?: string
 }

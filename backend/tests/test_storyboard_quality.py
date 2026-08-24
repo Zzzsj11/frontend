@@ -391,7 +391,7 @@ def test_general_storyboard_leaves_cast_empty_when_optional_and_not_selected(cli
     assert result["storyboardConfig"]["cast_policy"] == "optional_random"
 
 
-def test_random_general_storyboard_skips_outline_and_reuses_one_prompt(client) -> None:
+def test_random_general_storyboard_skips_outline_and_builds_shot_type_prompts(client) -> None:
     project = client.post("/api/projects", json={"name": "Random general"}).json()
     response = client.post(
         f"/api/projects/{project['id']}/storyboards/general/random",
@@ -399,7 +399,8 @@ def test_random_general_storyboard_skips_outline_and_reuses_one_prompt(client) -
             "genre": "流行歌曲",
             "secondary_category": "通用积极",
             "tertiary_category": "生活",
-            "shot_count": 3,
+            "empty_shot_count": 1,
+            "character_shot_count": 2,
             "total_duration": 15,
             "ratio": "16:9",
             "resolution": "480p",
@@ -411,14 +412,15 @@ def test_random_general_storyboard_skips_outline_and_reuses_one_prompt(client) -
     result = response.json()
     assert result["cast"] == []
     assert len(result["lines"]) == 3
-    assert {line["shotType"] for line in result["lines"]} == {"random"}
+    assert [line["shotType"] for line in result["lines"]].count("empty") == 1
+    assert [line["shotType"] for line in result["lines"]].count("character") == 2
     assert {line["generationStatus"] for line in result["lines"]} == {"succeeded"}
-    prompts = {line["shotPrompt"] for line in result["lines"]}
-    assert len(prompts) == 1
-    prompt = prompts.pop()
-    assert "流行歌曲 / 通用积极 / 生活" in prompt
-    assert "生成规模：共3个镜头" in prompt
-    assert "夏日公路旅行" in prompt
+    prompts = {line["shotType"]: line["shotPrompt"] for line in result["lines"]}
+    assert "流行歌曲 / 通用积极 / 生活" in prompts["empty"]
+    assert "生成规模：共3个镜头，其中1个空镜、2个人物镜" in prompts["empty"]
+    assert "夏日公路旅行" in prompts["empty"]
+    assert "不得出现人物" in prompts["empty"]
+    assert "必须以人物为明确视觉主体" in prompts["character"]
     task = client.get(f"/api/tasks/{result['taskId']}").json()
     assert task["storyboardType"] == "general_random"
     assert task["status"] == "ready"

@@ -139,7 +139,7 @@ describe('general storyboard defaults', () => {
     wrapper.unmount()
   })
 
-  it('random mode keeps music and scale but removes visual, cast, and shot-type fields', async () => {
+  it('random mode keeps music and 3+17 shot scale but removes visual and cast fields', async () => {
     const store = useProjectStore()
     store.generalStoryboardOptions = {
       genres: [{ value: 'pop', label: '流行歌曲' }],
@@ -157,12 +157,15 @@ describe('general storyboard defaults', () => {
 
     expect(document.body.textContent).toContain('音乐属性')
     expect(document.body.textContent).toContain('生成规模')
-    expect(document.body.textContent).toContain('总镜头数')
+    expect(document.body.textContent).toContain('空镜数量')
+    expect(document.body.textContent).toContain('人物镜数量')
     expect(document.body.textContent).not.toContain('视觉与人物设定')
     expect(document.body.textContent).not.toContain('人物素材')
-    expect(document.body.textContent).not.toContain('空镜数量')
-    expect(document.body.textContent).not.toContain('人物镜数量')
     expect(document.body.textContent).not.toContain('图片模型')
+    const numbers = Array.from(
+      document.body.querySelectorAll('input[type="number"]'),
+    ) as HTMLInputElement[]
+    expect(numbers.map((input) => input.value)).toEqual(['3', '17', '210'])
     wrapper.unmount()
   })
 })
