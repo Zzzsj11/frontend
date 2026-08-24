@@ -3,6 +3,7 @@ import type {
   GeneralStoryboardOptions,
   GeneralStoryboardRequest,
   GeneralStoryboardResult,
+  RandomGeneralStoryboardRequest,
   MaterialExport,
   OutlineFailedSegment,
   OutlinePlannedLine,
@@ -454,6 +455,29 @@ export async function generateGeneralStoryboard(
       overall_prompt: req.extraRequirement ?? '',
     }),
   })
+}
+
+export async function generateRandomGeneralStoryboard(
+  req: RandomGeneralStoryboardRequest,
+): Promise<GeneralStoryboardResult> {
+  if (!req.projectId) throw new Error('请先选择歌曲项目')
+  return apiRequest<GeneralStoryboardResult>(
+    `/projects/${req.projectId}/storyboards/general/random`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        genre: req.genre,
+        secondary_category: req.secondaryCategory,
+        tertiary_category: req.tertiaryCategory,
+        ratio: req.ratio,
+        resolution: req.resolution,
+        video_model: req.videoModel,
+        shot_count: req.shotCount,
+        total_duration: req.totalDuration,
+        extra_requirement: req.extraRequirement ?? '',
+      }),
+    },
+  )
 }
 
 /** POST /api/scene/generate — 根据场景提示词生成分镜的背景场景图 */

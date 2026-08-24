@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import random
 import tempfile
 import uuid
 import zipfile
@@ -57,6 +56,7 @@ from .schemas import (
     GeneralStoryboardCreate,
     ProjectCreate,
     ProjectUpdate,
+    RandomGeneralStoryboardCreate,
     ReorderLines,
     StoryboardLineCreate,
     StoryboardLineGenerate,
@@ -537,38 +537,6 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
     if payload.character_shot_count and not cast_ids:
         if cast_policy == "required":
             raise HTTPException(422, "当前分类必须手动选择至少一个角色")
-        gender_plan = {
-            "女": ["女"],
-            "男": ["男"],
-            "男女": ["女", "男"],
-            "女女": ["女", "女"],
-            "男男": ["男", "男"],
-            "多女（三人以上）": ["女", "女", "女"],
-            "多男（三人以上）": ["男", "男", "男"],
-            "多人有男有女（三人以上）": ["女", "男", "女"],
-        }[payload.gender]
-        system_humans = list(
-            (
-                await db.execute(
-                    select(DigitalHumanModel).where(
-                        DigitalHumanModel.scope == "system",
-                        DigitalHumanModel.status == "active",
-                        DigitalHumanModel.deleted_at.is_(None),
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        chosen: list[str] = []
-        rng = random.SystemRandom()
-        for gender in gender_plan:
-            candidates = [human.id for human in system_humans if human.gender == gender and human.id not in chosen]
-            if not candidates:
-                raise HTTPException(422, f"暂无可用于自动匹配的{gender}性系统人物，请手动选择角色")
-            chosen.append(rng.choice(candidates))
-        cast_ids = chosen
-        cast_selection_mode = "automatic"
     visible = await visible_humans(db, user.id, cast_ids)
     if len({item.id for item in visible}) != len(set(cast_ids)):
         raise HTTPException(422, "包含不可用角色")
@@ -576,7 +544,7 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
     config["digital_human_ids"] = cast_ids
     config["cast_policy"] = cast_policy
     config["cast_selection_mode"] = cast_selection_mode
-    title = f"通用分镜-{utcnow().astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d-%H-%M-%S')}"
+    title = f"定制通用分镜-{utcnow().astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d-%H-%M-%S')}"
     try:
         durations = exact_durations(payload.total_duration, total)
     except ValueError as exc:
@@ -639,6 +607,96 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
         "title": title,
         "status": "parsed",
         "cast": cast_ids,
+        "totalDuration": payload.total_duration,
+        "storyboardConfig": config,
+        "lines": output,
+    }
+
+
+@router.post("/projects/{project_id}/storyboards/general/random", status_code=201)
+async def create_random_general_storyboard(project_id: str, payload: RandomGeneralStoryboardCreate, user: CurrentUser, db: AsyncSession = Db) -> dict:
+    """Create same-prompt text-to-video lines without outline or scene generation."""
+    await owned_project(db, user.id, project_id)
+    model = (
+        await db.execute(
+            select(AiModelModel).where(
+                AiModelModel.code == payload.video_model,
+                AiModelModel.modality == "video",
+                AiModelModel.status == "active",
+                AiModelModel.deleted_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if not model:
+        raise HTTPException(422, f"不支持或已停用的视频模型：{payload.video_model}")
+    try:
+        durations = exact_durations(payload.total_duration, payload.shot_count)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    music_path = " / ".join(value for value in (payload.genre, payload.secondary_category, payload.tertiary_category) if value)
+    prompt_parts = [
+        f"音乐属性：{music_path}。",
+        f"生成规模：共{payload.shot_count}个镜头，{payload.ratio}画幅，{payload.resolution}清晰度。",
+    ]
+    if payload.extra_requirement.strip():
+        prompt_parts.append(f"额外要求：{payload.extra_requirement.strip()}。")
+    prompt_parts.append("请自由设计适合音乐氛围的视频画面、人物、动作、场景和镜头运动。")
+    prompt = "".join(prompt_parts)
+    title = f"随机通用分镜-{utcnow().astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d-%H-%M-%S')}"
+    config = {**payload.model_dump(mode="json"), "shared_prompt": prompt, "outlineSkipped": True}
+    task = ProjectTaskModel(
+        id=uid("task"),
+        project_id=project_id,
+        title=title,
+        storyboard_type="general_random",
+        status="ready",
+        extra_requirement=payload.extra_requirement,
+        overall_prompt=prompt,
+        storyboard_config=config,
+    )
+    db.add(task)
+    await db.flush()
+    output = []
+    for index, duration in enumerate(durations):
+        options = {
+            "ratio": payload.ratio,
+            "resolution": payload.resolution,
+            "videoModel": payload.video_model,
+            "duration": normalize_video_duration(duration),
+        }
+        line = StoryboardLineModel(
+            id=uid("line"),
+            project_task_id=task.id,
+            sort_order=index,
+            source="general_random",
+            shot_type="random",
+            planned_duration=duration,
+            scene_prompt="",
+            shot_prompt=prompt,
+            shot_options=options,
+            generation_status="succeeded",
+        )
+        db.add(line)
+        await db.flush()
+        output.append(
+            {
+                "id": line.id,
+                "shotType": "random",
+                "plannedDuration": duration,
+                "scenePrompt": "",
+                "shotPrompt": prompt,
+                "digitalHumanIds": [],
+                "shotOptions": options,
+                "generationStatus": "succeeded",
+            }
+        )
+    await db.commit()
+    return {
+        "taskId": task.id,
+        "projectId": project_id,
+        "title": title,
+        "status": "ready",
+        "cast": [],
         "totalDuration": payload.total_duration,
         "storyboardConfig": config,
         "lines": output,

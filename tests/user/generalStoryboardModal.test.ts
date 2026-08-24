@@ -138,4 +138,31 @@ describe('general storyboard defaults', () => {
     expect(submit.disabled).toBe(true)
     wrapper.unmount()
   })
+
+  it('random mode keeps music and scale but removes visual, cast, and shot-type fields', async () => {
+    const store = useProjectStore()
+    store.generalStoryboardOptions = {
+      genres: [{ value: 'pop', label: '流行歌曲' }],
+      seasons: ['秋'],
+      ageGroups: ['青年'],
+      visualStyles: ['电影写实'],
+      ratios: ['16:9'],
+    }
+    store.randomGeneralStoryboardOpen = true
+    const wrapper = mount(GeneralStoryboardModal, {
+      props: { random: true },
+      attachTo: document.body,
+    })
+    await vi.waitFor(() => expect(document.body.textContent).toContain('随机通用分镜'))
+
+    expect(document.body.textContent).toContain('音乐属性')
+    expect(document.body.textContent).toContain('生成规模')
+    expect(document.body.textContent).toContain('总镜头数')
+    expect(document.body.textContent).not.toContain('视觉与人物设定')
+    expect(document.body.textContent).not.toContain('人物素材')
+    expect(document.body.textContent).not.toContain('空镜数量')
+    expect(document.body.textContent).not.toContain('人物镜数量')
+    expect(document.body.textContent).not.toContain('图片模型')
+    wrapper.unmount()
+  })
 })

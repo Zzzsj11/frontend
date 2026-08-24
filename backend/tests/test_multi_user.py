@@ -115,8 +115,8 @@ def test_general_storyboard_persists_type_specific_configuration(client) -> None
     assert response.status_code == 201
     result = response.json()
     assert result["status"] == "parsed"
-    assert result["title"].startswith("通用分镜-")
-    assert len(result["title"]) == len("通用分镜-20260810-01-23-38")
+    assert result["title"].startswith("定制通用分镜-")
+    assert len(result["title"]) == len("定制通用分镜-20260810-01-23-38")
     assert result["storyboardConfig"]["genre"] == "流行歌曲"
     assert result["storyboardConfig"]["gender"] == "女"
     # 大纲异步生成前，lines 为占位：shotType 统一 empty，人物待后台回填

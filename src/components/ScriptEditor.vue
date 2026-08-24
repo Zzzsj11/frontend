@@ -179,7 +179,16 @@ const batchGeneratableCount = computed(
         >
           <span v-if="store.generalStoryboardLoading" class="spinner light" />
           <AppIcon v-else name="movie" :size="15" />
-          通用 MV 视频
+          定制通用分镜
+        </button>
+        <button
+          class="btn-primary"
+          :disabled="store.randomGeneralStoryboardLoading || store.songSwitching"
+          @click="store.openRandomGeneralStoryboard()"
+        >
+          <span v-if="store.randomGeneralStoryboardLoading" class="spinner light" />
+          <AppIcon v-else name="movie" :size="15" />
+          随机通用分镜
         </button>
       </div>
     </header>
@@ -258,7 +267,7 @@ const batchGeneratableCount = computed(
       </div>
 
       <p v-if="!store.songSwitching && store.lines.length === 0" class="empty-tip">
-        暂无视频，您可以点击下方【单个视频】按钮或顶部「ASS 视频」/【通用 MV 视频】开始创作
+        暂无视频，可点击下方【单个视频】或顶部三种分镜入口开始创作
       </p>
     </div>
 
@@ -273,6 +282,7 @@ const batchGeneratableCount = computed(
     <ShotDetailModal v-if="!!store.editingLine" />
     <MagicScriptModal v-if="store.magicOpen" />
     <GeneralStoryboardModal v-if="store.generalStoryboardOpen" />
+    <GeneralStoryboardModal v-if="store.randomGeneralStoryboardOpen" random />
     <StoryboardOutlineModal v-if="store.outlineOpen && !!store.activeStoryBible" />
   </section>
 </template>

@@ -23,7 +23,9 @@ const video = computed(() => store.videoOf(props.line))
 const cover = computed(() => store.coverOf(props.line))
 /** 歌词非中文时的中文翻译 */
 const translation = computed(() => store.translationOf(props.line))
-const isGeneral = computed(() => props.line.source === 'general')
+const isGeneral = computed(
+  () => props.line.source === 'general' || props.line.source === 'general_random',
+)
 
 /** ASS 大纲状态：pending=待生成 / failed=所在场景段生成失败 */
 const outlineStatus = computed(() => props.line.shotOptions?.outlineStatus)
@@ -143,7 +145,7 @@ const onGenerateShot = async () => {
         <button @click.stop="store.retryStoryboardLine(line.id)">重新生成</button>
       </div>
       <div v-if="isGeneral" class="general-meta">
-        <span class="shot-type" :class="line.shotType">{{
+        <span v-if="line.shotType !== 'random'" class="shot-type" :class="line.shotType">{{
           line.shotType === 'empty' ? '空镜' : '人物镜'
         }}</span>
         <span

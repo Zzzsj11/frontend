@@ -73,9 +73,9 @@ test('deployed frontend login, project and storyboard configuration journey', as
 
     await page
       .locator('.script-editor .header-actions')
-      .getByRole('button', { name: '通用 MV 视频', exact: true })
+      .getByRole('button', { name: '定制通用分镜', exact: true })
       .click()
-    const general = page.locator('.modal').filter({ hasText: '通用 MV 视频' })
+    const general = page.locator('.modal').filter({ hasText: '定制通用分镜' })
     await expect(general).toBeVisible()
     await general.getByLabel('画幅').selectOption('9:16')
     await expect(general.getByLabel('画幅')).toHaveValue('9:16')

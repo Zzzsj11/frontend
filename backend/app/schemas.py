@@ -56,7 +56,7 @@ class ProjectUpdate(BaseModel):
 
 class TaskCreate(BaseModel):
     title: str = Field(default="MV 分镜制作", min_length=1, max_length=255)
-    storyboard_type: Literal["ass", "general", "manual"] = "manual"
+    storyboard_type: Literal["ass", "general", "general_random", "manual"] = "manual"
     extra_requirement: str = Field(default="", max_length=20_000)
     overall_prompt: str = Field(default="", max_length=30_000)
     storyboard_config: dict = Field(default_factory=dict)
@@ -106,8 +106,8 @@ class DigitalHumanUpdate(BaseModel):
 
 
 class StoryboardLineCreate(BaseModel):
-    source: Literal["ass", "general", "manual"] = "manual"
-    shot_type: Literal["empty", "character"] | None = None
+    source: Literal["ass", "general", "general_random", "manual"] = "manual"
+    shot_type: Literal["empty", "character", "random"] | None = None
     planned_duration: float | None = Field(default=None, gt=0)
     lyrics: str = ""
     lyrics_zh: str | None = None
@@ -157,6 +157,18 @@ class GeneralStoryboardCreate(BaseModel):
     digital_human_ids: list[str] = Field(default_factory=list)
     extra_requirement: str = Field(default="", max_length=20_000)
     overall_prompt: str = Field(default="", max_length=30_000)
+
+
+class RandomGeneralStoryboardCreate(BaseModel):
+    genre: str
+    secondary_category: str | None = None
+    tertiary_category: str | None = None
+    ratio: Literal["16:9", "9:16", "1:1", "4:3"] = "16:9"
+    resolution: Literal["480p", "720p", "1080p"] = "720p"
+    video_model: str = Field(default="doubao-seedance-2.0", min_length=1, max_length=160)
+    shot_count: int = Field(ge=1, le=100)
+    total_duration: float = Field(gt=0, le=3600)
+    extra_requirement: str = Field(default="", max_length=20_000)
 
 
 class StoryboardLineGenerate(BaseModel):

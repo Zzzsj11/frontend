@@ -48,7 +48,7 @@ async function createProject(page: Page, name: string) {
   await expect(
     page
       .locator('.script-editor .header-actions')
-      .getByRole('button', { name: '通用 MV 视频', exact: true }),
+      .getByRole('button', { name: '定制通用分镜', exact: true }),
   ).toBeEnabled()
   await capture(page, `${name}-project-created`)
 }
@@ -171,9 +171,9 @@ test('ASS and general storyboard complete real frontend journeys through generat
   await createProject(page, `通用 MV 视频全链路真实验收${projectSuffix}`)
   await page
     .locator('.script-editor .header-actions')
-    .getByRole('button', { name: '通用 MV 视频', exact: true })
+    .getByRole('button', { name: '定制通用分镜', exact: true })
     .click()
-  const general = page.locator('.modal').filter({ hasText: '通用 MV 视频' })
+  const general = page.locator('.modal').filter({ hasText: '定制通用分镜' })
   await general.locator('.cast-item').nth(17).click()
   await general.getByLabel('空镜数量').fill('1')
   await general.getByLabel('人物镜数量').fill('1')

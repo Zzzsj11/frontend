@@ -142,9 +142,9 @@ export interface ShotGenOptions {
 export interface ScriptLine {
   id: string
   /** 脚本来源；通用分镜不包含歌词与翻译 */
-  source?: 'ass' | 'general' | 'manual'
+  source?: 'ass' | 'general' | 'general_random' | 'manual'
   /** 通用分镜的镜头类型 */
-  shotType?: 'empty' | 'character'
+  shotType?: 'empty' | 'character' | 'random'
   /** 脚本规划时长（秒），不等同于单次视频生成时长 */
   plannedDuration?: number
   /** ASS 时间轴起止时间（秒） */
@@ -309,6 +309,19 @@ export interface GeneralStoryboardRequest {
   extraRequirement?: string
 }
 
+export interface RandomGeneralStoryboardRequest {
+  projectId?: string
+  genre: string
+  secondaryCategory?: string
+  tertiaryCategory?: string
+  ratio: ShotGenOptions['ratio']
+  resolution: ShotGenOptions['resolution']
+  videoModel: VideoModelId
+  shotCount: number
+  totalDuration: number
+  extraRequirement?: string
+}
+
 export interface GeneralStoryboardResult {
   taskId: string
   title: string
@@ -316,7 +329,7 @@ export interface GeneralStoryboardResult {
   totalDuration: number
   lines: Array<{
     id?: string
-    shotType: 'empty' | 'character'
+    shotType: 'empty' | 'character' | 'random'
     plannedDuration: number
     scenePrompt: string
     shotPrompt: string

@@ -4,6 +4,7 @@ import type {
   DigitalHuman,
   GeneralStoryboardOptions,
   GeneralStoryboardRequest,
+  RandomGeneralStoryboardRequest,
   MaterialExport,
   OutlineFailedSegment,
   OutlinePlannedLine,
@@ -153,6 +154,9 @@ export const useProjectStore = defineStore('project', {
     generalStoryboardLoading: false,
     generalStoryboardError: null as string | null,
     generalStoryboardOptions: null as GeneralStoryboardOptions | null,
+    randomGeneralStoryboardOpen: false,
+    randomGeneralStoryboardLoading: false,
+    randomGeneralStoryboardError: null as string | null,
     outlineOpen: false,
     outlineLoading: false,
     /** 大纲生成中的任务归属：全局 outlineLoading 不区分任务，切到其他子项目时
@@ -1550,13 +1554,29 @@ export const useProjectStore = defineStore('project', {
       if (!this.generalStoryboardLoading) this.generalStoryboardOpen = false
     },
 
+    async openRandomGeneralStoryboard() {
+      this.randomGeneralStoryboardOpen = true
+      this.randomGeneralStoryboardError = null
+      if (!this.generalStoryboardOptions) {
+        try {
+          this.generalStoryboardOptions = await api.fetchGeneralStoryboardOptions()
+        } catch (err) {
+          this.randomGeneralStoryboardError = err instanceof Error ? err.message : '加载选项失败'
+        }
+      }
+    },
+
+    closeRandomGeneralStoryboard() {
+      if (!this.randomGeneralStoryboardLoading) this.randomGeneralStoryboardOpen = false
+    },
+
     /** 按曲风、人物与镜头规模生成无歌词的通用分镜脚本 */
     async runGeneralStoryboard(req: GeneralStoryboardRequest) {
       if (this.generalStoryboardLoading) return
       this.generalStoryboardLoading = true
       this.generalStoryboardError = null
       try {
-        // 全新状态直接点「通用 MV 视频」：自动创建未命名项目承载本次生成
+        // 全新状态直接点「定制通用分镜」：自动创建未命名项目承载本次生成
         await this.ensureSongProjectForGeneration()
         const result = await api.generateGeneralStoryboard({ ...req, projectId: this.activeSongId })
         const lines: ScriptLine[] = result.lines.map((item) => ({
@@ -1622,9 +1642,69 @@ export const useProjectStore = defineStore('project', {
         // 异步触发大纲生成：复用 ASS 的 SSE 订阅 + 僵尸恢复 + 完成后自动接续逐句生成
         void this.runOutlineGeneration(task.id)
       } catch (err) {
-        this.generalStoryboardError = err instanceof Error ? err.message : '通用 MV 视频生成失败'
+        this.generalStoryboardError = err instanceof Error ? err.message : '定制通用分镜生成失败'
       } finally {
         this.generalStoryboardLoading = false
+      }
+    },
+
+    /** 无大纲、无场景图：创建相同提示词的随机分镜并立即批量提交纯文本视频。 */
+    async runRandomGeneralStoryboard(req: RandomGeneralStoryboardRequest) {
+      if (this.randomGeneralStoryboardLoading) return
+      this.randomGeneralStoryboardLoading = true
+      this.randomGeneralStoryboardError = null
+      try {
+        await this.ensureSongProjectForGeneration()
+        const result = await api.generateRandomGeneralStoryboard({
+          ...req,
+          projectId: this.activeSongId,
+        })
+        const lines: ScriptLine[] = result.lines.map((item) => ({
+          id: item.id || nextId(),
+          source: 'general_random',
+          shotType: 'random',
+          plannedDuration: item.plannedDuration,
+          lyrics: '',
+          scenePrompt: '',
+          shotPrompt: item.shotPrompt,
+          digitalHumanIds: [],
+          voice: { status: 'none' },
+          scene: { status: 'none' },
+          shot: { status: 'none', assets: [] },
+          shotOptions: normalizeShotOptions(item.shotOptions ?? DEFAULT_SHOT_OPTIONS),
+          generationStatus: 'succeeded',
+        }))
+        this._cacheCurrentTask()
+        const song = this.songProjects.find((item) => item.id === this.activeSongId)
+        if (!song) throw new Error('项目不存在')
+        const task = {
+          id: result.taskId,
+          title: result.title,
+          updatedAt: '刚刚',
+          status: 'ready',
+          storyboardType: 'general_random',
+        }
+        song.tasks.push(task)
+        if (this.activeTaskId && this.activeTaskId !== task.id)
+          cancelTaskWatchers(this.activeTaskId)
+        this.stop()
+        this.editingLineId = null
+        this.castIds = []
+        this.lines = lines
+        this.taskScripts[task.id] = { cast: [], lines }
+        this.activeTaskId = task.id
+        this.activeStoryBible = null
+        this.activeStoryboardType = 'general_random'
+        this.activeTaskStatus = 'ready'
+        this.selectedLineId = lines[0]?.id ?? null
+        this.currentTime = 0
+        this.randomGeneralStoryboardOpen = false
+        void this.generateAllShots()
+      } catch (err) {
+        this.randomGeneralStoryboardError =
+          err instanceof Error ? err.message : '随机通用分镜生成失败'
+      } finally {
+        this.randomGeneralStoryboardLoading = false
       }
     },
 
@@ -1778,12 +1858,9 @@ export const useProjectStore = defineStore('project', {
       // 历史版本总数（含未懒加载的），用于资产版本序号
       const variant = line.shot.assetCount ?? line.shot.assets.length
       // 通用 MV 的人物镜由视频模型逐镜自由生成，不发送数字人参考图；ASS 仍用头像保护面部身份。
-      const characterUrls =
-        line.source === 'general'
-          ? []
-          : (line.digitalHumanIds
-              .map((id) => this.digitalHumans.find((h) => h.id === id)?.avatar)
-              .filter(Boolean) as string[])
+      const characterUrls = line.digitalHumanIds
+        .map((id) => this.digitalHumans.find((h) => h.id === id)?.avatar)
+        .filter(Boolean) as string[]
       // P1：轮询挂到任务 watcher 上，切换子项目即被取消（后端任务照跑，切回后恢复）
       const watcher = this.activeTaskId ? registerTaskWatcher(this.activeTaskId) : null
       try {
@@ -1848,7 +1925,7 @@ export const useProjectStore = defineStore('project', {
         for (const line of [...this.lines]) {
           // 切换子项目后立即停止批量派发
           if (this.activeTaskId !== taskId) break
-          if (line.source !== 'general' && line.voice.status !== 'done')
+          if (!line.source?.startsWith('general') && line.voice.status !== 'done')
             await this.generateVoiceFor(line.id)
         }
       } finally {

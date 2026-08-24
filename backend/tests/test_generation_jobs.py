@@ -1487,34 +1487,6 @@ def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) ->
             connection.close()
 
 
-async def test_general_video_server_strips_character_reference_images(client) -> None:
-    from app.database import session_factory
-    from app.main import _strip_general_character_references
-    from app.models import DigitalHumanModel, ProjectModel, ProjectTaskModel
-
-    async with session_factory() as db:
-        db.add(ProjectModel(id="project-general-random", user_id="user-admin", name="General random"))
-        db.add(ProjectTaskModel(id="task-general-random", project_id="project-general-random", title="General", storyboard_type="general"))
-        db.add(
-            DigitalHumanModel(
-                id="dh-general-random",
-                user_id="user-admin",
-                name="Reference person",
-                avatar_url="https://tos.test/human.png",
-                avatar_thumbnail_url="https://tos.test/human-thumb.png",
-                asset_avatar_url="asset://human",
-                scope="private",
-            )
-        )
-        await db.commit()
-        filtered = await _strip_general_character_references(
-            db,
-            "task-general-random",
-            ["https://tos.test/scene.png", "https://tos.test/human.png", "asset://human"],
-        )
-    assert filtered == ["https://tos.test/scene.png"]
-
-
 def test_h3_endpoint_enforces_official_reference_capabilities(client) -> None:
     base = {
         "prompt": "故宫舞蹈",

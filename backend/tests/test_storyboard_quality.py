@@ -366,8 +366,8 @@ def test_general_storyboard_rejects_character_shots_without_cast(client) -> None
     assert "必须手动选择" in response.json()["detail"]
 
 
-def test_general_storyboard_auto_selects_system_cast_for_non_romance(client) -> None:
-    project = client.post("/api/projects", json={"name": "Automatic cast"}).json()
+def test_general_storyboard_leaves_cast_empty_when_optional_and_not_selected(client) -> None:
+    project = client.post("/api/projects", json={"name": "Optional cast"}).json()
     response = client.post(
         f"/api/projects/{project['id']}/storyboards/general",
         json={
@@ -386,10 +386,43 @@ def test_general_storyboard_auto_selects_system_cast_for_non_romance(client) -> 
     )
     assert response.status_code == 201
     result = response.json()
-    assert len(result["cast"]) == 2
-    assert all(human_id.startswith("dh-system-") for human_id in result["cast"])
-    assert result["storyboardConfig"]["cast_selection_mode"] == "automatic"
+    assert result["cast"] == []
+    assert result["storyboardConfig"]["cast_selection_mode"] == "none"
     assert result["storyboardConfig"]["cast_policy"] == "optional_random"
+
+
+def test_random_general_storyboard_skips_outline_and_reuses_one_prompt(client) -> None:
+    project = client.post("/api/projects", json={"name": "Random general"}).json()
+    response = client.post(
+        f"/api/projects/{project['id']}/storyboards/general/random",
+        json={
+            "genre": "流行歌曲",
+            "secondary_category": "通用积极",
+            "tertiary_category": "生活",
+            "shot_count": 3,
+            "total_duration": 15,
+            "ratio": "16:9",
+            "resolution": "480p",
+            "video_model": "doubao-seedance-2.0",
+            "extra_requirement": "夏日公路旅行",
+        },
+    )
+    assert response.status_code == 201
+    result = response.json()
+    assert result["cast"] == []
+    assert len(result["lines"]) == 3
+    assert {line["shotType"] for line in result["lines"]} == {"random"}
+    assert {line["generationStatus"] for line in result["lines"]} == {"succeeded"}
+    prompts = {line["shotPrompt"] for line in result["lines"]}
+    assert len(prompts) == 1
+    prompt = prompts.pop()
+    assert "流行歌曲 / 通用积极 / 生活" in prompt
+    assert "生成规模：共3个镜头" in prompt
+    assert "夏日公路旅行" in prompt
+    task = client.get(f"/api/tasks/{result['taskId']}").json()
+    assert task["storyboardType"] == "general_random"
+    assert task["status"] == "ready"
+    assert task["storyboardConfig"]["outlineSkipped"] is True
 
 
 def test_general_storyboard_enforces_four_to_fifteen_seconds_per_shot(client) -> None:

@@ -1007,7 +1007,7 @@ describe('batch shot video generation', () => {
     expect(store.lines.find((line) => line.id === 'l-draft')?.shot.status).toBe('none')
   })
 
-  it('does not submit digital-human reference images for general MV shots', async () => {
+  it('submits manually selected digital-human reference images for customized general shots', async () => {
     const store = useProjectStore()
     store.activeTaskId = 'task-general'
     store.activeStoryboardType = 'general'
@@ -1034,6 +1034,28 @@ describe('batch shot video generation', () => {
       if (String(input) === '/api/generations/videos') {
         submittedImages = JSON.parse(String(init?.body)).image_urls
         return json({ id: 'general-video-job', status: 'queued', progress: 0 })
+      }
+      return succeededJob()
+    })
+
+    await store.generateShotFor(line.id)
+
+    expect(submittedImages).toEqual(['/media/scene.png', '/media/human.png'])
+  })
+
+  it('does not submit a character reference when a customized general shot has no selected human', async () => {
+    const store = useProjectStore()
+    store.activeTaskId = 'task-general-free'
+    const line = shotLine('general-free-line', 'succeeded', 'none')
+    line.source = 'general'
+    line.digitalHumanIds = []
+    line.scene = { status: 'done', imageUrl: '/media/scene.png' }
+    store.lines = [line]
+    let submittedImages: string[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      if (String(input) === '/api/generations/videos') {
+        submittedImages = JSON.parse(String(init?.body)).image_urls
+        return json({ id: 'general-free-job', status: 'queued', progress: 0 })
       }
       return succeededJob()
     })
@@ -1449,6 +1471,67 @@ describe('outline phase unified for general storyboards', () => {
     ] as unknown as ScriptLine[]
     // 队列已终止（无 running）：残留 pending 行不锁死批量生成入口（429/切任务场景的手动恢复）
     expect(store.storyboardProgress.active).toBe(false)
+  })
+})
+
+describe('random general storyboard', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+  afterEach(() => vi.restoreAllMocks())
+
+  it('creates ready same-prompt lines and starts video generation without an outline', async () => {
+    const store = useProjectStore()
+    store.activeSongId = 'song-random'
+    store.songProjects = [{ id: 'song-random', name: '随机项目', tasks: [] }]
+    const generateAllShots = vi.spyOn(store, 'generateAllShots').mockResolvedValue()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          taskId: 'task-random',
+          title: '随机通用分镜-test',
+          cast: [],
+          totalDuration: 10,
+          lines: [
+            {
+              id: 'line-random-1',
+              shotType: 'random',
+              plannedDuration: 5,
+              scenePrompt: '',
+              shotPrompt: '完全相同的提示词',
+              digitalHumanIds: [],
+              shotOptions: {
+                ratio: '16:9',
+                resolution: '480p',
+                videoModel: 'doubao-seedance-2.0',
+                duration: 5,
+              },
+              generationStatus: 'succeeded',
+            },
+          ],
+        }),
+        { status: 201, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+
+    await store.runRandomGeneralStoryboard({
+      genre: '流行歌曲',
+      ratio: '16:9',
+      resolution: '480p',
+      videoModel: 'doubao-seedance-2.0',
+      shotCount: 1,
+      totalDuration: 5,
+    })
+
+    expect(store.activeStoryboardType).toBe('general_random')
+    expect(store.activeTaskStatus).toBe('ready')
+    expect(store.outlinePhase).toBe('none')
+    expect(store.lines[0]).toMatchObject({
+      source: 'general_random',
+      shotType: 'random',
+      scenePrompt: '',
+      shotPrompt: '完全相同的提示词',
+      generationStatus: 'succeeded',
+    })
+    expect(generateAllShots).toHaveBeenCalledOnce()
   })
 })
 

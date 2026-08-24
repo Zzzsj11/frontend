@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { GeneralGender, GeneralStoryboardRequest, ShotGenOptions } from '../types'
+import type {
+  GeneralGender,
+  GeneralStoryboardRequest,
+  RandomGeneralStoryboardRequest,
+  ShotGenOptions,
+} from '../types'
 import { GENERAL_GENDER_OPTIONS } from '../types'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
@@ -16,6 +21,7 @@ import {
   loadGenerationModels,
 } from '../generationModels'
 
+const props = withDefaults(defineProps<{ random?: boolean }>(), { random: false })
 const store = useProjectStore()
 void loadGenerationModels()
 const genre = ref('')
@@ -31,6 +37,7 @@ const imageModel = ref(DEFAULT_IMAGE_MODEL)
 const videoModel = ref(DEFAULT_VIDEO_MODEL)
 const emptyShotCount = ref(4)
 const characterShotCount = ref(13)
+const shotCount = ref(17)
 const totalDuration = ref(210)
 const extraRequirement = ref('')
 const selectedHumanIds = ref<string[]>([])
@@ -54,8 +61,10 @@ const castPolicy = computed(
     'optional_random',
 )
 const castRequired = computed(() => characterShotCount.value > 0 && castPolicy.value === 'required')
-const totalShots = computed(
-  () => Math.max(0, emptyShotCount.value) + Math.max(0, characterShotCount.value),
+const totalShots = computed(() =>
+  props.random
+    ? Math.max(0, shotCount.value)
+    : Math.max(0, emptyShotCount.value) + Math.max(0, characterShotCount.value),
 )
 const minimumTotalDuration = computed(() => totalShots.value * MIN_VIDEO_DURATION)
 const maximumTotalDuration = computed(() => totalShots.value * MAX_VIDEO_DURATION)
@@ -73,7 +82,7 @@ const canSubmit = computed(
     (!secondaryOptions.value.length || !!secondary.value) &&
     totalShots.value > 0 &&
     durationIsValid.value &&
-    (!castRequired.value || selectedHumanIds.value.length > 0),
+    (props.random || !castRequired.value || selectedHumanIds.value.length > 0),
 )
 
 const reset = () => {
@@ -93,6 +102,7 @@ const reset = () => {
   gender.value = '女'
   emptyShotCount.value = 4
   characterShotCount.value = 13
+  shotCount.value = 17
   totalDuration.value = 210
   extraRequirement.value = ''
   selectedHumanIds.value = []
@@ -100,7 +110,7 @@ const reset = () => {
 
 // immediate：弹层懒挂载（P3d）后挂载即打开，靠 immediate 完成表单初始化
 watch(
-  () => store.generalStoryboardOpen,
+  () => (props.random ? store.randomGeneralStoryboardOpen : store.generalStoryboardOpen),
   (open) => {
     if (open) reset()
   },
@@ -109,7 +119,12 @@ watch(
 watch(
   () => store.generalStoryboardOptions,
   (options) => {
-    if (store.generalStoryboardOpen && options && !genre.value) reset()
+    if (
+      (props.random ? store.randomGeneralStoryboardOpen : store.generalStoryboardOpen) &&
+      options &&
+      !genre.value
+    )
+      reset()
   },
 )
 watch(genre, () => {
@@ -129,7 +144,28 @@ const labelOf = (value: string, options: Array<{ value: string; label: string }>
   options.find((item) => item.value === value)?.label ?? value
 
 const submit = () => {
-  if (!canSubmit.value || store.generalStoryboardLoading) return
+  if (
+    !canSubmit.value ||
+    (props.random ? store.randomGeneralStoryboardLoading : store.generalStoryboardLoading)
+  )
+    return
+  if (props.random) {
+    const request: RandomGeneralStoryboardRequest = {
+      genre: labelOf(genre.value, store.generalStoryboardOptions?.genres ?? []),
+      secondaryCategory: secondary.value
+        ? labelOf(secondary.value, secondaryOptions.value)
+        : undefined,
+      tertiaryCategory: tertiary.value ? labelOf(tertiary.value, tertiaryOptions.value) : undefined,
+      ratio: ratio.value,
+      resolution: resolution.value,
+      videoModel: videoModel.value,
+      shotCount: Math.max(1, Math.round(shotCount.value)),
+      totalDuration: Math.round(totalDuration.value),
+      extraRequirement: extraRequirement.value.trim() || undefined,
+    }
+    store.runRandomGeneralStoryboard(request)
+    return
+  }
   const request: GeneralStoryboardRequest = {
     genre: labelOf(genre.value, store.generalStoryboardOptions?.genres ?? []),
     secondaryCategory: secondary.value
@@ -156,20 +192,28 @@ const submit = () => {
 
 <template>
   <BaseModal
-    :open="store.generalStoryboardOpen"
+    :open="random ? store.randomGeneralStoryboardOpen : store.generalStoryboardOpen"
     width="920px"
     max-height="94vh"
-    :loading="store.generalStoryboardLoading"
-    aria-label="通用 MV 视频"
-    @close="store.closeGeneralStoryboard()"
+    :loading="random ? store.randomGeneralStoryboardLoading : store.generalStoryboardLoading"
+    :aria-label="random ? '随机通用分镜' : '定制通用分镜'"
+    @close="random ? store.closeRandomGeneralStoryboard() : store.closeGeneralStoryboard()"
   >
-    <template #title><AppIcon name="movie" :size="18" />通用 MV 视频</template>
+    <template #title
+      ><AppIcon name="movie" :size="18" />{{ random ? '随机通用分镜' : '定制通用分镜' }}</template
+    >
     <div class="modal-body">
-      <p v-if="store.generalStoryboardError" class="error-tip">
-        {{ store.generalStoryboardError }}
+      <p
+        v-if="random ? store.randomGeneralStoryboardError : store.generalStoryboardError"
+        class="error-tip"
+      >
+        {{ random ? store.randomGeneralStoryboardError : store.generalStoryboardError }}
       </p>
       <p
-        v-if="!store.generalStoryboardOptions && !store.generalStoryboardError"
+        v-if="
+          !store.generalStoryboardOptions &&
+          !(random ? store.randomGeneralStoryboardError : store.generalStoryboardError)
+        "
         class="loading-tip"
       >
         <span class="spinner" />正在加载生成选项…
@@ -212,10 +256,10 @@ const submit = () => {
           </div>
         </section>
 
-        <section class="form-section">
+        <section v-if="!random" class="form-section">
           <h4>视觉与人物设定</h4>
           <div class="field-grid five">
-            <label
+            <label v-if="!random"
               ><span>季节</span
               ><select v-model="season">
                 <option v-for="item in store.generalStoryboardOptions.seasons" :key="item">
@@ -223,7 +267,7 @@ const submit = () => {
                 </option>
               </select></label
             >
-            <label
+            <label v-if="!random"
               ><span>性别</span
               ><select v-model="gender">
                 <option v-for="item in GENERAL_GENDER_OPTIONS" :key="item" :value="item">
@@ -261,11 +305,15 @@ const submit = () => {
         <section class="form-section">
           <h4>生成规模</h4>
           <div class="field-grid three">
-            <label
+            <label v-if="!random"
               ><span>空镜数量</span
               ><input v-model.number="emptyShotCount" type="number" min="0" max="50"
             /></label>
-            <label
+            <label v-if="random"
+              ><span>总镜头数</span
+              ><input v-model.number="shotCount" type="number" min="1" max="100"
+            /></label>
+            <label v-if="!random"
               ><span>人物镜数量</span
               ><input v-model.number="characterShotCount" type="number" min="0" max="50"
             /></label>
@@ -279,10 +327,9 @@ const submit = () => {
             /></label>
           </div>
           <p class="estimate" :class="{ invalid: totalShots > 0 && !durationIsValid }">
-            将生成 <strong>{{ totalShots }}</strong> 个视频：{{ emptyShotCount }} 个空镜、{{
-              characterShotCount
-            }}
-            个人物镜，平均每镜约 <strong>{{ averageDuration }} 秒</strong>；允许总时长
+            将生成 <strong>{{ totalShots }}</strong> 个视频<span v-if="!random"
+              >：{{ emptyShotCount }} 个空镜、{{ characterShotCount }} 个人物镜</span
+            >，平均每镜约 <strong>{{ averageDuration }} 秒</strong>；允许总时长
             <strong>{{ minimumTotalDuration }}–{{ maximumTotalDuration }} 秒</strong>（每镜 4–15
             秒）
           </p>
@@ -295,6 +342,14 @@ const submit = () => {
                 <option value="1080p">1080p</option>
               </select></label
             >
+            <label v-if="random"
+              ><span>画幅</span
+              ><select v-model="ratio">
+                <option v-for="item in store.generalStoryboardOptions.ratios" :key="item">
+                  {{ item }}
+                </option>
+              </select></label
+            >
             <label
               ><span>视频模型 *</span
               ><select v-model="videoModel" aria-label="视频模型">
@@ -303,7 +358,7 @@ const submit = () => {
                 </option>
               </select></label
             >
-            <label
+            <label v-if="!random"
               ><span>图片模型 *</span
               ><select v-model="imageModel" disabled>
                 <option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">
@@ -322,14 +377,14 @@ const submit = () => {
             />
           </label>
         </section>
-        <section class="form-section">
+        <section v-if="!random" class="form-section">
           <h4>人物素材{{ castRequired ? '（必选）' : '（可选）' }}</h4>
           <div>
             <p class="field-label">
               从已有角色库选择
               <span v-if="characterShotCount <= 0">（当前没有人物镜，无需选择）</span>
               <span v-else-if="castRequired">（当前分类必须手动选择至少一位人物）</span>
-              <span v-else>（未选择时，系统会按性别设定自动匹配系统人物）</span>
+              <span v-else>（未选择时，人物镜由视频模型自由生成人物）</span>
             </p>
             <div class="cast-list">
               <button
@@ -356,19 +411,32 @@ const submit = () => {
     <template #footer>
       <button
         class="cancel-btn"
-        :disabled="store.generalStoryboardLoading"
-        @click="store.closeGeneralStoryboard()"
+        :disabled="random ? store.randomGeneralStoryboardLoading : store.generalStoryboardLoading"
+        @click="random ? store.closeRandomGeneralStoryboard() : store.closeGeneralStoryboard()"
       >
         取消
       </button>
       <button
         class="btn-primary"
-        :disabled="!canSubmit || store.generalStoryboardLoading || !store.generalStoryboardOptions"
+        :disabled="
+          !canSubmit ||
+          (random ? store.randomGeneralStoryboardLoading : store.generalStoryboardLoading) ||
+          !store.generalStoryboardOptions
+        "
         @click="submit"
       >
-        <span v-if="store.generalStoryboardLoading" class="spinner light" />
+        <span
+          v-if="random ? store.randomGeneralStoryboardLoading : store.generalStoryboardLoading"
+          class="spinner light"
+        />
         <AppIcon v-else name="sparkles" :size="15" />
-        {{ store.generalStoryboardLoading ? '正在生成视频脚本…' : '批量生成' }}
+        {{
+          (random ? store.randomGeneralStoryboardLoading : store.generalStoryboardLoading)
+            ? random
+              ? '正在提交视频…'
+              : '正在生成视频脚本…'
+            : '批量生成'
+        }}
       </button>
     </template>
   </BaseModal>

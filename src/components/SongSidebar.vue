@@ -175,9 +175,11 @@ const removeTask = async (songId: string, task: SongTask) => {
     store.deleteSongTask(songId, task.id)
 }
 
-const startStoryboard = async (songId: string, type: 'ass' | 'general') => {
+const startStoryboard = async (songId: string, type: 'ass' | 'general' | 'general_random') => {
   await store.selectSongTask(songId, null)
-  type === 'ass' ? store.openMagic() : store.openGeneralStoryboard()
+  if (type === 'ass') store.openMagic()
+  else if (type === 'general') store.openGeneralStoryboard()
+  else store.openRandomGeneralStoryboard()
 }
 
 onMounted(() => {
@@ -355,7 +357,8 @@ onMounted(() => {
             <span>暂无视频任务</span>
             <div class="empty-actions">
               <button @click="startStoryboard(song.id, 'ass')">ASS 视频</button>
-              <button @click="startStoryboard(song.id, 'general')">通用 MV 视频</button>
+              <button @click="startStoryboard(song.id, 'general')">定制通用分镜</button>
+              <button @click="startStoryboard(song.id, 'general_random')">随机通用分镜</button>
             </div>
           </div>
         </template>
