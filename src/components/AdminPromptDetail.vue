@@ -8,6 +8,7 @@ import {
   type PromptDetail,
 } from '../api/adminPrompts'
 import { confirmDialog } from '../composables/useConfirmDialog'
+import { formatChinaDateTime } from '../utils/dateTime'
 import AdminPromptPreview from './AdminPromptPreview.vue'
 
 const props = defineProps<{ promptKey: string }>()
@@ -163,7 +164,9 @@ onMounted(load)
                 <span v-if="v.id === detail.currentVersionId" class="muted">（当前）</span>
               </td>
               <td>{{ v.changeNote || '-' }}</td>
-              <td class="muted">{{ v.createdBy }} · {{ v.createdAt?.slice(0, 16) }}</td>
+              <td class="muted">
+                {{ v.createdBy }} · {{ v.createdAt ? formatChinaDateTime(v.createdAt) : '-' }}
+              </td>
               <td class="ops">
                 <button :disabled="busy" @click="viewVersion(v.content)">查看</button>
                 <button

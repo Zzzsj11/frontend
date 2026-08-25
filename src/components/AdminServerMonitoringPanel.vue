@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatChinaDateTime } from '../utils/dateTime'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   dryRunServerMaintenance,
@@ -315,7 +316,7 @@ const changeRange = () => void load()
                 </td>
                 <td>{{ worker.activeJobs }}</td>
                 <td>{{ worker.version.replace(/^git-/, '').slice(0, 7) }}</td>
-                <td>{{ new Date(worker.lastHeartbeatAt).toLocaleString() }}</td>
+                <td>{{ formatChinaDateTime(worker.lastHeartbeatAt) }}</td>
               </tr>
               <tr v-if="!data?.workers?.length">
                 <td colspan="5">暂无 Worker 注册信息</td>
@@ -437,9 +438,7 @@ const changeRange = () => void load()
           >
             <b>{{ alert.title }}</b
             ><span>{{ alert.message }}</span
-            ><small
-              >{{ alert.status }} · {{ new Date(alert.lastObservedAt).toLocaleString() }}</small
-            >
+            ><small>{{ alert.status }} · {{ formatChinaDateTime(alert.lastObservedAt) }}</small>
           </div>
         </article>
         <article class="monitor-card">
@@ -469,7 +468,7 @@ const changeRange = () => void load()
           <div v-for="run in data?.maintenanceRuns" :key="run.id" class="maintenance-row">
             <b>{{ run.action }}</b
             ><span>{{ run.summary }}</span
-            ><small>{{ new Date(run.createdAt).toLocaleString() }}</small>
+            ><small>{{ formatChinaDateTime(run.createdAt) }}</small>
           </div>
         </article>
       </section>

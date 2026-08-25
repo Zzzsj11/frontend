@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatChinaDateTime } from '../utils/dateTime'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import {
   fetchRunningHubStatus,
@@ -365,7 +366,7 @@ const submit = async () => {
     }
     upsertHistory({
       taskId: created.taskId,
-      time: new Date().toLocaleString(),
+      time: formatChinaDateTime(new Date()),
       duration: duration.value,
       aspectRatio: aspectRatio.value,
       imageCount: submittedImages.value.length,

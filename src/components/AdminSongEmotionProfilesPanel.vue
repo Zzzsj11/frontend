@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatChinaDateTime } from '../utils/dateTime'
 import { computed, onMounted, ref } from 'vue'
 import {
   createSongEmotion,
@@ -249,7 +250,7 @@ const remove = async (songCode: string) => {
             </td>
             <td>{{ item.seasons || '-' }}</td>
             <td>{{ item.status }}</td>
-            <td>{{ new Date(item.updatedAt).toLocaleString() }}</td>
+            <td>{{ formatChinaDateTime(item.updatedAt) }}</td>
             <td class="actions">
               <button type="button" @click="showEdit(item)">编辑</button>
               <template v-if="confirmingCode === item.songCode">

@@ -8,6 +8,7 @@ import {
   type VideoBillingDetail,
 } from '../api/adminVideoBilling'
 import AdminVideoBillingDetailModal from './AdminVideoBillingDetailModal.vue'
+import { formatChinaDateTime } from '../utils/dateTime'
 
 const emptyData = (): VideoBillingResponse => ({
   total: 0,
@@ -182,7 +183,7 @@ onMounted(load)
         </thead>
         <tbody>
           <tr v-for="item in data.items" :key="item.id" :class="{ 'failed-row': item.isFailed }">
-            <td>{{ item.completedAt ? new Date(item.completedAt).toLocaleString() : '-' }}</td>
+            <td>{{ item.completedAt ? formatChinaDateTime(item.completedAt) : '-' }}</td>
             <td>
               <b>{{ item.username }}</b
               ><small>{{ item.projectName }} / {{ item.taskTitle }}</small>

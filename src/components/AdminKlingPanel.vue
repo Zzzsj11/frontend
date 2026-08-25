@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatChinaDateTime } from '../utils/dateTime'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   fetchKlingStatus,
@@ -203,7 +204,7 @@ const submit = async () => {
     }
     upsertHistory({
       taskId: created.taskId,
-      time: new Date().toLocaleString(),
+      time: formatChinaDateTime(new Date()),
       summary: `${duration.value}s · ${mode.value} · ${aspectRatio.value} · 声${sound.value}`,
       status: created.status || 'submitted',
       videoUrl: '',

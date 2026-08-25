@@ -15,6 +15,7 @@ import BaseModal from '../components/base/BaseModal.vue'
 import { perfSnapshot } from '../perf'
 import { useAuthStore } from '../stores/auth'
 import type { AdminNavGroup, AdminNavItem } from '../types'
+import { formatChinaDateTime, formatChinaTime } from '../utils/dateTime'
 
 /** 管理后台列表行：各 tab 返回列不一致，未建模的列由 columns 动态渲染 */
 interface AdminRow {
@@ -642,7 +643,7 @@ onMounted(() => {
                           >{{ row.durationMs }}ms</span
                         >
                       </td>
-                      <td class="muted">{{ row.createdAt }}</td>
+                      <td class="muted">{{ formatChinaDateTime(row.createdAt) }}</td>
                       <td><button class="action" @click="openReqDetail(row)">详情</button></td>
                     </tr>
                   </tbody>
@@ -735,7 +736,7 @@ onMounted(() => {
                         >
                       </td>
                       <td class="path">{{ task.target || '-' }}</td>
-                      <td class="muted">{{ new Date(task.at).toLocaleTimeString() }}</td>
+                      <td class="muted">{{ formatChinaTime(task.at) }}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -985,7 +986,7 @@ onMounted(() => {
         <template v-else-if="reqDetail">
           <p class="meta">
             {{ reqDetail.method }} {{ reqDetail.path }} · {{ reqDetail.statusCode }} · 耗时
-            {{ reqDetail.durationMs }}ms · {{ reqDetail.createdAt }}
+            {{ reqDetail.durationMs }}ms · {{ formatChinaDateTime(reqDetail.createdAt) }}
           </p>
           <p class="meta">
             runId: {{ reqDetail.runId || '-' }}
@@ -1013,7 +1014,8 @@ onMounted(() => {
             出 {{ llmDetail.outputTokens }} / 缓存 {{ llmDetail.cachedInputTokens }}
           </p>
           <p class="meta">
-            requestId: {{ llmDetail.requestId || '-' }} · {{ llmDetail.createdAt }}
+            requestId: {{ llmDetail.requestId || '-' }} ·
+            {{ formatChinaDateTime(llmDetail.createdAt) }}
           </p>
           <p v-if="llmDetail.error" class="error">{{ llmDetail.error }}</p>
           <h3>请求消息（{{ llmDetail.requestMessages?.length || 0 }} 条）</h3>
