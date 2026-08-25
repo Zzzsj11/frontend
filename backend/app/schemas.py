@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from .generation_constraints import GENERAL_STORYBOARD_MAX_GROUPS, GENERAL_STORYBOARD_MAX_SHOTS
 from .media_constraints import DEFAULT_VIDEO_DURATION, MAX_VIDEO_DURATION, MIN_VIDEO_DURATION
 
 
@@ -151,9 +152,9 @@ class GeneralStoryboardCreate(BaseModel):
     resolution: Literal["480p", "720p", "1080p"] = "720p"
     image_model: str = Field(default="gpt-image-2", min_length=1, max_length=160)
     video_model: str = Field(default="doubao-seedance-2.0", min_length=1, max_length=160)
-    empty_shot_count: int = Field(ge=0, le=17)
-    character_shot_count: int = Field(ge=0, le=17)
-    group_count: int = Field(default=1, ge=1, le=10)
+    empty_shot_count: int = Field(ge=0, le=GENERAL_STORYBOARD_MAX_SHOTS)
+    character_shot_count: int = Field(ge=0, le=GENERAL_STORYBOARD_MAX_SHOTS)
+    group_count: int = Field(default=1, ge=1, le=GENERAL_STORYBOARD_MAX_GROUPS)
     total_duration: float = Field(gt=0, le=3600)
     digital_human_ids: list[str] = Field(default_factory=list)
     extra_requirement: str = Field(default="", max_length=20_000)
@@ -161,7 +162,7 @@ class GeneralStoryboardCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_shot_count(self):
-        if self.empty_shot_count + self.character_shot_count > 17:
+        if self.empty_shot_count + self.character_shot_count > GENERAL_STORYBOARD_MAX_SHOTS:
             raise ValueError("每组通用分镜最多生成 17 个镜头")
         return self
 
@@ -173,15 +174,15 @@ class RandomGeneralStoryboardCreate(BaseModel):
     ratio: Literal["16:9", "9:16", "1:1", "4:3"] = "16:9"
     resolution: Literal["480p", "720p", "1080p"] = "720p"
     video_model: str = Field(default="doubao-seedance-2.0", min_length=1, max_length=160)
-    empty_shot_count: int = Field(default=3, ge=0, le=17)
-    character_shot_count: int = Field(default=14, ge=0, le=17)
-    group_count: int = Field(default=1, ge=1, le=10)
+    empty_shot_count: int = Field(default=3, ge=0, le=GENERAL_STORYBOARD_MAX_SHOTS)
+    character_shot_count: int = Field(default=14, ge=0, le=GENERAL_STORYBOARD_MAX_SHOTS)
+    group_count: int = Field(default=1, ge=1, le=GENERAL_STORYBOARD_MAX_GROUPS)
     total_duration: float = Field(gt=0, le=3600)
     extra_requirement: str = Field(default="", max_length=20_000)
 
     @model_validator(mode="after")
     def validate_shot_count(self):
-        if self.empty_shot_count + self.character_shot_count > 17:
+        if self.empty_shot_count + self.character_shot_count > GENERAL_STORYBOARD_MAX_SHOTS:
             raise ValueError("每组通用分镜最多生成 17 个镜头")
         return self
 

@@ -4,6 +4,7 @@ import type {
   DigitalHuman,
   GeneralStoryboardOptions,
   GeneralStoryboardRequest,
+  GeneralStoryboardResult,
   RandomGeneralStoryboardRequest,
   MaterialExport,
   OutlineFailedSegment,
@@ -23,6 +24,7 @@ import { generateVoice } from '../api/voice'
 import { nextId } from '../utils/id'
 import { ApiError, reportApiError } from '../errorBus'
 import { DEFAULT_VIDEO_DURATION, normalizeShotOptions } from '../mediaConstraints'
+import { OUTLINE_WATCH_TIMEOUT_MS } from '../generationConstraints'
 import {
   DEFAULT_IMAGE_MODEL,
   DEFAULT_VIDEO_MODEL,
@@ -46,6 +48,27 @@ const sidebarKeys = (userId: string) => ({
 const batchShotKey = (userId: string, taskId: string) => `mv_batch_shot_${userId}_${taskId}`
 /** 与后端单用户视频生成上限一致，避免第 21 个请求被 429 拒绝。 */
 const BATCH_SHOT_CONCURRENCY = 200
+
+const mapGeneralStoryboardLines = (
+  items: GeneralStoryboardResult['lines'],
+  source: 'general' | 'general_random',
+  fallbackOptions: (item: GeneralStoryboardResult['lines'][number]) => ShotGenOptions,
+): ScriptLine[] =>
+  items.map((item) => ({
+    id: item.id || nextId(),
+    source,
+    shotType: item.shotType,
+    plannedDuration: item.plannedDuration,
+    lyrics: '',
+    scenePrompt: item.scenePrompt,
+    shotPrompt: item.shotPrompt,
+    digitalHumanIds: [...item.digitalHumanIds],
+    voice: { status: 'none' },
+    scene: { status: 'none' },
+    shot: { status: 'none', assets: [] },
+    shotOptions: normalizeShotOptions(item.shotOptions ?? fallbackOptions(item)),
+    generationStatus: item.generationStatus || (source === 'general' ? 'pending' : 'succeeded'),
+  }))
 
 /** 无配音时的占位时长（秒） */
 export const DEFAULT_CLIP_DURATION = 5
@@ -938,18 +961,20 @@ export const useProjectStore = defineStore('project', {
     async _runSiblingGeneralStoryboard(taskId: string) {
       try {
         await api.regenerateStoryboardOutline(taskId)
-        for (let attempt = 0; attempt < 150; attempt++) {
-          await new Promise((resolve) => window.setTimeout(resolve, 2000))
-          const fresh = await api.fetchSongScript(taskId)
-          if (fresh.status === 'outline_failed') return
-          if (fresh.status === 'parsed' || fresh.status === 'outlining') continue
-          this.taskScripts[taskId] = { cast: [...fresh.cast], lines: fresh.lines }
-          const readyIds = fresh.lines
-            .filter((line) => line.shotOptions?.outlineStatus !== 'failed')
-            .map((line) => line.id)
-          if (readyIds.length) await this._generateStoryboardBatch(taskId, readyIds)
-          return
+        const controller = new AbortController()
+        const timeout = window.setTimeout(() => controller.abort(), OUTLINE_WATCH_TIMEOUT_MS)
+        try {
+          await api.streamStoryboardOutline(taskId, () => undefined, controller.signal)
+        } finally {
+          window.clearTimeout(timeout)
         }
+        const fresh = await api.fetchSongScript(taskId)
+        if (fresh.status === 'outline_failed' || fresh.status === 'outlining') return
+        this.taskScripts[taskId] = { cast: [...fresh.cast], lines: fresh.lines }
+        const readyIds = fresh.lines
+          .filter((line) => line.shotOptions?.outlineStatus !== 'failed')
+          .map((line) => line.id)
+        if (readyIds.length) await this._generateStoryboardBatch(taskId, readyIds)
       } catch {
         // 子项目错误状态由持久化任务和侧边栏刷新呈现，不影响其他组继续执行。
       }
@@ -1646,29 +1671,13 @@ export const useProjectStore = defineStore('project', {
         const results = response.tasks?.length ? response.tasks : [response]
         const result = results[0]
         const toLines = (items: typeof result.lines): ScriptLine[] =>
-          items.map((item) => ({
-            id: item.id || nextId(),
-            source: 'general',
-            shotType: item.shotType,
-            plannedDuration: item.plannedDuration,
-            lyrics: '',
-            scenePrompt: item.scenePrompt,
-            shotPrompt: item.shotPrompt,
-            digitalHumanIds: [...item.digitalHumanIds],
-            voice: { status: 'none' },
-            scene: { status: 'none' },
-            shot: { status: 'none', assets: [] },
-            shotOptions: normalizeShotOptions(
-              item.shotOptions ?? {
-                ...DEFAULT_SHOT_OPTIONS,
-                duration: item.plannedDuration ?? DEFAULT_SHOT_OPTIONS.duration,
-                ratio: req.ratio,
-                resolution: req.resolution,
-                imageModel: req.imageModel,
-                videoModel: req.videoModel,
-              },
-            ),
-            generationStatus: item.generationStatus || 'pending',
+          mapGeneralStoryboardLines(items, 'general', (item) => ({
+            ...DEFAULT_SHOT_OPTIONS,
+            duration: item.plannedDuration ?? DEFAULT_SHOT_OPTIONS.duration,
+            ratio: req.ratio,
+            resolution: req.resolution,
+            imageModel: req.imageModel,
+            videoModel: req.videoModel,
           }))
         const lines = toLines(result.lines)
         this._cacheCurrentTask()
@@ -1746,21 +1755,7 @@ export const useProjectStore = defineStore('project', {
         const results = response.tasks?.length ? response.tasks : [response]
         const result = results[0]
         const toLines = (items: typeof result.lines): ScriptLine[] =>
-          items.map((item) => ({
-            id: item.id || nextId(),
-            source: 'general_random',
-            shotType: item.shotType,
-            plannedDuration: item.plannedDuration,
-            lyrics: '',
-            scenePrompt: '',
-            shotPrompt: item.shotPrompt,
-            digitalHumanIds: [],
-            voice: { status: 'none' },
-            scene: { status: 'none' },
-            shot: { status: 'none', assets: [] },
-            shotOptions: normalizeShotOptions(item.shotOptions ?? DEFAULT_SHOT_OPTIONS),
-            generationStatus: 'succeeded',
-          }))
+          mapGeneralStoryboardLines(items, 'general_random', () => DEFAULT_SHOT_OPTIONS)
         const lines = toLines(result.lines)
         this._cacheCurrentTask()
         const song = this.songProjects.find((item) => item.id === this.activeSongId)

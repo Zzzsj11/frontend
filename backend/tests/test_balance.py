@@ -185,3 +185,19 @@ async def test_balance_query_degrades_when_unconfigured(monkeypatch) -> None:
     assert result["available"] is False
     assert result["balanceDisplay"] == "--"
     assert result["key"] is None
+
+
+async def test_video_batch_cost_estimate_and_insufficient_key_balance(monkeypatch) -> None:
+    async def enough(force=False):
+        return {"available": True, "key": {"remaining": 20}}
+
+    monkeypatch.setattr(balance, "query_business_balance", enough)
+    items = [SimpleNamespace(duration=10, model="doubao-seedance-2.0"), SimpleNamespace(duration=10, model="minimax-h3-runninghub")]
+    assert (await balance.ensure_video_batch_balance(items))["estimatedCost"] == 15
+
+    async def insufficient(force=False):
+        return {"available": True, "key": {"remaining": 14.99}}
+
+    monkeypatch.setattr(balance, "query_business_balance", insufficient)
+    with pytest.raises(ValueError, match="余额不足，请补足余额再试"):
+        await balance.ensure_video_batch_balance(items)

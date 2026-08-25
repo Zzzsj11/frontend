@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import CurrentUser, hash_password, user_public
 from .config import settings
 from .database import database_session, session_factory
+from .generation_constraints import OUTLINE_STALE_SECONDS
 from .jobs import Job, jobs
 from .media_constraints import normalize_video_duration
 from .models import (
@@ -517,6 +518,35 @@ async def general_storyboard_options(user: CurrentUser, db: AsyncSession = Db) -
     return await load_general_storyboard_options(db)
 
 
+async def _create_general_task(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    title: str,
+    storyboard_type: str,
+    status: str,
+    extra_requirement: str,
+    overall_prompt: str,
+    config: dict,
+    cast_ids: list[str],
+) -> ProjectTaskModel:
+    task = ProjectTaskModel(
+        id=uid("task"),
+        project_id=project_id,
+        title=title,
+        storyboard_type=storyboard_type,
+        status=status,
+        extra_requirement=extra_requirement,
+        overall_prompt=overall_prompt,
+        storyboard_config=config,
+    )
+    db.add(task)
+    await db.flush()
+    for index, human_id in enumerate(cast_ids):
+        db.add(ProjectCastModel(id=uid("cast"), project_task_id=task.id, digital_human_id=human_id, sort_order=index))
+    return task
+
+
 @router.post("/projects/{project_id}/storyboards/general", status_code=201)
 async def create_general_storyboard(project_id: str, payload: GeneralStoryboardCreate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     await owned_project(db, user.id, project_id)
@@ -554,20 +584,17 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
     for group_index in range(payload.group_count):
         title = title_base if payload.group_count == 1 else f"{title_base}-{group_index + 1:02d}"
         group_config = {**config, "group_index": group_index + 1}
-        task = ProjectTaskModel(
-            id=uid("task"),
+        task = await _create_general_task(
+            db,
             project_id=project_id,
             title=title,
             storyboard_type="general",
             status="parsed",
             extra_requirement=payload.extra_requirement,
             overall_prompt=payload.overall_prompt,
-            storyboard_config=group_config,
+            config=group_config,
+            cast_ids=cast_ids,
         )
-        db.add(task)
-        await db.flush()
-        for index, human_id in enumerate(cast_ids):
-            db.add(ProjectCastModel(id=uid("cast"), project_task_id=task.id, digital_human_id=human_id, sort_order=index))
         output = []
         for index, duration in enumerate(durations):
             line = StoryboardLineModel(
@@ -669,18 +696,17 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
     for group_index in range(payload.group_count):
         title = title_base if payload.group_count == 1 else f"{title_base}-{group_index + 1:02d}"
         group_config = {**config, "group_index": group_index + 1}
-        task = ProjectTaskModel(
-            id=uid("task"),
+        task = await _create_general_task(
+            db,
             project_id=project_id,
             title=title,
             storyboard_type="general_random",
             status="ready",
             extra_requirement=payload.extra_requirement,
             overall_prompt=common_prompt,
-            storyboard_config=group_config,
+            config=group_config,
+            cast_ids=[],
         )
-        db.add(task)
-        await db.flush()
         output = []
         character_index = 0
         for index, (duration, shot_type) in enumerate(zip(durations, shot_types, strict=True)):
@@ -1176,7 +1202,7 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
         if updated_at and updated_at.tzinfo is None:
             updated_at = updated_at.replace(tzinfo=utcnow().tzinfo)
         stale_seconds = (utcnow() - updated_at).total_seconds() if updated_at else 999999
-        if stale_seconds < 150:
+        if stale_seconds < OUTLINE_STALE_SECONDS:
             raise HTTPException(409, "分镜大纲正在生成中，请等待本轮完成后再提交")
     cast_links = list(
         (await db.execute(select(ProjectCastModel).where(ProjectCastModel.project_task_id == task.id, ProjectCastModel.deleted_at.is_(None)).order_by(ProjectCastModel.sort_order)))

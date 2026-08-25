@@ -1535,6 +1535,29 @@ describe('random general storyboard', () => {
               generationStatus: 'succeeded',
             },
           ],
+          tasks: Array.from({ length: 10 }, (_, index) => ({
+            taskId: `task-random-${index + 1}`,
+            title: `随机通用分镜-${index + 1}`,
+            cast: [],
+            totalDuration: 5,
+            lines: [
+              {
+                id: `line-random-${index + 1}`,
+                shotType: 'random',
+                plannedDuration: 5,
+                scenePrompt: '',
+                shotPrompt: `随机提示词-${index + 1}`,
+                digitalHumanIds: [],
+                shotOptions: {
+                  ratio: '16:9',
+                  resolution: '480p',
+                  videoModel: 'doubao-seedance-2.0',
+                  duration: 5,
+                },
+                generationStatus: 'succeeded',
+              },
+            ],
+          })),
         }),
         { status: 201, headers: { 'Content-Type': 'application/json' } },
       ),
@@ -1557,10 +1580,11 @@ describe('random general storyboard', () => {
       source: 'general_random',
       shotType: 'random',
       scenePrompt: '',
-      shotPrompt: '完全相同的提示词',
+      shotPrompt: '随机提示词-1',
       generationStatus: 'succeeded',
     })
-    expect(generateRandomShots).toHaveBeenCalledOnce()
+    expect(generateRandomShots).toHaveBeenCalledTimes(10)
+    expect(store.songProjects[0].tasks).toHaveLength(10)
   })
 })
 

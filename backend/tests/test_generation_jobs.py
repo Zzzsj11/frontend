@@ -975,8 +975,12 @@ def test_generation_concurrency_limit_returns_429(client, monkeypatch) -> None:
     async def fake_video(payload, job) -> dict:
         return {"videoUrl": "https://tos.test/videos/ok.mp4", "coverUrl": "https://tos.test/images/ok.png", "duration": 5}
 
+    async def enough_balance(items) -> dict:
+        return {"estimatedCost": 10.0, "availableBalance": 100.0}
+
     monkeypatch.setattr(main, "generate_image", fake_image)
     monkeypatch.setattr(main, "generate_video", fake_video)
+    monkeypatch.setattr(main, "ensure_video_batch_balance", enough_balance)
 
     try:
         # 上限 200：占满活跃图片任务后，第 201 个被拒（429 在消耗配额之前）

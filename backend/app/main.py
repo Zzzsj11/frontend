@@ -37,7 +37,7 @@ from .auth import (
     user_public,
     verify_password,
 )
-from .balance import query_business_balance
+from .balance import ensure_video_batch_balance, query_business_balance
 from .chat import chat_manager
 from .config import settings, validate_runtime_security
 from .database import close_database, database_ok, database_session, init_database
@@ -712,8 +712,12 @@ async def create_video_generations_batch(
     db: AsyncSession = Depends(database_session),
 ) -> dict:
     """一次受理最多200个视频工单；每个工单仍独立持久化、计费、重试和回填素材。"""
+    try:
+        estimate = await ensure_video_batch_balance(payload.items)
+    except ValueError as exc:
+        raise HTTPException(402, str(exc)) from exc
     jobs_output = [await create_video_generation(item, user, db) for item in payload.items]
-    return {"count": len(jobs_output), "jobs": jobs_output}
+    return {"count": len(jobs_output), "jobs": jobs_output, **estimate}
 
 
 @app.get("/api/generations/{job_id}")

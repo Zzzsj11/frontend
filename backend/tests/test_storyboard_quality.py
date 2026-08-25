@@ -369,6 +369,25 @@ def test_ass_timeline_keeps_short_gaps_single_and_splits_beyond_thirty_seconds()
     assert sum(item["end"] - item["start"] for item in middle) == pytest.approx(40.0)
 
 
+def test_ass_timeline_merges_consecutive_short_lyrics_without_crossing_interlude() -> None:
+    segments = group_cues(
+        [
+            AssCue(0, 4, "第一句"),
+            AssCue(4, 8, "第二句"),
+            AssCue(8, 12, "第三句"),
+            AssCue(15, 19, "第四句"),
+            AssCue(19, 24, "第五句"),
+        ]
+    )
+    lyrics = [item for item in segments if item["segmentType"] == "lyric"]
+    assert [(item["start"], item["end"], item["lyrics"]) for item in lyrics] == [
+        (0, 8, "第一句 第二句"),
+        (8, 12, "第三句"),
+        (15, 24, "第四句 第五句"),
+    ]
+    assert any(item["segmentType"] == "interlude" and item["start"] == 12 for item in segments)
+
+
 def test_scene_plan_requires_exact_count_and_full_coverage() -> None:
     global_visual = {
         "visualStyle": "电影写实",
@@ -636,7 +655,7 @@ def test_random_general_storyboard_skips_outline_and_builds_shot_type_prompts(cl
     assert task["storyboardConfig"]["character_prompt_policy"] == "unique_cast_per_shot_v1"
 
 
-def test_random_general_storyboard_creates_multiple_child_tasks(client) -> None:
+def test_random_general_storyboard_creates_ten_child_tasks_concurrently(client) -> None:
     project = client.post("/api/projects", json={"name": "Random groups"}).json()
     response = client.post(
         f"/api/projects/{project['id']}/storyboards/general/random",
@@ -644,16 +663,16 @@ def test_random_general_storyboard_creates_multiple_child_tasks(client) -> None:
             "genre": "流行歌曲",
             "empty_shot_count": 1,
             "character_shot_count": 1,
-            "group_count": 3,
+            "group_count": 10,
             "total_duration": 10,
         },
     )
     assert response.status_code == 201
     result = response.json()
-    assert result["groupCount"] == 3
-    assert len(result["tasks"]) == 3
-    assert len({task["taskId"] for task in result["tasks"]}) == 3
-    assert [task["storyboardConfig"]["group_index"] for task in result["tasks"]] == [1, 2, 3]
+    assert result["groupCount"] == 10
+    assert len(result["tasks"]) == 10
+    assert len({task["taskId"] for task in result["tasks"]}) == 10
+    assert [task["storyboardConfig"]["group_index"] for task in result["tasks"]] == list(range(1, 11))
     assert all(len(task["lines"]) == 2 for task in result["tasks"])
 
 

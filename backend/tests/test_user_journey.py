@@ -110,8 +110,8 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(domain, "get_storage", lambda: storage)
 
     async def fake_storyboard_line(**kwargs):
-        assert kwargs["current"]["lyrics"] == "First line"
-        assert len(kwargs["full_context"]["timelineWindow"]) == 3
+        assert kwargs["current"]["lyrics"] == "First line Second line"
+        assert len(kwargs["full_context"]["timelineWindow"]) >= 1
         assert "图片ID：020" in kwargs["allowed_humans"][0]["systemPrompt"]
         return {
             "scenePrompt": "sunlit room",

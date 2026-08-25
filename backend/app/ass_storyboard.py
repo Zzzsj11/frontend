@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from .generation_constraints import INTERLUDE_GAP_SECONDS, SHORT_LYRIC_MERGE_SECONDS
+
 TIME_RE = re.compile(r"^(\d+):(\d{2}):(\d{2})[.](\d{2})$")
 TAG_RE = re.compile(r"{[^}]*}")
 
@@ -77,8 +79,25 @@ def _gap_durations(duration: float, max_duration: float) -> list[float]:
 
 
 def group_cues(cues: list[AssCue], max_duration: float = 15.0) -> list[dict[str, Any]]:
-    """每句歌词独立成镜；超过 2 秒的前奏、间奏拆成结构性空镜，末尾追加一个尾奏占位段。"""
+    """合并连续短歌词；不跨越间奏，再拆结构空镜并追加尾奏。"""
     max_duration = min(15.0, max(4.0, max_duration or 15.0))
+    merged_cues: list[AssCue] = []
+    index = 0
+    while index < len(cues):
+        current = AssCue(cues[index].start, cues[index].end, cues[index].text)
+        index += 1
+        while index < len(cues):
+            following = cues[index]
+            current_duration = current.end - current.start
+            following_duration = following.end - following.start
+            gap = following.start - current.end
+            combined_duration = following.end - current.start
+            if current_duration > SHORT_LYRIC_MERGE_SECONDS or following_duration > SHORT_LYRIC_MERGE_SECONDS or gap > INTERLUDE_GAP_SECONDS or combined_duration > max_duration:
+                break
+            current = AssCue(current.start, following.end, f"{current.text} {following.text}".strip())
+            index += 1
+        merged_cues.append(current)
+    cues = merged_cues
     segments: list[dict[str, Any]] = []
 
     def append_gap(start: float, end: float, segment_type: str) -> None:

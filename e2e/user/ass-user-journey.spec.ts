@@ -36,10 +36,16 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await page.route('**/api/model-options', (route) =>
     route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({
-        imageModels: [{ code: 'gpt-image-2', name: 'Img2' }],
-        videoModels: [{ code: 'doubao-seedance-2.0', name: 'SD2.0' }],
-      }),
+      body: JSON.stringify([
+        { id: 'gpt-image-2', name: 'Img2', modality: 'image' },
+        { id: 'doubao-seedance-2.0', name: 'SD2.0', modality: 'video' },
+        {
+          id: 'minimax-h3-runninghub',
+          name: 'H3',
+          modality: 'video',
+          capabilities: { h3Modes: ['auto', 'text'], executionConcurrency: 2 },
+        },
+      ]),
     }),
   )
   // 通用分镜选项（需求 7 起由后端组装，e2e 全 mock 环境按种子口径补齐）
@@ -131,7 +137,7 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
               duration: 4,
               ratio: '16:9',
               imageModel: 'gpt-image-2',
-              videoModel: 'doubao-seedance-2.0',
+              videoModel: 'minimax-h3-runninghub',
               segmentType: 'lyric',
               timelineLabel: '自动化测试歌词',
               outlineStatus: 'pending',
@@ -161,6 +167,7 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
     }),
   )
   // 注意尾部的 *：fetchSongScript 会带 ?history=0 查询串，不带 * 的 glob 匹配不到会穿透到真实后端
+  let lineGenerated = false
   await page.route('**/api/tasks/task-e2e*', (route) => {
     if (route.request().method() !== 'GET') return route.fallback()
     return route.fulfill({
@@ -188,17 +195,17 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
             end: 5,
             shotType: 'character',
             plannedDuration: 4,
-            scenePrompt: '',
-            shotPrompt: '',
+            scenePrompt: lineGenerated ? '清晨的房间' : '',
+            shotPrompt: lineGenerated ? '镜头缓慢推进' : '',
             digitalHumanIds: ['dh-luoli'],
-            generationStatus: 'pending',
-            generationAttempt: 0,
+            generationStatus: lineGenerated ? 'succeeded' : 'pending',
+            generationAttempt: lineGenerated ? 1 : 0,
             shotOptions: {
               resolution: '720p',
               duration: 4,
               ratio: '16:9',
               imageModel: 'gpt-image-2',
-              videoModel: 'doubao-seedance-2.0',
+              videoModel: 'minimax-h3-runninghub',
               segmentType: 'lyric',
               timelineLabel: '自动化测试歌词',
               outlineStatus: 'ready',
@@ -206,6 +213,14 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
           },
         ],
       }),
+    })
+  })
+  await page.route('**/api/tasks/task-e2e/storyboard-lines/generate-batch', (route) => {
+    lineGenerated = true
+    return route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ count: 1, jobs: [] }),
     })
   })
   await page.route('**/api/tasks/task-e2e/storyboard-lines/line-e2e/generate', (route) =>
@@ -243,7 +258,8 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await expect(page.locator('.song-input')).toHaveValue('10012204')
   await expect(page.getByLabel('画幅 *')).toHaveValue('16:9')
   await expect(page.getByLabel('清晰度 *')).toHaveValue('480p')
-  await expect(page.getByLabel('视频模型')).toHaveValue('doubao-seedance-2.0')
+  await page.getByLabel('视频模型').selectOption('minimax-h3-runninghub')
+  await expect(page.getByLabel('视频模型')).toHaveValue('minimax-h3-runninghub')
   await expect(page.getByLabel('视频模型')).toBeEnabled()
   await expect(page.getByLabel('图片模型 *')).toHaveValue('gpt-image-2')
   await expect(page.getByLabel('图片模型 *')).toBeDisabled()

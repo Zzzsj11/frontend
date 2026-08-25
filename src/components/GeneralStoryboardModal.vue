@@ -13,6 +13,10 @@ import BaseModal from './base/BaseModal.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
 import { MAX_VIDEO_DURATION, MIN_VIDEO_DURATION } from '../mediaConstraints'
 import {
+  GENERAL_STORYBOARD_MAX_GROUPS,
+  GENERAL_STORYBOARD_MAX_SHOTS,
+} from '../generationConstraints'
+import {
   DEFAULT_IMAGE_MODEL,
   DEFAULT_VIDEO_MODEL,
   IMAGE_MODEL_OPTIONS,
@@ -79,9 +83,9 @@ const canSubmit = computed(
     !!genre.value &&
     (!secondaryOptions.value.length || !!secondary.value) &&
     totalShots.value > 0 &&
-    totalShots.value <= 17 &&
+    totalShots.value <= GENERAL_STORYBOARD_MAX_SHOTS &&
     groupCount.value >= 1 &&
-    groupCount.value <= 10 &&
+    groupCount.value <= GENERAL_STORYBOARD_MAX_GROUPS &&
     durationIsValid.value &&
     (props.random || !castRequired.value || selectedHumanIds.value.length > 0),
 )
@@ -311,11 +315,19 @@ const submit = () => {
           <div class="field-grid four">
             <label
               ><span>空镜数量</span
-              ><input v-model.number="emptyShotCount" type="number" min="0" max="17"
+              ><input
+                v-model.number="emptyShotCount"
+                type="number"
+                min="0"
+                :max="GENERAL_STORYBOARD_MAX_SHOTS"
             /></label>
             <label
               ><span>人物镜数量</span
-              ><input v-model.number="characterShotCount" type="number" min="0" max="17"
+              ><input
+                v-model.number="characterShotCount"
+                type="number"
+                min="0"
+                :max="GENERAL_STORYBOARD_MAX_SHOTS"
             /></label>
             <label
               ><span>总时长（秒）</span
@@ -327,12 +339,19 @@ const submit = () => {
             /></label>
             <label
               ><span>生成组数</span
-              ><input v-model.number="groupCount" type="number" min="1" max="10"
+              ><input
+                v-model.number="groupCount"
+                type="number"
+                min="1"
+                :max="GENERAL_STORYBOARD_MAX_GROUPS"
             /></label>
           </div>
           <p
             class="estimate"
-            :class="{ invalid: totalShots > 17 || (totalShots > 0 && !durationIsValid) }"
+            :class="{
+              invalid:
+                totalShots > GENERAL_STORYBOARD_MAX_SHOTS || (totalShots > 0 && !durationIsValid),
+            }"
           >
             将创建 <strong>{{ groupCount }}</strong> 个子项目，每组生成
             <strong>{{ totalShots }}</strong> 个视频（上限 17）：{{ emptyShotCount }} 个空镜、{{
