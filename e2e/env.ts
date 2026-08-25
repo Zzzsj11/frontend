@@ -10,9 +10,7 @@ const LOCAL_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]'])
 
 export function targetBaseURL(): string {
   return (
-    process.env.REMOTE_API_BASE_URL ||
-    process.env.PLAYWRIGHT_BASE_URL ||
-    'http://120.24.38.200:5173'
+    process.env.REMOTE_API_BASE_URL || process.env.PLAYWRIGHT_BASE_URL || 'http://120.24.38.200'
   )
 }
 

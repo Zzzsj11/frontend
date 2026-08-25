@@ -32,42 +32,42 @@ npm run test:admin        # 管理后台 e2e（API 契约 + 控制台 UI）
 
 `make preflight` 全量约 3 分钟，各阶段实测：
 
-| 阶段 | 耗时 | 说明 |
-|---|---|---|
-| lint | 11s | 前端 prettier+eslint、后端 ruff |
-| migration-check | 3s | Alembic 迁移一致性 |
-| test-backend | 49s | pytest 143 用例（纯执行 31s）+ coverage 卡口（约 18s） |
-| test-frontend | 14s | vitest 118 用例，启动/transform 占大头 |
-| build | 8s | vue-tsc + vite |
-| docker-build | 87s | 缓存命中态，占全量约一半 |
+| 阶段            | 耗时 | 说明                                                   |
+| --------------- | ---- | ------------------------------------------------------ |
+| lint            | 11s  | 前端 prettier+eslint、后端 ruff                        |
+| migration-check | 3s   | Alembic 迁移一致性                                     |
+| test-backend    | 49s  | pytest 143 用例（纯执行 31s）+ coverage 卡口（约 18s） |
+| test-frontend   | 14s  | vitest 118 用例，启动/transform 占大头                 |
+| build           | 8s   | vue-tsc + vite                                         |
+| docker-build    | 87s  | 缓存命中态，占全量约一半                               |
 
 e2e 不在 preflight 内，按需触发：`test:e2e:user`（本地 mock 链路）约 6s；`test:admin` 约 10s；`test:remote:*` 分钟级；`test:e2e:real` 上限 90 分钟且产生真实费用。
 
 日常小改不必每次全量，按改动范围选最小验证集：
 
-| 改动范围 | 最小验证命令 | 耗时 |
-|---|---|---|
-| 前端单组件/composable | `npx vitest run tests/user/xxx.test.ts` | ~3s |
-| 前端用户侧 src | `npm run test:unit:user` | ~9s |
-| 前端管理后台 src | `npm run test:unit:admin` | ~6s |
-| 后端单模块 | `cd backend && .venv/bin/pytest -q tests/test_xxx.py` | 2~10s |
-| 权限/隔离/API 契约 | 上述 + `tests/test_multi_user.py` `tests/test_api.py` | ~10s |
-| models.py 或 migrations | `make migration-check` + 相关 pytest 文件 | ~15s |
-| 日常提交前 | `make preflight-lite`（跳过 docker-build） | ~85s |
-| 发布前 | `make preflight` 全量 + 相关 e2e | ~3min |
-| 用户旅程关键链路 | 追加 `npm run test:e2e:user` | ~6s |
-| 管理后台 UI/契约 | 追加 `npm run test:admin` | ~10s |
-| 供应商/提示词/生成链路 | 按需 `npm run test:e2e:real`（有成本） | 上限 90min |
+| 改动范围                | 最小验证命令                                          | 耗时       |
+| ----------------------- | ----------------------------------------------------- | ---------- |
+| 前端单组件/composable   | `npx vitest run tests/user/xxx.test.ts`               | ~3s        |
+| 前端用户侧 src          | `npm run test:unit:user`                              | ~9s        |
+| 前端管理后台 src        | `npm run test:unit:admin`                             | ~6s        |
+| 后端单模块              | `cd backend && .venv/bin/pytest -q tests/test_xxx.py` | 2~10s      |
+| 权限/隔离/API 契约      | 上述 + `tests/test_multi_user.py` `tests/test_api.py` | ~10s       |
+| models.py 或 migrations | `make migration-check` + 相关 pytest 文件             | ~15s       |
+| 日常提交前              | `make preflight-lite`（跳过 docker-build）            | ~85s       |
+| 发布前                  | `make preflight` 全量 + 相关 e2e                      | ~3min      |
+| 用户旅程关键链路        | 追加 `npm run test:e2e:user`                          | ~6s        |
+| 管理后台 UI/契约        | 追加 `npm run test:admin`                             | ~10s       |
+| 供应商/提示词/生成链路  | 按需 `npm run test:e2e:real`（有成本）                | 上限 90min |
 
 约束：新增后端功能必须补集成测试（对应 pytest 文件必跑）；涉及用户旅程、API、部署或权限的改动必须加跑对应 e2e；`make preflight` 是发布前唯一全量卡口，不得用 preflight-lite 替代发布验证。
 
 不适合自动化的点（需人工验收）：
 
-| 功能 | 原因 |
-| --- | --- |
-| 图片/视频生成质量 | 需要视觉判断 |
+| 功能                   | 原因                          |
+| ---------------------- | ----------------------------- |
+| 图片/视频生成质量      | 需要视觉判断                  |
 | 拖拽排序动画、卡片动效 | CSS 动效，Playwright 难以验证 |
-| 数字人生成进度 | 依赖真实 AI 服务，耗时长 |
+| 数字人生成进度         | 依赖真实 AI 服务，耗时长      |
 
 新增功能必须优先补后端集成测试；关键页面再补 Playwright，避免只依靠脆弱的端到端测试。失败产物在 `test-results/`，远程截图在 `test-artifacts/remote/runs/`。
 
@@ -103,7 +103,7 @@ e2e 不在 preflight 内，按需触发：`test:e2e:user`（本地 mock 链路�
 
 ## 远程验收（对已部署环境）
 
-远程自动化固定使用 `http://120.24.38.200:5173`，不使用业务域名；域名可用性由 `scripts/online-health-check.sh` 单独验证，避免将网络问题误判为应用回归。带远程开关（`REMOTE_*`/`ADMIN_*`）运行时 playwright.config.ts 自动以 `e2e/env.ts` 的 `targetBaseURL()` 为目标且不在本地起服务，无需再设 `PLAYWRIGHT_BASE_URL`（设置了则可覆盖目标）。
+远程自动化固定使用 `http://120.24.38.200`（生产 Web 端口 80），不使用业务域名；域名可用性由 `scripts/online-health-check.sh` 单独验证，避免将网络问题误判为应用回归。带远程开关（`REMOTE_*`/`ADMIN_*`）运行时 playwright.config.ts 自动以 `e2e/env.ts` 的 `targetBaseURL()` 为目标且不在本地起服务，无需再设 `PLAYWRIGHT_BASE_URL`（设置了则可覆盖目标）。
 
 ```bash
 npm run test:remote:api        # API 契约/鉴权/隔离/软删除（不消耗生成 Token）
