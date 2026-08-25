@@ -54,14 +54,14 @@ async def _price_rule(db: AsyncSession, *, model: str, provider: str, resolution
 
 
 async def reconcile_video_job(db: AsyncSession, job: GenerationJobModel) -> VideoBillingRecordModel | None:
-    if job.kind != "video" or job.status not in TERMINAL_STATUSES or job.deleted_at is not None:
+    # 财务事实不随项目软删除消失；否则测试清理或用户删项目会造成历史成本漏账。
+    if job.kind != "video" or job.status not in TERMINAL_STATUSES:
         return None
     usage = (
         await db.execute(
             select(TokenUsageModel)
             .where(
                 TokenUsageModel.generation_job_id == job.id,
-                TokenUsageModel.deleted_at.is_(None),
             )
             .order_by(TokenUsageModel.created_at.desc())
             .limit(1)
@@ -136,7 +136,6 @@ async def reconcile_video_billing(db: AsyncSession, job_ids: list[str] | None = 
     query = select(GenerationJobModel).where(
         GenerationJobModel.kind == "video",
         GenerationJobModel.status.in_(TERMINAL_STATUSES),
-        GenerationJobModel.deleted_at.is_(None),
     )
     if job_ids:
         query = query.where(GenerationJobModel.id.in_(job_ids))

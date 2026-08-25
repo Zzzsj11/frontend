@@ -60,6 +60,7 @@ async def _seed_billing_fixtures() -> None:
                 provider="yinghe-h3",
                 error="供应商失败",
                 finished_at=now,
+                deleted_at=now,
             ),
             GenerationJobModel(
                 id="billing-rh-failed",
@@ -94,6 +95,7 @@ async def _seed_billing_fixtures() -> None:
                     provider="yinghe-h3",
                     model="minimax-h3",
                     raw_usage={"output_seconds": 12},
+                    deleted_at=now,
                 ),
                 TokenUsageModel(
                     id="billing-usage-rh",
