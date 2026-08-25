@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import JSON, BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -319,6 +319,52 @@ class TokenUsageModel(LifecycleMixin, Base):
     cached_input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     raw_usage: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class VideoPricingRuleModel(LifecycleMixin, Base):
+    """可追溯的视频供应商报价；账单生成后同时固化价格快照。"""
+
+    __tablename__ = "video_pricing_rules"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    model: Mapped[str] = mapped_column(String(160), index=True)
+    provider: Mapped[str] = mapped_column(String(80), default="", index=True)
+    resolution: Mapped[str] = mapped_column(String(32), default="", index=True)
+    usage_type: Mapped[str] = mapped_column(String(48))
+    unit_size: Mapped[float] = mapped_column(Numeric(20, 6))
+    unit_price: Mapped[float] = mapped_column(Numeric(20, 8))
+    currency: Mapped[str] = mapped_column(String(16), default="CNY")
+    effective_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class VideoBillingRecordModel(LifecycleMixin, Base):
+    """一条视频工单对应一条对账记录，包含失败工单和不计费渠道。"""
+
+    __tablename__ = "video_billing_records"
+    __table_args__ = (UniqueConstraint("generation_job_id", name="uq_video_billing_generation_job"),)
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    generation_job_id: Mapped[str] = mapped_column(ForeignKey("generation_jobs.id"), index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
+    project_task_id: Mapped[str | None] = mapped_column(ForeignKey("project_tasks.id"), nullable=True, index=True)
+    storyboard_line_id: Mapped[str | None] = mapped_column(ForeignKey("storyboard_lines.id"), nullable=True, index=True)
+    pricing_rule_id: Mapped[str | None] = mapped_column(ForeignKey("video_pricing_rules.id"), nullable=True, index=True)
+    provider: Mapped[str] = mapped_column(String(80), default="", index=True)
+    model: Mapped[str] = mapped_column(String(160), default="", index=True)
+    resolution: Mapped[str] = mapped_column(String(32), default="", index=True)
+    generation_status: Mapped[str] = mapped_column(String(32), index=True)
+    is_failed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    billing_status: Mapped[str] = mapped_column(String(32), index=True)
+    usage_type: Mapped[str] = mapped_column(String(48), default="")
+    usage_quantity: Mapped[float] = mapped_column(Numeric(20, 6), default=0)
+    usage_unit: Mapped[str] = mapped_column(String(48), default="")
+    unit_price: Mapped[float] = mapped_column(Numeric(20, 8), default=0)
+    amount: Mapped[float] = mapped_column(Numeric(20, 8), default=0)
+    currency: Mapped[str] = mapped_column(String(16), default="CNY")
+    raw_usage: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
 
 class LlmCallLogModel(LifecycleMixin, Base):

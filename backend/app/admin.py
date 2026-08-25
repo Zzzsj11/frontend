@@ -51,6 +51,7 @@ from .models import (
     StoryboardOptionItemModel,
     TokenUsageModel,
     UserModel,
+    VideoBillingRecordModel,
     WorkerInstanceModel,
     utcnow,
 )
@@ -89,6 +90,7 @@ from .server_monitoring import monitoring_summary
 from .storage import get_storage, import_remote, safe_key
 from .storyboard_options import OPTION_KINDS, load_general_storyboard_options
 from .token_usage import add_llm_call_log, add_token_usage
+from .video_billing import reconcile_video_billing
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 Db = Depends(database_session)
@@ -507,6 +509,99 @@ async def usage(user: CurrentUser, db: AsyncSession = Db):
         )
     ).all()
     return [{"model": r[0], "provider": r[1], "inputTokens": r[2] or 0, "outputTokens": r[3] or 0, "totalTokens": r[4] or 0, "calls": r[5]} for r in rows]
+
+
+def _money(value) -> float:
+    return round(float(value or 0), 8)
+
+
+@router.get("/video-billing")
+async def video_billing(
+    user: CurrentUser,
+    db: AsyncSession = Db,
+    status: str = "",
+    model: str = "",
+    q: str = "",
+    limit: int = 50,
+    offset: int = 0,
+):
+    require_admin(user)
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+    conditions = [VideoBillingRecordModel.deleted_at.is_(None)]
+    if status == "failed":
+        conditions.append(VideoBillingRecordModel.is_failed.is_(True))
+    elif status:
+        conditions.append(VideoBillingRecordModel.billing_status == status)
+    if model:
+        conditions.append(VideoBillingRecordModel.model == model)
+    if q.strip():
+        needle = f"%{q.strip()}%"
+        conditions.append(
+            or_(UserModel.username.ilike(needle), ProjectModel.name.ilike(needle), ProjectTaskModel.title.ilike(needle), VideoBillingRecordModel.generation_job_id.ilike(needle))
+        )
+
+    joined = (
+        select(VideoBillingRecordModel, UserModel.username, ProjectModel.name, ProjectTaskModel.title)
+        .outerjoin(UserModel, UserModel.id == VideoBillingRecordModel.user_id)
+        .outerjoin(ProjectModel, ProjectModel.id == VideoBillingRecordModel.project_id)
+        .outerjoin(ProjectTaskModel, ProjectTaskModel.id == VideoBillingRecordModel.project_task_id)
+        .where(*conditions)
+    )
+    all_rows = (await db.execute(joined.order_by(VideoBillingRecordModel.completed_at.desc()))).all()
+    items = []
+    for record, username, project_name, task_title in all_rows[offset : offset + limit]:
+        items.append(
+            {
+                "id": record.id,
+                "generationJobId": record.generation_job_id,
+                "userId": record.user_id,
+                "username": username or "-",
+                "projectId": record.project_id,
+                "projectName": project_name or "-",
+                "projectTaskId": record.project_task_id,
+                "taskTitle": task_title or "-",
+                "provider": record.provider,
+                "model": record.model,
+                "resolution": record.resolution,
+                "generationStatus": record.generation_status,
+                "isFailed": record.is_failed,
+                "billingStatus": record.billing_status,
+                "usageType": record.usage_type,
+                "usageQuantity": _money(record.usage_quantity),
+                "usageUnit": record.usage_unit,
+                "unitPrice": _money(record.unit_price),
+                "amount": _money(record.amount),
+                "currency": record.currency,
+                "completedAt": iso(record.completed_at),
+            }
+        )
+    total_amount = sum(_money(row[0].amount) for row in all_rows)
+    failed_rows = [row[0] for row in all_rows if row[0].is_failed]
+    models = sorted({row[0].model for row in all_rows if row[0].model})
+    return {
+        "total": len(all_rows),
+        "items": items,
+        "models": models,
+        "summary": {
+            "totalAmount": round(total_amount, 8),
+            "pricedRecords": sum(1 for row in all_rows if row[0].billing_status == "priced"),
+            "failedRecords": len(failed_rows),
+            "failedAmount": round(sum(_money(row.amount) for row in failed_rows), 8),
+            "excludedRecords": sum(1 for row in all_rows if row[0].billing_status == "excluded"),
+            "unpricedRecords": sum(1 for row in all_rows if row[0].billing_status == "unpriced"),
+            "noUsageRecords": sum(1 for row in all_rows if row[0].billing_status == "no_usage"),
+        },
+    }
+
+
+@router.post("/video-billing/reconcile")
+async def video_billing_reconcile(request: Request, user: CurrentUser, db: AsyncSession = Db):
+    require_admin(user)
+    result = await reconcile_video_billing(db)
+    await audit(db, request, user, "video_billing.reconcile", "video_billing", after=result)
+    await db.commit()
+    return result
 
 
 class ProviderIn(BaseModel):

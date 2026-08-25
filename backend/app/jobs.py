@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import uuid
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ from .redis_store import acquire_execution_lease, cache_job, get_cached_job, not
 from .token_usage import add_token_usage
 
 JobRunner = Callable[["Job"], Awaitable[dict[str, Any]]]
+logger = logging.getLogger(__name__)
 
 
 # 重启后可续跑挽回的窗口：供应商任务保留期内、本机协程丢失的僵尸任务重新挂轮询
@@ -242,6 +244,16 @@ class JobManager:
                 await release_execution_lease(*distributed_lease)
             self._active.discard(job.id)
             await self._persist(job)
+            if job.kind == "video" and job.status in {"succeeded", "failed", "cancelled"}:
+                from .video_billing import reconcile_video_billing
+
+                try:
+                    async with session_factory() as session:
+                        await reconcile_video_billing(session, [job.id])
+                        await session.commit()
+                except Exception:
+                    # 对账可由后台幂等补算，不能反过来改变已经落库的视频终态。
+                    logger.exception("video billing reconciliation failed: job_id=%s", job.id)
 
     async def _acquire_distributed_slot(self, job: Job) -> tuple[tuple[str, str] | None, asyncio.Task | None]:
         request = job.request or {}

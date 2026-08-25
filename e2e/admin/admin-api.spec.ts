@@ -17,6 +17,7 @@ test('admin API authorization and contracts', async ({ request }) => {
     '/api/admin/projects',
     '/api/admin/jobs',
     '/api/admin/usage',
+    '/api/admin/video-billing?limit=1',
     '/api/admin/models',
     '/api/admin/api-errors',
     '/api/admin/audit-logs',

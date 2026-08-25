@@ -1,0 +1,155 @@
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .models import GenerationJobModel, TokenUsageModel, VideoBillingRecordModel, VideoPricingRuleModel
+
+TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
+ZERO = Decimal("0")
+
+
+def _decimal(value: Any) -> Decimal:
+    try:
+        return Decimal(str(value or 0))
+    except (ValueError, TypeError):
+        return ZERO
+
+
+def _usage_metrics(raw: dict[str, Any]) -> dict[str, Any]:
+    nested = raw.get("rawUsage")
+    return nested if isinstance(nested, dict) else raw
+
+
+def _model_provider(job: GenerationJobModel, usage: TokenUsageModel | None) -> tuple[str, str]:
+    request = job.request or {}
+    result = job.result or {}
+    model = str((usage.model if usage else "") or result.get("model") or request.get("model") or "")
+    provider = str((usage.provider if usage else "") or result.get("provider") or job.provider or request.get("_provider") or "")
+    return model, provider
+
+
+async def _price_rule(db: AsyncSession, *, model: str, provider: str, resolution: str, at: datetime) -> VideoPricingRuleModel | None:
+    rules = list(
+        (
+            await db.execute(
+                select(VideoPricingRuleModel)
+                .where(
+                    VideoPricingRuleModel.model == model,
+                    VideoPricingRuleModel.resolution == resolution,
+                    VideoPricingRuleModel.status == "active",
+                    VideoPricingRuleModel.deleted_at.is_(None),
+                    VideoPricingRuleModel.effective_at <= at,
+                )
+                .order_by(VideoPricingRuleModel.effective_at.desc())
+            )
+        ).scalars()
+    )
+    return next((rule for rule in rules if (not rule.provider or rule.provider == provider) and (rule.expires_at is None or rule.expires_at > at)), None)
+
+
+async def reconcile_video_job(db: AsyncSession, job: GenerationJobModel) -> VideoBillingRecordModel | None:
+    if job.kind != "video" or job.status not in TERMINAL_STATUSES or job.deleted_at is not None:
+        return None
+    usage = (
+        await db.execute(
+            select(TokenUsageModel)
+            .where(
+                TokenUsageModel.generation_job_id == job.id,
+                TokenUsageModel.deleted_at.is_(None),
+            )
+            .order_by(TokenUsageModel.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    raw_usage = dict(usage.raw_usage or {}) if usage else dict((job.result or {}).get("usage") or {})
+    metrics = _usage_metrics(raw_usage)
+    model, provider = _model_provider(job, usage)
+    resolution = str((job.request or {}).get("resolution") or "720p")
+    completed_at = job.finished_at or job.updated_at or job.created_at or datetime.now(timezone.utc)
+    failed = job.status != "succeeded"
+    billing_status = "no_usage"
+    usage_type = ""
+    usage_unit = ""
+    quantity = ZERO
+    amount = ZERO
+    rule = None
+
+    if provider == "runninghub" or model == "minimax-h3-runninghub":
+        billing_status = "excluded"
+        usage_type = "runninghub_coins"
+        usage_unit = "RH币"
+        quantity = _decimal(metrics.get("consumeCoins"))
+    elif model == "doubao-seedance-2.0":
+        usage_type = "completion_tokens"
+        usage_unit = "Token"
+        quantity = _decimal((usage.output_tokens if usage else 0) or metrics.get("completion_tokens") or metrics.get("completionTokens"))
+        if quantity > 0:
+            rule = await _price_rule(db, model=model, provider=provider, resolution=resolution, at=completed_at)
+            billing_status = "priced" if rule else "unpriced"
+    elif model == "minimax-h3" and provider == "yinghe-h3":
+        usage_type = "output_seconds"
+        usage_unit = "秒"
+        quantity = _decimal(metrics.get("output_seconds") or metrics.get("outputSeconds"))
+        if quantity > 0:
+            rule = await _price_rule(db, model=model, provider=provider, resolution=resolution, at=completed_at)
+            billing_status = "priced" if rule else "unpriced"
+    else:
+        billing_status = "unpriced"
+
+    if rule and billing_status == "priced":
+        amount = (quantity / _decimal(rule.unit_size) * _decimal(rule.unit_price)).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_UP)
+
+    record = (await db.execute(select(VideoBillingRecordModel).where(VideoBillingRecordModel.generation_job_id == job.id))).scalar_one_or_none()
+    if record is None:
+        record = VideoBillingRecordModel(id=f"vbill-{uuid.uuid4().hex}", generation_job_id=job.id)
+        db.add(record)
+    record.user_id = job.user_id
+    record.project_id = job.project_id
+    record.project_task_id = job.project_task_id
+    record.storyboard_line_id = job.storyboard_line_id
+    record.pricing_rule_id = rule.id if rule else None
+    record.provider = provider
+    record.model = model
+    record.resolution = resolution
+    record.generation_status = job.status
+    record.is_failed = failed
+    record.billing_status = billing_status
+    record.usage_type = usage_type
+    record.usage_quantity = quantity
+    record.usage_unit = usage_unit
+    record.unit_price = _decimal(rule.unit_price) if rule else ZERO
+    record.amount = amount
+    record.currency = rule.currency if rule else "CNY"
+    record.raw_usage = raw_usage
+    record.completed_at = completed_at
+    record.deleted_at = None
+    return record
+
+
+async def reconcile_video_billing(db: AsyncSession, job_ids: list[str] | None = None) -> dict[str, int]:
+    query = select(GenerationJobModel).where(
+        GenerationJobModel.kind == "video",
+        GenerationJobModel.status.in_(TERMINAL_STATUSES),
+        GenerationJobModel.deleted_at.is_(None),
+    )
+    if job_ids:
+        query = query.where(GenerationJobModel.id.in_(job_ids))
+    jobs = list((await db.execute(query.order_by(GenerationJobModel.created_at))).scalars())
+    counts = {"processed": 0, "priced": 0, "failed": 0, "excluded": 0, "unpriced": 0, "noUsage": 0}
+    for job in jobs:
+        record = await reconcile_video_job(db, job)
+        if not record:
+            continue
+        counts["processed"] += 1
+        if record.is_failed:
+            counts["failed"] += 1
+        key = {"priced": "priced", "excluded": "excluded", "unpriced": "unpriced", "no_usage": "noUsage"}[record.billing_status]
+        counts[key] += 1
+    await db.flush()
+    return counts

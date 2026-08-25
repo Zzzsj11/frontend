@@ -10,6 +10,7 @@ import AdminServerMonitoringPanel from '../components/AdminServerMonitoringPanel
 import AdminSideNav from '../components/AdminSideNav.vue'
 import AdminSongEmotionProfilesPanel from '../components/AdminSongEmotionProfilesPanel.vue'
 import AdminTopBar from '../components/AdminTopBar.vue'
+import AdminVideoBillingPanel from '../components/AdminVideoBillingPanel.vue'
 import BaseModal from '../components/base/BaseModal.vue'
 import { perfSnapshot } from '../perf'
 import { useAuthStore } from '../stores/auth'
@@ -280,7 +281,8 @@ const load = async () => {
     tab.value === 'runninghub' ||
     tab.value === 'kling' ||
     tab.value === 'chat-comparison' ||
-    tab.value === 'server'
+    tab.value === 'server' ||
+    tab.value === 'usage'
   )
     return
   loading.value = true
@@ -306,7 +308,8 @@ const select = async (key: string) => {
     value === 'runninghub' ||
     value === 'kling' ||
     value === 'chat-comparison' ||
-    value === 'server'
+    value === 'server' ||
+    value === 'usage'
   )
     return
   await load()
@@ -580,6 +583,7 @@ onMounted(load)
           <AdminKlingPanel v-if="tab === 'kling'" />
           <AdminModelComparisonPanel v-if="tab === 'chat-comparison'" />
           <AdminServerMonitoringPanel v-if="tab === 'server'" />
+          <AdminVideoBillingPanel v-if="tab === 'usage'" />
           <!-- 性能页：后端全量耗时（慢请求 TOP + 路径聚合） + 本浏览器会话观测 -->
           <div v-if="tab === 'perf'" class="perf">
             <section class="perf-group">
