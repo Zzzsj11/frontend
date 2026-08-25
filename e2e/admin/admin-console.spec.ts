@@ -55,6 +55,8 @@ test('administrator can inspect dashboard, models, errors and audit logs', async
   await expect(page.getByRole('button', { name: '重新核算全部历史' })).toBeVisible()
   await expect(page.getByRole('columnheader', { name: '来源' })).toBeVisible()
   await expect(page.getByRole('columnheader', { name: '时长' })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '计费用量/单价 Token / 秒' })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '费用/每秒费用（单价毛）' })).toBeVisible()
   await page.locator('tbody').getByRole('button', { name: '详情' }).first().click()
   await expect(page.getByRole('dialog', { name: '视频费用与生成详情' })).toBeVisible()
   await expect(page.getByText('计价标准')).toBeVisible()

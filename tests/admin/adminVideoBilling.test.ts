@@ -85,6 +85,12 @@ describe('AdminVideoBillingPanel', () => {
     expect(wrapper.text()).toContain('¥5.100000')
     expect(wrapper.findAll('.badge.failed')).toHaveLength(2)
     expect(wrapper.text()).toContain('渠道暂不计费')
+    expect(wrapper.text()).toContain('计费用量/单价')
+    expect(wrapper.text()).toContain('Token / 秒')
+    expect(wrapper.text()).toContain('费用/每秒费用（单价毛）')
+    expect(wrapper.text()).toContain('¥5.1')
+    expect(wrapper.text()).toContain('4.25毛')
+    expect(wrapper.text()).not.toContain('12 Token')
   })
 
   it('支持筛选失败任务并触发历史重算', async () => {

@@ -80,6 +80,11 @@ td {
   text-align: left;
   white-space: nowrap;
 }
+th small {
+  display: block;
+  margin-top: 4px;
+  font-weight: 400;
+}
 td small {
   display: block;
   margin-top: 4px;

@@ -41,8 +41,12 @@ const offset = ref(0)
 const pageSize = 50
 
 const money = (value: number) => `¥${value.toFixed(6)}`
+const compactNumber = (value: number, digits = 6) => Number(value.toFixed(digits)).toLocaleString()
 const usage = (value: number, unit: string) =>
-  unit === 'Token' ? `${Math.round(value).toLocaleString()} Token` : `${value} ${unit || '-'}`
+  unit === 'Token' ? Math.round(value).toLocaleString() : compactNumber(value)
+const compactMoney = (value: number) => `¥${compactNumber(value)}`
+const perSecondJiao = (amount: number, durationSeconds: number) =>
+  durationSeconds > 0 && amount > 0 ? `${compactNumber((amount / durationSeconds) * 10, 4)}毛` : '-'
 const billingLabel = (value: string) =>
   ({ priced: '已计费', excluded: '渠道暂不计费', unpriced: '缺少价格', no_usage: '无供应商用量' })[
     value
@@ -171,9 +175,8 @@ onMounted(load)
             <th>来源</th>
             <th>时长</th>
             <th>生成结果</th>
-            <th>计费用量</th>
-            <th>单价</th>
-            <th>费用</th>
+            <th>计费用量/单价<small>Token / 秒</small></th>
+            <th>费用/每秒费用（单价毛）</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -201,9 +204,13 @@ onMounted(load)
               }}</span
               ><small>{{ billingLabel(item.billingStatus) }}</small>
             </td>
-            <td>{{ usage(item.usageQuantity, item.usageUnit) }}</td>
-            <td>{{ item.rateLabel }}</td>
-            <td class="amount">{{ money(item.amount) }}</td>
+            <td>
+              {{ usage(item.usageQuantity, item.usageUnit) }}<small>{{ item.rateLabel }}</small>
+            </td>
+            <td class="amount">
+              {{ compactMoney(item.amount)
+              }}<small>{{ perSecondJiao(item.amount, item.durationSeconds) }}</small>
+            </td>
             <td><button class="action" @click="openDetail(item.id)">详情</button></td>
           </tr>
         </tbody>
