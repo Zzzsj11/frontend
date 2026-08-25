@@ -542,7 +542,8 @@ async def video_billing(
         )
 
     joined = (
-        select(VideoBillingRecordModel, UserModel.username, ProjectModel.name, ProjectTaskModel.title)
+        select(VideoBillingRecordModel, UserModel.username, ProjectModel.name, ProjectTaskModel.title, GenerationJobModel.request, GenerationJobModel.result)
+        .join(GenerationJobModel, GenerationJobModel.id == VideoBillingRecordModel.generation_job_id)
         .outerjoin(UserModel, UserModel.id == VideoBillingRecordModel.user_id)
         .outerjoin(ProjectModel, ProjectModel.id == VideoBillingRecordModel.project_id)
         .outerjoin(ProjectTaskModel, ProjectTaskModel.id == VideoBillingRecordModel.project_task_id)
@@ -550,7 +551,8 @@ async def video_billing(
     )
     all_rows = (await db.execute(joined.order_by(VideoBillingRecordModel.completed_at.desc()))).all()
     items = []
-    for record, username, project_name, task_title in all_rows[offset : offset + limit]:
+    for record, username, project_name, task_title, job_request, job_result in all_rows[offset : offset + limit]:
+        duration = _money((job_result or {}).get("duration") or (job_request or {}).get("duration"))
         items.append(
             {
                 "id": record.id,
@@ -564,6 +566,7 @@ async def video_billing(
                 "provider": record.provider,
                 "model": record.model,
                 "resolution": record.resolution,
+                "durationSeconds": duration,
                 "generationStatus": record.generation_status,
                 "isFailed": record.is_failed,
                 "billingStatus": record.billing_status,
@@ -571,6 +574,7 @@ async def video_billing(
                 "usageQuantity": _money(record.usage_quantity),
                 "usageUnit": record.usage_unit,
                 "unitPrice": _money(record.unit_price),
+                "rateLabel": f"¥{_money(record.unit_price):g} / {'100万 Token' if record.usage_type == 'completion_tokens' else '秒'}" if record.unit_price else "暂不计费",
                 "amount": _money(record.amount),
                 "currency": record.currency,
                 "completedAt": iso(record.completed_at),
@@ -602,6 +606,62 @@ async def video_billing_reconcile(request: Request, user: CurrentUser, db: Async
     await audit(db, request, user, "video_billing.reconcile", "video_billing", after=result)
     await db.commit()
     return result
+
+
+@router.get("/video-billing/{record_id}")
+async def video_billing_detail(record_id: str, user: CurrentUser, db: AsyncSession = Db):
+    require_admin(user)
+    row = (
+        await db.execute(
+            select(VideoBillingRecordModel, GenerationJobModel)
+            .join(GenerationJobModel, GenerationJobModel.id == VideoBillingRecordModel.generation_job_id)
+            .where(VideoBillingRecordModel.id == record_id, VideoBillingRecordModel.deleted_at.is_(None))
+        )
+    ).one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="对账记录不存在")
+    record, job = row
+    request_data = job.request or {}
+    result_data = job.result or {}
+    bindings = request_data.get("_referenceBindings") if isinstance(request_data.get("_referenceBindings"), dict) else {}
+    references = []
+    seen = set()
+    for kind, key in (("图片", "image_urls"), ("视频", "video_urls"), ("音频", "audio_urls")):
+        for url in request_data.get(key) or []:
+            if isinstance(url, str) and url not in seen:
+                seen.add(url)
+                references.append({"label": f"{kind} {len(references) + 1}", "type": kind, "url": url})
+    for label, value in bindings.items():
+        url = value.get("url") if isinstance(value, dict) else None
+        if isinstance(url, str) and url not in seen:
+            seen.add(url)
+            references.append({"label": label, "type": str(value.get("type") or "参考"), "url": url})
+    prompts = []
+    for label, key in (("最终提交提示词", "prompt"), ("H3 编译提示词", "_compiledPrompt"), ("原始业务提示词", "_sourcePrompt")):
+        value = request_data.get(key)
+        if isinstance(value, str) and value.strip() and value not in {item["content"] for item in prompts}:
+            prompts.append({"label": label, "content": value})
+    return {
+        "id": record.id,
+        "generationJobId": job.id,
+        "providerTaskId": job.provider_task_id,
+        "status": job.status,
+        "error": job.error or "",
+        "model": record.model,
+        "provider": record.provider,
+        "resolution": record.resolution,
+        "durationSeconds": _money(result_data.get("duration") or request_data.get("duration")),
+        "usageQuantity": _money(record.usage_quantity),
+        "usageUnit": record.usage_unit,
+        "unitPrice": _money(record.unit_price),
+        "rateLabel": f"¥{_money(record.unit_price):g} / {'100万 Token' if record.usage_type == 'completion_tokens' else '秒'}" if record.unit_price else "暂不计费",
+        "amount": _money(record.amount),
+        "billingStatus": record.billing_status,
+        "prompts": prompts,
+        "references": references,
+        "rawUsage": record.raw_usage,
+        "result": {key: result_data.get(key) for key in ("videoUrl", "coverUrl", "duration", "ratio") if result_data.get(key) is not None},
+    }
 
 
 class ProviderIn(BaseModel):

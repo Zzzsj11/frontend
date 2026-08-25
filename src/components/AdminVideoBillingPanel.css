@@ -1,0 +1,126 @@
+.billing-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+.summary article {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.summary b {
+  font-size: 20px;
+}
+.summary span,
+small {
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+}
+.summary .failed {
+  background: var(--danger-light);
+  border-color: var(--danger);
+}
+.summary .failed b {
+  color: var(--danger);
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.toolbar input,
+.toolbar select,
+.pager button {
+  padding: 8px 10px;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.toolbar input {
+  min-width: 240px;
+}
+.action {
+  padding: 8px 12px;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+}
+.action.primary {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: var(--primary);
+}
+.table-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+th,
+td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+td small {
+  display: block;
+  margin-top: 4px;
+}
+.failed-row {
+  background: var(--danger-light);
+}
+.badge {
+  display: inline-block;
+  padding: 3px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--success-light);
+  color: var(--success);
+  font-size: var(--font-sm);
+}
+.badge.failed {
+  background: var(--danger);
+  color: var(--on-primary);
+  font-weight: 600;
+}
+.amount {
+  font-weight: 700;
+}
+.message,
+.empty {
+  padding: 12px;
+  color: var(--text-secondary);
+}
+.message.error {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+.message.notice {
+  background: var(--success-light);
+  color: var(--success);
+}
+.pager {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+}
+@media (max-width: 900px) {
+  .summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

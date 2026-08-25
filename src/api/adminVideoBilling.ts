@@ -9,15 +9,39 @@ export interface VideoBillingItem {
   provider: string
   model: string
   resolution: string
+  durationSeconds: number
   generationStatus: string
   isFailed: boolean
   billingStatus: string
   usageQuantity: number
   usageUnit: string
   unitPrice: number
+  rateLabel: string
   amount: number
   currency: string
   completedAt?: string
+}
+
+export interface VideoBillingDetail {
+  id: string
+  generationJobId: string
+  providerTaskId?: string
+  status: string
+  error: string
+  model: string
+  provider: string
+  resolution: string
+  durationSeconds: number
+  usageQuantity: number
+  usageUnit: string
+  unitPrice: number
+  rateLabel: string
+  amount: number
+  billingStatus: string
+  prompts: { label: string; content: string }[]
+  references: { label: string; type: string; url: string }[]
+  rawUsage: Record<string, unknown>
+  result: { videoUrl?: string; coverUrl?: string; duration?: number; ratio?: string }
 }
 
 export interface VideoBillingResponse {
@@ -43,3 +67,6 @@ export const reconcileVideoBilling = () =>
     '/admin/video-billing/reconcile',
     { method: 'POST' },
   )
+
+export const getVideoBillingDetail = (id: string) =>
+  apiRequest<VideoBillingDetail>(`/admin/video-billing/${encodeURIComponent(id)}`)

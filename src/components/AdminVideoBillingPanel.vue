@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import {
+  getVideoBillingDetail,
   getVideoBilling,
   reconcileVideoBilling,
   type VideoBillingResponse,
+  type VideoBillingDetail,
 } from '../api/adminVideoBilling'
+import AdminVideoBillingDetailModal from './AdminVideoBillingDetailModal.vue'
 
 const emptyData = (): VideoBillingResponse => ({
   total: 0,
@@ -23,6 +26,9 @@ const emptyData = (): VideoBillingResponse => ({
 const data = ref(emptyData())
 const loading = ref(false)
 const reconciling = ref(false)
+const detailLoading = ref(false)
+const detail = ref<VideoBillingDetail | null>(null)
+const detailOpen = ref(false)
 const error = ref('')
 const notice = ref('')
 const status = ref('')
@@ -73,6 +79,19 @@ const reconcile = async () => {
     error.value = cause instanceof Error ? cause.message : '历史核算失败'
   } finally {
     reconciling.value = false
+  }
+}
+const openDetail = async (id: string) => {
+  detailOpen.value = true
+  detailLoading.value = true
+  detail.value = null
+  try {
+    detail.value = await getVideoBillingDetail(id)
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '详情加载失败'
+    detailOpen.value = false
+  } finally {
+    detailLoading.value = false
   }
 }
 
@@ -136,10 +155,12 @@ onMounted(load)
             <th>完成时间</th>
             <th>用户 / 项目</th>
             <th>模型</th>
+            <th>时长</th>
             <th>生成结果</th>
             <th>计费用量</th>
             <th>单价</th>
             <th>费用</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -153,6 +174,7 @@ onMounted(load)
               {{ item.model || '-'
               }}<small>{{ item.provider || '-' }} · {{ item.resolution }}</small>
             </td>
+            <td>{{ item.durationSeconds ? `${item.durationSeconds} 秒` : '-' }}</td>
             <td>
               <span :class="['badge', { failed: item.isFailed }]">{{
                 item.isFailed ? '生成失败' : '生成成功'
@@ -160,8 +182,9 @@ onMounted(load)
               ><small>{{ billingLabel(item.billingStatus) }}</small>
             </td>
             <td>{{ usage(item.usageQuantity, item.usageUnit) }}</td>
-            <td>{{ item.unitPrice ? money(item.unitPrice) : '-' }}</td>
+            <td>{{ item.rateLabel }}</td>
             <td class="amount">{{ money(item.amount) }}</td>
+            <td><button class="action" @click="openDetail(item.id)">详情</button></td>
           </tr>
         </tbody>
       </table>
@@ -173,134 +196,13 @@ onMounted(load)
       ><span>{{ offset + 1 }}–{{ Math.min(offset + pageSize, data.total) }} / {{ data.total }}</span
       ><button :disabled="offset + pageSize >= data.total" @click="changePage(1)">下一页</button>
     </div>
+    <AdminVideoBillingDetailModal
+      :open="detailOpen"
+      :loading="detailLoading"
+      :detail="detail"
+      @close="detailOpen = false"
+    />
   </section>
 </template>
 
-<style scoped>
-.billing-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.summary {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-}
-.summary article {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-}
-.summary b {
-  font-size: 20px;
-}
-.summary span,
-small {
-  color: var(--text-secondary);
-  font-size: var(--font-sm);
-}
-.summary .failed {
-  background: var(--danger-light);
-  border-color: var(--danger);
-}
-.summary .failed b {
-  color: var(--danger);
-}
-.toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.toolbar input,
-.toolbar select,
-.pager button {
-  padding: 8px 10px;
-  border: 1px solid var(--border-dark);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-}
-.toolbar input {
-  min-width: 240px;
-}
-.action {
-  padding: 8px 12px;
-  border: 1px solid var(--border-dark);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  cursor: pointer;
-}
-.action.primary {
-  background: var(--primary);
-  color: var(--on-primary);
-  border-color: var(--primary);
-}
-.table-wrap {
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-th,
-td {
-  padding: 11px 12px;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  white-space: nowrap;
-}
-td small {
-  display: block;
-  margin-top: 4px;
-}
-.failed-row {
-  background: var(--danger-light);
-}
-.badge {
-  display: inline-block;
-  padding: 3px 7px;
-  border-radius: var(--radius-pill);
-  background: var(--success-light);
-  color: var(--success);
-  font-size: var(--font-sm);
-}
-.badge.failed {
-  background: var(--danger);
-  color: var(--on-primary);
-  font-weight: 600;
-}
-.amount {
-  font-weight: 700;
-}
-.message,
-.empty {
-  padding: 12px;
-  color: var(--text-secondary);
-}
-.message.error {
-  background: var(--danger-light);
-  color: var(--danger);
-}
-.message.notice {
-  background: var(--success-light);
-  color: var(--success);
-}
-.pager {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-secondary);
-}
-@media (max-width: 900px) {
-  .summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-</style>
+<style scoped src="./AdminVideoBillingPanel.css"></style>

@@ -56,7 +56,14 @@ async def _seed_billing_fixtures() -> None:
                 user_id="user-admin",
                 kind="video",
                 status="failed",
-                request={"model": "minimax-h3", "resolution": "720p"},
+                request={
+                    "model": "minimax-h3",
+                    "resolution": "720p",
+                    "duration": 12,
+                    "prompt": "最终 H3 提示词",
+                    "_sourcePrompt": "原始业务提示词",
+                    "image_urls": ["https://example.com/reference.jpg"],
+                },
                 provider="yinghe-h3",
                 error="供应商失败",
                 finished_at=now,
@@ -125,12 +132,23 @@ async def test_video_billing_reconciles_success_failed_and_excluded(client):
     assert items["billing-h3-failed"]["isFailed"] is True
     assert items["billing-h3-failed"]["billingStatus"] == "priced"
     assert items["billing-h3-failed"]["amount"] == pytest.approx(5.1)
+    assert items["billing-h3-failed"]["durationSeconds"] == 12
+    assert items["billing-h3-failed"]["rateLabel"] == "¥0.425 / 秒"
     assert items["billing-rh-failed"]["billingStatus"] == "excluded"
     assert items["billing-rh-failed"]["amount"] == 0
 
     failed = client.get("/api/admin/video-billing", params={"status": "failed", "q": "billing-"}).json()
     assert {item["generationJobId"] for item in failed["items"]} == {"billing-h3-failed", "billing-rh-failed"}
     assert failed["summary"]["failedRecords"] == 2
+
+    detail = client.get(f"/api/admin/video-billing/{items['billing-h3-failed']['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["prompts"] == [
+        {"label": "最终提交提示词", "content": "最终 H3 提示词"},
+        {"label": "原始业务提示词", "content": "原始业务提示词"},
+    ]
+    assert detail.json()["references"][0]["url"] == "https://example.com/reference.jpg"
+    assert detail.json()["rawUsage"] == {"output_seconds": 12}
 
     # 重复核算必须更新同一工单账单，不得重复入账。
     assert client.post("/api/admin/video-billing/reconcile").status_code == 200

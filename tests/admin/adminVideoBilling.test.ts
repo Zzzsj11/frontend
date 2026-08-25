@@ -27,12 +27,14 @@ const response = {
       provider: 'yinghe-h3',
       model: 'minimax-h3',
       resolution: '720p',
+      durationSeconds: 12,
       generationStatus: 'failed',
       isFailed: true,
       billingStatus: 'priced',
       usageQuantity: 12,
       usageUnit: '秒',
       unitPrice: 0.425,
+      rateLabel: '¥0.425 / 秒',
       amount: 5.1,
       currency: 'CNY',
       completedAt: '2026-08-25T00:00:00Z',
@@ -46,12 +48,14 @@ const response = {
       provider: 'runninghub',
       model: 'minimax-h3-runninghub',
       resolution: '720p',
+      durationSeconds: 12,
       generationStatus: 'failed',
       isFailed: true,
       billingStatus: 'excluded',
       usageQuantity: 80,
       usageUnit: 'RH币',
       unitPrice: 0,
+      rateLabel: '暂不计费',
       amount: 0,
       currency: 'CNY',
       completedAt: '2026-08-25T00:00:00Z',
@@ -88,5 +92,44 @@ describe('AdminVideoBillingPanel', () => {
     await flushPromises()
     expect(apiRequest).toHaveBeenCalledWith('/admin/video-billing/reconcile', { method: 'POST' })
     expect(wrapper.text()).toContain('历史核算完成')
+  })
+
+  it('打开详情展示提示词、参考图片和原始用量', async () => {
+    apiRequest.mockImplementation((path: string) =>
+      path.includes('/admin/video-billing/bill-')
+        ? Promise.resolve({
+            id: 'vbill-1',
+            generationJobId: 'job-1',
+            status: 'failed',
+            error: '供应商失败',
+            model: 'minimax-h3',
+            provider: 'yinghe-h3',
+            resolution: '720p',
+            durationSeconds: 12,
+            usageQuantity: 12,
+            usageUnit: '秒',
+            unitPrice: 0.425,
+            rateLabel: '¥0.425 / 秒',
+            amount: 5.1,
+            billingStatus: 'priced',
+            prompts: [{ label: '最终提交提示词', content: '完整视频提示词' }],
+            references: [{ label: 'Picture 1', type: 'image', url: 'https://example.com/a.jpg' }],
+            rawUsage: { output_seconds: 12 },
+            result: {},
+          })
+        : Promise.resolve(response),
+    )
+    const wrapper = mount(AdminVideoBillingPanel, { attachTo: document.body })
+    await flushPromises()
+    const detailButton = wrapper.findAll('button').find((button) => button.text() === '详情')
+    expect(detailButton).toBeTruthy()
+    await detailButton!.trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('完整视频提示词')
+    expect(document.body.textContent).toContain('¥0.425 / 秒')
+    expect(document.body.querySelector('img')?.getAttribute('src')).toBe(
+      'https://example.com/a.jpg',
+    )
+    wrapper.unmount()
   })
 })
