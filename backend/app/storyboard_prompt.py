@@ -1080,6 +1080,8 @@ async def _generate_general_story_outline_v2(
     if on_progress:
         await on_progress({"phase": "generating", "shotsDone": 0, "shotsTotal": expected_count})
     system_prompt = await get_prompt("general.story_outline_v2.system")
+    rules_prompt = await get_prompt("general.story_outline_v2.rules")
+    retry_prompt = await get_prompt("general.story_outline_v2.retry_user")
     suffix_prompt = await get_prompt("common.pure_json_suffix")
     payload = {
         "music": [config.get("genre"), config.get("secondary_category"), config.get("tertiary_category")],
@@ -1089,12 +1091,7 @@ async def _generate_general_story_outline_v2(
         "requirement": config.get("extra_requirement", ""),
         "characters": _compact_characters(selected_humans),
         "rules": [
-            "shots 按叙事建立、推进、高潮、收束排列；相邻场景、景别、动作和运镜不得雷同",
-            "每条严格只有 i,t,s,b,c,a,e,m；i 从0连续；t=e为空镜、t=c为人物镜",
-            f"必须恰好 {empty_count} 条 t=e 和 {character_count} 条 t=c",
-            "空镜 c=[]；有人物可选时人物镜 c 只能引用 characters.id；没有人物可选时人物镜 c=[]并自由设计人物",
-            "s、b、a、e、m 使用具体但短小的中文短语，不得写成长段落",
-            "长度硬约束：s/a不超过20个汉字，b/e/m各不超过12个汉字",
+            *rules_prompt.render_json(empty_count=empty_count, character_count=character_count),
             *(
                 [
                     f"必须额外输出 wardrobeGroups 共 {wardrobe_group_count} 组，每组按全局镜头序号连续覆盖 3 镜，最后一组可不足 3 镜",
@@ -1145,7 +1142,7 @@ async def _generate_general_story_outline_v2(
             }
         except ValueError as exc:
             last_error = exc
-            messages.extend([{"role": "assistant", "content": text}, {"role": "user", "content": f"结构错误：{exc}。修正并重新输出完整纯 JSON。"}])
+            messages.extend([{"role": "assistant", "content": text}, {"role": "user", "content": retry_prompt.render(error=exc)}])
         except Exception as exc:
             raise StoryboardPromptError(str(exc), usage_records=usage_records) from exc
     raise StoryboardPromptError(str(last_error), usage_records=usage_records)

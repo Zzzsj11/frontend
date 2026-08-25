@@ -60,7 +60,7 @@ describe('admin general outline comparison panel', () => {
       expect.objectContaining({
         models: ['gpt-5.5', 'gpt-5.6-sol', 'claude-opus-4-8'],
         empty_shot_count: 4,
-        character_shot_count: 17,
+        character_shot_count: 13,
         total_duration: 210,
       }),
     )

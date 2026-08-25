@@ -57,14 +57,14 @@ describe('general storyboard defaults', () => {
     const wrapper = mount(GeneralStoryboardModal, { attachTo: document.body })
     store.generalStoryboardOpen = true
     await vi.waitFor(() =>
-      expect(document.body.querySelectorAll('input[type="number"]').length).toBe(3),
+      expect(document.body.querySelectorAll('input[type="number"]').length).toBe(4),
     )
 
     const numbers = Array.from(
       document.body.querySelectorAll('input[type="number"]'),
     ) as HTMLInputElement[]
-    // 空镜数量 / 人物镜数量 / 总时长（秒）
-    expect(numbers.map((el) => el.value)).toEqual(['4', '13', '210'])
+    // 空镜数量 / 人物镜数量 / 总时长（秒）/ 生成组数
+    expect(numbers.map((el) => el.value)).toEqual(['4', '13', '210', '1'])
     wrapper.unmount()
   })
 
@@ -165,7 +165,7 @@ describe('general storyboard defaults', () => {
     const numbers = Array.from(
       document.body.querySelectorAll('input[type="number"]'),
     ) as HTMLInputElement[]
-    expect(numbers.map((input) => input.value)).toEqual(['3', '17', '210'])
+    expect(numbers.map((input) => input.value)).toEqual(['3', '14', '210', '1'])
     wrapper.unmount()
   })
 })

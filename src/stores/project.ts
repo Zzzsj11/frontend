@@ -934,6 +934,27 @@ export const useProjectStore = defineStore('project', {
       }
     },
 
+    /** 批量定制通用分镜的非当前子项目：启动大纲、等待落库，再接续逐镜提示词。 */
+    async _runSiblingGeneralStoryboard(taskId: string) {
+      try {
+        await api.regenerateStoryboardOutline(taskId)
+        for (let attempt = 0; attempt < 150; attempt++) {
+          await new Promise((resolve) => window.setTimeout(resolve, 2000))
+          const fresh = await api.fetchSongScript(taskId)
+          if (fresh.status === 'outline_failed') return
+          if (fresh.status === 'parsed' || fresh.status === 'outlining') continue
+          this.taskScripts[taskId] = { cast: [...fresh.cast], lines: fresh.lines }
+          const readyIds = fresh.lines
+            .filter((line) => line.shotOptions?.outlineStatus !== 'failed')
+            .map((line) => line.id)
+          if (readyIds.length) await this._generateStoryboardBatch(taskId, readyIds)
+          return
+        }
+      } catch {
+        // 子项目错误状态由持久化任务和侧边栏刷新呈现，不影响其他组继续执行。
+      }
+    },
+
     async regenerateOutline() {
       await this.runOutlineGeneration()
     },
@@ -1618,31 +1639,38 @@ export const useProjectStore = defineStore('project', {
       try {
         // 全新状态直接点「定制通用分镜」：自动创建未命名项目承载本次生成
         await this.ensureSongProjectForGeneration()
-        const result = await api.generateGeneralStoryboard({ ...req, projectId: this.activeSongId })
-        const lines: ScriptLine[] = result.lines.map((item) => ({
-          id: item.id || nextId(),
-          source: 'general',
-          shotType: item.shotType,
-          plannedDuration: item.plannedDuration,
-          lyrics: '',
-          scenePrompt: item.scenePrompt,
-          shotPrompt: item.shotPrompt,
-          digitalHumanIds: [...item.digitalHumanIds],
-          voice: { status: 'none' },
-          scene: { status: 'none' },
-          shot: { status: 'none', assets: [] },
-          shotOptions: normalizeShotOptions(
-            item.shotOptions ?? {
-              ...DEFAULT_SHOT_OPTIONS,
-              duration: item.plannedDuration ?? DEFAULT_SHOT_OPTIONS.duration,
-              ratio: req.ratio,
-              resolution: req.resolution,
-              imageModel: req.imageModel,
-              videoModel: req.videoModel,
-            },
-          ),
-          generationStatus: item.generationStatus || 'pending',
-        }))
+        const response = await api.generateGeneralStoryboard({
+          ...req,
+          projectId: this.activeSongId,
+        })
+        const results = response.tasks?.length ? response.tasks : [response]
+        const result = results[0]
+        const toLines = (items: typeof result.lines): ScriptLine[] =>
+          items.map((item) => ({
+            id: item.id || nextId(),
+            source: 'general',
+            shotType: item.shotType,
+            plannedDuration: item.plannedDuration,
+            lyrics: '',
+            scenePrompt: item.scenePrompt,
+            shotPrompt: item.shotPrompt,
+            digitalHumanIds: [...item.digitalHumanIds],
+            voice: { status: 'none' },
+            scene: { status: 'none' },
+            shot: { status: 'none', assets: [] },
+            shotOptions: normalizeShotOptions(
+              item.shotOptions ?? {
+                ...DEFAULT_SHOT_OPTIONS,
+                duration: item.plannedDuration ?? DEFAULT_SHOT_OPTIONS.duration,
+                ratio: req.ratio,
+                resolution: req.resolution,
+                imageModel: req.imageModel,
+                videoModel: req.videoModel,
+              },
+            ),
+            generationStatus: item.generationStatus || 'pending',
+          }))
+        const lines = toLines(result.lines)
         this._cacheCurrentTask()
         let song = this.songProjects.find((s) => s.id === this.activeSongId)
         if (!song) {
@@ -1662,6 +1690,19 @@ export const useProjectStore = defineStore('project', {
           storyboardType: 'general',
         }
         song.tasks.push(task)
+        for (const sibling of results.slice(1)) {
+          song.tasks.push({
+            id: sibling.taskId,
+            title: sibling.title,
+            updatedAt: '刚刚',
+            status: 'parsed',
+            storyboardType: 'general',
+          })
+          this.taskScripts[sibling.taskId] = {
+            cast: [...sibling.cast],
+            lines: toLines(sibling.lines),
+          }
+        }
         // P1：切到新子项目前停止旧任务的轮询/SSE
         if (this.activeTaskId && this.activeTaskId !== task.id)
           cancelTaskWatchers(this.activeTaskId)
@@ -1680,6 +1721,9 @@ export const useProjectStore = defineStore('project', {
         this.currentTime = 0
         this.generalStoryboardOpen = false
         // 异步触发大纲生成：复用 ASS 的 SSE 订阅 + 僵尸恢复 + 完成后自动接续逐句生成
+        void Promise.allSettled(
+          results.slice(1).map((item) => this._runSiblingGeneralStoryboard(item.taskId)),
+        )
         void this.runOutlineGeneration(task.id)
       } catch (err) {
         this.generalStoryboardError = err instanceof Error ? err.message : '定制通用分镜生成失败'
@@ -1695,25 +1739,29 @@ export const useProjectStore = defineStore('project', {
       this.randomGeneralStoryboardError = null
       try {
         await this.ensureSongProjectForGeneration()
-        const result = await api.generateRandomGeneralStoryboard({
+        const response = await api.generateRandomGeneralStoryboard({
           ...req,
           projectId: this.activeSongId,
         })
-        const lines: ScriptLine[] = result.lines.map((item) => ({
-          id: item.id || nextId(),
-          source: 'general_random',
-          shotType: item.shotType,
-          plannedDuration: item.plannedDuration,
-          lyrics: '',
-          scenePrompt: '',
-          shotPrompt: item.shotPrompt,
-          digitalHumanIds: [],
-          voice: { status: 'none' },
-          scene: { status: 'none' },
-          shot: { status: 'none', assets: [] },
-          shotOptions: normalizeShotOptions(item.shotOptions ?? DEFAULT_SHOT_OPTIONS),
-          generationStatus: 'succeeded',
-        }))
+        const results = response.tasks?.length ? response.tasks : [response]
+        const result = results[0]
+        const toLines = (items: typeof result.lines): ScriptLine[] =>
+          items.map((item) => ({
+            id: item.id || nextId(),
+            source: 'general_random',
+            shotType: item.shotType,
+            plannedDuration: item.plannedDuration,
+            lyrics: '',
+            scenePrompt: '',
+            shotPrompt: item.shotPrompt,
+            digitalHumanIds: [],
+            voice: { status: 'none' },
+            scene: { status: 'none' },
+            shot: { status: 'none', assets: [] },
+            shotOptions: normalizeShotOptions(item.shotOptions ?? DEFAULT_SHOT_OPTIONS),
+            generationStatus: 'succeeded',
+          }))
+        const lines = toLines(result.lines)
         this._cacheCurrentTask()
         const song = this.songProjects.find((item) => item.id === this.activeSongId)
         if (!song) throw new Error('项目不存在')
@@ -1725,6 +1773,18 @@ export const useProjectStore = defineStore('project', {
           storyboardType: 'general_random',
         }
         song.tasks.push(task)
+        const siblingBatches = results.slice(1).map((sibling) => {
+          const siblingLines = toLines(sibling.lines)
+          song.tasks.push({
+            id: sibling.taskId,
+            title: sibling.title,
+            updatedAt: '刚刚',
+            status: 'ready',
+            storyboardType: 'general_random',
+          })
+          this.taskScripts[sibling.taskId] = { cast: [], lines: siblingLines }
+          return { taskId: sibling.taskId, lines: siblingLines }
+        })
         if (this.activeTaskId && this.activeTaskId !== task.id)
           cancelTaskWatchers(this.activeTaskId)
         this.stop()
@@ -1739,7 +1799,10 @@ export const useProjectStore = defineStore('project', {
         this.selectedLineId = lines[0]?.id ?? null
         this.currentTime = 0
         this.randomGeneralStoryboardOpen = false
-        void this._generateRandomShotsBatch(task.id, lines)
+        void Promise.all([
+          this._generateRandomShotsBatch(task.id, lines),
+          ...siblingBatches.map((item) => this._generateRandomShotsBatch(item.taskId, item.lines)),
+        ])
       } catch (err) {
         this.randomGeneralStoryboardError =
           err instanceof Error ? err.message : '随机通用分镜生成失败'

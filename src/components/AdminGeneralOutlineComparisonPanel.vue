@@ -22,7 +22,7 @@ const form = reactive({
   age_group: '青年',
   visual_style: '写实电影感，暖冷色温递进',
   empty_shot_count: 4,
-  character_shot_count: 17,
+  character_shot_count: 13,
   total_duration: 210,
   extra_requirement: '画面克制，强调人物情绪与空间连续性',
   overall_prompt: '同一座临海城市，从黄昏过渡到夜晚，人物造型保持一致。',
@@ -33,7 +33,12 @@ const form = reactive({
 })
 
 const canRun = computed(
-  () => selectedModels.value.length > 0 && form.genre.trim() && !loading.value,
+  () =>
+    selectedModels.value.length > 0 &&
+    form.genre.trim() &&
+    form.empty_shot_count + form.character_shot_count > 0 &&
+    form.empty_shot_count + form.character_shot_count <= 17 &&
+    !loading.value,
 )
 const toggleModel = (code: string) => {
   if (selectedModels.value.includes(code))
@@ -83,14 +88,14 @@ onMounted(async () => {
         <label>性别<input v-model="form.gender" /></label>
         <label>年龄段<input v-model="form.age_group" /></label>
         <label
-          >空镜数量<input v-model.number="form.empty_shot_count" type="number" min="0" max="30"
+          >空镜数量<input v-model.number="form.empty_shot_count" type="number" min="0" max="17"
         /></label>
         <label
           >人物镜数量<input
             v-model.number="form.character_shot_count"
             type="number"
             min="0"
-            max="30"
+            max="17"
         /></label>
         <label
           >总时长（秒）<input v-model.number="form.total_duration" type="number" min="1" max="600"

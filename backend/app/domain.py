@@ -545,73 +545,78 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
     config["digital_human_ids"] = cast_ids
     config["cast_policy"] = cast_policy
     config["cast_selection_mode"] = cast_selection_mode
-    title = f"定制通用分镜-{utcnow().astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d-%H-%M-%S')}"
+    title_base = f"定制通用分镜-{utcnow().astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d-%H-%M-%S')}"
     try:
         durations = exact_durations(payload.total_duration, total)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    task = ProjectTaskModel(
-        id=uid("task"),
-        project_id=project_id,
-        title=title,
-        storyboard_type="general",
-        status="parsed",
-        extra_requirement=payload.extra_requirement,
-        overall_prompt=payload.overall_prompt,
-        storyboard_config=config,
-    )
-    db.add(task)
-    await db.flush()
-    for index, human_id in enumerate(cast_ids):
-        db.add(ProjectCastModel(id=uid("cast"), project_task_id=task.id, digital_human_id=human_id, sort_order=index))
-    # 占位 lines：大纲生成前只确定数量与时长，shotType 与大纲字段由后台任务回填
-    output = []
-    for index in range(total):
-        duration = durations[index]
-        line = StoryboardLineModel(
-            id=uid("line"),
-            project_task_id=task.id,
-            sort_order=index,
-            source="general",
-            shot_type="empty",
-            planned_duration=duration,
-            scene_prompt="",
-            shot_prompt="",
-            shot_options={
-                "ratio": payload.ratio,
-                "resolution": payload.resolution,
-                "imageModel": payload.image_model,
-                "videoModel": payload.video_model,
-                "duration": normalize_video_duration(duration),
-                "outlineStatus": "pending",
-            },
-            generation_status="pending",
+    results = []
+    for group_index in range(payload.group_count):
+        title = title_base if payload.group_count == 1 else f"{title_base}-{group_index + 1:02d}"
+        group_config = {**config, "group_index": group_index + 1}
+        task = ProjectTaskModel(
+            id=uid("task"),
+            project_id=project_id,
+            title=title,
+            storyboard_type="general",
+            status="parsed",
+            extra_requirement=payload.extra_requirement,
+            overall_prompt=payload.overall_prompt,
+            storyboard_config=group_config,
         )
-        db.add(line)
+        db.add(task)
         await db.flush()
-        output.append(
+        for index, human_id in enumerate(cast_ids):
+            db.add(ProjectCastModel(id=uid("cast"), project_task_id=task.id, digital_human_id=human_id, sort_order=index))
+        output = []
+        for index, duration in enumerate(durations):
+            line = StoryboardLineModel(
+                id=uid("line"),
+                project_task_id=task.id,
+                sort_order=index,
+                source="general",
+                shot_type="empty",
+                planned_duration=duration,
+                scene_prompt="",
+                shot_prompt="",
+                shot_options={
+                    "ratio": payload.ratio,
+                    "resolution": payload.resolution,
+                    "imageModel": payload.image_model,
+                    "videoModel": payload.video_model,
+                    "duration": normalize_video_duration(duration),
+                    "outlineStatus": "pending",
+                },
+                generation_status="pending",
+            )
+            db.add(line)
+            await db.flush()
+            output.append(
+                {
+                    "id": line.id,
+                    "shotType": "empty",
+                    "plannedDuration": duration,
+                    "scenePrompt": "",
+                    "shotPrompt": "",
+                    "digitalHumanIds": [],
+                    "shotOptions": line.shot_options,
+                    "generationStatus": "pending",
+                }
+            )
+        results.append(
             {
-                "id": line.id,
-                "shotType": "empty",
-                "plannedDuration": duration,
-                "scenePrompt": "",
-                "shotPrompt": "",
-                "digitalHumanIds": [],
-                "shotOptions": line.shot_options,
-                "generationStatus": "pending",
+                "taskId": task.id,
+                "projectId": project_id,
+                "title": title,
+                "status": "parsed",
+                "cast": cast_ids,
+                "totalDuration": payload.total_duration,
+                "storyboardConfig": group_config,
+                "lines": output,
             }
         )
     await db.commit()
-    return {
-        "taskId": task.id,
-        "projectId": project_id,
-        "title": title,
-        "status": "parsed",
-        "cast": cast_ids,
-        "totalDuration": payload.total_duration,
-        "storyboardConfig": config,
-        "lines": output,
-    }
+    return {**results[0], "tasks": results, "groupCount": len(results)}
 
 
 @router.post("/projects/{project_id}/storyboards/general/random", status_code=201)
@@ -647,7 +652,7 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
     common_prompt = "".join(common_prompt_parts)
     empty_prompt = common_prompt + "本镜为空镜：画面中不得出现人物、人影或可识别的人体主体；请自由设计环境、景物、光影与镜头运动。"
     character_prompt = common_prompt + "本镜为人物镜：必须以人物为明确视觉主体；请自由设计人物动作、场景和镜头运动。"
-    title = f"随机通用分镜-{utcnow().astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d-%H-%M-%S')}"
+    title_base = f"随机通用分镜-{utcnow().astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d-%H-%M-%S')}"
     config = {
         **payload.model_dump(mode="json"),
         "empty_prompt": empty_prompt,
@@ -655,104 +660,112 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
         "character_prompt_policy": "unique_cast_per_shot_v1",
         "outlineSkipped": True,
     }
-    task = ProjectTaskModel(
-        id=uid("task"),
-        project_id=project_id,
-        title=title,
-        storyboard_type="general_random",
-        status="ready",
-        extra_requirement=payload.extra_requirement,
-        overall_prompt=common_prompt,
-        storyboard_config=config,
-    )
-    db.add(task)
-    await db.flush()
-    output = []
+    results = []
     # Evenly distribute empty shots across the timeline instead of placing all
     # environment shots at the beginning.
     empty_positions = {min(total - 1, int(index * total / payload.empty_shot_count)) for index in range(payload.empty_shot_count)} if payload.empty_shot_count else set()
     shot_types = ["empty" if index in empty_positions else "character" for index in range(total)]
     character_index = 0
-    for index, (duration, shot_type) in enumerate(zip(durations, shot_types, strict=True)):
-        if shot_type == "empty":
-            prompt = empty_prompt
-        else:
-            # 随机通用分镜不传人物参考图。若所有人物镜提示词完全相同，视频模型
-            # 很容易收敛到同一张脸；为每镜指定不同的成人选角特征，并明确禁止跨镜
-            # 复用演员身份，让每条请求本身就携带足够强的身份差异信号。
-            cast_profiles = (
-                "二十多岁女性，短卷发，圆脸与明亮眼神，穿柠檬黄街头夹克",
-                "三十多岁男性，寸头，棱角分明的长脸，穿深蓝工装外套",
-                "四十多岁女性，齐肩直发，成熟方脸，穿酒红色长风衣",
-                "二十多岁男性，中长卷发，清瘦鹅蛋脸，穿银灰运动套装",
-                "五十多岁女性，利落短发，宽颧骨与沉静眼神，穿墨绿针织衫",
-                "三十多岁女性，高马尾，心形脸，穿橙色复古连衣裙",
-                "六十多岁男性，花白背头，宽阔方脸，穿米色亚麻西装",
-                "二十多岁女性，黑色波波头，细长脸，穿紫色机能风套装",
-                "四十多岁男性，自然卷短发，圆方脸与络腮胡，穿棕色皮夹克",
-                "三十多岁女性，栗色长卷发，鹅蛋脸与雀斑，穿湖蓝色衬衫",
-                "五十多岁男性，灰色短发，瘦长脸，穿暗红色中式立领外套",
-                "二十多岁男性，蓬松短发，宽额方脸，穿绿色棒球夹克",
-                "四十多岁女性，银灰挑染盘发，菱形脸，穿黑白几何套装",
-                "三十多岁男性，光头，圆脸与浓眉，穿亮橙色连帽衫",
-                "六十多岁女性，银白齐耳短发，慈祥圆脸，穿靛蓝披肩",
-                "二十多岁女性，红棕色脏辫，长脸，穿青绿色飞行夹克",
-                "五十多岁男性，微卷中发，方脸与八字胡，穿浅灰长大衣",
-                "三十多岁女性，超短发，棱角分明的脸型，穿玫红色西装",
-                "四十多岁男性，盐胡椒色侧分发，鹅蛋脸，穿藏青色针织开衫",
-                "二十多岁男性，浅色卷发，窄长脸，穿白色未来感风衣",
-            )
-            profile = cast_profiles[character_index % len(cast_profiles)]
-            cycle = character_index // len(cast_profiles) + 1
-            prompt = (
-                character_prompt
-                + f"本镜独立选角编号 R{cycle}-{character_index + 1}：{profile}。"
-                + "必须是一位与本任务其他人物镜完全不同的新人物；不得复用相同演员、相同面孔、相同发型或相同服装，尤其不得延续上一镜人物身份。"
-            )
-            character_index += 1
-        options = {
-            "ratio": payload.ratio,
-            "resolution": payload.resolution,
-            "videoModel": payload.video_model,
-            "duration": normalize_video_duration(duration),
-        }
-        line = StoryboardLineModel(
-            id=uid("line"),
-            project_task_id=task.id,
-            sort_order=index,
-            source="general_random",
-            shot_type=shot_type,
-            planned_duration=duration,
-            scene_prompt="",
-            shot_prompt=prompt,
-            shot_options=options,
-            generation_status="succeeded",
+    for group_index in range(payload.group_count):
+        title = title_base if payload.group_count == 1 else f"{title_base}-{group_index + 1:02d}"
+        group_config = {**config, "group_index": group_index + 1}
+        task = ProjectTaskModel(
+            id=uid("task"),
+            project_id=project_id,
+            title=title,
+            storyboard_type="general_random",
+            status="ready",
+            extra_requirement=payload.extra_requirement,
+            overall_prompt=common_prompt,
+            storyboard_config=group_config,
         )
-        db.add(line)
+        db.add(task)
         await db.flush()
-        output.append(
+        output = []
+        character_index = 0
+        for index, (duration, shot_type) in enumerate(zip(durations, shot_types, strict=True)):
+            if shot_type == "empty":
+                prompt = empty_prompt
+            else:
+                # 随机通用分镜不传人物参考图。若所有人物镜提示词完全相同，视频模型
+                # 很容易收敛到同一张脸；为每镜指定不同的成人选角特征，并明确禁止跨镜
+                # 复用演员身份，让每条请求本身就携带足够强的身份差异信号。
+                cast_profiles = (
+                    "二十多岁女性，短卷发，圆脸与明亮眼神，穿柠檬黄街头夹克",
+                    "三十多岁男性，寸头，棱角分明的长脸，穿深蓝工装外套",
+                    "四十多岁女性，齐肩直发，成熟方脸，穿酒红色长风衣",
+                    "二十多岁男性，中长卷发，清瘦鹅蛋脸，穿银灰运动套装",
+                    "五十多岁女性，利落短发，宽颧骨与沉静眼神，穿墨绿针织衫",
+                    "三十多岁女性，高马尾，心形脸，穿橙色复古连衣裙",
+                    "六十多岁男性，花白背头，宽阔方脸，穿米色亚麻西装",
+                    "二十多岁女性，黑色波波头，细长脸，穿紫色机能风套装",
+                    "四十多岁男性，自然卷短发，圆方脸与络腮胡，穿棕色皮夹克",
+                    "三十多岁女性，栗色长卷发，鹅蛋脸与雀斑，穿湖蓝色衬衫",
+                    "五十多岁男性，灰色短发，瘦长脸，穿暗红色中式立领外套",
+                    "二十多岁男性，蓬松短发，宽额方脸，穿绿色棒球夹克",
+                    "四十多岁女性，银灰挑染盘发，菱形脸，穿黑白几何套装",
+                    "三十多岁男性，光头，圆脸与浓眉，穿亮橙色连帽衫",
+                    "六十多岁女性，银白齐耳短发，慈祥圆脸，穿靛蓝披肩",
+                    "二十多岁女性，红棕色脏辫，长脸，穿青绿色飞行夹克",
+                    "五十多岁男性，微卷中发，方脸与八字胡，穿浅灰长大衣",
+                    "三十多岁女性，超短发，棱角分明的脸型，穿玫红色西装",
+                    "四十多岁男性，盐胡椒色侧分发，鹅蛋脸，穿藏青色针织开衫",
+                    "二十多岁男性，浅色卷发，窄长脸，穿白色未来感风衣",
+                )
+                profile = cast_profiles[character_index % len(cast_profiles)]
+                cycle = character_index // len(cast_profiles) + 1
+                prompt = (
+                    character_prompt
+                    + f"本镜独立选角编号 R{cycle}-{character_index + 1}：{profile}。"
+                    + "必须是一位与本任务其他人物镜完全不同的新人物；不得复用相同演员、相同面孔、相同发型或相同服装，尤其不得延续上一镜人物身份。"
+                )
+                character_index += 1
+            options = {
+                "ratio": payload.ratio,
+                "resolution": payload.resolution,
+                "videoModel": payload.video_model,
+                "duration": normalize_video_duration(duration),
+            }
+            line = StoryboardLineModel(
+                id=uid("line"),
+                project_task_id=task.id,
+                sort_order=index,
+                source="general_random",
+                shot_type=shot_type,
+                planned_duration=duration,
+                scene_prompt="",
+                shot_prompt=prompt,
+                shot_options=options,
+                generation_status="succeeded",
+            )
+            db.add(line)
+            await db.flush()
+            output.append(
+                {
+                    "id": line.id,
+                    "shotType": shot_type,
+                    "plannedDuration": duration,
+                    "scenePrompt": "",
+                    "shotPrompt": prompt,
+                    "digitalHumanIds": [],
+                    "shotOptions": options,
+                    "generationStatus": "succeeded",
+                }
+            )
+        results.append(
             {
-                "id": line.id,
-                "shotType": shot_type,
-                "plannedDuration": duration,
-                "scenePrompt": "",
-                "shotPrompt": prompt,
-                "digitalHumanIds": [],
-                "shotOptions": options,
-                "generationStatus": "succeeded",
+                "taskId": task.id,
+                "projectId": project_id,
+                "title": title,
+                "status": "ready",
+                "cast": [],
+                "totalDuration": payload.total_duration,
+                "storyboardConfig": group_config,
+                "lines": output,
             }
         )
     await db.commit()
-    return {
-        "taskId": task.id,
-        "projectId": project_id,
-        "title": title,
-        "status": "ready",
-        "cast": [],
-        "totalDuration": payload.total_duration,
-        "storyboardConfig": config,
-        "lines": output,
-    }
+    return {**results[0], "tasks": results, "groupCount": len(results)}
 
 
 @router.get("/tasks/{task_id}")

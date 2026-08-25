@@ -636,6 +636,41 @@ def test_random_general_storyboard_skips_outline_and_builds_shot_type_prompts(cl
     assert task["storyboardConfig"]["character_prompt_policy"] == "unique_cast_per_shot_v1"
 
 
+def test_random_general_storyboard_creates_multiple_child_tasks(client) -> None:
+    project = client.post("/api/projects", json={"name": "Random groups"}).json()
+    response = client.post(
+        f"/api/projects/{project['id']}/storyboards/general/random",
+        json={
+            "genre": "流行歌曲",
+            "empty_shot_count": 1,
+            "character_shot_count": 1,
+            "group_count": 3,
+            "total_duration": 10,
+        },
+    )
+    assert response.status_code == 201
+    result = response.json()
+    assert result["groupCount"] == 3
+    assert len(result["tasks"]) == 3
+    assert len({task["taskId"] for task in result["tasks"]}) == 3
+    assert [task["storyboardConfig"]["group_index"] for task in result["tasks"]] == [1, 2, 3]
+    assert all(len(task["lines"]) == 2 for task in result["tasks"])
+
+
+def test_general_storyboard_rejects_more_than_seventeen_shots(client) -> None:
+    project = client.post("/api/projects", json={"name": "Too many shots"}).json()
+    response = client.post(
+        f"/api/projects/{project['id']}/storyboards/general/random",
+        json={
+            "genre": "流行歌曲",
+            "empty_shot_count": 4,
+            "character_shot_count": 14,
+            "total_duration": 90,
+        },
+    )
+    assert response.status_code == 422
+
+
 def test_general_storyboard_enforces_four_to_fifteen_seconds_per_shot(client) -> None:
     project = client.post("/api/projects", json={"name": "Duration validation"}).json()
     base = {

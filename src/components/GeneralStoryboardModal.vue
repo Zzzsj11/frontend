@@ -38,6 +38,7 @@ const videoModel = ref(DEFAULT_VIDEO_MODEL)
 const emptyShotCount = ref(4)
 const characterShotCount = ref(13)
 const totalDuration = ref(210)
+const groupCount = ref(1)
 const extraRequirement = ref('')
 const selectedHumanIds = ref<string[]>([])
 
@@ -78,6 +79,9 @@ const canSubmit = computed(
     !!genre.value &&
     (!secondaryOptions.value.length || !!secondary.value) &&
     totalShots.value > 0 &&
+    totalShots.value <= 17 &&
+    groupCount.value >= 1 &&
+    groupCount.value <= 10 &&
     durationIsValid.value &&
     (props.random || !castRequired.value || selectedHumanIds.value.length > 0),
 )
@@ -98,7 +102,8 @@ const reset = () => {
   videoModel.value = DEFAULT_VIDEO_MODEL
   gender.value = '女'
   emptyShotCount.value = props.random ? 3 : 4
-  characterShotCount.value = props.random ? 17 : 13
+  characterShotCount.value = props.random ? 14 : 13
+  groupCount.value = 1
   totalDuration.value = 210
   extraRequirement.value = ''
   selectedHumanIds.value = []
@@ -158,6 +163,7 @@ const submit = () => {
       emptyShotCount: Math.max(0, Math.round(emptyShotCount.value)),
       characterShotCount: Math.max(0, Math.round(characterShotCount.value)),
       totalDuration: Math.round(totalDuration.value),
+      groupCount: Math.round(groupCount.value),
       extraRequirement: extraRequirement.value.trim() || undefined,
     }
     store.runRandomGeneralStoryboard(request)
@@ -180,6 +186,7 @@ const submit = () => {
     emptyShotCount: Math.max(0, Math.round(emptyShotCount.value)),
     characterShotCount: Math.max(0, Math.round(characterShotCount.value)),
     totalDuration: Math.round(totalDuration.value),
+    groupCount: Math.round(groupCount.value),
     digitalHumanIds: [...selectedHumanIds.value],
     extraRequirement: extraRequirement.value.trim() || undefined,
   }
@@ -301,14 +308,14 @@ const submit = () => {
 
         <section class="form-section">
           <h4>生成规模</h4>
-          <div class="field-grid three">
+          <div class="field-grid four">
             <label
               ><span>空镜数量</span
-              ><input v-model.number="emptyShotCount" type="number" min="0" max="50"
+              ><input v-model.number="emptyShotCount" type="number" min="0" max="17"
             /></label>
             <label
               ><span>人物镜数量</span
-              ><input v-model.number="characterShotCount" type="number" min="0" max="50"
+              ><input v-model.number="characterShotCount" type="number" min="0" max="17"
             /></label>
             <label
               ><span>总时长（秒）</span
@@ -318,9 +325,17 @@ const submit = () => {
                 :min="minimumTotalDuration"
                 :max="maximumTotalDuration"
             /></label>
+            <label
+              ><span>生成组数</span
+              ><input v-model.number="groupCount" type="number" min="1" max="10"
+            /></label>
           </div>
-          <p class="estimate" :class="{ invalid: totalShots > 0 && !durationIsValid }">
-            将生成 <strong>{{ totalShots }}</strong> 个视频：{{ emptyShotCount }} 个空镜、{{
+          <p
+            class="estimate"
+            :class="{ invalid: totalShots > 17 || (totalShots > 0 && !durationIsValid) }"
+          >
+            将创建 <strong>{{ groupCount }}</strong> 个子项目，每组生成
+            <strong>{{ totalShots }}</strong> 个视频（上限 17）：{{ emptyShotCount }} 个空镜、{{
               characterShotCount
             }}
             个人物镜，平均每镜约 <strong>{{ averageDuration }} 秒</strong>；允许总时长
@@ -580,6 +595,9 @@ const submit = () => {
 .field-grid.three {
   grid-template-columns: repeat(3, 1fr);
 }
+.field-grid.four {
+  grid-template-columns: repeat(4, 1fr);
+}
 .field-grid.five {
   grid-template-columns: repeat(5, 1fr);
 }
@@ -646,6 +664,7 @@ textarea {
 @media (max-width: 760px) {
   .people-grid,
   .field-grid.three,
+  .field-grid.four,
   .field-grid.five {
     grid-template-columns: 1fr 1fr;
   }
@@ -653,6 +672,7 @@ textarea {
 @media (max-width: 520px) {
   .people-grid,
   .field-grid.three,
+  .field-grid.four,
   .field-grid.five {
     grid-template-columns: 1fr;
   }

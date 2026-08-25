@@ -133,8 +133,8 @@ class GeneralOutlineComparisonIn(BaseModel):
     gender: str = Field(default="", max_length=32)
     age_group: str = Field(default="", max_length=80)
     visual_style: str = Field(default="", max_length=1000)
-    empty_shot_count: int = Field(ge=0, le=30)
-    character_shot_count: int = Field(ge=0, le=30)
+    empty_shot_count: int = Field(ge=0, le=17)
+    character_shot_count: int = Field(ge=0, le=17)
     total_duration: float = Field(gt=0, le=600)
     extra_requirement: str = Field(default="", max_length=4000)
     overall_prompt: str = Field(default="", max_length=8000)
@@ -201,6 +201,8 @@ async def run_general_outline_comparison(payload: GeneralOutlineComparisonIn, re
     require_admin(user)
     if payload.empty_shot_count + payload.character_shot_count < 1:
         raise HTTPException(422, "镜头总数至少为 1")
+    if payload.empty_shot_count + payload.character_shot_count > 17:
+        raise HTTPException(422, "通用分镜最多生成 17 个镜头")
     models = list(dict.fromkeys(payload.models))
     allowed = {item.code for item in CHAT_TEST_MODELS}
     unknown = [model for model in models if model not in allowed]

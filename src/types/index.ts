@@ -325,6 +325,7 @@ export interface GeneralStoryboardRequest {
   emptyShotCount: number
   characterShotCount: number
   totalDuration: number
+  groupCount?: number
   digitalHumanIds?: string[]
   extraRequirement?: string
 }
@@ -340,6 +341,7 @@ export interface RandomGeneralStoryboardRequest {
   emptyShotCount: number
   characterShotCount: number
   totalDuration: number
+  groupCount?: number
   extraRequirement?: string
 }
 
@@ -358,6 +360,8 @@ export interface GeneralStoryboardResult {
     shotOptions?: ShotGenOptions
     generationStatus?: ScriptLine['generationStatus']
   }>
+  /** 批量创建时包含全部子项目；顶层字段兼容表示第一组。 */
+  tasks?: GeneralStoryboardResult[]
 }
 
 /** 时间轴片段 */

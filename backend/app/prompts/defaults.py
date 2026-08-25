@@ -133,6 +133,35 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
             f"输出格式要求：{_PURE_JSON_RULE}"
         ),
     },
+    "general.story_outline_v2.rules": {
+        "name": "定制通用大纲 V2·规则",
+        "description": "当前线上定制通用分镜 V2 user payload 的基础 rules；服装组规则由代码按人物选择动态追加。",
+        "engine": "llm",
+        "format": "json",
+        "variables": {"empty_count": "空镜条数", "character_count": "人物镜条数"},
+        "required_fragments": [],
+        "content": json.dumps(
+            [
+                "shots 按叙事建立、推进、高潮、收束排列；相邻场景、景别、动作和运镜不得雷同",
+                "每条严格只有 i,t,s,b,c,a,e,m；i 从0连续；t=e为空镜、t=c为人物镜",
+                "必须恰好 {{empty_count}} 条 t=e 和 {{character_count}} 条 t=c",
+                "空镜 c=[]；有人物可选时人物镜 c 只能引用 characters.id；没有人物可选时人物镜 c=[]并自由设计人物",
+                "s、b、a、e、m 使用具体但短小的中文短语，不得写成长段落",
+                "长度硬约束：s/a不超过20个汉字，b/e/m各不超过12个汉字",
+            ],
+            ensure_ascii=False,
+            indent=2,
+        ),
+    },
+    "general.story_outline_v2.retry_user": {
+        "name": "定制通用大纲 V2·结构重试",
+        "description": "当前线上 V2 大纲结构校验失败后的修正消息。",
+        "engine": "llm",
+        "format": "text",
+        "variables": {"error": "结构校验错误"},
+        "required_fragments": ["纯 JSON"],
+        "content": "结构错误：{{error}}。修正并重新输出完整纯 JSON。",
+    },
     # ── 逐句分镜画面提示词 ───────────────────────────────────────────────────
     "storyboard_line.system": {
         "name": "逐句分镜·画面提示词 system",
