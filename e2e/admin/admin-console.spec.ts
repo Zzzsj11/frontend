@@ -48,6 +48,8 @@ test('administrator can inspect dashboard, models, errors and audit logs', async
   await expect(page.getByRole('button', { name: '新增歌曲' })).toBeVisible()
   await page.getByRole('button', { name: '费用用量' }).click()
   await expect(page.getByRole('heading', { name: '费用用量' })).toBeVisible()
+  await page.reload()
+  await expect(page.getByRole('heading', { name: '费用用量' })).toBeVisible()
   await expect(page.getByText('最终失败任务')).toBeVisible()
   await expect(page.getByText('失败任务费用')).toBeVisible()
   await expect(page.locator('.summary span', { hasText: 'Agent 开发测试' })).toBeVisible()

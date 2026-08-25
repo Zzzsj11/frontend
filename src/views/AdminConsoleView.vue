@@ -187,6 +187,32 @@ const NAV_GROUPS = computed<AdminNavGroup[]>(() => {
     ]
   return []
 })
+const activeTabStorageKey = computed(() => `admin-active-tab:${auth.user?.id || 'anonymous'}`)
+const availableTabs = computed(
+  () => new Set(NAV_GROUPS.value.flatMap((group) => group.items.map((item) => item.key))),
+)
+const restoreActiveTab = () => {
+  try {
+    const saved = localStorage.getItem(activeTabStorageKey.value)
+    if (saved && availableTabs.value.has(saved)) {
+      tab.value = saved as Tab
+      return
+    }
+  } catch {
+    // localStorage 不可用时保留角色对应的默认栏目。
+  }
+  if (!availableTabs.value.has(tab.value)) {
+    const fallback = NAV_GROUPS.value[0]?.items[0]?.key
+    if (fallback) tab.value = fallback as Tab
+  }
+}
+const rememberActiveTab = (value: Tab) => {
+  try {
+    localStorage.setItem(activeTabStorageKey.value, value)
+  } catch {
+    // 隐私模式或存储空间不足不应阻断管理后台导航。
+  }
+}
 const tabTitle = computed(
   () => NAV_GROUPS.value.flatMap((g) => g.items).find((i) => i.key === tab.value)?.label ?? '',
 )
@@ -297,7 +323,9 @@ const load = async () => {
 }
 const select = async (key: string) => {
   const value = key as Tab
+  if (!availableTabs.value.has(value)) return
   tab.value = value
+  rememberActiveTab(value)
   pageOffset.value = 0
   if (value === 'requests') void loadReqRuns()
   if (value === 'perf') return void loadPerf()
@@ -523,7 +551,11 @@ const columns = computed(() =>
       )
     : [],
 )
-onMounted(load)
+onMounted(() => {
+  restoreActiveTab()
+  if (tab.value === 'requests') void loadReqRuns()
+  void load()
+})
 </script>
 <template>
   <div class="console">
