@@ -117,6 +117,7 @@ services:
     image: postgres:16
     restart: unless-stopped
     environment:
+      TZ: Asia/Shanghai
       POSTGRES_DB: mvagent
       POSTGRES_USER: mvagent
       POSTGRES_PASSWORD: mvagent
