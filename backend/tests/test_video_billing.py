@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 
 from app.database import session_factory
 from app.models import GenerationJobModel, TokenUsageModel, VideoPricingRuleModel
@@ -68,6 +70,9 @@ async def _seed_billing_fixtures() -> None:
                 error="供应商失败",
                 finished_at=now,
                 deleted_at=now,
+                generation_origin="agent_test",
+                agent_name="code-agent",
+                agent_run_id="agent-test-billing-001",
             ),
             GenerationJobModel(
                 id="billing-rh-failed",
@@ -134,6 +139,8 @@ async def test_video_billing_reconciles_success_failed_and_excluded(client):
     assert items["billing-h3-failed"]["amount"] == pytest.approx(5.1)
     assert items["billing-h3-failed"]["durationSeconds"] == 12
     assert items["billing-h3-failed"]["rateLabel"] == "¥0.425 / 秒"
+    assert items["billing-h3-failed"]["generationOrigin"] == "agent_test"
+    assert items["billing-h3-failed"]["agentRunId"] == "agent-test-billing-001"
     assert items["billing-rh-failed"]["billingStatus"] == "excluded"
     assert items["billing-rh-failed"]["amount"] == 0
 
@@ -149,6 +156,11 @@ async def test_video_billing_reconciles_success_failed_and_excluded(client):
     ]
     assert detail.json()["references"][0]["url"] == "https://example.com/reference.jpg"
     assert detail.json()["rawUsage"] == {"output_seconds": 12}
+    assert detail.json()["generationOrigin"] == "agent_test"
+
+    agent_only = client.get("/api/admin/video-billing", params={"origin": "agent_test", "q": "billing-"}).json()
+    assert agent_only["total"] == 1
+    assert agent_only["summary"]["agentTestRecords"] == 1
 
     # 重复核算必须更新同一工单账单，不得重复入账。
     assert client.post("/api/admin/video-billing/reconcile").status_code == 200
@@ -162,3 +174,25 @@ def test_video_billing_requires_admin(client):
     assert client.get("/api/admin/video-billing", headers=headers).status_code == 403
     assert client.post("/api/admin/video-billing/reconcile", headers=headers).status_code == 403
     client.delete(f"/api/admin/users/{created['id']}")
+
+
+def test_generation_job_persists_agent_request_attribution(client, monkeypatch):
+    async def no_dispatch(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("app.main.jobs.dispatch", no_dispatch)
+    response = client.post(
+        "/api/generations/videos",
+        json={"prompt": "Agent 归因测试", "duration": 5, "model": "doubao-seedance-2.0"},
+        headers={"X-Test-Run-Id": "agent-real-generation-001", "X-Agent-Name": "code-agent", "X-Agent-Run-Id": "agent-real-generation-001"},
+    )
+    assert response.status_code == 202
+
+    async def load_job():
+        async with session_factory() as db:
+            return (await db.execute(select(GenerationJobModel).where(GenerationJobModel.id == response.json()["id"]))).scalar_one()
+
+    job = asyncio.run(load_job())
+    assert job.generation_origin == "agent_test"
+    assert job.agent_name == "code-agent"
+    assert job.agent_run_id == "agent-real-generation-001"

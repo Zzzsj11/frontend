@@ -5,7 +5,7 @@
 }
 .summary {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 .summary article {
@@ -31,6 +31,10 @@ small {
 }
 .summary .failed b {
   color: var(--danger);
+}
+.summary .agent-test {
+  background: var(--primary-light);
+  border-color: var(--primary);
 }
 .toolbar {
   display: flex;
@@ -94,6 +98,18 @@ td small {
 .badge.failed {
   background: var(--danger);
   color: var(--on-primary);
+  font-weight: 600;
+}
+.origin-badge {
+  display: inline-block;
+  padding: 3px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  font-size: var(--font-sm);
+}
+.origin-badge.agent {
+  background: var(--primary-light);
+  color: var(--primary);
   font-weight: 600;
 }
 .amount {

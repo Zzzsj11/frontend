@@ -16,11 +16,16 @@ const response = {
     excludedRecords: 1,
     unpricedRecords: 0,
     noUsageRecords: 0,
+    agentTestRecords: 1,
+    businessRecords: 1,
   },
   items: [
     {
       id: 'bill-1',
       generationJobId: 'job-1',
+      generationOrigin: 'agent_test',
+      agentName: 'code-agent',
+      agentRunId: 'agent-e2e-001',
       username: 'dev01',
       projectName: '项目A',
       taskTitle: '子项目A',
@@ -42,6 +47,9 @@ const response = {
     {
       id: 'bill-2',
       generationJobId: 'job-2',
+      generationOrigin: 'business',
+      agentName: '',
+      agentRunId: '',
       username: 'dev01',
       projectName: '项目A',
       taskTitle: '子项目B',
@@ -100,6 +108,9 @@ describe('AdminVideoBillingPanel', () => {
         ? Promise.resolve({
             id: 'vbill-1',
             generationJobId: 'job-1',
+            generationOrigin: 'agent_test',
+            agentName: 'code-agent',
+            agentRunId: 'agent-e2e-001',
             status: 'failed',
             error: '供应商失败',
             model: 'minimax-h3',

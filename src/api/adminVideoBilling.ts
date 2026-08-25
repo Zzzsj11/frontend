@@ -3,6 +3,9 @@ import { apiRequest } from './client'
 export interface VideoBillingItem {
   id: string
   generationJobId: string
+  generationOrigin: 'business' | 'agent_test'
+  agentName: string
+  agentRunId: string
   username: string
   projectName: string
   taskTitle: string
@@ -25,6 +28,9 @@ export interface VideoBillingItem {
 export interface VideoBillingDetail {
   id: string
   generationJobId: string
+  generationOrigin: 'business' | 'agent_test'
+  agentName: string
+  agentRunId: string
   providerTaskId?: string
   status: string
   error: string
@@ -56,6 +62,8 @@ export interface VideoBillingResponse {
     excludedRecords: number
     unpricedRecords: number
     noUsageRecords: number
+    agentTestRecords: number
+    businessRecords: number
   }
 }
 

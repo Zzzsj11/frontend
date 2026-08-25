@@ -4,6 +4,8 @@
 
 强制约束：所有新增业务表包含 `created_at`、`updated_at`、`deleted_at`；所有删除均为软删除；用户私有数据必须按 `user_id` 隔离；系统人物只读；媒体原文件和缩略图均进入 TOS；任何模型调用必须记录用量；数据库修改只能通过 Alembic。
 
+最高准则——Agent 生成归因：任何 Code Agent、自动化 Agent、E2E 或开发验收在本地、测试或生产环境触发真实模型调用（尤其图片/视频生成）时，必须为全部请求携带 `X-Agent-Name: code-agent` 与本次运行唯一的 `X-Agent-Run-Id`；同时保留 `X-Test-Run-Id`。缺少 Agent 标识不得执行真实生成。后端必须将来源固化到生成工单和费用对账，管理后台必须能区分“正常业务”与“Agent 开发测试”、按来源筛选并展示 Agent 名称和批次。禁止通过伪造普通业务流量规避测试成本归因。
+
 交付卡口：日常提交前 `make preflight-lite`（约 70s），发布前 `make preflight`（约 90s）。测试按侧分组——单测 `tests/user`、`tests/admin`（`npm run test:unit:user` / `test:unit:admin`），e2e `e2e/user`、`e2e/admin`（`npm run test:e2e:user` / `test:admin`）；涉及用户旅程、API、部署或权限时，必须加跑对应 Playwright 测试。本机 Docker 操作必须经 `make dev` 或带 `-f docker-compose.yml -f docker-compose.local-build.yml`，禁止直连 docker.io。禁止提交 `.env`、密钥、测试媒体、备份和构建产物。禁止直接修改生产服务器源码；发布使用版本化镜像和 `scripts/deploy.sh`。
 
 重要入口：后端 `backend/app/main.py`，领域 API `backend/app/domain.py`，管理 API `backend/app/admin.py`，前端路由 `src/router.ts`，主状态 `src/stores/project.ts`，管理控制台 `src/views/AdminConsoleView.vue` + 侧边导航 `src/components/AdminSideNav.vue`，测试说明 `docs/TESTING.md`。

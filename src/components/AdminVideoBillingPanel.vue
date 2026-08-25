@@ -21,6 +21,8 @@ const emptyData = (): VideoBillingResponse => ({
     excludedRecords: 0,
     unpricedRecords: 0,
     noUsageRecords: 0,
+    agentTestRecords: 0,
+    businessRecords: 0,
   },
 })
 const data = ref(emptyData())
@@ -33,6 +35,7 @@ const error = ref('')
 const notice = ref('')
 const status = ref('')
 const model = ref('')
+const origin = ref('')
 const keyword = ref('')
 const offset = ref(0)
 const pageSize = 50
@@ -51,6 +54,7 @@ const load = async () => {
   const query = new URLSearchParams({ limit: String(pageSize), offset: String(offset.value) })
   if (status.value) query.set('status', status.value)
   if (model.value) query.set('model', model.value)
+  if (origin.value) query.set('origin', origin.value)
   if (keyword.value.trim()) query.set('q', keyword.value.trim())
   try {
     data.value = await getVideoBilling(query)
@@ -121,6 +125,10 @@ onMounted(load)
         <b>{{ data.summary.excludedRecords }}</b
         ><span>RunningHub 暂不计费</span>
       </article>
+      <article class="agent-test">
+        <b>{{ data.summary.agentTestRecords }}</b
+        ><span>Agent 开发测试</span>
+      </article>
     </div>
     <div class="toolbar">
       <select v-model="status" aria-label="对账状态" @change="search">
@@ -134,6 +142,11 @@ onMounted(load)
       <select v-model="model" aria-label="视频模型" @change="search">
         <option value="">全部模型</option>
         <option v-for="item in data.models" :key="item" :value="item">{{ item }}</option>
+      </select>
+      <select v-model="origin" aria-label="生成来源" @change="search">
+        <option value="">全部来源</option>
+        <option value="business">正常业务</option>
+        <option value="agent_test">Agent 开发测试</option>
       </select>
       <input
         v-model="keyword"
@@ -155,6 +168,7 @@ onMounted(load)
             <th>完成时间</th>
             <th>用户 / 项目</th>
             <th>模型</th>
+            <th>来源</th>
             <th>时长</th>
             <th>生成结果</th>
             <th>计费用量</th>
@@ -173,6 +187,12 @@ onMounted(load)
             <td>
               {{ item.model || '-'
               }}<small>{{ item.provider || '-' }} · {{ item.resolution }}</small>
+            </td>
+            <td>
+              <span :class="['origin-badge', { agent: item.generationOrigin === 'agent_test' }]">
+                {{ item.generationOrigin === 'agent_test' ? 'Agent 开发测试' : '正常业务' }}
+              </span>
+              <small v-if="item.agentRunId">{{ item.agentName }} · {{ item.agentRunId }}</small>
             </td>
             <td>{{ item.durationSeconds ? `${item.durationSeconds} 秒` : '-' }}</td>
             <td>

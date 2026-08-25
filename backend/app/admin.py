@@ -521,6 +521,7 @@ async def video_billing(
     db: AsyncSession = Db,
     status: str = "",
     model: str = "",
+    origin: str = "",
     q: str = "",
     limit: int = 50,
     offset: int = 0,
@@ -535,6 +536,8 @@ async def video_billing(
         conditions.append(VideoBillingRecordModel.billing_status == status)
     if model:
         conditions.append(VideoBillingRecordModel.model == model)
+    if origin:
+        conditions.append(GenerationJobModel.generation_origin == origin)
     if q.strip():
         needle = f"%{q.strip()}%"
         conditions.append(
@@ -542,7 +545,7 @@ async def video_billing(
         )
 
     joined = (
-        select(VideoBillingRecordModel, UserModel.username, ProjectModel.name, ProjectTaskModel.title, GenerationJobModel.request, GenerationJobModel.result)
+        select(VideoBillingRecordModel, UserModel.username, ProjectModel.name, ProjectTaskModel.title, GenerationJobModel)
         .join(GenerationJobModel, GenerationJobModel.id == VideoBillingRecordModel.generation_job_id)
         .outerjoin(UserModel, UserModel.id == VideoBillingRecordModel.user_id)
         .outerjoin(ProjectModel, ProjectModel.id == VideoBillingRecordModel.project_id)
@@ -551,12 +554,15 @@ async def video_billing(
     )
     all_rows = (await db.execute(joined.order_by(VideoBillingRecordModel.completed_at.desc()))).all()
     items = []
-    for record, username, project_name, task_title, job_request, job_result in all_rows[offset : offset + limit]:
-        duration = _money((job_result or {}).get("duration") or (job_request or {}).get("duration"))
+    for record, username, project_name, task_title, job in all_rows[offset : offset + limit]:
+        duration = _money((job.result or {}).get("duration") or (job.request or {}).get("duration"))
         items.append(
             {
                 "id": record.id,
                 "generationJobId": record.generation_job_id,
+                "generationOrigin": job.generation_origin,
+                "agentName": job.agent_name,
+                "agentRunId": job.agent_run_id,
                 "userId": record.user_id,
                 "username": username or "-",
                 "projectId": record.project_id,
@@ -595,6 +601,8 @@ async def video_billing(
             "excludedRecords": sum(1 for row in all_rows if row[0].billing_status == "excluded"),
             "unpricedRecords": sum(1 for row in all_rows if row[0].billing_status == "unpriced"),
             "noUsageRecords": sum(1 for row in all_rows if row[0].billing_status == "no_usage"),
+            "agentTestRecords": sum(1 for row in all_rows if row[4].generation_origin == "agent_test"),
+            "businessRecords": sum(1 for row in all_rows if row[4].generation_origin == "business"),
         },
     }
 
@@ -644,6 +652,9 @@ async def video_billing_detail(record_id: str, user: CurrentUser, db: AsyncSessi
     return {
         "id": record.id,
         "generationJobId": job.id,
+        "generationOrigin": job.generation_origin,
+        "agentName": job.agent_name,
+        "agentRunId": job.agent_run_id,
         "providerTaskId": job.provider_task_id,
         "status": job.status,
         "error": job.error or "",

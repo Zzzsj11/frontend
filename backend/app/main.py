@@ -22,6 +22,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .admin import public_router as model_options_router
 from .admin import router as admin_router
+from .agent_attribution import agent_attribution_middleware
 from .ass_storyboard import group_cues, parse_ass
 from .auth import (
     CurrentUser,
@@ -148,6 +149,7 @@ app = FastAPI(title="MV Agent API", version="0.3.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 # 测试流量耗时采集：仅带 X-Test-Run-Id 头或 API_REQUEST_LOG_ALL=true 时入库
 app.middleware("http")(api_request_log_middleware)
+app.middleware("http")(agent_attribution_middleware)
 app.include_router(domain_router)
 app.include_router(admin_router)
 app.include_router(model_options_router)

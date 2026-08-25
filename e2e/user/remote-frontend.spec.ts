@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { remoteCredentials, testRunId } from '../env'
+import { agentTestHeaders, remoteCredentials, testRunId } from '../env'
 
 test.skip(!process.env.REMOTE_FRONTEND_E2E, 'set REMOTE_FRONTEND_E2E=1 to test a deployed frontend')
 test.setTimeout(5 * 60 * 1000)
@@ -18,7 +18,7 @@ mkdirSync(output, { recursive: true })
 
 test('deployed frontend login, project and storyboard configuration journey', async ({ page }) => {
   await page.route('**/api/**', (route) =>
-    route.continue({ headers: { ...route.request().headers(), 'x-test-run-id': runId } }),
+    route.continue({ headers: { ...route.request().headers(), ...agentTestHeaders(runId) } }),
   )
   let accessToken = ''
   let projectId = ''

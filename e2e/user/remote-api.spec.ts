@@ -7,7 +7,7 @@ import {
 } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { remoteCredentials, targetBaseURL, testRunId } from '../env'
+import { agentTestHeaders, remoteCredentials, targetBaseURL, testRunId } from '../env'
 
 test.skip(!process.env.REMOTE_API_E2E, 'set REMOTE_API_E2E=1 to test a deployed API')
 test.describe.configure({ mode: 'serial' })
@@ -38,7 +38,7 @@ async function login(
 ): Promise<{ api: APIRequestContext; token: string; user: unknown }> {
   const session = await playwrightRequest.newContext({
     baseURL,
-    extraHTTPHeaders: { 'X-Test-Run-Id': runId },
+    extraHTTPHeaders: agentTestHeaders(runId),
   })
   const body = await json(await session.post('/api/auth/login', { data: { username, password } }))
   const token = body.accessToken as string
@@ -48,7 +48,7 @@ async function login(
   const api = await playwrightRequest.newContext({
     baseURL,
     storageState: storage,
-    extraHTTPHeaders: { Authorization: `Bearer ${token}`, 'X-Test-Run-Id': runId },
+    extraHTTPHeaders: { Authorization: `Bearer ${token}`, ...agentTestHeaders(runId) },
   })
   return { api, token, user: body.user }
 }
@@ -56,7 +56,7 @@ async function login(
 test('remote API contract, authorization, isolation and soft-delete journey', async () => {
   const publicApi = await playwrightRequest.newContext({
     baseURL,
-    extraHTTPHeaders: { 'X-Test-Run-Id': runId },
+    extraHTTPHeaders: agentTestHeaders(runId),
   })
   const health = await json(await publicApi.get('/api/health'))
   expect(health).toEqual({ ok: true })

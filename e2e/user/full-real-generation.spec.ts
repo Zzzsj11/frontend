@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { remoteCredentials, testRunId } from '../env'
+import { agentTestHeaders, remoteCredentials, testRunId } from '../env'
 
 test.skip(
   process.env.REAL_GENERATION_E2E !== '1',
@@ -106,7 +106,7 @@ test('ASS and general storyboard complete real frontend journeys through generat
   page,
 }) => {
   await page.route('**/api/**', (route) =>
-    route.continue({ headers: { ...route.request().headers(), 'x-test-run-id': runId } }),
+    route.continue({ headers: { ...route.request().headers(), ...agentTestHeaders(runId) } }),
   )
   await page.goto('/')
   await page.getByLabel('用户名').fill(username)

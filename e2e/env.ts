@@ -43,3 +43,8 @@ export function testRunId(prefix = 'e2e'): string {
     `${prefix}-${new Date().toISOString().replaceAll(/[:.]/g, '-')}`
   )
 }
+
+/** 最高准则：所有 Agent 测试流量显式归因，真实生成缺少这些头时不得执行。 */
+export function agentTestHeaders(runId: string): Record<string, string> {
+  return { 'X-Test-Run-Id': runId, 'X-Agent-Name': 'code-agent', 'X-Agent-Run-Id': runId }
+}

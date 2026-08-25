@@ -11,6 +11,7 @@ from typing import Any, Awaitable, Callable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .agent_attribution import current_agent_attribution
 from .config import settings
 from .database import session_factory
 from .models import GenerationJobModel, SceneAssetModel, ShotAssetModel, utcnow
@@ -139,6 +140,7 @@ class JobManager:
     ) -> Job:
         """Add a replayable job to the caller's transaction without dispatching it."""
         now = time.time()
+        generation_origin, agent_name, agent_run_id = current_agent_attribution()
         job = Job(
             id=f"job-{uuid.uuid4().hex}",
             kind=kind,
@@ -152,7 +154,16 @@ class JobManager:
         )
         session.add(
             GenerationJobModel(
-                id=job.id, kind=kind, request=request, user_id=user_id, project_id=project_id, project_task_id=project_task_id, storyboard_line_id=storyboard_line_id
+                id=job.id,
+                kind=kind,
+                request=request,
+                user_id=user_id,
+                project_id=project_id,
+                project_task_id=project_task_id,
+                storyboard_line_id=storyboard_line_id,
+                generation_origin=generation_origin,
+                agent_name=agent_name,
+                agent_run_id=agent_run_id,
             )
         )
         await session.flush()

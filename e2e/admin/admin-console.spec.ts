@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test'
-import { remoteCredentials, testRunId } from '../env'
+import { agentTestHeaders, remoteCredentials, testRunId } from '../env'
 test.skip(!process.env.ADMIN_CONSOLE_E2E, 'set ADMIN_CONSOLE_E2E=1')
 const { username, password } = remoteCredentials()
 const runId = testRunId()
 test('administrator can inspect dashboard, models, errors and audit logs', async ({ page }) => {
   await page.route('**/api/**', (route) =>
-    route.continue({ headers: { ...route.request().headers(), 'x-test-run-id': runId } }),
+    route.continue({ headers: { ...route.request().headers(), ...agentTestHeaders(runId) } }),
   )
   await page.goto('/login')
   await page.getByLabel('用户名').fill(username)
@@ -50,11 +50,15 @@ test('administrator can inspect dashboard, models, errors and audit logs', async
   await expect(page.getByRole('heading', { name: '费用用量' })).toBeVisible()
   await expect(page.getByText('最终失败任务')).toBeVisible()
   await expect(page.getByText('失败任务费用')).toBeVisible()
+  await expect(page.getByText('Agent 开发测试')).toBeVisible()
+  await expect(page.getByLabel('生成来源')).toBeVisible()
   await expect(page.getByRole('button', { name: '重新核算全部历史' })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '来源' })).toBeVisible()
   await expect(page.getByRole('columnheader', { name: '时长' })).toBeVisible()
   await page.locator('tbody').getByRole('button', { name: '详情' }).first().click()
   await expect(page.getByRole('dialog', { name: '视频费用与生成详情' })).toBeVisible()
   await expect(page.getByText('计价标准')).toBeVisible()
+  await expect(page.getByText('生成来源')).toBeVisible()
   await expect(page.getByRole('heading', { name: '输出提示词' })).toBeVisible()
   await page.getByRole('button', { name: '关闭' }).click()
   await page.getByRole('button', { name: '错误日志' }).click()

@@ -29,6 +29,15 @@ const money = (value: number) => `¥${value.toFixed(6)}`
             <span>工单</span><b>{{ detail.generationJobId }}</b>
           </div>
           <div>
+            <span>生成来源</span>
+            <b :class="{ agent: detail.generationOrigin === 'agent_test' }">
+              {{ detail.generationOrigin === 'agent_test' ? 'Agent 开发测试' : '正常业务' }}
+              <template v-if="detail.agentRunId">
+                · {{ detail.agentName }} / {{ detail.agentRunId }}
+              </template>
+            </b>
+          </div>
+          <div>
             <span>供应商任务</span><b>{{ detail.providerTaskId || '-' }}</b>
           </div>
           <div>
@@ -131,6 +140,9 @@ small,
   overflow-wrap: anywhere;
 }
 .amount {
+  color: var(--primary);
+}
+.agent {
   color: var(--primary);
 }
 .failed {
