@@ -27,11 +27,38 @@ const activeTab = ref<TabKey | null>(null)
 
 // 分镜视频生成参数草稿（清晰度 / 时长 / 画幅 / 模型），重新生成分镜时生效
 const optionsDraft = ref<ShotGenOptions>({ ...DEFAULT_SHOT_OPTIONS })
+const copiedJobId = ref('')
+let copyFeedbackTimer: number | undefined
 const clockNow = ref(Date.now())
 const clockTimer = window.setInterval(() => {
   clockNow.value = Date.now()
 }, 1000)
-onBeforeUnmount(() => window.clearInterval(clockTimer))
+onBeforeUnmount(() => {
+  window.clearInterval(clockTimer)
+  if (copyFeedbackTimer) window.clearTimeout(copyFeedbackTimer)
+})
+
+const copyJobId = async (jobId: string) => {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(jobId)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = jobId
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      textarea.remove()
+    }
+    copiedJobId.value = jobId
+    if (copyFeedbackTimer) window.clearTimeout(copyFeedbackTimer)
+    copyFeedbackTimer = window.setTimeout(() => (copiedJobId.value = ''), 1600)
+  } catch {
+    copiedJobId.value = ''
+  }
+}
 
 const shotWaitingSeconds = computed(() => {
   const submittedAt = store.editingLine?.shot.generationSubmittedAt
@@ -364,20 +391,36 @@ const cancel = () => store.closeEditor()
               <div
                 v-for="(asset, i) in store.editingLine.shot.assets"
                 :key="asset.id"
-                class="asset-thumb"
-                :class="{ active: asset.id === store.editingLine.shot.currentAssetId }"
-                :title="`片段 v${i + 1} · ${asset.duration}s，点击选用并预览`"
-                @click="pickAsset(asset, i)"
+                class="asset-item"
               >
-                <video v-if="!asset.coverUrl" :src="asset.videoUrl" preload="metadata" muted />
-                <img v-else :src="asset.coverUrl" alt="" />
-                <span class="asset-play"><AppIcon name="play" :size="12" /></span>
-                <span class="asset-duration">{{ asset.duration }}s</span>
-                <span v-if="isH3Asset(asset)" class="asset-model-badge">H3</span>
-                <ImageZoom
-                  :src="asset.originalCoverUrl || asset.coverUrl"
-                  :alt="`片段 v${i + 1} 原图预览`"
-                />
+                <div
+                  class="asset-thumb"
+                  :class="{ active: asset.id === store.editingLine.shot.currentAssetId }"
+                  :title="`片段 v${i + 1} · ${asset.duration}s，点击选用并预览`"
+                  @click="pickAsset(asset, i)"
+                >
+                  <video v-if="!asset.coverUrl" :src="asset.videoUrl" preload="metadata" muted />
+                  <img v-else :src="asset.coverUrl" alt="" />
+                  <span class="asset-play"><AppIcon name="play" :size="12" /></span>
+                  <span class="asset-duration">{{ asset.duration }}s</span>
+                  <span v-if="isH3Asset(asset)" class="asset-model-badge">H3</span>
+                  <ImageZoom
+                    :src="asset.originalCoverUrl || asset.coverUrl"
+                    :alt="`片段 v${i + 1} 原图预览`"
+                  />
+                </div>
+                <div v-if="asset.generationJobId" class="asset-job">
+                  <span :title="asset.generationJobId">工单 {{ asset.generationJobId }}</span>
+                  <button
+                    type="button"
+                    class="copy-job-id"
+                    :aria-label="`复制工单ID ${asset.generationJobId}`"
+                    @click="copyJobId(asset.generationJobId)"
+                  >
+                    {{ copiedJobId === asset.generationJobId ? '已复制' : '复制' }}
+                  </button>
+                </div>
+                <div v-else class="asset-job unavailable"><span>工单 ID 暂无</span></div>
               </div>
             </div>
           </template>
@@ -786,15 +829,49 @@ const cancel = () => store.closeEditor()
   gap: 8px;
   flex-wrap: wrap;
 }
+.asset-item {
+  width: 180px;
+  min-width: 0;
+}
 .asset-thumb {
   position: relative;
-  width: 84px;
+  width: 100%;
   aspect-ratio: 16 / 9;
   border-radius: var(--radius-sm);
   border: 2px solid transparent;
   overflow: hidden;
   cursor: pointer;
   transition: border-color 0.15s;
+}
+.asset-job {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+.asset-job span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.asset-job.unavailable {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+.copy-job-id {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  padding: 2px;
+  font-size: 10px;
+  cursor: pointer;
 }
 .asset-thumb img,
 .asset-thumb video {

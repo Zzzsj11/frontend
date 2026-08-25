@@ -58,6 +58,8 @@ export interface VoiceInfo {
 /** 分镜视频片段资产（一次生成的产物） */
 export interface ShotAsset {
   id: string
+  /** 生成该视频资产的内部工单 ID，供业务与管理后台联查。 */
+  generationJobId?: string
   /** 视频封面图 */
   coverUrl: string
   /** 视频封面原图，仅在放大预览时加载 */

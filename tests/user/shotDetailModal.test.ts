@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -80,6 +80,8 @@ describe('ShotDetailModal general MV character controls', () => {
   })
 
   it('marks H3 video assets but leaves SD2 assets unmarked', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
     const store = useProjectStore()
     const line = {
       id: 'model-badge-line',
@@ -98,6 +100,7 @@ describe('ShotDetailModal general MV character controls', () => {
         assets: [
           {
             id: 'h3-asset',
+            generationJobId: 'job-h3-123456',
             coverUrl: '/h3.jpg',
             videoUrl: '/h3.mp4',
             duration: 5,
@@ -106,6 +109,7 @@ describe('ShotDetailModal general MV character controls', () => {
           },
           {
             id: 'sd-asset',
+            generationJobId: 'job-sd-654321',
             coverUrl: '/sd.jpg',
             videoUrl: '/sd.mp4',
             duration: 5,
@@ -125,6 +129,14 @@ describe('ShotDetailModal general MV character controls', () => {
     expect(document.body.querySelectorAll('.model-badge')).toHaveLength(1)
     expect(document.body.querySelectorAll('.asset-model-badge')).toHaveLength(1)
     expect(document.body.querySelector('.asset-model-badge')?.textContent).toBe('H3')
+    expect(document.body.textContent).toContain('工单 job-h3-123456')
+    const copyButton = document.body.querySelector(
+      '[aria-label="复制工单ID job-h3-123456"]',
+    ) as HTMLButtonElement
+    copyButton.click()
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('job-h3-123456')
+    expect(copyButton.textContent).toBe('已复制')
     wrapper.unmount()
   })
 })

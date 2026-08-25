@@ -1957,6 +1957,7 @@ def _line_json_from_assets(
             "coverUrl": a.cover_thumbnail_url or a.cover_url,
             "originalCoverUrl": a.cover_url,
             "videoUrl": a.video_url,
+            "generationJobId": a.generation_job_id,
             "model": a.model_code,
             "duration": a.duration,
             "resolution": a.resolution,

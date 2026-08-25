@@ -77,6 +77,7 @@ async def test_get_task_default_returns_full_asset_history(client):
     assert len(line["shotAssets"]) == 3
     assert "shotAssetCount" not in line
     assert [a["isCurrent"] for a in line["shotAssets"]] == [False, False, True]
+    assert all("generationJobId" in asset for asset in line["shotAssets"])
 
 
 @pytest.mark.asyncio
