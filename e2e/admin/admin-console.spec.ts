@@ -50,7 +50,7 @@ test('administrator can inspect dashboard, models, errors and audit logs', async
   await expect(page.getByRole('heading', { name: '费用用量' })).toBeVisible()
   await expect(page.getByText('最终失败任务')).toBeVisible()
   await expect(page.getByText('失败任务费用')).toBeVisible()
-  await expect(page.getByText('Agent 开发测试')).toBeVisible()
+  await expect(page.locator('.summary span', { hasText: 'Agent 开发测试' })).toBeVisible()
   await expect(page.getByLabel('生成来源')).toBeVisible()
   await expect(page.getByRole('button', { name: '重新核算全部历史' })).toBeVisible()
   await expect(page.getByRole('columnheader', { name: '来源' })).toBeVisible()
