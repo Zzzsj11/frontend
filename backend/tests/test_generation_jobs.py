@@ -526,6 +526,37 @@ def test_direct_h3_video_uses_documented_contract_and_archives_output(monkeypatc
     assert result["usage"]["total_seconds"] == 5
 
 
+def test_direct_h3_video_reports_tos_archive_stage_when_source_url_is_rejected(monkeypatch) -> None:
+    from app import providers
+    from app.jobs import Job
+
+    async def reject_insecure_url(_url, _prefix, _filename):
+        raise ValueError("仅支持不含凭证的 HTTPS 公网地址")
+
+    monkeypatch.setattr(providers, "import_remote", reject_insecure_url)
+    job = Job(
+        id="job-direct-h3-insecure-result",
+        kind="video",
+        user_id="user-1",
+        provider="yinghe-h3",
+        provider_task_id="direct-h3-insecure-result",
+        request={"model": "minimax-h3", "duration": 12, "ratio": "16:9"},
+    )
+    task = {
+        "id": "direct-h3-insecure-result",
+        "status": "succeeded",
+        "content": {"url": "http://upstream.test/h3.mp4"},
+        "duration": 12,
+        "ratio": "16:9",
+    }
+
+    with pytest.raises(
+        providers.ProviderError,
+        match="H3 已生成成功，但归档到 TOS 失败：供应商视频地址未通过下载安全校验",
+    ):
+        asyncio.run(providers._store_direct_h3_result(job, task))
+
+
 def _insert_job(
     job_id: str,
     *,

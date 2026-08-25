@@ -12,7 +12,7 @@ export function targetBaseURL(): string {
   return (
     process.env.REMOTE_API_BASE_URL ||
     process.env.PLAYWRIGHT_BASE_URL ||
-    'http://124.222.219.76:5173'
+    'http://120.24.38.200:5173'
   )
 }
 

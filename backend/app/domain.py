@@ -1045,6 +1045,9 @@ async def _apply_general_outline_to_lines(db: AsyncSession, lines: list[Storyboa
             "characterAction": shot["characterAction"],
             "emotionalFocus": shot["emotionalFocus"],
             "cameraPurpose": shot["cameraPurpose"],
+            "wardrobeGroupIndex": shot.get("wardrobeGroupIndex"),
+            "wardrobeIntent": shot.get("wardrobeIntent") or "",
+            "wardrobeByCharacter": shot.get("wardrobeByCharacter") or {},
             "outlineStatus": "ready",
         }
         line.generation_status = "pending"

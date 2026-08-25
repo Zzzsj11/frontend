@@ -186,6 +186,10 @@ export interface StoryOutlineShot {
   /** 所属场景段序号 */
   sceneIndex?: number
   wardrobeByCharacter?: Record<string, string>
+  /** 定制通用分镜每 3 镜服装组序号。 */
+  wardrobeGroupIndex?: number
+  /** 当前服装与场景、光线、色彩和情绪的匹配意图。 */
+  wardrobeIntent?: string
   intent?: string
   outlineScene?: string
   outlineShot?: string
@@ -216,9 +220,19 @@ export interface StoryBible {
   motifs?: Array<{ id: string; name: string; meaning: string; maxAppearances: number }>
   /** 第一轮场景规划结果（ASS 两轮分段架构） */
   scenePlan?: StoryScenePlan[]
+  /** 定制通用分镜按每 3 镜规划的氛围化服装组。 */
+  wardrobeGroups?: StoryWardrobeGroup[]
   /** 第二轮生成失败的场景段 */
   failedSegments?: OutlineFailedSegment[]
   shots: StoryOutlineShot[]
+}
+
+export interface StoryWardrobeGroup {
+  groupIndex: number
+  shotStart: number
+  shotEnd: number
+  visualIntent: string
+  wardrobeByCharacter: Record<string, string>
 }
 
 /** ASS 第一轮场景规划的一个大场景 */

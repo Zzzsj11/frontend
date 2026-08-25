@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 import time
 from collections.abc import Awaitable, Callable
@@ -18,6 +19,7 @@ PROMPT_VERSION = "storyboard-v7"
 SCHEMA_VERSION = "storyboard-line-v2"
 
 STRUCTURAL_TYPES = {"intro", "interlude", "outro"}
+GENERAL_WARDROBE_GROUP_SIZE = 3
 
 # 大纲生成进度回调：V1 使用 planning/segments，V2 使用 planning/shots 两阶段。
 ProgressCallback = Callable[[dict[str, Any]], Awaitable[None]]
@@ -229,6 +231,10 @@ async def _plan_ass_scenes(
         "structuralSegments": structural_notes,
         "selectedCharacters": _compact_characters(selected_humans) if settings.outline_protocol_version == "v2" else selected_humans,
         "overallRequirement": extra_requirement,
+        "wardrobeDirection": (
+            "每个大场景先结合 globalVisual 与本场 locationName、mood、emotion、visualTone、narrativePurpose，确定服装在色彩、材质、层次、年代感和正式程度上的设计意图；"
+            "再为每位已选人物设计完整服装、鞋履和关键配饰。服装必须融入画面氛围而不是孤立好看，同场一致，相邻大场景明显换整套，人物面部与发型保持不变。"
+        ),
         "rules": rules_prompt.render_json(),
         "conciseLimits": {
             "locationName": 12,
@@ -849,12 +855,19 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
     version_label = f"prompt-v{system_prompt.version}" if system_prompt.source == "db" else PROMPT_VERSION
     role_constraint = role_constraint_prompt.render(planned_ids=json.dumps(planned, ensure_ascii=False))
     system = system_prompt.render(prompt_version=version_label, schema_version=SCHEMA_VERSION)
+    requirements = requirements_prompt.render_json()
+    outline = current.get("outline") or {}
+    if source == "general" and planned and outline.get("wardrobeByCharacter"):
+        requirements.append(
+            "本镜必须逐字执行 currentShot.outline.wardrobeByCharacter，并让服装材质、色彩、层次和正式程度呼应 wardrobeIntent、场景、光线、主色和情绪；"
+            "忽略人物参考图原始服装。同一 wardrobeGroupIndex 内不得换装，进入下一组后不得沿用上一组服装。"
+        )
     payload = {
         "source": source,
         "globalContext": full_context,
         "allowedCharacters": allowed_humans,
         "outputSchema": {"scenePrompt": "string", "shotPrompt": "string", "digitalHumanIds": ["allowed character id"]},
-        "requirements": requirements_prompt.render_json(),
+        "requirements": requirements,
         "outputLengthLimits": {"scenePromptChineseCharacters": 220, "shotPromptChineseCharacters": 180},
         "currentShot": current,
         "roleConstraint": role_constraint,
@@ -920,8 +933,9 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
 
 def _check_general_outline(body: dict[str, Any], *, expected_count: int, empty_count: int, character_count: int, role_ids: list[str]) -> dict[str, Any]:
     """通用分镜大纲的结构完整性检查。"""
-    if set(body) != {"shots"}:
-        raise ValueError("大纲必须严格只包含 shots 字段")
+    expected_fields = {"shots", "wardrobeGroups"} if role_ids else {"shots"}
+    if set(body) != expected_fields:
+        raise ValueError(f"大纲必须严格包含：{sorted(expected_fields)}")
     shots = body["shots"]
     if not isinstance(shots, list) or len(shots) != expected_count:
         raise ValueError(f"shots 必须包含 {expected_count} 条镜头规划")
@@ -960,11 +974,12 @@ def _check_general_outline(body: dict[str, Any], *, expected_count: int, empty_c
     actual_character = len(normalized) - actual_empty
     if actual_empty != empty_count or actual_character != character_count:
         raise ValueError(f"镜头类型配额不一致：要求空镜 {empty_count} 条、人物镜 {character_count} 条，实际为空镜 {actual_empty} 条、人物镜 {actual_character} 条")
-    return {"shots": normalized}
+    return {"shots": _apply_general_wardrobe_groups(normalized, body.get("wardrobeGroups"), role_ids)}
 
 
 def _check_general_outline_v2(body: dict[str, Any], *, expected_count: int, empty_count: int, character_count: int, role_ids: list[str]) -> dict[str, Any]:
-    if set(body) != {"shots"} or not isinstance(body["shots"], list) or len(body["shots"]) != expected_count:
+    expected_fields = {"shots", "wardrobeGroups"} if role_ids else {"shots"}
+    if set(body) != expected_fields or not isinstance(body["shots"], list) or len(body["shots"]) != expected_count:
         raise ValueError(f"shots 必须严格包含 {expected_count} 条")
     allowed = set(role_ids)
     normalized: list[dict[str, Any]] = []
@@ -999,7 +1014,55 @@ def _check_general_outline_v2(body: dict[str, Any], *, expected_count: int, empt
     actual_empty = sum(item["shotType"] == "empty" for item in normalized)
     if actual_empty != empty_count or len(normalized) - actual_empty != character_count:
         raise ValueError(f"镜头类型配额不一致：要求空镜 {empty_count} 条、人物镜 {character_count} 条")
-    return {"shots": normalized}
+    return {"shots": _apply_general_wardrobe_groups(normalized, body.get("wardrobeGroups"), role_ids)}
+
+
+def _apply_general_wardrobe_groups(shots: list[dict[str, Any]], raw_groups: Any, role_ids: list[str]) -> list[dict[str, Any]]:
+    """Validate three-shot wardrobe groups and copy the active outfit contract onto every shot."""
+    if not role_ids:
+        return shots
+    expected_count = math.ceil(len(shots) / GENERAL_WARDROBE_GROUP_SIZE)
+    if not isinstance(raw_groups, list) or len(raw_groups) != expected_count:
+        raise ValueError(f"wardrobeGroups 必须包含 {expected_count} 个每 3 镜服装组")
+    allowed_roles, previous = set(role_ids), {}
+    groups: list[dict[str, Any]] = []
+    required = {"groupIndex", "shotStart", "shotEnd", "visualIntent", "wardrobeByCharacter"}
+    for index, group in enumerate(raw_groups):
+        start = index * GENERAL_WARDROBE_GROUP_SIZE
+        end = min(len(shots) - 1, start + GENERAL_WARDROBE_GROUP_SIZE - 1)
+        if not isinstance(group, dict) or set(group) != required:
+            raise ValueError(f"第 {index + 1} 个服装组字段不完整")
+        if group["groupIndex"] != index or group["shotStart"] != start or group["shotEnd"] != end:
+            raise ValueError(f"第 {index + 1} 个服装组必须覆盖镜头 {start}–{end}")
+        visual_intent = group["visualIntent"]
+        if not isinstance(visual_intent, str) or not visual_intent.strip():
+            raise ValueError("每个服装组必须说明与场景、光线、色彩和情绪匹配的 visualIntent")
+        wardrobe = group["wardrobeByCharacter"]
+        if not isinstance(wardrobe, dict) or set(wardrobe) != allowed_roles:
+            raise ValueError("每个服装组必须为全部已选人物规划服装")
+        normalized_wardrobe: dict[str, str] = {}
+        for human_id, outfit in wardrobe.items():
+            if not isinstance(outfit, str) or not outfit.strip():
+                raise ValueError("服装组中的人物服装不能为空")
+            normalized_outfit = outfit.strip()
+            if re.search(r"换成|换上|改穿|更换为|脱下.{0,20}穿上|先穿.{0,30}再穿", normalized_outfit):
+                raise ValueError("同一服装组内每个人物只能有一套服装，不得描述镜头内换装")
+            if previous.get(human_id) == normalized_outfit:
+                raise ValueError("同一人物在相邻服装组必须更换明显不同且符合新氛围的整套服装")
+            normalized_wardrobe[human_id] = normalized_outfit
+        previous = normalized_wardrobe
+        groups.append({**group, "visualIntent": visual_intent.strip(), "wardrobeByCharacter": normalized_wardrobe})
+    return [
+        {
+            **shot,
+            "wardrobeGroupIndex": group["groupIndex"],
+            "wardrobeIntent": group["visualIntent"],
+            "wardrobePlanByCharacter": group["wardrobeByCharacter"],
+            "wardrobeByCharacter": {human_id: group["wardrobeByCharacter"][human_id] for human_id in shot["requiredCharacterIds"]},
+        }
+        for shot in shots
+        for group in [groups[shot["index"] // GENERAL_WARDROBE_GROUP_SIZE]]
+    ]
 
 
 async def _generate_general_story_outline_v2(
@@ -1013,6 +1076,7 @@ async def _generate_general_story_outline_v2(
     character_count = int(config.get("character_shot_count", 0))
     expected_count = empty_count + character_count
     role_ids = [item["id"] for item in selected_humans]
+    wardrobe_group_count = math.ceil(expected_count / GENERAL_WARDROBE_GROUP_SIZE) if role_ids else 0
     if on_progress:
         await on_progress({"phase": "generating", "shotsDone": 0, "shotsTotal": expected_count})
     system_prompt = await get_prompt("general.story_outline_v2.system")
@@ -1031,9 +1095,29 @@ async def _generate_general_story_outline_v2(
             "空镜 c=[]；有人物可选时人物镜 c 只能引用 characters.id；没有人物可选时人物镜 c=[]并自由设计人物",
             "s、b、a、e、m 使用具体但短小的中文短语，不得写成长段落",
             "长度硬约束：s/a不超过20个汉字，b/e/m各不超过12个汉字",
+            *(
+                [
+                    f"必须额外输出 wardrobeGroups 共 {wardrobe_group_count} 组，每组按全局镜头序号连续覆盖 3 镜，最后一组可不足 3 镜",
+                    "每组 visualIntent 必须综合该组三镜的场景、季节、曲风、视觉风格、光线、主色和叙事情绪；wardrobeByCharacter 必须为每个已选人物设计与该意境协调的完整服装、鞋履和关键配饰",
+                    "同组服装保持一致，相邻组必须明显更换整套服装；服装材质、色彩、层次和正式程度必须服务画面氛围，不得照抄人物参考图原服装",
+                ]
+                if role_ids
+                else []
+            ),
         ],
         "schema": {"shots": [{"i": 0, "t": "e|c", "s": "短场景", "b": "短节拍", "c": [], "a": "短动作", "e": "短情绪", "m": "短运镜"}]},
     }
+    if role_ids:
+        payload["schema"]["wardrobeGroups"] = [
+            {
+                "groupIndex": index,
+                "shotStart": index * GENERAL_WARDROBE_GROUP_SIZE,
+                "shotEnd": min(expected_count - 1, index * GENERAL_WARDROBE_GROUP_SIZE + GENERAL_WARDROBE_GROUP_SIZE - 1),
+                "visualIntent": "该组三镜的场景、光线、色彩与情绪意境",
+                "wardrobeByCharacter": {role_id: "与该组画面氛围协调的完整服装、鞋履与关键配饰" for role_id in role_ids},
+            }
+            for index in range(wardrobe_group_count)
+        ]
     messages = [
         {"role": "system", "content": system_prompt.render()},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + suffix_prompt.render()},
@@ -1044,7 +1128,7 @@ async def _generate_general_story_outline_v2(
         operation = "general_story_outline_v2" if attempt == 0 else "general_story_outline_v2_retry"
         try:
             call = call_override or _call
-            text = await call(client, messages, 2600, usage_records=usage_records, operation=operation, prompt_key=system_prompt.key, prompt_version=system_prompt.version)
+            text = await call(client, messages, 3400, usage_records=usage_records, operation=operation, prompt_key=system_prompt.key, prompt_version=system_prompt.version)
             shots = _check_general_outline_v2(
                 _extract_json(text),
                 expected_count=expected_count,
@@ -1088,6 +1172,7 @@ async def generate_general_story_outline(
     character_count: int = config.get("character_shot_count", 0)
     expected_count = empty_count + character_count
     role_ids = [item["id"] for item in selected_humans]
+    wardrobe_group_count = math.ceil(expected_count / GENERAL_WARDROBE_GROUP_SIZE) if role_ids else 0
     total_duration: float = config.get("total_duration", 0)
     if on_progress:
         await on_progress({"phase": "generating", "shotsDone": 0, "shotsTotal": expected_count})
@@ -1112,6 +1197,12 @@ async def generate_general_story_outline(
             "overallPrompt": config.get("overall_prompt", ""),
         },
         "selectedCharacters": selected_humans,
+        "wardrobeDirection": (
+            "每 3 个全局镜头形成一个服装组。先综合组内场景、季节、曲风、视觉风格、光线、色彩和叙事情绪形成 visualIntent，"
+            "再为全部已选人物设计与该意境协调的完整服装、鞋履和关键配饰；同组一致，相邻组明显换整套，忽略参考图原服装。"
+            if role_ids
+            else ""
+        ),
         "rules": rules_prompt.render_json(expected_count=expected_count, empty_count=empty_count, character_count=character_count),
         "schema": {
             "shots": [
@@ -1129,6 +1220,17 @@ async def generate_general_story_outline(
             ]
         },
     }
+    if role_ids:
+        payload["schema"]["wardrobeGroups"] = [
+            {
+                "groupIndex": index,
+                "shotStart": index * GENERAL_WARDROBE_GROUP_SIZE,
+                "shotEnd": min(expected_count - 1, index * GENERAL_WARDROBE_GROUP_SIZE + GENERAL_WARDROBE_GROUP_SIZE - 1),
+                "visualIntent": "该组三镜的场景、光线、色彩与情绪意境",
+                "wardrobeByCharacter": {role_id: "与该组画面氛围协调的完整服装、鞋履与关键配饰" for role_id in role_ids},
+            }
+            for index in range(wardrobe_group_count)
+        ]
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + suffix_prompt.render()},

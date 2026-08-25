@@ -592,7 +592,7 @@ async def _store_direct_h3_result(job: Job, task: dict[str, Any]) -> dict[str, A
         raise ProviderError("H3 生成成功但未返回视频地址")
     task_id = job.provider_task_id or str(task.get("id") or "")
     owner_prefix = f"users/{job.user_id}/generated"
-    stored_url = await import_remote(source_url, f"{owner_prefix}/videos", f"h3-{task_id}.mp4")
+    stored_url = await _archive_h3_video_to_tos(source_url, f"{owner_prefix}/videos", f"h3-{task_id}.mp4")
     stored_cover, stored_cover_thumbnail = await _video_first_frame(source_url, f"h3-{task_id}", job.user_id)
     request = job.request or {}
     return {
@@ -607,6 +607,14 @@ async def _store_direct_h3_result(job: Job, task: dict[str, Any]) -> dict[str, A
         "duration": task.get("duration") or request.get("duration"),
         "ratio": task.get("ratio") or request.get("ratio"),
     }
+
+
+async def _archive_h3_video_to_tos(source_url: str, owner_prefix: str, filename: str) -> str:
+    """Archive a completed H3 result while preserving the failing pipeline stage in user-facing errors."""
+    try:
+        return await import_remote(source_url, owner_prefix, filename)
+    except ValueError as exc:
+        raise ProviderError(f"H3 已生成成功，但归档到 TOS 失败：供应商视频地址未通过下载安全校验（{exc}）") from exc
 
 
 async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
@@ -828,7 +836,7 @@ async def _store_h3_video_result(job: Job, data: dict[str, Any]) -> dict[str, An
     task_id = job.provider_task_id or str(data.get("taskId") or "")
     source_url = str(output["url"])
     owner_prefix = f"users/{job.user_id}/generated"
-    stored_url = await import_remote(source_url, f"{owner_prefix}/videos", f"h3-{task_id}.mp4")
+    stored_url = await _archive_h3_video_to_tos(source_url, f"{owner_prefix}/videos", f"h3-{task_id}.mp4")
     stored_cover, stored_cover_thumbnail = await _video_first_frame(source_url, f"h3-{task_id}", job.user_id)
     request = job.request or {}
     generation_mode = request.get("_h3Mode")

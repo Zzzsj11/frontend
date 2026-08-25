@@ -43,7 +43,7 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
                 "相邻场景的视觉基调要有明显差异（地点、光线、色彩、氛围至少两项明显不同），避免观众审美疲劳。",
                 "structuralSegments 说明的前奏、间奏、尾奏是系统拆出的无人空镜素材，可作为场景切换的天然节点，不需要你为它们分配行号。",
                 "先确定全片统一的视觉基调 globalVisual，再让每个场景在其框架内变化。",
-                "每个 scenes 条目必须在 wardrobeByCharacter 中为每个 selectedCharacters 的 id 设计一套符合地点、季节、时代与情绪的完整服装（上装、下装或裙装、鞋履、关键配饰）；同一大场景内保持该套服装一致，切换到相邻大场景时每个人物必须明显换一整套，禁止沿用定妆参考图服装或仅改变微小配饰。",
+                "每个 scenes 条目必须先综合 globalVisual 与本场 locationName、mood、emotion、visualTone、narrativePurpose，再在 wardrobeByCharacter 中为每个 selectedCharacters 的 id 设计一套与地点、季节、时代、光线、主色和情绪意境协调的完整服装（上装、下装或裙装、鞋履、关键配饰）；服装材质、色彩、层次和正式程度必须服务画面氛围。同一大场景内保持该套服装一致，切换到相邻大场景时每个人物必须明显换一整套，禁止沿用定妆参考图服装或仅改变微小配饰。",
                 "人物的面部、五官、脸型、肤色、年龄感和发型作为身份锚点全片一致；服装不属于身份锚点，必须按大场景变化。",
             ],
             ensure_ascii=False,
@@ -164,7 +164,7 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
                 "严格执行 currentShot.outline 中的 characterAction、emotionalFocus、cameraPurpose、motifIds 和 locationChange；未列入 motifIds 的视觉母题不得擅自加入。",
                 "一致性来自时间、天气、色彩与空间衔接，不等于所有镜头停留在同一场景。scenePrompt 必须体现大纲规划的场景推进。",
                 "当 source 为 ass 且 plannedDigitalHumanIds 非空时，shotPrompt 必须逐一写入对应 allowedCharacters 的面部身份信息，并逐字写出 currentShot.outline.wardrobeByCharacter 中对应角色的本场服装。参考图只用于锁定面部、五官、脸型、肤色、年龄感和发型，必须明确忽略参考图中的原始服装，严格换成本大场景服装；同一 sceneIndex 内服装一致，不同 sceneIndex 必须换装。严禁出现未列入本镜的其他人物。",
-                "当 source 为 general 且 plannedDigitalHumanIds 非空时，人物参考图会提交给视频模型；shotPrompt 必须明确保持参考人物的面部身份、五官、脸型、肤色、年龄感和发型一致，并严格使用本镜规划的服装与动作。",
+                "当 source 为 general 且 plannedDigitalHumanIds 非空时，人物参考图会提交给视频模型；shotPrompt 必须明确保持参考人物的面部身份、五官、脸型、肤色、年龄感和发型一致，并逐字使用 currentShot.outline.wardrobeByCharacter 的本组服装与动作。服装的材质、色彩、层次和正式程度必须呼应 currentShot.outline.wardrobeIntent 以及本镜场景、光线、主色和情绪；忽略参考图原始服装。同一 wardrobeGroupIndex 内服装一致，切换组后必须换装。",
                 "当 source 为 general、shotType 为 character 且 plannedDigitalHumanIds 为空时，digitalHumanIds 必须为空，但 shotPrompt 应依据曲风、性别、年龄、场景和动作自由设计本镜人物，不要求跨镜为同一个人。",
                 "当 shotType 为 empty 或 source 不为 general 且 plannedDigitalHumanIds 为空时，digitalHumanIds 必须为空，shotPrompt 必须明确为无人出镜的空镜，不得描写可识别人物。",
                 "构图必须适配指定画幅比例，动作必须能在 plannedDuration 内完成。",
@@ -310,7 +310,7 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
         "format": "text",
         "variables": {},
         "required_fragments": ["空镜严禁人物"],
-        "content": "空镜严禁人物；人物镜保留本镜预分配的性别与人数语义，但视频生成不使用人物参考图。每个人物镜可独立生成不同人物外貌与服装，不要求跨镜头身份或着装一致。",
+        "content": "空镜严禁人物；选择人物后，人物面部身份与发型跨镜一致，服装按 wardrobeGroupIndex 每 3 镜成组：同组严格一致，切换组时明显换整套；每套服装必须在材质、色彩、层次和正式程度上呼应场景、季节、曲风、光线、主色与叙事情绪。未选择人物时，每个人物镜可独立生成人物，不要求跨镜身份或着装一致。",
     },
     # ── 数字人定妆照（image 引擎；条件拼接逻辑留在代码，模板只含固定文案） ────
     "portrait.digital_human_ref": {

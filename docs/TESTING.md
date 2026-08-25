@@ -103,7 +103,7 @@ e2e 不在 preflight 内，按需触发：`test:e2e:user`（本地 mock 链路�
 
 ## 远程验收（对已部署环境）
 
-远程自动化固定使用 `http://124.222.219.76:5173`，不使用业务域名；域名可用性由 `scripts/online-health-check.sh` 单独验证，避免将网络问题误判为应用回归。带远程开关（`REMOTE_*`/`ADMIN_*`）运行时 playwright.config.ts 自动以 `e2e/env.ts` 的 `targetBaseURL()` 为目标且不在本地起服务，无需再设 `PLAYWRIGHT_BASE_URL`（设置了则可覆盖目标）。
+远程自动化固定使用 `http://120.24.38.200:5173`，不使用业务域名；域名可用性由 `scripts/online-health-check.sh` 单独验证，避免将网络问题误判为应用回归。带远程开关（`REMOTE_*`/`ADMIN_*`）运行时 playwright.config.ts 自动以 `e2e/env.ts` 的 `targetBaseURL()` 为目标且不在本地起服务，无需再设 `PLAYWRIGHT_BASE_URL`（设置了则可覆盖目标）。
 
 ```bash
 npm run test:remote:api        # API 契约/鉴权/隔离/软删除（不消耗生成 Token）

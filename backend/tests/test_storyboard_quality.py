@@ -142,7 +142,18 @@ def test_general_outline_rejects_changed_shot_type_quota() -> None:
             "cameraPurpose": "建立空间",
         }
 
-    body = {"shots": [shot(0, "empty"), shot(1, "empty"), shot(2, "character")]}
+    body = {
+        "shots": [shot(0, "empty"), shot(1, "empty"), shot(2, "character")],
+        "wardrobeGroups": [
+            {
+                "groupIndex": 0,
+                "shotStart": 0,
+                "shotEnd": 2,
+                "visualIntent": "冷蓝雨夜、克制疏离",
+                "wardrobeByCharacter": {"human-1": "深蓝防水风衣、灰色针织衫、黑色长裤与皮靴"},
+            }
+        ],
+    }
 
     with pytest.raises(ValueError, match="镜头类型配额不一致"):
         _check_general_outline(body, expected_count=3, empty_count=1, character_count=2, role_ids=["human-1"])
@@ -155,11 +166,70 @@ def test_general_outline_v2_expands_compact_decisions() -> None:
         "shots": [
             {"i": 0, "t": "e", "s": "雨夜街道", "b": "建立", "c": [], "a": "雨滴落地", "e": "孤独", "m": "广角静止"},
             {"i": 1, "t": "c", "s": "车站站台", "b": "推进", "c": ["human-1"], "a": "人物回望", "e": "克制", "m": "中景推近"},
-        ]
+        ],
+        "wardrobeGroups": [
+            {
+                "groupIndex": 0,
+                "shotStart": 0,
+                "shotEnd": 1,
+                "visualIntent": "冷蓝雨夜、克制疏离",
+                "wardrobeByCharacter": {"human-1": "深蓝防水风衣、灰色针织衫、黑色长裤与皮靴"},
+            }
+        ],
     }
     result = _check_general_outline_v2(body, expected_count=2, empty_count=1, character_count=1, role_ids=["human-1"])
     assert result["shots"][1]["outlineScene"] == "车站站台"
     assert result["shots"][1]["outlineShot"] == "人物回望；中景推近"
+    assert result["shots"][1]["wardrobeGroupIndex"] == 0
+    assert result["shots"][1]["wardrobeIntent"] == "冷蓝雨夜、克制疏离"
+    assert result["shots"][1]["wardrobeByCharacter"]["human-1"].startswith("深蓝")
+    assert result["shots"][0]["wardrobeByCharacter"] == {}
+
+
+def test_general_outline_v2_requires_atmosphere_matched_three_shot_wardrobe_groups() -> None:
+    shots = [{"i": index, "t": "c", "s": f"场景{index + 1}", "b": "推进", "c": ["human-1"], "a": "人物前行", "e": "坚定", "m": "中景跟拍"} for index in range(7)]
+    groups = [
+        {
+            "groupIndex": 0,
+            "shotStart": 0,
+            "shotEnd": 2,
+            "visualIntent": "晨雾低饱和、安静启程",
+            "wardrobeByCharacter": {"human-1": "浅灰亚麻外套、白衬衫、卡其长裤与棕色短靴"},
+        },
+        {
+            "groupIndex": 1,
+            "shotStart": 3,
+            "shotEnd": 5,
+            "visualIntent": "夕阳暖金、情绪升温",
+            "wardrobeByCharacter": {"human-1": "焦糖色麂皮夹克、米色针织衫、深棕长裤与皮鞋"},
+        },
+        {
+            "groupIndex": 2,
+            "shotStart": 6,
+            "shotEnd": 6,
+            "visualIntent": "深夜冷蓝、克制收束",
+            "wardrobeByCharacter": {"human-1": "藏蓝羊毛大衣、炭灰高领衫、黑色长裤与皮靴"},
+        },
+    ]
+    result = _check_general_outline_v2(
+        {"shots": shots, "wardrobeGroups": groups},
+        expected_count=7,
+        empty_count=0,
+        character_count=7,
+        role_ids=["human-1"],
+    )
+    assert [result["shots"][index]["wardrobeGroupIndex"] for index in (0, 3, 6)] == [0, 1, 2]
+    assert result["shots"][5]["wardrobeByCharacter"]["human-1"].startswith("焦糖色")
+
+    repeated = [groups[0], {**groups[1], "wardrobeByCharacter": groups[0]["wardrobeByCharacter"]}, groups[2]]
+    with pytest.raises(ValueError, match="相邻服装组"):
+        _check_general_outline_v2(
+            {"shots": shots, "wardrobeGroups": repeated},
+            expected_count=7,
+            empty_count=0,
+            character_count=7,
+            role_ids=["human-1"],
+        )
 
 
 @pytest.mark.asyncio
@@ -186,7 +256,7 @@ async def test_general_outline_v2_uses_one_compact_call(monkeypatch) -> None:
         selected_humans=[],
         call_override=fake_call,
     )
-    assert calls == [(2600, "general_story_outline_v2")]
+    assert calls == [(3400, "general_story_outline_v2")]
     assert result["protocolVersion"] == "v2"
 
 

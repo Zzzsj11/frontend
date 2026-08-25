@@ -117,6 +117,32 @@ const regenerate = async () => {
             </div>
           </article>
         </div>
+        <div v-else-if="store.activeStoryBible.wardrobeGroups?.length" class="scene-list">
+          <article
+            v-for="group in store.activeStoryBible.wardrobeGroups"
+            :key="group.groupIndex"
+            class="scene-card"
+          >
+            <div class="scene-index">{{ String(group.groupIndex + 1).padStart(2, '0') }}</div>
+            <div class="scene-body">
+              <div class="scene-head">
+                <strong>服装组 {{ group.groupIndex + 1 }}</strong>
+                <span class="scene-range"
+                  >镜头 {{ group.shotStart + 1 }}–{{ group.shotEnd + 1 }}</span
+                >
+              </div>
+              <div class="scene-attrs">
+                <span><b>画面意境：</b>{{ group.visualIntent }}</span>
+                <span
+                  v-for="(outfit, humanId) in group.wardrobeByCharacter"
+                  :key="humanId"
+                  class="wardrobe-item"
+                  ><b>{{ roleNames([humanId]) }}服装：</b>{{ outfit }}</span
+                >
+              </div>
+            </div>
+          </article>
+        </div>
         <p v-else class="empty-tab">暂无场景规划数据</p>
       </template>
 
@@ -185,6 +211,10 @@ const regenerate = async () => {
                 <span v-if="shot.characterAction"><b>动作：</b>{{ shot.characterAction }}</span>
                 <span v-if="shot.emotionalFocus"><b>情绪：</b>{{ shot.emotionalFocus }}</span>
                 <span v-if="shot.cameraPurpose"><b>镜头目的：</b>{{ shot.cameraPurpose }}</span>
+                <span v-if="shot.wardrobeGroupIndex !== undefined"
+                  ><b>服装组：</b>{{ shot.wardrobeGroupIndex + 1 }}</span
+                >
+                <span v-if="shot.wardrobeIntent"><b>服装意境：</b>{{ shot.wardrobeIntent }}</span>
                 <span v-if="shot.motifIds?.length"
                   ><b>视觉母题：</b>{{ motifNames(shot.motifIds) }}</span
                 >

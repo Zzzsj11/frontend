@@ -190,11 +190,17 @@ async def import_remote_image(url: str, category: str, filename: str | None = No
     return await put_image_with_thumbnail(safe_key(category, guessed), content, content_type)
 
 
+_HTTP_PUBLIC_URL_ALLOWLIST = frozenset({"store.vod-qcloud.com"})
+
+
 async def _validate_public_url(url: str) -> None:
     parsed = urlparse(url)
-    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
-        raise ValueError("仅支持不含凭证的 HTTPS 公网地址")
-    addresses = await asyncio.get_running_loop().getaddrinfo(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+    hostname = (parsed.hostname or "").lower()
+    scheme_allowed = parsed.scheme == "https" or (parsed.scheme == "http" and hostname in _HTTP_PUBLIC_URL_ALLOWLIST)
+    if not scheme_allowed or not hostname or parsed.username or parsed.password:
+        raise ValueError("仅支持不含凭证的 HTTPS 公网地址（受信任供应商域名除外）")
+    default_port = 443 if parsed.scheme == "https" else 80
+    addresses = await asyncio.get_running_loop().getaddrinfo(hostname, parsed.port or default_port, type=socket.SOCK_STREAM)
     for entry in addresses:
         address = ipaddress.ip_address(entry[4][0])
         if not address.is_global:

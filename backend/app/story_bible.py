@@ -82,6 +82,26 @@ async def build_general_story_bible(*, config: dict[str, Any], shots: list[dict[
     total = len(shots)
     # 部分曲风（戏曲、中文喊麦）没有二级分类，拼接风格路径时跳过空段
     category_path = " / ".join(part for part in (config.get("genre"), config.get("secondary_category")) if part)
+    wardrobe_groups = []
+    for shot in shots:
+        group_index = shot.get("wardrobeGroupIndex")
+        if group_index is None or any(item["groupIndex"] == group_index for item in wardrobe_groups):
+            continue
+        wardrobe_groups.append(
+            {
+                "groupIndex": group_index,
+                "shotStart": group_index * 3,
+                "shotEnd": min(len(shots) - 1, group_index * 3 + 2),
+                "visualIntent": shot.get("wardrobeIntent") or "",
+                "wardrobeByCharacter": shot.get("wardrobePlanByCharacter") or shot.get("wardrobeByCharacter") or {},
+            }
+        )
+    character_policy = character_policy_prompt.render()
+    if wardrobe_groups:
+        character_policy = (
+            character_policy + " 已选人物的面部身份与发型跨镜一致；服装按每 3 镜一个 wardrobeGroupIndex 规划，同组严格一致、切换组时明显换整套。"
+            "每套服装的材质、色彩、层次和正式程度必须呼应 wardrobeIntent 所描述的场景、季节、曲风、光线、主色与叙事情绪，并忽略人物参考图原始服装。"
+        )
     return {
         "version": STORY_BIBLE_VERSION,
         "logline": logline_prompt.render(category_path=category_path, gender=config.get("gender") or "女"),
@@ -92,7 +112,8 @@ async def build_general_story_bible(*, config: dict[str, Any], shots: list[dict[
             "ratio": config.get("ratio"),
             "overallPrompt": config.get("overall_prompt"),
         },
-        "characterPolicy": character_policy_prompt.render(),
+        "characterPolicy": character_policy,
+        "wardrobeGroups": wardrobe_groups,
         "shots": [
             {
                 "index": index,
@@ -105,6 +126,9 @@ async def build_general_story_bible(*, config: dict[str, Any], shots: list[dict[
                 "characterAction": shot["characterAction"],
                 "emotionalFocus": shot["emotionalFocus"],
                 "cameraPurpose": shot["cameraPurpose"],
+                "wardrobeGroupIndex": shot.get("wardrobeGroupIndex"),
+                "wardrobeIntent": shot.get("wardrobeIntent") or "",
+                "wardrobeByCharacter": shot.get("wardrobeByCharacter") or {},
                 "materialDuration": durations[index],
                 "generationDuration": normalize_video_duration(durations[index]),
             }
