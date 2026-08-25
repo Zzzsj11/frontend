@@ -31,6 +31,8 @@ def _model_provider(job: GenerationJobModel, usage: TokenUsageModel | None) -> t
     result = job.result or {}
     model = str((usage.model if usage else "") or result.get("model") or request.get("model") or "")
     provider = str((usage.provider if usage else "") or result.get("provider") or job.provider or request.get("_provider") or "")
+    if model == "minimax-h3" and provider == "yinghe":
+        provider = "yinghe-h3"
     return model, provider
 
 
