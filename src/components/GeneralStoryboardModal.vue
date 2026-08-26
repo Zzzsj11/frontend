@@ -33,6 +33,7 @@ import {
   generationModelLabel,
   loadGenerationModels,
   videoModelCapabilities,
+  videoResolutionLabel,
 } from '../generationModels'
 
 const props = withDefaults(defineProps<{ random?: boolean }>(), { random: false })
@@ -447,7 +448,7 @@ const submit = async () => {
               ><span>清晰度 *</span
               ><select v-model="resolution">
                 <option v-for="item in resolutionChoices" :key="item" :value="item">
-                  {{ item.toUpperCase() }}
+                  {{ videoResolutionLabel(videoModel, item) }}
                 </option>
               </select></label
             >

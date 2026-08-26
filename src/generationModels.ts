@@ -28,6 +28,14 @@ export const VIDEO_MODEL_OPTIONS = reactive<Array<GenerationModelOption>>([
 ])
 export const videoModelCapabilities = (modelId?: string): GenerationModelCapabilities =>
   VIDEO_MODEL_OPTIONS.find((item) => item.value === modelId)?.capabilities ?? {}
+export const videoResolutionLabel = (modelId: string | undefined, resolution: string): string => {
+  const labels = videoModelCapabilities(modelId).resolutionLabels
+  if (labels && typeof labels === 'object' && !Array.isArray(labels)) {
+    const label = (labels as Record<string, unknown>)[resolution]
+    if (typeof label === 'string' && label.trim()) return label
+  }
+  return resolution.toUpperCase()
+}
 export const videoModelConcurrency = (modelId?: string): number => {
   const configured = VIDEO_MODEL_OPTIONS.find((item) => item.value === modelId)?.capabilities
     ?.executionConcurrency

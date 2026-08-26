@@ -213,6 +213,7 @@ async def seed_system_data() -> None:
                     "durations": {"min": 4, "max": 15},
                     "ratios": ["16:9", "9:16", "4:3", "1:1"],
                     "resolutions": ["480p", "720p", "1080p"],
+                    "resolutionLabels": {"720p": "736P"},
                     "variants": {
                         "t2va": {"images": {"min": 0, "max": 0}},
                         "i2va": {"images": {"min": 1, "max": 1}},
@@ -252,6 +253,7 @@ async def seed_system_data() -> None:
                     "durations": {"min": 4, "max": 15},
                     "ratios": ["16:9", "9:16", "4:3", "1:1"],
                     "resolutions": ["720p", "1080p"],
+                    "resolutionLabels": {"720p": "768P", "1080p": "2K"},
                     "h3Modes": ["auto", "text", "first_frame", "first_last", "reference"],
                     "referenceImage": {"min": 0, "max": 6},
                     "referenceVideo": {"min": 0, "max": 1},
@@ -279,7 +281,7 @@ async def seed_system_data() -> None:
                 {
                     "durations": {"min": 4, "max": 15},
                     "ratios": ["16:9", "9:16", "4:3", "1:1"],
-                    "resolutions": ["480p", "720p"],
+                    "resolutions": ["480p", "720p", "1080p"],
                     "nativeAudio": True,
                     "executionPool": "ppio-seedance",
                     "executionConcurrency": 200,
@@ -299,6 +301,7 @@ async def seed_system_data() -> None:
                     "durations": {"min": 4, "max": 15},
                     "ratios": ["16:9", "9:16", "4:3", "1:1"],
                     "resolutions": ["720p", "1080p"],
+                    "resolutionLabels": {"720p": "768P", "1080p": "2K"},
                     "h3Modes": ["auto", "text", "first_frame", "first_last", "reference"],
                     "referenceImage": {"min": 0, "max": 6},
                     "referenceVideo": {"min": 0, "max": 1},

@@ -8,6 +8,7 @@ import {
   generationModelLabel,
   isH3VideoModel,
   videoModelCapabilities,
+  videoResolutionLabel,
 } from '../generationModels'
 import {
   DEFAULT_H3_MODE,
@@ -38,7 +39,10 @@ const durationChoices = VIDEO_DURATION_CHOICES
 const isH3 = computed(() => props.mode === 'shot' && isH3VideoModel(props.modelValue.videoModel))
 
 const summary = computed(() => {
-  const parts = [props.modelValue.ratio, props.modelValue.resolution.toUpperCase()]
+  const parts = [
+    props.modelValue.ratio,
+    videoResolutionLabel(props.modelValue.videoModel, props.modelValue.resolution),
+  ]
   if (props.mode === 'shot') parts.push(`${props.modelValue.duration}s`)
   const models = props.mode === 'shot' ? VIDEO_MODEL_OPTIONS : IMAGE_MODEL_OPTIONS
   const modelValue =
@@ -213,7 +217,7 @@ onBeforeUnmount(close)
                 :aria-pressed="modelValue.resolution === resolution"
                 @click="updateOption('resolution', resolution)"
               >
-                {{ resolution.toUpperCase() }}
+                {{ videoResolutionLabel(modelValue.videoModel, resolution) }}
               </button>
             </div>
           </fieldset>

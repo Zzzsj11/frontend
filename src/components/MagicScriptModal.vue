@@ -12,6 +12,8 @@ import {
   VIDEO_MODEL_OPTIONS,
   generationModelLabel,
   loadGenerationModels,
+  videoModelCapabilities,
+  videoResolutionLabel,
 } from '../generationModels'
 
 const store = useProjectStore()
@@ -29,6 +31,12 @@ const videoModel = ref(DEFAULT_VIDEO_MODEL)
 const assInputRef = ref<HTMLInputElement>()
 
 const canSubmit = computed(() => songId.value.trim() !== '' && assFile.value !== null)
+const resolutionChoices = computed<ShotGenOptions['resolution'][]>(() => {
+  const configured = videoModelCapabilities(videoModel.value).resolutions
+  return Array.isArray(configured) && configured.length
+    ? (configured as ShotGenOptions['resolution'][])
+    : ['480p', '720p', '1080p']
+})
 
 const resetForm = () => {
   songId.value = ''
@@ -53,6 +61,11 @@ watch(
   },
   { immediate: true },
 )
+watch(videoModel, () => {
+  if (!resolutionChoices.value.includes(resolution.value)) {
+    resolution.value = resolutionChoices.value[0] ?? '720p'
+  }
+})
 
 // ---------- ass 文件 ----------
 const pickAss = (files: FileList | null) => {
@@ -132,9 +145,9 @@ const cancel = () => {
           <label
             ><span>清晰度 *</span
             ><select v-model="resolution">
-              <option value="480p">480p</option>
-              <option value="720p">720p</option>
-              <option value="1080p">1080p</option>
+              <option v-for="item in resolutionChoices" :key="item" :value="item">
+                {{ videoResolutionLabel(videoModel, item) }}
+              </option>
             </select></label
           >
           <label

@@ -32,9 +32,11 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     ppio_h3 = next(x for x in options if x["id"] == "minimax-h3-ppio")
     assert h3["name"] == "H3（RunningHub，2并发，仅测试时用）"
     assert h3["capabilities"]["executionConcurrency"] == 2
+    assert h3["capabilities"]["resolutionLabels"]["720p"] == "736P"
     assert direct_h3["name"] == "H3（英和）"
     assert direct_h3["capabilities"]["executionConcurrency"] == 200
     assert direct_h3["capabilities"]["executionPool"] == "yinghe-h3"
+    assert direct_h3["capabilities"]["resolutionLabels"]["720p"] == "768P"
     assert h3["capabilities"]["referenceImage"] == {"min": 0, "max": 6}
     assert h3["capabilities"]["referenceVideo"] == {"min": 0, "max": 1}
     assert h3["capabilities"]["referenceAudio"] == {"min": 0, "max": 3}
@@ -44,9 +46,10 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     assert "first_last" in h3["capabilities"]["h3Modes"]
     assert "first_last" in direct_h3["capabilities"]["h3Modes"]
     assert ppio_sd["name"] == "SD2.0（PPIO）"
-    assert ppio_sd["capabilities"]["resolutions"] == ["480p", "720p"]
+    assert ppio_sd["capabilities"]["resolutions"] == ["480p", "720p", "1080p"]
     assert ppio_h3["name"] == "H3（PPIO）"
     assert ppio_h3["capabilities"]["providerCode"] == "ppio"
+    assert ppio_h3["capabilities"]["resolutionLabels"]["720p"] == "768P"
     client.delete(f"/api/admin/users/{created['id']}")
     # Restore the shared TestClient's refresh cookie for subsequent auth tests.
     restored = client.post("/api/auth/login", json={"username": "admin", "password": "secure-admin-123"})
