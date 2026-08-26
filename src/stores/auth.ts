@@ -19,6 +19,8 @@ export interface AccountBalance {
   available: boolean
   balance: string | null
   balanceDisplay: string
+  rawBalance?: string | null
+  unitScale?: number
   currency: string
   updatedAt: string
   message?: string | null
@@ -29,6 +31,7 @@ export interface AccountBalance {
     pendingCharges: number | null
     outstandingInvoices: number | null
   }
+  rawDetails?: Record<string, string | null>
   providers?: {
     yinghe: AccountBalance
     ppio: AccountBalance

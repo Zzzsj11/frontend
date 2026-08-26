@@ -239,8 +239,13 @@ async def test_ppio_balance_and_channel_cost_precheck(monkeypatch) -> None:
     monkeypatch.setattr(balance, "settings", ppio_settings)
     monkeypatch.setattr(balance.httpx, "AsyncClient", lambda **_kwargs: PpioClient())
     result = await balance.query_ppio_balance()
-    assert result["balanceDisplay"] == "1000000.00"
-    assert result["details"]["cashBalance"] == 800000
+    assert result["rawBalance"] == "1000000"
+    assert result["balance"] == "100"
+    assert result["balanceDisplay"] == "100.00"
+    assert result["unitScale"] == 10000
+    assert result["details"]["cashBalance"] == 80
+    assert result["details"]["creditLimit"] == 20
+    assert result["rawDetails"]["cashBalance"] == "800000"
 
     async def provider_balances(force=False):
         return {"providers": {"yinghe": balance.unavailable_balance(), "ppio": result}}
@@ -249,3 +254,10 @@ async def test_ppio_balance_and_channel_cost_precheck(monkeypatch) -> None:
     estimate = await balance.ensure_video_batch_balance([SimpleNamespace(duration=10, model="doubao-seedance-2.0-ppio"), SimpleNamespace(duration=10, model="minimax-h3-ppio")])
     assert estimate["estimatedCost"] == 12.25
     assert estimate["providerEstimates"] == {"ppio": 12.25}
+
+    async def insufficient_provider_balances(force=False):
+        return {"providers": {"yinghe": balance.unavailable_balance(), "ppio": {**result, "balance": "10", "balanceDisplay": "10.00"}}}
+
+    monkeypatch.setattr(balance, "query_provider_balances", insufficient_provider_balances)
+    with pytest.raises(ValueError, match="PPIO 余额不足，请先完成充值或提升余额上限后再试"):
+        await balance.ensure_video_batch_balance([SimpleNamespace(duration=10, model="doubao-seedance-2.0-ppio"), SimpleNamespace(duration=10, model="minimax-h3-ppio")])

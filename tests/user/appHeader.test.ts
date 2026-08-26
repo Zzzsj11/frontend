@@ -49,15 +49,23 @@ describe('AppHeader provider balances', () => {
         },
         ppio: {
           available: true,
-          balance: '1000000',
-          balanceDisplay: '1000000.00',
+          rawBalance: '1000000',
+          balance: '100',
+          balanceDisplay: '100.00',
+          unitScale: 10000,
           currency: 'CNY',
           updatedAt: '',
           details: {
-            cashBalance: 800000,
-            creditLimit: 200000,
+            cashBalance: 80,
+            creditLimit: 20,
             pendingCharges: 0,
             outstandingInvoices: 0,
+          },
+          rawDetails: {
+            cashBalance: '800000',
+            creditLimit: '200000',
+            pendingCharges: '0',
+            outstandingInvoices: '0',
           },
         },
       },
@@ -71,7 +79,7 @@ describe('AppHeader provider balances', () => {
     expect(wrapper.text()).toContain('2626.47')
     expect(wrapper.text()).toContain('yh-test*** 余 658.96')
     expect(wrapper.get('[data-test="ppio-balance"]').text()).toContain('PPIO')
-    expect(wrapper.get('[data-test="ppio-balance"]').text()).toContain('1000000.00')
-    expect(wrapper.get('[data-test="ppio-balance"]').attributes('title')).toContain('现金 ¥800000')
+    expect(wrapper.get('[data-test="ppio-balance"]').text()).toContain('100.00')
+    expect(wrapper.get('[data-test="ppio-balance"]').attributes('title')).toContain('现金 ¥80')
   })
 })

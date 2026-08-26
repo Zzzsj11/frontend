@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import time
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import httpx
@@ -16,6 +17,7 @@ _lock = asyncio.Lock()
 SD20_ESTIMATE_PRICE_PER_SECOND = 0.83
 H3_ESTIMATE_PRICE_PER_SECOND = 0.425
 PPIO_SD20_ESTIMATE_PRICE_PER_SECOND = 0.8
+PPIO_BALANCE_UNIT_SCALE = Decimal("10000")
 
 
 def build_balance_sign(user_id: str, timestamp: int, api_key: str) -> str:
@@ -41,6 +43,20 @@ def _to_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _ppio_amount_in_yuan(value: Any) -> Decimal | None:
+    """PPIO 余额接口金额单位为 1/10000 元；业务与前端统一使用人民币元。"""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return Decimal(str(value)) / PPIO_BALANCE_UNIT_SCALE
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _decimal_text(value: Decimal) -> str:
+    return format(value.normalize(), "f")
 
 
 def unavailable_balance(message: str = "余额暂不可用") -> dict[str, Any]:
@@ -151,22 +167,28 @@ async def query_ppio_balance() -> dict[str, Any]:
             response = await client.get(settings.ppio_balance_url, headers={"Authorization": f"Bearer {settings.ppio_api_key}"})
             response.raise_for_status()
             data = response.json()
-        available = _to_float(data.get("availableBalance"))
+        raw_available = data.get("availableBalance")
+        available = _ppio_amount_in_yuan(raw_available)
         if available is None:
             raise ValueError("PPIO 余额接口未返回 availableBalance")
+        raw_details = {
+            "cashBalance": data.get("cashBalance"),
+            "creditLimit": data.get("creditLimit"),
+            "pendingCharges": data.get("pendingCharges"),
+            "outstandingInvoices": data.get("outstandingInvoices"),
+        }
+        details = {key: _ppio_amount_in_yuan(value) for key, value in raw_details.items()}
         return {
             "available": True,
-            "balance": str(data.get("availableBalance")),
+            "rawBalance": str(raw_available),
+            "balance": _decimal_text(available),
             "balanceDisplay": f"{available:.2f}",
             "currency": "CNY",
+            "unitScale": int(PPIO_BALANCE_UNIT_SCALE),
             "updatedAt": datetime.now(UTC).isoformat(),
             "message": None,
-            "details": {
-                "cashBalance": _to_float(data.get("cashBalance")),
-                "creditLimit": _to_float(data.get("creditLimit")),
-                "pendingCharges": _to_float(data.get("pendingCharges")),
-                "outstandingInvoices": _to_float(data.get("outstandingInvoices")),
-            },
+            "rawDetails": raw_details,
+            "details": {key: float(value) if value is not None else None for key, value in details.items()},
         }
     except (httpx.HTTPError, ValueError, TypeError) as exc:
         return unavailable_balance(str(exc) or "PPIO 余额服务请求失败")
