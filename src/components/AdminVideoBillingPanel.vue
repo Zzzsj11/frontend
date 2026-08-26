@@ -9,6 +9,7 @@ import {
 } from '../api/adminVideoBilling'
 import AdminVideoBillingDetailModal from './AdminVideoBillingDetailModal.vue'
 import { formatChinaDateTime } from '../utils/dateTime'
+import { formatElapsedSeconds } from '../utils/duration'
 
 const emptyData = (): VideoBillingResponse => ({
   total: 0,
@@ -70,6 +71,11 @@ const load = async () => {
   }
 }
 const search = () => {
+  offset.value = 0
+  void load()
+}
+const clearSearch = () => {
+  keyword.value = ''
   offset.value = 0
   void load()
 }
@@ -153,12 +159,24 @@ onMounted(load)
         <option value="business">正常业务</option>
         <option value="agent_test">Agent 开发测试</option>
       </select>
-      <input
-        v-model="keyword"
-        aria-label="搜索"
-        placeholder="用户、项目、子项目或工单ID"
-        @keyup.enter="search"
-      />
+      <div class="search-field">
+        <input
+          v-model="keyword"
+          aria-label="搜索"
+          placeholder="用户、项目、子项目或工单ID"
+          @keyup.enter="search"
+        />
+        <button
+          v-if="keyword"
+          type="button"
+          class="clear-search"
+          aria-label="清空搜索并重置列表"
+          title="清空搜索"
+          @click="clearSearch"
+        >
+          ×
+        </button>
+      </div>
       <button class="action" @click="search">查询</button>
       <button class="action primary" :disabled="reconciling" @click="reconcile">
         {{ reconciling ? '核算中…' : '重新核算全部历史' }}
@@ -175,6 +193,7 @@ onMounted(load)
             <th>模型</th>
             <th>来源</th>
             <th>时长</th>
+            <th>生成耗时</th>
             <th>生成结果</th>
             <th>计费用量/单价<small>Token / 秒</small></th>
             <th>费用/每秒费用（单价毛）</th>
@@ -199,6 +218,7 @@ onMounted(load)
               <small v-if="item.agentRunId">{{ item.agentName }} · {{ item.agentRunId }}</small>
             </td>
             <td>{{ item.durationSeconds ? `${item.durationSeconds} 秒` : '-' }}</td>
+            <td>{{ formatElapsedSeconds(item.generationElapsedSeconds) }}</td>
             <td>
               <span :class="['badge', { failed: item.isFailed }]">{{
                 item.isFailed ? '生成失败' : '生成成功'

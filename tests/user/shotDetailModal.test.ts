@@ -101,6 +101,7 @@ describe('ShotDetailModal general MV character controls', () => {
           {
             id: 'h3-asset',
             generationJobId: 'job-h3-123456',
+            generationElapsedSeconds: 96,
             coverUrl: '/h3.jpg',
             videoUrl: '/h3.mp4',
             duration: 5,
@@ -110,6 +111,7 @@ describe('ShotDetailModal general MV character controls', () => {
           {
             id: 'sd-asset',
             generationJobId: 'job-sd-654321',
+            generationElapsedSeconds: 45,
             coverUrl: '/sd.jpg',
             videoUrl: '/sd.mp4',
             duration: 5,

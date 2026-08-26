@@ -22,6 +22,7 @@ from .auth import CurrentUser, hash_password, user_public
 from .config import settings
 from .database import database_session, session_factory
 from .generation_constraints import OUTLINE_STALE_SECONDS
+from .generation_timing import generation_elapsed_seconds
 from .jobs import Job, jobs
 from .media_constraints import normalize_video_duration
 from .models import (
@@ -850,6 +851,16 @@ async def get_task(task_id: str, user: CurrentUser, db: AsyncSession = Db, histo
     voices_by_line: dict[str, list[VoiceAssetModel]] = {}
     for asset in await _asset_rows(VoiceAssetModel, "voice"):
         voices_by_line.setdefault(asset.storyboard_line_id, []).append(asset)
+    generation_job_ids = {asset.generation_job_id for assets in shots_by_line.values() for asset in assets if asset.generation_job_id}
+    generation_jobs = list((await db.execute(select(GenerationJobModel).where(GenerationJobModel.id.in_(generation_job_ids)))).scalars().all()) if generation_job_ids else []
+    job_elapsed = {
+        job.id: generation_elapsed_seconds(
+            created_at=job.created_at,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+        )
+        for job in generation_jobs
+    }
     return {
         **task_json(task),
         "cast": [item.digital_human_id for item in cast],
@@ -868,6 +879,7 @@ async def get_task(task_id: str, user: CurrentUser, db: AsyncSession = Db, histo
                 }
                 if not history
                 else None,
+                job_elapsed_seconds=job_elapsed,
             )
             for line in lines
         ],
@@ -1944,6 +1956,7 @@ def _line_json_from_assets(
     *,
     include_history: bool = True,
     asset_counts: dict[str, int] | None = None,
+    job_elapsed_seconds: dict[str, float | None] | None = None,
 ) -> dict:
     """组装单行脚本 JSON（纯函数，资产由调用方预取）。
 
@@ -1958,6 +1971,7 @@ def _line_json_from_assets(
             "originalCoverUrl": a.cover_url,
             "videoUrl": a.video_url,
             "generationJobId": a.generation_job_id,
+            "generationElapsedSeconds": (job_elapsed_seconds or {}).get(a.generation_job_id) if a.generation_job_id else None,
             "model": a.model_code,
             "duration": a.duration,
             "resolution": a.resolution,
@@ -2014,7 +2028,17 @@ async def line_json(db: AsyncSession, line: StoryboardLineModel, cast: list[str]
         .scalars()
         .all()
     )
-    return _line_json_from_assets(line, cast, scenes, shots, voices)
+    job_ids = {asset.generation_job_id for asset in shots if asset.generation_job_id}
+    generation_jobs = list((await db.execute(select(GenerationJobModel).where(GenerationJobModel.id.in_(job_ids)))).scalars().all()) if job_ids else []
+    job_elapsed = {
+        job.id: generation_elapsed_seconds(
+            created_at=job.created_at,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+        )
+        for job in generation_jobs
+    }
+    return _line_json_from_assets(line, cast, scenes, shots, voices, job_elapsed_seconds=job_elapsed)
 
 
 @router.get("/tasks/{task_id}/storyboard-lines/{line_id}")

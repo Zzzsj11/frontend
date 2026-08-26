@@ -13,6 +13,7 @@ export interface VideoBillingItem {
   model: string
   resolution: string
   durationSeconds: number
+  generationElapsedSeconds?: number
   generationStatus: string
   isFailed: boolean
   billingStatus: string
@@ -38,6 +39,7 @@ export interface VideoBillingDetail {
   provider: string
   resolution: string
   durationSeconds: number
+  generationElapsedSeconds?: number
   usageQuantity: number
   usageUnit: string
   unitPrice: number

@@ -9,7 +9,8 @@ import ImageZoom from './ImageZoom.vue'
 import ShotGenerationOptionsPopover from './ShotGenerationOptionsPopover.vue'
 import { confirmDialog } from '../composables/useConfirmDialog'
 import { normalizeShotOptions } from '../mediaConstraints'
-import { loadGenerationModels } from '../generationModels'
+import { loadGenerationModels, VIDEO_MODEL_OPTIONS } from '../generationModels'
+import { formatElapsedSeconds } from '../utils/duration'
 
 const store = useProjectStore()
 void loadGenerationModels()
@@ -28,6 +29,8 @@ const activeTab = ref<TabKey | null>(null)
 // 分镜视频生成参数草稿（清晰度 / 时长 / 画幅 / 模型），重新生成分镜时生效
 const optionsDraft = ref<ShotGenOptions>({ ...DEFAULT_SHOT_OPTIONS })
 const copiedJobId = ref('')
+const assetModelLabel = (model?: string) =>
+  VIDEO_MODEL_OPTIONS.find((option) => option.value === model)?.label || model || '模型未知'
 let copyFeedbackTimer: number | undefined
 const clockNow = ref(Date.now())
 const clockTimer = window.setInterval(() => {
@@ -408,6 +411,10 @@ const cancel = () => store.closeEditor()
                     :src="asset.originalCoverUrl || asset.coverUrl"
                     :alt="`片段 v${i + 1} 原图预览`"
                   />
+                </div>
+                <div class="asset-meta">
+                  <span :title="asset.model">{{ assetModelLabel(asset.model) }}</span>
+                  <span>耗时 {{ formatElapsedSeconds(asset.generationElapsedSeconds) }}</span>
                 </div>
                 <div v-if="asset.generationJobId" class="asset-job">
                   <span :title="asset.generationJobId">工单 {{ asset.generationJobId }}</span>
@@ -825,13 +832,26 @@ const cancel = () => store.closeEditor()
 
 /* 已生成片段缩略图列表 */
 .asset-list {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  flex-wrap: wrap;
 }
 .asset-item {
-  width: 180px;
   min-width: 0;
+}
+.asset-meta {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 4px;
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+.asset-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .asset-thumb {
   position: relative;

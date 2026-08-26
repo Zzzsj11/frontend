@@ -19,6 +19,7 @@ from .config import settings
 from .database import database_session
 from .general_outline_comparison import compare_general_outlines
 from .generation_constraints import GENERAL_STORYBOARD_MAX_SHOTS
+from .generation_timing import generation_elapsed_seconds
 from .jobs import jobs as job_manager
 from .kling import ASPECT_RATIOS as KLING_ASPECT_RATIOS
 from .kling import IMAGE_TYPES as KLING_IMAGE_TYPES
@@ -573,6 +574,11 @@ async def video_billing(
                 "model": record.model,
                 "resolution": record.resolution,
                 "durationSeconds": duration,
+                "generationElapsedSeconds": generation_elapsed_seconds(
+                    created_at=job.created_at,
+                    started_at=job.started_at,
+                    finished_at=job.finished_at,
+                ),
                 "generationStatus": record.generation_status,
                 "isFailed": record.is_failed,
                 "billingStatus": record.billing_status,
@@ -662,6 +668,11 @@ async def video_billing_detail(record_id: str, user: CurrentUser, db: AsyncSessi
         "provider": record.provider,
         "resolution": record.resolution,
         "durationSeconds": _money(result_data.get("duration") or request_data.get("duration")),
+        "generationElapsedSeconds": generation_elapsed_seconds(
+            created_at=job.created_at,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+        ),
         "usageQuantity": _money(record.usage_quantity),
         "usageUnit": record.usage_unit,
         "unitPrice": _money(record.unit_price),

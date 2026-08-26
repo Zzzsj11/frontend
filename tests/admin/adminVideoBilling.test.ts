@@ -33,6 +33,7 @@ const response = {
       model: 'minimax-h3',
       resolution: '720p',
       durationSeconds: 12,
+      generationElapsedSeconds: 96,
       generationStatus: 'failed',
       isFailed: true,
       billingStatus: 'priced',
@@ -57,6 +58,7 @@ const response = {
       model: 'minimax-h3-runninghub',
       resolution: '720p',
       durationSeconds: 12,
+      generationElapsedSeconds: 45,
       generationStatus: 'failed',
       isFailed: true,
       billingStatus: 'excluded',
@@ -91,6 +93,21 @@ describe('AdminVideoBillingPanel', () => {
     expect(wrapper.text()).toContain('¥5.1')
     expect(wrapper.text()).toContain('4.25毛')
     expect(wrapper.text()).not.toContain('12 Token')
+    expect(wrapper.text()).toContain('生成耗时')
+    expect(wrapper.text()).toContain('1 分 36 秒')
+  })
+
+  it('清空搜索条件后回到首页并重新加载完整列表', async () => {
+    const wrapper = mount(AdminVideoBillingPanel)
+    await flushPromises()
+    const input = wrapper.get('input[aria-label="搜索"]')
+    await input.setValue('job-1')
+    await wrapper.get('button[aria-label="清空搜索并重置列表"]').trigger('click')
+    await flushPromises()
+    expect((input.element as HTMLInputElement).value).toBe('')
+    const requestedPath = String(apiRequest.mock.calls.at(-1)?.[0])
+    expect(requestedPath).not.toContain('q=')
+    expect(requestedPath).toContain('offset=0')
   })
 
   it('支持筛选失败任务并触发历史重算', async () => {

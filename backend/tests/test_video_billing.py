@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -68,6 +68,7 @@ async def _seed_billing_fixtures() -> None:
                 },
                 provider="yinghe-h3",
                 error="供应商失败",
+                started_at=now - timedelta(seconds=96),
                 finished_at=now,
                 deleted_at=now,
                 generation_origin="agent_test",
@@ -138,6 +139,7 @@ async def test_video_billing_reconciles_success_failed_and_excluded(client):
     assert items["billing-h3-failed"]["billingStatus"] == "priced"
     assert items["billing-h3-failed"]["amount"] == pytest.approx(5.1)
     assert items["billing-h3-failed"]["durationSeconds"] == 12
+    assert items["billing-h3-failed"]["generationElapsedSeconds"] == 96
     assert items["billing-h3-failed"]["rateLabel"] == "¥0.425 / 秒"
     assert items["billing-h3-failed"]["generationOrigin"] == "agent_test"
     assert items["billing-h3-failed"]["agentRunId"] == "agent-test-billing-001"
@@ -157,6 +159,7 @@ async def test_video_billing_reconciles_success_failed_and_excluded(client):
     assert detail.json()["references"][0]["url"] == "https://example.com/reference.jpg"
     assert detail.json()["rawUsage"] == {"output_seconds": 12}
     assert detail.json()["generationOrigin"] == "agent_test"
+    assert detail.json()["generationElapsedSeconds"] == 96
 
     agent_only = client.get("/api/admin/video-billing", params={"origin": "agent_test", "q": "billing-"}).json()
     assert agent_only["total"] == 1

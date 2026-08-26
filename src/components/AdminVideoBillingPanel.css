@@ -52,6 +52,33 @@ small {
 .toolbar input {
   min-width: 240px;
 }
+.search-field {
+  position: relative;
+}
+.search-field input {
+  box-sizing: border-box;
+  width: 100%;
+  padding-right: 34px;
+}
+.clear-search {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 20px;
+}
+.clear-search:hover {
+  color: var(--text-primary);
+}
 .action {
   padding: 8px 12px;
   border: 1px solid var(--border-dark);

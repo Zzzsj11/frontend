@@ -82,6 +82,7 @@ function mapScriptLine(item: Record<string, unknown>): ScriptLine {
       originalCoverUrl?: string
       videoUrl: string
       generationJobId?: string
+      generationElapsedSeconds?: number
       duration: number
       model?: string
       isCurrent: boolean

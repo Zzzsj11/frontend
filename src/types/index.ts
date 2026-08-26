@@ -60,6 +60,8 @@ export interface ShotAsset {
   id: string
   /** 生成该视频资产的内部工单 ID，供业务与管理后台联查。 */
   generationJobId?: string
+  /** 从任务开始执行到最终完成的耗时（秒）。 */
+  generationElapsedSeconds?: number
   /** 视频封面图 */
   coverUrl: string
   /** 视频封面原图，仅在放大预览时加载 */
