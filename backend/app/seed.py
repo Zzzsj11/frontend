@@ -318,6 +318,7 @@ async def seed_system_data() -> None:
             ),
         ]
         for mid, model_provider_id, code, name, modality, provider_id, capabilities, is_default in defaults:
+            ppio_model_enabled = not code.endswith("-ppio") or bool(settings.ppio_api_key) or settings.app_env != "production"
             model = await session.get(AiModelModel, mid)
             if not model:
                 session.add(
@@ -329,7 +330,7 @@ async def seed_system_data() -> None:
                         modality=modality,
                         provider_model_id=provider_id or code,
                         capabilities=capabilities,
-                        status="active",
+                        status="active" if ppio_model_enabled else "inactive",
                         user_visible=True,
                         is_default=is_default,
                     )
@@ -339,7 +340,7 @@ async def seed_system_data() -> None:
                 model.name = name
                 model.provider_model_id = provider_id or code
                 model.capabilities = capabilities
-                model.status = "active"
+                model.status = "active" if ppio_model_enabled else "inactive"
                 model.user_visible = True
         system_style_specs = [
             ("style-system-male", "男", 0),
