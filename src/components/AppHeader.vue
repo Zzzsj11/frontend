@@ -10,22 +10,30 @@ const menuOpen = ref(false)
 const menu = ref<HTMLElement | null>(null)
 const userName = computed(() => auth.user?.displayName || auth.user?.username || '用户')
 const userInitial = computed(() => userName.value.trim().charAt(0).toUpperCase() || 'U')
-const balanceText = computed(() => auth.balance?.balanceDisplay || '--')
+const yingheBalance = computed(() => auth.balance?.providers?.yinghe ?? auth.balance)
+const ppioBalance = computed(() => auth.balance?.providers?.ppio)
 const hasAdminAccess = computed(
   () => auth.user?.isSuperAdmin || Boolean(auth.user?.permissions?.length),
 )
 const keyText = computed(() => {
-  const key = auth.balance?.key
+  const key = yingheBalance.value?.key
   if (!key) return ''
   return `${key.keyMasked} 余 ${key.remainingDisplay}`
 })
 const balanceTitle = computed(() => {
-  if (auth.balance?.message) return auth.balance.message
-  const key = auth.balance?.key
+  if (yingheBalance.value?.message) return yingheBalance.value.message
+  const key = yingheBalance.value?.key
   if (!key) return '点击刷新余额'
   const name = key.keyName ? `（${key.keyName}）` : ''
   const quota = key.quotaAmt == null ? '不限额' : key.quotaAmt
   return `当前 Key ${key.keyMasked}${name} · 月度已用 ${key.usedAmt ?? '--'} / 限额 ${quota} · 点击刷新余额`
+})
+const ppioBalanceTitle = computed(() => {
+  const balance = ppioBalance.value
+  if (!balance) return 'PPIO 余额暂不可用'
+  if (balance.message) return balance.message
+  const details = balance.details
+  return `PPIO 可用余额 ¥${balance.balanceDisplay} · 现金 ¥${details?.cashBalance ?? '--'} · 信用额度 ¥${details?.creditLimit ?? '--'} · 待入账 ¥${details?.pendingCharges ?? '--'} · 未结账单 ¥${details?.outstandingInvoices ?? '--'} · 点击刷新`
 })
 
 const logout = async () => {
@@ -68,14 +76,26 @@ onBeforeUnmount(() => {
     <div class="header-actions">
       <DeploymentBadge />
       <button
-        class="balance-pill"
+        class="balance-pill yinghe"
         :class="{ loading: auth.balanceLoading }"
         :title="balanceTitle"
         @click="refreshBalance"
       >
         <span class="balance-icon" aria-hidden="true">ϟ</span>
-        <span class="balance-value">{{ balanceText }}</span>
+        <span class="balance-provider">英和</span>
+        <span class="balance-value">{{ yingheBalance?.balanceDisplay || '--' }}</span>
         <span v-if="keyText" class="balance-key" data-test="key-quota">{{ keyText }}</span>
+      </button>
+      <button
+        class="balance-pill ppio"
+        :class="{ loading: auth.balanceLoading }"
+        :title="ppioBalanceTitle"
+        data-test="ppio-balance"
+        @click="refreshBalance"
+      >
+        <span class="balance-icon" aria-hidden="true">P</span>
+        <span class="balance-provider">PPIO</span>
+        <span class="balance-value">{{ ppioBalance?.balanceDisplay || '--' }}</span>
       </button>
       <div ref="menu" class="user-menu">
         <button
@@ -205,6 +225,16 @@ onBeforeUnmount(() => {
   font-size: 13px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
+}
+.balance-provider {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+}
+.balance-pill.ppio .balance-icon {
+  background: var(--success-light);
+  color: var(--success);
+  font-size: 11px;
 }
 .balance-key {
   padding-left: 7px;

@@ -14,7 +14,7 @@ describe('generation model labels', () => {
         label: 'H3',
         capabilities: { executionConcurrency: 2 },
       }),
-    ).toBe('H3（临时测试可用，并发限制为2）')
+    ).toBe('H3（RunningHub，2并发，仅测试时用）')
   })
 
   it('does not annotate the effectively unlimited default pool', () => {
@@ -30,6 +30,7 @@ describe('generation model labels', () => {
   it('recognizes both the retained RunningHub model and direct H3 model', () => {
     expect(isH3VideoModel('minimax-h3-runninghub')).toBe(true)
     expect(isH3VideoModel('minimax-h3')).toBe(true)
+    expect(isH3VideoModel('minimax-h3-ppio')).toBe(true)
     expect(isH3VideoModel('doubao-seedance-2.0')).toBe(false)
   })
 

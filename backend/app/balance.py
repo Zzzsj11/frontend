@@ -15,6 +15,7 @@ _cache_expires_at = 0.0
 _lock = asyncio.Lock()
 SD20_ESTIMATE_PRICE_PER_SECOND = 0.83
 H3_ESTIMATE_PRICE_PER_SECOND = 0.425
+PPIO_SD20_ESTIMATE_PRICE_PER_SECOND = 0.8
 
 
 def build_balance_sign(user_id: str, timestamp: int, api_key: str) -> str:
@@ -142,12 +143,70 @@ async def query_business_balance(*, force: bool = False) -> dict[str, Any]:
         return dict(result)
 
 
-async def ensure_video_batch_balance(items: list[Any]) -> dict[str, float]:
-    """按当前 Key 剩余额度预检批量视频；H3 0.425 元/秒，SD2.0 0.83 元/秒。"""
-    estimated = sum(float(item.duration) * (H3_ESTIMATE_PRICE_PER_SECOND if str(item.model or "").startswith("minimax-h3") else SD20_ESTIMATE_PRICE_PER_SECOND) for item in items)
-    balance = await query_business_balance(force=True)
-    key_remaining = ((balance.get("key") or {}).get("remaining")) if balance.get("available") else None
-    available = _to_float(key_remaining)
-    if available is not None and available + 1e-9 < estimated:
-        raise ValueError("子账号 Key 余额额度不足，请先完成充值或提升余额上限后再试")
-    return {"estimatedCost": round(estimated, 2), "availableBalance": available if available is not None else -1.0}
+async def query_ppio_balance() -> dict[str, Any]:
+    if not settings.ppio_api_key:
+        return unavailable_balance("未配置 PPIO_API_KEY")
+    try:
+        async with httpx.AsyncClient(timeout=settings.ppio_balance_timeout) as client:
+            response = await client.get(settings.ppio_balance_url, headers={"Authorization": f"Bearer {settings.ppio_api_key}"})
+            response.raise_for_status()
+            data = response.json()
+        available = _to_float(data.get("availableBalance"))
+        if available is None:
+            raise ValueError("PPIO 余额接口未返回 availableBalance")
+        return {
+            "available": True,
+            "balance": str(data.get("availableBalance")),
+            "balanceDisplay": f"{available:.2f}",
+            "currency": "CNY",
+            "updatedAt": datetime.now(UTC).isoformat(),
+            "message": None,
+            "details": {
+                "cashBalance": _to_float(data.get("cashBalance")),
+                "creditLimit": _to_float(data.get("creditLimit")),
+                "pendingCharges": _to_float(data.get("pendingCharges")),
+                "outstandingInvoices": _to_float(data.get("outstandingInvoices")),
+            },
+        }
+    except (httpx.HTTPError, ValueError, TypeError) as exc:
+        return unavailable_balance(str(exc) or "PPIO 余额服务请求失败")
+
+
+async def query_provider_balances(*, force: bool = False) -> dict[str, Any]:
+    yinghe, ppio = await asyncio.gather(query_business_balance(force=force), query_ppio_balance())
+    return {"providers": {"yinghe": yinghe, "ppio": ppio}, **yinghe}
+
+
+def estimate_item_cost(item: Any) -> tuple[str, float]:
+    model = str(item.model or "")
+    provider = "ppio" if model.endswith("-ppio") else "yinghe"
+    if model.startswith("minimax-h3"):
+        unit_price = H3_ESTIMATE_PRICE_PER_SECOND
+    elif provider == "ppio":
+        unit_price = PPIO_SD20_ESTIMATE_PRICE_PER_SECOND
+    else:
+        unit_price = SD20_ESTIMATE_PRICE_PER_SECOND
+    return provider, float(item.duration) * unit_price
+
+
+async def ensure_video_batch_balance(items: list[Any]) -> dict[str, Any]:
+    """按实际渠道分别预检批量视频余额，避免用一个渠道的余额替另一个渠道兜底。"""
+    estimates: dict[str, float] = {}
+    for item in items:
+        provider, amount = estimate_item_cost(item)
+        estimates[provider] = estimates.get(provider, 0) + amount
+    balances = await query_provider_balances(force=True)
+    available_by_provider: dict[str, float] = {}
+    for provider, estimated in estimates.items():
+        balance = balances["providers"][provider]
+        raw_available = (balance.get("key") or {}).get("remaining") if provider == "yinghe" else balance.get("balance")
+        available = _to_float(raw_available) if balance.get("available") else None
+        if available is None:
+            label = "PPIO" if provider == "ppio" else "英和子账号 Key"
+            raise ValueError(f"{label} 余额暂时无法获取，请稍后再试")
+        if available + 1e-9 < estimated:
+            label = "PPIO" if provider == "ppio" else "英和子账号 Key"
+            raise ValueError(f"{label} 余额不足，请先完成充值或提升余额上限后再试")
+        available_by_provider[provider] = available
+    estimated_total = round(sum(estimates.values()), 2)
+    return {"estimatedCost": estimated_total, "availableBalance": min(available_by_provider.values(), default=-1.0), "providerEstimates": estimates}

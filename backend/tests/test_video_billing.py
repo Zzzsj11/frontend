@@ -41,6 +41,32 @@ async def _seed_billing_fixtures() -> None:
                 status="active",
                 notes="test",
             ),
+            VideoPricingRuleModel(
+                id="test-price-ppio-sd-720",
+                model="doubao-seedance-2.0-ppio",
+                provider="ppio",
+                resolution="720p",
+                usage_type="completion_tokens",
+                unit_size=1_000_000,
+                unit_price=46,
+                currency="CNY",
+                effective_at=datetime(1970, 1, 1, tzinfo=timezone.utc),
+                status="active",
+                notes="test",
+            ),
+            VideoPricingRuleModel(
+                id="test-price-ppio-h3-720",
+                model="minimax-h3-ppio",
+                provider="ppio",
+                resolution="720p",
+                usage_type="output_seconds",
+                unit_size=1,
+                unit_price=Decimal("0.5"),
+                currency="CNY",
+                effective_at=datetime(1970, 1, 1, tzinfo=timezone.utc),
+                status="active",
+                notes="test",
+            ),
         ):
             db.add(rule)
         jobs = (
@@ -85,6 +111,24 @@ async def _seed_billing_fixtures() -> None:
                 error="工作流失败",
                 finished_at=now,
             ),
+            GenerationJobModel(
+                id="billing-ppio-sd-ok",
+                user_id="user-admin",
+                kind="video",
+                status="succeeded",
+                request={"model": "doubao-seedance-2.0-ppio", "resolution": "720p"},
+                provider="ppio",
+                finished_at=now,
+            ),
+            GenerationJobModel(
+                id="billing-ppio-h3-ok",
+                user_id="user-admin",
+                kind="video",
+                status="succeeded",
+                request={"model": "minimax-h3-ppio", "resolution": "720p"},
+                provider="ppio",
+                finished_at=now,
+            ),
         )
         db.add_all(jobs)
         db.add_all(
@@ -119,6 +163,28 @@ async def _seed_billing_fixtures() -> None:
                     model="minimax-h3-runninghub",
                     raw_usage={"consumeCoins": 80},
                 ),
+                TokenUsageModel(
+                    id="billing-usage-ppio-sd",
+                    user_id="user-admin",
+                    generation_job_id="billing-ppio-sd-ok",
+                    operation="generation_video",
+                    provider="ppio",
+                    model="doubao-seedance-2.0-ppio",
+                    output_tokens=100_000,
+                    total_tokens=100_000,
+                    raw_usage={"completion_tokens": 100_000},
+                ),
+                TokenUsageModel(
+                    id="billing-usage-ppio-h3",
+                    user_id="user-admin",
+                    generation_job_id="billing-ppio-h3-ok",
+                    operation="generation_video",
+                    provider="ppio",
+                    model="minimax-h3-ppio",
+                    output_tokens=162_745,
+                    total_tokens=162_745,
+                    raw_usage={"output_seconds": 5, "completion_tokens": 162_745},
+                ),
             )
         )
         await db.commit()
@@ -150,6 +216,10 @@ async def test_video_billing_reconciles_success_failed_and_excluded(client):
     assert items["billing-h3-failed"]["agentRunId"] == "agent-test-billing-001"
     assert items["billing-rh-failed"]["billingStatus"] == "excluded"
     assert items["billing-rh-failed"]["amount"] == 0
+    assert items["billing-ppio-sd-ok"]["amount"] == pytest.approx(3.68)
+    assert items["billing-ppio-sd-ok"]["discountLabel"] == "PPIO 8 折"
+    assert items["billing-ppio-h3-ok"]["amount"] == pytest.approx(2.125)
+    assert items["billing-ppio-h3-ok"]["discountLabel"] == "PPIO 85 折"
 
     failed = client.get("/api/admin/video-billing", params={"status": "failed", "q": "billing-"}).json()
     assert {item["generationJobId"] for item in failed["items"]} == {"billing-h3-failed", "billing-rh-failed"}
@@ -172,7 +242,7 @@ async def test_video_billing_reconciles_success_failed_and_excluded(client):
 
     # 重复核算必须更新同一工单账单，不得重复入账。
     assert client.post("/api/admin/video-billing/reconcile").status_code == 200
-    assert client.get("/api/admin/video-billing", params={"q": "billing-"}).json()["total"] == 3
+    assert client.get("/api/admin/video-billing", params={"q": "billing-"}).json()["total"] == 5
 
 
 def test_video_billing_requires_admin(client):

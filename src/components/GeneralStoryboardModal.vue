@@ -14,6 +14,7 @@ import { confirmDialog } from '../composables/useConfirmDialog'
 import {
   estimateVideoBatchCost,
   formatVideoEstimateUnitPrice,
+  videoProviderForModel,
   videoEstimateUnitPrice,
 } from '../utils/videoBatchCost'
 import AppIcon from './AppIcon.vue'
@@ -31,6 +32,7 @@ import {
   VIDEO_MODEL_OPTIONS,
   generationModelLabel,
   loadGenerationModels,
+  videoModelCapabilities,
 } from '../generationModels'
 
 const props = withDefaults(defineProps<{ random?: boolean }>(), { random: false })
@@ -82,6 +84,12 @@ const maximumTotalDuration = computed(() => totalShots.value * MAX_VIDEO_DURATIO
 const averageDuration = computed(() =>
   totalShots.value ? Math.round((totalDuration.value / totalShots.value) * 10) / 10 : 0,
 )
+const resolutionChoices = computed<ShotGenOptions['resolution'][]>(() => {
+  const configured = videoModelCapabilities(videoModel.value).resolutions
+  return Array.isArray(configured) && configured.length
+    ? (configured as ShotGenOptions['resolution'][])
+    : ['480p', '720p', '1080p']
+})
 const durationIsValid = computed(
   () =>
     totalDuration.value >= minimumTotalDuration.value &&
@@ -148,6 +156,11 @@ watch(genre, () => {
 watch(secondary, () => {
   tertiary.value = tertiaryOptions.value[0]?.value ?? ''
 })
+watch(videoModel, () => {
+  if (!resolutionChoices.value.includes(resolution.value)) {
+    resolution.value = resolutionChoices.value[0] ?? '720p'
+  }
+})
 
 const toggleHuman = (id: string) => {
   const index = selectedHumanIds.value.indexOf(id)
@@ -188,14 +201,31 @@ const submit = async () => {
         { duration: seconds, model: request.videoModel },
       ])
       const balance = await apiRequest<AccountBalance>('/account/balance?force=true')
-      const keyRemaining = balance.available ? balance.key?.remaining : null
-      const keyLabel = balance.key?.keyName || balance.key?.keyMasked || '当前视频 Key'
-      const unlimited = Boolean(balance.available && balance.key && balance.key.quotaAmt === null)
-      if (!unlimited && (keyRemaining == null || keyRemaining + 1e-9 < estimatedCost)) {
+      const providerCode = videoProviderForModel(request.videoModel)
+      const providerBalance = balance.providers?.[providerCode] ?? balance
+      const keyRemaining =
+        providerCode === 'ppio'
+          ? providerBalance.balance == null
+            ? null
+            : Number(providerBalance.balance)
+          : providerBalance.key?.remaining
+      const keyLabel =
+        providerCode === 'ppio'
+          ? 'PPIO'
+          : providerBalance.key?.keyName || providerBalance.key?.keyMasked || '当前视频 Key'
+      const unlimited = Boolean(
+        providerCode === 'yinghe' &&
+        providerBalance.available &&
+        providerBalance.key &&
+        providerBalance.key.quotaAmt === null,
+      )
+      const usableRemaining =
+        providerBalance.available && Number.isFinite(keyRemaining) ? Number(keyRemaining) : null
+      if (!unlimited && (usableRemaining == null || usableRemaining + 1e-9 < estimatedCost)) {
         const balanceDetail =
-          keyRemaining == null
+          usableRemaining == null
             ? `${keyLabel} 的剩余额度暂时无法获取。`
-            : `${keyLabel} 当前剩余额度 ¥${keyRemaining.toFixed(2)}，尚缺 ¥${(estimatedCost - keyRemaining).toFixed(2)}。`
+            : `${keyLabel} 当前剩余额度 ¥${usableRemaining.toFixed(2)}，尚缺 ¥${(estimatedCost - usableRemaining).toFixed(2)}。`
         await confirmDialog({
           title: '余额额度不足',
           message: `本次预计费用 ¥${estimatedCost.toFixed(2)}，${balanceDetail}\n\n请先完成充值或提升子账号 Key 的余额上限后再试，本次不会创建项目或提交视频任务。`,
@@ -206,9 +236,9 @@ const submit = async () => {
         return
       }
       const remainingText =
-        keyRemaining == null
-          ? balance.key?.remainingDisplay || '暂时无法获取，提交时将再次校验'
-          : `¥${keyRemaining.toFixed(2)}`
+        usableRemaining == null
+          ? providerBalance.key?.remainingDisplay || '暂时无法获取，提交时将再次校验'
+          : `¥${usableRemaining.toFixed(2)}`
       const confirmed = await confirmDialog({
         title: '确认批量生成视频',
         message: `将生成 ${request.groupCount ?? 1} 组随机通用分镜，共约 ${seconds} 秒视频。\n\n计费模型：${labelOf(request.videoModel, VIDEO_MODEL_OPTIONS)}\n预估单价：¥${formatVideoEstimateUnitPrice(unitPrice)}/秒\n本次预估费用：¥${estimatedCost.toFixed(2)}\n${keyLabel} 剩余额度：${remainingText}\n\n实际费用以供应商最终用量为准，确认后将立即创建子项目并提交视频任务。`,
@@ -416,9 +446,9 @@ const submit = async () => {
             <label
               ><span>清晰度 *</span
               ><select v-model="resolution">
-                <option value="480p">480p</option>
-                <option value="720p">720p</option>
-                <option value="1080p">1080p</option>
+                <option v-for="item in resolutionChoices" :key="item" :value="item">
+                  {{ item.toUpperCase() }}
+                </option>
               </select></label
             >
             <label v-if="random"

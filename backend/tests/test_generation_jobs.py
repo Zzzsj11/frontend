@@ -526,6 +526,121 @@ def test_direct_h3_video_uses_documented_contract_and_archives_output(monkeypatc
     assert result["usage"]["total_seconds"] == 5
 
 
+def test_ppio_h3_uses_original_protocol_routes(monkeypatch) -> None:
+    import httpx
+
+    from app import providers
+    from app.jobs import Job
+    from app.schemas import VideoGenerationCreate
+
+    calls: list[tuple[str, str]] = []
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            calls.append(("POST", url))
+            assert json["model"] == "MiniMax-H3"
+            return httpx.Response(200, json={"task_id": "ppio-h3-1"}, request=httpx.Request("POST", url))
+
+        async def get(self, url, headers=None):
+            calls.append(("GET", url))
+            return httpx.Response(
+                200,
+                json={"task": {"id": "ppio-h3-1", "status": "succeeded", "content": {"url": "https://source.test/h3.mp4"}, "usage": {"output_seconds": 5}}},
+                request=httpx.Request("GET", url),
+            )
+
+    async def no_op(*_args, **_kwargs):
+        return None
+
+    async def set_task(job, provider, task_id, **_kwargs):
+        job.provider, job.provider_task_id = provider, task_id
+
+    monkeypatch.setattr(providers, "_ppio_config", lambda: ("https://api.ppio.test", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", lambda **_kwargs: Client())
+    monkeypatch.setattr(providers.jobs, "mark_provider_submitting", no_op)
+    monkeypatch.setattr(providers.jobs, "set_provider_task", set_task)
+    monkeypatch.setattr(providers.jobs, "update_progress", no_op)
+    monkeypatch.setattr(providers, "import_remote", lambda *_args: no_op())
+    monkeypatch.setattr(providers, "_archive_h3_video_to_tos", lambda *_args: no_op())
+
+    async def archive(*_args):
+        return "https://tos.test/h3.mp4"
+
+    async def cover(*_args):
+        return "https://tos.test/h3.jpg", "https://tos.test/h3-thumb.jpg"
+
+    monkeypatch.setattr(providers, "_archive_h3_video_to_tos", archive)
+    monkeypatch.setattr(providers, "_video_first_frame", cover)
+    monkeypatch.setattr(providers, "H3_POLL_INTERVAL_SECONDS", 0)
+    request = VideoGenerationCreate(prompt="PPIO H3", duration=5, model="minimax-h3-ppio")
+    job = Job(
+        id="job-ppio-h3",
+        kind="video",
+        user_id="user-1",
+        request={"model": "minimax-h3-ppio", "_provider": "ppio", "_providerModelId": "MiniMax-H3", "_h3Mode": "text"},
+    )
+    result = asyncio.run(providers.generate_video(request, job))
+    assert calls == [
+        ("POST", "https://api.ppio.test/v3/minimax/v2/video_generation"),
+        ("GET", "https://api.ppio.test/v3/minimax/v2/query/video_generation/ppio-h3-1"),
+    ]
+    assert result["provider"] == "ppio"
+
+
+@pytest.mark.asyncio
+async def test_ppio_seedance_uses_standard_model_and_metered_routes(monkeypatch) -> None:
+    import httpx
+
+    from app import providers
+    from app.jobs import Job
+    from app.schemas import VideoGenerationCreate
+
+    submitted: dict = {}
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            submitted.update(url=url, payload=json)
+            return httpx.Response(200, json={"id": "ppio-sd-1"}, request=httpx.Request("POST", url))
+
+    async def no_op(*_args, **_kwargs):
+        return None
+
+    async def set_task(job, provider, task_id, **_kwargs):
+        job.provider, job.provider_task_id = provider, task_id
+
+    async def poll(url, *_args, **_kwargs):
+        assert url.endswith("/v3/bytedance-cn/metered/contents/generations/tasks/ppio-sd-1")
+        return {"status": "succeeded", "content": {"video_url": "https://source.test/sd.mp4"}, "usage": {"completion_tokens": 50638}}
+
+    async def store(_job, _task_id, data, _created):
+        return {"provider": "ppio", "usage": data["usage"]}
+
+    monkeypatch.setattr(providers, "_ppio_config", lambda: ("https://api.ppio.test", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", lambda **_kwargs: Client())
+    monkeypatch.setattr(providers.jobs, "mark_provider_submitting", no_op)
+    monkeypatch.setattr(providers.jobs, "set_provider_task", set_task)
+    monkeypatch.setattr(providers, "_poll_scheduled", poll)
+    monkeypatch.setattr(providers, "_store_video_result", store)
+    request = VideoGenerationCreate(prompt="PPIO SD", duration=5, resolution="480p", model="doubao-seedance-2.0-ppio")
+    job = Job(id="job-ppio-sd", kind="video", request={"model": request.model, "_provider": "ppio", "_providerModelId": "doubao-seedance-2-0-260128"})
+    result = await providers.generate_video(request, job)
+    assert submitted["url"] == "https://api.ppio.test/v3/bytedance-cn/metered/contents/generations/tasks"
+    assert submitted["payload"]["model"] == "doubao-seedance-2-0-260128"
+    assert result["usage"]["completion_tokens"] == 50638
+
+
 def test_direct_h3_video_reports_tos_archive_stage_when_source_url_is_rejected(monkeypatch) -> None:
     from app import providers
     from app.jobs import Job

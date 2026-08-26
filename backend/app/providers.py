@@ -183,6 +183,12 @@ def _video_config() -> tuple[str, dict[str, str]]:
     return settings.video_api_base_url.rstrip("/"), _headers(settings.video_api_key)
 
 
+def _ppio_config() -> tuple[str, dict[str, str]]:
+    if not settings.ppio_api_key:
+        raise ProviderError("PPIO_API_KEY 未配置")
+    return settings.ppio_api_base_url, _headers(settings.ppio_api_key)
+
+
 async def _query_task(client: httpx.AsyncClient, url: str, headers: dict[str, str]) -> dict[str, Any]:
     response = await client.get(url, headers=headers)
     _raise_for_status(response)
@@ -517,6 +523,34 @@ async def _submit_seedance_video(request: VideoGenerationCreate, job: Job, image
     return task_id, created, base, headers
 
 
+async def _submit_ppio_seedance_video(request: VideoGenerationCreate, job: Job, image_urls: list[str]) -> tuple[str, dict[str, Any], str, dict[str, str]]:
+    base, headers = _ppio_config()
+    variant = "reference" if image_urls else "text"
+    job.idempotency_key = f"{job.id}:ppio:{variant}"
+    headers["Idempotency-Key"] = job.idempotency_key
+    content: list[dict[str, Any]] = [{"type": "text", "text": request.prompt}]
+    content.extend({"type": "image_url", "image_url": {"url": url}, "role": "reference_image"} for url in image_urls)
+    payload = {
+        "model": str((job.request or {}).get("_providerModelId") or "doubao-seedance-2-0-260128"),
+        "content": content,
+        "generate_audio": request.generate_audio,
+        "ratio": request.ratio,
+        "resolution": request.resolution,
+        "duration": request.duration,
+        "watermark": request.watermark,
+    }
+    await jobs.mark_provider_submitting(job)
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(f"{base}/v3/bytedance-cn/metered/contents/generations/tasks", headers=headers, json=payload)
+        _raise_for_status(response)
+        created = _unwrap(response.json())
+    task_id = str(created.get("id") or "")
+    if not task_id:
+        raise ProviderError("PPIO Seedance 提交成功但未返回任务 id")
+    await jobs.set_provider_task(job, "ppio", task_id, idempotency_key=job.idempotency_key)
+    return task_id, created, base, headers
+
+
 def _direct_h3_content(request: VideoGenerationCreate, mode: str) -> list[dict[str, Any]]:
     content: list[dict[str, Any]] = [{"type": "text", "text": request.prompt}]
     for index, url in enumerate(request.image_urls):
@@ -531,14 +565,15 @@ def _direct_h3_content(request: VideoGenerationCreate, mode: str) -> list[dict[s
     return content
 
 
-async def _poll_direct_h3(base: str, headers: dict[str, str], job: Job) -> dict[str, Any]:
+async def _poll_direct_h3(base: str, headers: dict[str, str], job: Job, *, provider: str = "yinghe") -> dict[str, Any]:
     deadline = time.monotonic() + _remaining_video_job_timeout(job)
     consecutive_errors = 0
     async with httpx.AsyncClient(timeout=60) as client:
         while time.monotonic() < deadline:
             await asyncio.sleep(H3_POLL_INTERVAL_SECONDS)
             try:
-                response = await client.get(f"{base}/video/generation/tasks/{job.provider_task_id}", headers=headers)
+                path = f"/v3/minimax/v2/query/video_generation/{job.provider_task_id}" if provider == "ppio" else f"/video/generation/tasks/{job.provider_task_id}"
+                response = await client.get(f"{base}{path}", headers=headers)
                 _raise_for_status(response)
                 body = _unwrap(response.json())
                 task = body.get("task") if isinstance(body.get("task"), dict) else body
@@ -559,7 +594,8 @@ async def _poll_direct_h3(base: str, headers: dict[str, str], job: Job) -> dict[
 
 
 async def generate_direct_h3_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
-    base, headers = _video_config()
+    provider = str((job.request or {}).get("_provider") or "yinghe")
+    base, headers = _ppio_config() if provider == "ppio" else _video_config()
     mode = str((job.request or {}).get("_h3Mode") or request.h3_mode)
     if mode == "auto":
         mode = "reference" if request.video_urls or request.audio_urls or len(request.image_urls) > 1 else ("first_frame" if request.image_urls else "text")
@@ -575,14 +611,16 @@ async def generate_direct_h3_video(request: VideoGenerationCreate, job: Job) -> 
     }
     await jobs.mark_provider_submitting(job)
     async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.post(f"{base}/video/generation/tasks", headers=headers, json=payload)
+        path = "/v3/minimax/v2/video_generation" if provider == "ppio" else "/video/generation/tasks"
+        response = await client.post(f"{base}{path}", headers=headers, json=payload)
         _raise_for_status(response)
         created = _unwrap(response.json())
     task_id = str(created.get("task_id") or "")
     if not task_id:
         raise ProviderError("H3 提交成功但未返回 task_id")
-    await jobs.set_provider_task(job, "yinghe-h3", task_id, idempotency_key=job.idempotency_key)
-    return await _store_direct_h3_result(job, await _poll_direct_h3(base, headers, job))
+    stored_provider = "ppio" if provider == "ppio" else "yinghe-h3"
+    await jobs.set_provider_task(job, stored_provider, task_id, idempotency_key=job.idempotency_key)
+    return await _store_direct_h3_result(job, await _poll_direct_h3(base, headers, job, provider=provider))
 
 
 async def _store_direct_h3_result(job: Job, task: dict[str, Any]) -> dict[str, Any]:
@@ -596,7 +634,7 @@ async def _store_direct_h3_result(job: Job, task: dict[str, Any]) -> dict[str, A
     stored_cover, stored_cover_thumbnail = await _video_first_frame(source_url, f"h3-{task_id}", job.user_id)
     request = job.request or {}
     return {
-        "provider": "yinghe-h3",
+        "provider": "ppio" if request.get("_provider") == "ppio" else "yinghe-h3",
         "providerTaskId": task_id,
         "model": request.get("model") or "minimax-h3",
         "usage": task.get("usage") or {},
@@ -622,10 +660,12 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         return await generate_h3_video(request, job)
     if (job.request or {}).get("_providerModelId") == "MiniMax-H3":
         return await generate_direct_h3_video(request, job)
-    task_id, created, base, headers = await _submit_seedance_video(request, job, request.image_urls)
+    is_ppio = (job.request or {}).get("_provider") == "ppio"
+    submit = _submit_ppio_seedance_video if is_ppio else _submit_seedance_video
+    task_id, created, base, headers = await submit(request, job, request.image_urls)
     try:
         data = await _poll_scheduled(
-            f"{base}/v3/video/tasks/{task_id}",
+            f"{base}{f'/v3/bytedance-cn/metered/contents/generations/tasks/{task_id}' if is_ppio else f'/v3/video/tasks/{task_id}'}",
             headers,
             job,
             timeout_seconds=_remaining_video_job_timeout(job),
@@ -639,9 +679,9 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
             raise
         # 通用人物镜不要求跨镜身份一致。若 AI 场景首帧被上游误判为
         # 真人参考，安全降级为纯文本视频，避免整条全量任务被阻断。
-        task_id, created, base, headers = await _submit_seedance_video(request, job, [])
+        task_id, created, base, headers = await submit(request, job, [])
         data = await _poll_scheduled(
-            f"{base}/v3/video/tasks/{task_id}",
+            f"{base}{f'/v3/bytedance-cn/metered/contents/generations/tasks/{task_id}' if is_ppio else f'/v3/video/tasks/{task_id}'}",
             headers,
             job,
             timeout_seconds=_remaining_video_job_timeout(job),
@@ -882,7 +922,7 @@ async def _store_video_result_inner(job: Job, task_id: str, data: dict[str, Any]
         await import_remote_image(cover_url, f"{owner_prefix}/covers") if cover_url else await _video_first_frame(source_url, task_id, job.user_id)
     )
     return {
-        "provider": "yinghe",
+        "provider": str(request.get("_provider") or "yinghe"),
         "providerTaskId": task_id,
         "model": request.get("model") or settings.video_model,
         "usage": _usage(data) or _usage(created),
@@ -902,16 +942,19 @@ async def resume_generation(job: Job) -> dict[str, Any]:
     if (job.request or {}).get("_provider") == "runninghub":
         return await _store_h3_video_result(job, await _poll_runninghub(job))
     if job.provider == "yinghe-h3" or (job.request or {}).get("_providerModelId") == "MiniMax-H3":
-        base, headers = _video_config()
-        return await _store_direct_h3_result(job, await _poll_direct_h3(base, headers, job))
+        provider = str((job.request or {}).get("_provider") or "yinghe")
+        base, headers = _ppio_config() if provider == "ppio" else _video_config()
+        return await _store_direct_h3_result(job, await _poll_direct_h3(base, headers, job, provider=provider))
     if job.kind == "image":
         base, headers = _image_config()
         url, timeout = f"{base}/image/generation/tasks/{job.provider_task_id}", IMAGE_POLL_TIMEOUT_SECONDS
         timeout = _remaining_provider_timeout(job, timeout)
         timeout_error = "gpt-image-2 生成超过10分钟，已判定失败"
     elif job.kind == "video":
-        base, headers = _video_config()
-        url, timeout = f"{base}/v3/video/tasks/{job.provider_task_id}", _remaining_video_job_timeout(job)
+        provider = str((job.request or {}).get("_provider") or "yinghe")
+        base, headers = _ppio_config() if provider == "ppio" else _video_config()
+        path = f"/v3/bytedance-cn/metered/contents/generations/tasks/{job.provider_task_id}" if provider == "ppio" else f"/v3/video/tasks/{job.provider_task_id}"
+        url, timeout = f"{base}{path}", _remaining_video_job_timeout(job)
         timeout_error = "视频生成超过20分钟，已判定失败，请重新生成"
     else:
         raise ProviderError(f"不支持恢复的任务类型：{job.kind}")
@@ -933,6 +976,17 @@ async def query_provider_task(kind: str, task_id: str, provider: str | None = No
             _raise_for_status(response)
             body = _unwrap(response.json())
         return body.get("task") if isinstance(body.get("task"), dict) else body
+    if provider == "ppio":
+        base, headers = _ppio_config()
+        async with httpx.AsyncClient(timeout=60) as client:
+            seedance = await client.get(f"{base}/v3/bytedance-cn/metered/contents/generations/tasks/{task_id}", headers=headers)
+            if seedance.status_code != 404:
+                _raise_for_status(seedance)
+                return _unwrap(seedance.json())
+            h3 = await client.get(f"{base}/v3/minimax/v2/query/video_generation/{task_id}", headers=headers)
+            _raise_for_status(h3)
+            body = _unwrap(h3.json())
+            return body.get("task") if isinstance(body.get("task"), dict) else body
     if kind == "image":
         base, headers = _image_config()
         url = f"{base}/image/generation/tasks/{task_id}"

@@ -12,7 +12,7 @@ import type { AccountBalance } from '../stores/auth'
 import { confirmDialog } from '../composables/useConfirmDialog'
 import { normalizeShotOptions } from '../mediaConstraints'
 import { VIDEO_MODEL_OPTIONS } from '../generationModels'
-import { estimateVideoBatchCost } from '../utils/videoBatchCost'
+import { estimateVideoBatchCost, estimateVideoBatchCostByProvider } from '../utils/videoBatchCost'
 
 const store = useProjectStore()
 const lineListRef = ref<HTMLDivElement>()
@@ -136,6 +136,7 @@ const confirmBatchGenerate = async () => {
       return { duration: options.duration, model: options.videoModel }
     })
     const { totalSeconds, estimatedCost } = estimateVideoBatchCost(items)
+    const providerEstimates = estimateVideoBatchCostByProvider(items)
     const modelCodes = [...new Set(items.map((item) => item.model).filter(Boolean))]
     const modelText = modelCodes
       .map(
@@ -144,17 +145,35 @@ const confirmBatchGenerate = async () => {
       )
       .join('、')
     const balance = await apiRequest<AccountBalance>('/account/balance?force=true')
-    const keyRemaining = balance.available ? balance.key?.remaining : null
-    const unlimited = Boolean(balance.available && balance.key && balance.key.quotaAmt === null)
-    const keyText =
-      keyRemaining == null
-        ? balance.key?.remainingDisplay || '暂时无法获取'
-        : keyRemaining.toFixed(2)
-    const sufficient = unlimited || (keyRemaining != null && keyRemaining + 1e-9 >= estimatedCost)
+    const balanceLines: string[] = []
+    let sufficient = true
+    for (const [provider, estimate] of Object.entries(providerEstimates)) {
+      const providerBalance = balance.providers?.[provider as 'yinghe' | 'ppio'] ?? balance
+      const rawRemaining =
+        provider === 'ppio'
+          ? providerBalance.balance == null
+            ? null
+            : Number(providerBalance.balance)
+          : providerBalance.key?.remaining
+      const remaining =
+        providerBalance.available && Number.isFinite(rawRemaining) ? Number(rawRemaining) : null
+      const unlimited = Boolean(
+        provider === 'yinghe' &&
+        providerBalance.available &&
+        providerBalance.key &&
+        providerBalance.key.quotaAmt === null,
+      )
+      const label = provider === 'ppio' ? 'PPIO' : '英和'
+      balanceLines.push(
+        `${label}预计 ¥${Number(estimate).toFixed(2)}，余额 ${unlimited ? '不限额' : remaining == null ? '暂时无法获取' : `¥${remaining.toFixed(2)}`}`,
+      )
+      if (!unlimited && (remaining == null || remaining + 1e-9 < Number(estimate)))
+        sufficient = false
+    }
     const conclusion = sufficient
       ? '【余额充足，可以开始批量生成任务】'
       : '【余额不足，请联系负责人进行充值】'
-    const message = `本次将生成总计：${items.length} 条，共：${totalSeconds} 秒，${modelText || '视频模型'} 视频，预计总费用为：${estimatedCost.toFixed(2)} 元，当前子账号余额还有：${keyText} 元。\n\n${conclusion}`
+    const message = `本次将生成总计：${items.length} 条，共：${totalSeconds} 秒，${modelText || '视频模型'} 视频，预计总费用为：${estimatedCost.toFixed(2)} 元。\n${balanceLines.join('\n')}\n\n${conclusion}`
     const confirmed = await confirmDialog({
       title: sufficient ? '确认批量生成视频' : '子账号余额不足',
       message,

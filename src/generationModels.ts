@@ -7,6 +7,8 @@ export interface GenerationModelCapabilities {
   executionConcurrency?: number
   executionPool?: string
   nativeAudio?: boolean
+  providerCode?: string
+  sortOrder?: number
   referenceImage?: { min?: number; max?: number }
   h3Modes?: Array<'auto' | 'text' | 'first_frame' | 'first_last' | 'reference'>
   [key: string]: unknown
@@ -24,6 +26,8 @@ export const IMAGE_MODEL_OPTIONS = reactive<Array<GenerationModelOption>>([
 export const VIDEO_MODEL_OPTIONS = reactive<Array<GenerationModelOption>>([
   { value: DEFAULT_VIDEO_MODEL, label: 'SD2.0' },
 ])
+export const videoModelCapabilities = (modelId?: string): GenerationModelCapabilities =>
+  VIDEO_MODEL_OPTIONS.find((item) => item.value === modelId)?.capabilities ?? {}
 export const videoModelConcurrency = (modelId?: string): number => {
   const configured = VIDEO_MODEL_OPTIONS.find((item) => item.value === modelId)?.capabilities
     ?.executionConcurrency
@@ -35,12 +39,13 @@ export const isH3VideoModel = (modelId?: string): boolean => {
   return (
     Boolean(option?.capabilities?.h3Modes?.length) ||
     modelId === 'minimax-h3-runninghub' ||
-    modelId === 'minimax-h3'
+    modelId === 'minimax-h3' ||
+    modelId === 'minimax-h3-ppio'
   )
 }
 export const generationModelLabel = (option: GenerationModelOption): string => {
   if (option.value === 'minimax-h3-runninghub') {
-    return 'H3（临时测试可用，并发限制为2）'
+    return 'H3（RunningHub，2并发，仅测试时用）'
   }
   const concurrency = option.capabilities?.executionConcurrency
   return Number.isFinite(concurrency) && Number(concurrency) < 200
@@ -52,8 +57,10 @@ export const sortVideoModelOptions = (
 ): Array<GenerationModelOption> =>
   [...options].sort(
     (left, right) =>
-      Number(left.value === 'minimax-h3-runninghub') -
-      Number(right.value === 'minimax-h3-runninghub'),
+      Number(left.capabilities?.sortOrder ?? (left.value === 'minimax-h3-runninghub' ? 999 : 100)) -
+      Number(
+        right.capabilities?.sortOrder ?? (right.value === 'minimax-h3-runninghub' ? 999 : 100),
+      ),
   )
 let loaded = false
 export async function loadGenerationModels(force = false): Promise<void> {

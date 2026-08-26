@@ -38,7 +38,7 @@ from .auth import (
     user_public,
     verify_password,
 )
-from .balance import ensure_video_batch_balance, query_business_balance
+from .balance import ensure_video_batch_balance, query_provider_balances
 from .chat import chat_manager
 from .config import settings, validate_runtime_security
 from .database import close_database, database_ok, database_session, init_database
@@ -236,6 +236,18 @@ def generation_request_snapshot(payload: BaseModel, model: AiModelModel, provide
 
 
 def validate_video_references(payload: VideoGenerationCreate, capabilities: dict) -> None:
+    resolutions = capabilities.get("resolutions")
+    if isinstance(resolutions, list) and resolutions and payload.resolution not in resolutions:
+        raise HTTPException(422, f"该视频模型不支持 {payload.resolution}，可选：{'、'.join(map(str, resolutions))}")
+    ratios = capabilities.get("ratios")
+    if isinstance(ratios, list) and ratios and payload.ratio not in ratios:
+        raise HTTPException(422, f"该视频模型不支持画幅 {payload.ratio}")
+    durations = capabilities.get("durations")
+    if isinstance(durations, dict):
+        minimum = int(durations.get("min") or 0)
+        maximum = int(durations.get("max") or 0)
+        if minimum and payload.duration < minimum or maximum and payload.duration > maximum:
+            raise HTTPException(422, f"该视频模型仅支持 {minimum}–{maximum} 秒")
     for field, capability_key, label in (
         (payload.image_urls, "referenceImage", "图片"),
         (payload.video_urls, "referenceVideo", "视频"),
@@ -301,7 +313,7 @@ async def release_info() -> dict:
 
 @app.get("/api/account/balance")
 async def account_balance(_user: CurrentUser, force: bool = False) -> dict:
-    return await query_business_balance(force=force)
+    return await query_provider_balances(force=force)
 
 
 @app.post("/api/auth/login")

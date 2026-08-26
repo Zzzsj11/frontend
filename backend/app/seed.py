@@ -178,6 +178,10 @@ async def seed_system_data() -> None:
         if not runninghub_provider:
             runninghub_provider = AiProviderModel(id="provider-runninghub", code="runninghub", name="RunningHub", base_url="", status="active")
             session.add(runninghub_provider)
+        ppio_provider = await session.get(AiProviderModel, "provider-ppio")
+        if not ppio_provider:
+            ppio_provider = AiProviderModel(id="provider-ppio", code="ppio", name="PPIO", base_url="https://api.ppio.com", status="active")
+            session.add(ppio_provider)
         defaults = [
             ("model-chat-default", provider.id, "chat-default", "默认 Chat 模型", "chat", "", {"structuredOutput": True}, True),
             ("model-img2", provider.id, "gpt-image-2", "Img2", "image", "gpt-image-2", {"ratios": ["16:9", "9:16", "4:3", "1:1"], "imageToImage": True}, True),
@@ -185,17 +189,24 @@ async def seed_system_data() -> None:
                 "model-sd20",
                 provider.id,
                 "doubao-seedance-2.0",
-                "SD2.0",
+                "SD2.0（英和）",
                 "video",
                 "doubao-seedance-2.0",
-                {"durations": {"min": 4, "max": 15}, "ratios": ["16:9", "9:16", "4:3", "1:1"], "executionPool": "yinghe-generation", "executionConcurrency": 200},
+                {
+                    "durations": {"min": 4, "max": 15},
+                    "ratios": ["16:9", "9:16", "4:3", "1:1"],
+                    "executionPool": "yinghe-generation",
+                    "executionConcurrency": 200,
+                    "providerCode": "yinghe",
+                    "sortOrder": 10,
+                },
                 True,
             ),
             (
                 "model-h3-runninghub",
                 runninghub_provider.id,
                 "minimax-h3-runninghub",
-                "H3",
+                "H3（RunningHub，2并发，仅测试时用）",
                 "video",
                 "minimax-h3-ref2va",
                 {
@@ -225,6 +236,8 @@ async def seed_system_data() -> None:
                     "nativeAudio": True,
                     "executionPool": "runninghub-h3",
                     "executionConcurrency": 2,
+                    "providerCode": "runninghub",
+                    "sortOrder": 50,
                 },
                 False,
             ),
@@ -232,7 +245,7 @@ async def seed_system_data() -> None:
                 "model-h3-direct",
                 provider.id,
                 "minimax-h3",
-                "H3",
+                "H3（英和）",
                 "video",
                 "MiniMax-H3",
                 {
@@ -251,6 +264,55 @@ async def seed_system_data() -> None:
                     "nativeAudio": True,
                     "executionPool": "yinghe-h3",
                     "executionConcurrency": 200,
+                    "providerCode": "yinghe",
+                    "sortOrder": 20,
+                },
+                False,
+            ),
+            (
+                "model-sd20-ppio",
+                ppio_provider.id,
+                "doubao-seedance-2.0-ppio",
+                "SD2.0 标准版（PPIO）",
+                "video",
+                "doubao-seedance-2-0-260128",
+                {
+                    "durations": {"min": 4, "max": 15},
+                    "ratios": ["16:9", "9:16", "4:3", "1:1"],
+                    "resolutions": ["480p", "720p"],
+                    "nativeAudio": True,
+                    "executionPool": "ppio-seedance",
+                    "executionConcurrency": 200,
+                    "providerCode": "ppio",
+                    "sortOrder": 30,
+                },
+                False,
+            ),
+            (
+                "model-h3-ppio",
+                ppio_provider.id,
+                "minimax-h3-ppio",
+                "H3（PPIO）",
+                "video",
+                "MiniMax-H3",
+                {
+                    "durations": {"min": 4, "max": 15},
+                    "ratios": ["16:9", "9:16", "4:3", "1:1"],
+                    "resolutions": ["720p", "1080p"],
+                    "h3Modes": ["auto", "text", "first_frame", "first_last", "reference"],
+                    "referenceImage": {"min": 0, "max": 6},
+                    "referenceVideo": {"min": 0, "max": 1},
+                    "referenceAudio": {"min": 0, "max": 3},
+                    "referenceTotalMax": 10,
+                    "referenceAudioRequiresVisual": True,
+                    "workflowVersion": "minimax-h3-ppio-v1",
+                    "promptCompiler": "h3-prompt-writing",
+                    "promptCompilerVersion": "1.2.0",
+                    "nativeAudio": True,
+                    "executionPool": "ppio-h3",
+                    "executionConcurrency": 200,
+                    "providerCode": "ppio",
+                    "sortOrder": 40,
                 },
                 False,
             ),
@@ -272,7 +334,7 @@ async def seed_system_data() -> None:
                         is_default=is_default,
                     )
                 )
-            elif code in {"minimax-h3-runninghub", "minimax-h3"}:
+            elif code in {"doubao-seedance-2.0", "minimax-h3-runninghub", "minimax-h3", "doubao-seedance-2.0-ppio", "minimax-h3-ppio"}:
                 # 模型能力属于系统种子配置；启动时同步升级已有环境，避免仅新库生效。
                 model.name = name
                 model.provider_model_id = provider_id or code

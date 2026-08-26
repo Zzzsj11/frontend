@@ -8,6 +8,8 @@
 - 前端选择器动态化：`src/generationModels.ts` 的 `loadGenerationModels()` 从 `/model-options` 拉取并覆盖内置默认，注册中心不可用时回退默认模型，不再硬编码禁用。
 - H3 已进入项目视频生成主流程，UI 支持 T2VA、I2VA、FL2VA、Ref2VA（当前产品明确不开放 L2VA）；Ref2VA 产品上限为 6 图、1 视频、3 音频，视觉素材必需，音频不能单独提交。
 - H3 保留 RunningHub 工作流模型（前端标注并发上限 2），并新增 MiniMax-H3 直连模型（前端显示 H3）；直连协议使用 `/video/generation/tasks`、稳定 `Idempotency-Key`、`task_id` 和 `task.content.url`，768P/2K 分别由产品侧 480p/720p 与 1080p 映射。
+- PPIO 已按独立供应商接入 Seedance 2.0 标准版与 MiniMax-H3：Seedance 使用 `/v3/bytedance-cn/metered/contents/generations/tasks`，H3 使用 `/v3/minimax/v2/video_generation`；模型编码、执行池、余额和账单均与英和隔离，前端按英和、PPIO、RunningHub 顺序展示。
+- 余额端点聚合英和商户/子账号 Key 与 PPIO `availableBalance`，批量生成按渠道分别估价和校验；PPIO SD2.0 估算按 8 折后的 0.8 元/秒，PPIO H3 按 85 折后的 0.425 元/秒。
 
 ## 剩余待办
 

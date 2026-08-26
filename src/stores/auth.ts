@@ -23,6 +23,16 @@ export interface AccountBalance {
   updatedAt: string
   message?: string | null
   key?: KeyQuotaInfo | null
+  details?: {
+    cashBalance: number | null
+    creditLimit: number | null
+    pendingCharges: number | null
+    outstandingInvoices: number | null
+  }
+  providers?: {
+    yinghe: AccountBalance
+    ppio: AccountBalance
+  }
 }
 export const useAuthStore = defineStore('auth', {
   state: () => ({

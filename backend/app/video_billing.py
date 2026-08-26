@@ -13,16 +13,29 @@ from .models import GenerationJobModel, TokenUsageModel, VideoBillingRecordModel
 TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
 ZERO = Decimal("0")
 YINGHE_SD20_DISCOUNT_RATE = Decimal("0.83")
+PPIO_SD20_DISCOUNT_RATE = Decimal("0.80")
+PPIO_H3_DISCOUNT_RATE = Decimal("0.85")
 
 
 def video_discount_rate(*, model: str, provider: str) -> Decimal:
     if model == "doubao-seedance-2.0" and provider == "yinghe":
         return YINGHE_SD20_DISCOUNT_RATE
+    if model == "doubao-seedance-2.0-ppio" and provider == "ppio":
+        return PPIO_SD20_DISCOUNT_RATE
+    if model == "minimax-h3-ppio" and provider == "ppio":
+        return PPIO_H3_DISCOUNT_RATE
     return Decimal("1")
 
 
 def video_discount_label(*, model: str, provider: str) -> str:
-    return "英和 83 折" if video_discount_rate(model=model, provider=provider) < 1 else ""
+    rate = video_discount_rate(model=model, provider=provider)
+    if rate == YINGHE_SD20_DISCOUNT_RATE:
+        return "英和 83 折"
+    if rate == PPIO_SD20_DISCOUNT_RATE:
+        return "PPIO 8 折"
+    if rate == PPIO_H3_DISCOUNT_RATE:
+        return "PPIO 85 折"
+    return ""
 
 
 def _decimal(value: Any) -> Decimal:
@@ -98,14 +111,14 @@ async def reconcile_video_job(db: AsyncSession, job: GenerationJobModel) -> Vide
         usage_type = "runninghub_coins"
         usage_unit = "RH币"
         quantity = _decimal(metrics.get("consumeCoins"))
-    elif model == "doubao-seedance-2.0":
+    elif model in {"doubao-seedance-2.0", "doubao-seedance-2.0-ppio"}:
         usage_type = "completion_tokens"
         usage_unit = "Token"
         quantity = _decimal((usage.output_tokens if usage else 0) or metrics.get("completion_tokens") or metrics.get("completionTokens"))
         if quantity > 0:
             rule = await _price_rule(db, model=model, provider=provider, resolution=resolution, at=completed_at)
             billing_status = "priced" if rule else "unpriced"
-    elif model == "minimax-h3" and provider == "yinghe-h3":
+    elif (model == "minimax-h3" and provider == "yinghe-h3") or (model == "minimax-h3-ppio" and provider == "ppio"):
         usage_type = "output_seconds"
         usage_unit = "秒"
         quantity = _decimal(metrics.get("output_seconds") or metrics.get("outputSeconds"))

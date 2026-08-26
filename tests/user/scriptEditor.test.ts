@@ -52,7 +52,7 @@ describe('ScriptEditor batch generation confirmation', () => {
     expect(options.title).toBe('确认批量生成视频')
     expect(options.message).toContain('本次将生成总计：2 条，共：10 秒')
     expect(options.message).toContain('预计总费用为：8.30 元')
-    expect(options.message).toContain('当前子账号余额还有：20.00 元')
+    expect(options.message).toContain('英和预计 ¥8.30，余额 ¥20.00')
     expect(options.message).toContain('【余额充足，可以开始批量生成任务】')
     expect(generate).toHaveBeenCalledTimes(1)
     wrapper.unmount()

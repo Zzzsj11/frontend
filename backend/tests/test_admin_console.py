@@ -28,9 +28,11 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     assert any(x["id"] == "gpt-image-2" for x in options)
     h3 = next(x for x in options if x["id"] == "minimax-h3-runninghub")
     direct_h3 = next(x for x in options if x["id"] == "minimax-h3")
-    assert h3["name"] == "H3"
+    ppio_sd = next(x for x in options if x["id"] == "doubao-seedance-2.0-ppio")
+    ppio_h3 = next(x for x in options if x["id"] == "minimax-h3-ppio")
+    assert h3["name"] == "H3（RunningHub，2并发，仅测试时用）"
     assert h3["capabilities"]["executionConcurrency"] == 2
-    assert direct_h3["name"] == "H3"
+    assert direct_h3["name"] == "H3（英和）"
     assert direct_h3["capabilities"]["executionConcurrency"] == 200
     assert direct_h3["capabilities"]["executionPool"] == "yinghe-h3"
     assert h3["capabilities"]["referenceImage"] == {"min": 0, "max": 6}
@@ -41,6 +43,10 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     assert h3["capabilities"]["referenceVideo"]["max"] == 1
     assert "first_last" in h3["capabilities"]["h3Modes"]
     assert "first_last" in direct_h3["capabilities"]["h3Modes"]
+    assert ppio_sd["name"] == "SD2.0 标准版（PPIO）"
+    assert ppio_sd["capabilities"]["resolutions"] == ["480p", "720p"]
+    assert ppio_h3["name"] == "H3（PPIO）"
+    assert ppio_h3["capabilities"]["providerCode"] == "ppio"
     client.delete(f"/api/admin/users/{created['id']}")
     # Restore the shared TestClient's refresh cookie for subsequent auth tests.
     restored = client.post("/api/auth/login", json={"username": "admin", "password": "secure-admin-123"})

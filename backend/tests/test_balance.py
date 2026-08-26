@@ -191,13 +191,61 @@ async def test_video_batch_cost_estimate_and_insufficient_key_balance(monkeypatc
     async def enough(force=False):
         return {"available": True, "key": {"remaining": 20}}
 
-    monkeypatch.setattr(balance, "query_business_balance", enough)
+    async def enough_providers(force=False):
+        return {"providers": {"yinghe": await enough(force), "ppio": balance.unavailable_balance()}}
+
+    monkeypatch.setattr(balance, "query_provider_balances", enough_providers)
     items = [SimpleNamespace(duration=10, model="doubao-seedance-2.0"), SimpleNamespace(duration=10, model="minimax-h3-runninghub")]
     assert (await balance.ensure_video_batch_balance(items))["estimatedCost"] == 12.55
 
     async def insufficient(force=False):
         return {"available": True, "key": {"remaining": 12.54}}
 
-    monkeypatch.setattr(balance, "query_business_balance", insufficient)
-    with pytest.raises(ValueError, match="子账号 Key 余额额度不足，请先完成充值或提升余额上限后再试"):
+    async def insufficient_providers(force=False):
+        return {"providers": {"yinghe": await insufficient(force), "ppio": balance.unavailable_balance()}}
+
+    monkeypatch.setattr(balance, "query_provider_balances", insufficient_providers)
+    with pytest.raises(ValueError, match="英和子账号 Key 余额不足，请先完成充值或提升余额上限后再试"):
         await balance.ensure_video_batch_balance(items)
+
+
+@pytest.mark.asyncio
+async def test_ppio_balance_and_channel_cost_precheck(monkeypatch) -> None:
+    class PpioClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, url, headers):
+            assert url == "https://api.ppio.com/openapi/v1/billing/balance/detail"
+            assert headers == {"Authorization": "Bearer ppio-test-key"}
+            return FakeResponse(
+                {
+                    "availableBalance": "1000000",
+                    "cashBalance": "800000",
+                    "creditLimit": "200000",
+                    "pendingCharges": "0",
+                    "outstandingInvoices": "0",
+                }
+            )
+
+    ppio_settings = SimpleNamespace(
+        ppio_api_key="ppio-test-key",
+        ppio_balance_url="https://api.ppio.com/openapi/v1/billing/balance/detail",
+        ppio_balance_timeout=10,
+    )
+    monkeypatch.setattr(balance, "settings", ppio_settings)
+    monkeypatch.setattr(balance.httpx, "AsyncClient", lambda **_kwargs: PpioClient())
+    result = await balance.query_ppio_balance()
+    assert result["balanceDisplay"] == "1000000.00"
+    assert result["details"]["cashBalance"] == 800000
+
+    async def provider_balances(force=False):
+        return {"providers": {"yinghe": balance.unavailable_balance(), "ppio": result}}
+
+    monkeypatch.setattr(balance, "query_provider_balances", provider_balances)
+    estimate = await balance.ensure_video_batch_balance([SimpleNamespace(duration=10, model="doubao-seedance-2.0-ppio"), SimpleNamespace(duration=10, model="minimax-h3-ppio")])
+    assert estimate["estimatedCost"] == 12.25
+    assert estimate["providerEstimates"] == {"ppio": 12.25}
