@@ -49,10 +49,12 @@ small {
   background: var(--surface);
 }
 .toolbar input {
-  min-width: 240px;
+  min-width: 360px;
 }
 .search-field {
   position: relative;
+  flex: 1 1 420px;
+  max-width: 640px;
 }
 .search-field input {
   box-sizing: border-box;
@@ -89,6 +91,11 @@ small {
   background: var(--primary);
   color: var(--on-primary);
   border-color: var(--primary);
+}
+.search-action {
+  min-width: 96px;
+  padding-right: 22px;
+  padding-left: 22px;
 }
 .table-wrap {
   overflow: auto;

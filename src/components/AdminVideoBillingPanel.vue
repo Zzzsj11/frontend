@@ -179,7 +179,7 @@ onMounted(load)
           ×
         </button>
       </div>
-      <button class="action" @click="search">查询</button>
+      <button class="action search-action" @click="search">查询</button>
       <button class="action primary" :disabled="reconciling" @click="reconcile">
         {{ reconciling ? '核算中…' : '重新核算全部历史' }}
       </button>
