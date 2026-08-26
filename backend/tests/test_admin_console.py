@@ -43,7 +43,7 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     assert h3["capabilities"]["referenceVideo"]["max"] == 1
     assert "first_last" in h3["capabilities"]["h3Modes"]
     assert "first_last" in direct_h3["capabilities"]["h3Modes"]
-    assert ppio_sd["name"] == "SD2.0 标准版（PPIO）"
+    assert ppio_sd["name"] == "SD2.0（PPIO）"
     assert ppio_sd["capabilities"]["resolutions"] == ["480p", "720p"]
     assert ppio_h3["name"] == "H3（PPIO）"
     assert ppio_h3["capabilities"]["providerCode"] == "ppio"

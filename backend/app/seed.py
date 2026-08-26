@@ -273,7 +273,7 @@ async def seed_system_data() -> None:
                 "model-sd20-ppio",
                 ppio_provider.id,
                 "doubao-seedance-2.0-ppio",
-                "SD2.0 标准版（PPIO）",
+                "SD2.0（PPIO）",
                 "video",
                 "doubao-seedance-2-0-260128",
                 {
