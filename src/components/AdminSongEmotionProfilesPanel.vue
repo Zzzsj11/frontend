@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { formatChinaDateTime } from '../utils/dateTime'
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import {
   createSongEmotion,
   deleteSongEmotion,
@@ -13,6 +13,7 @@ import {
 import { fetchGeneralStoryboardOptions } from '../api/domain'
 import type { GeneralStoryboardOptions } from '../types'
 import BaseModal from './base/BaseModal.vue'
+import AdminPagination from './base/AdminPagination.vue'
 import SongEmotionEditor from './SongEmotionEditor.vue'
 
 const emptyForm = (): SongEmotionInput => ({
@@ -44,7 +45,6 @@ const editing = ref(false)
 const confirmingCode = ref('')
 const form = ref<SongEmotionInput>(emptyForm())
 const options = ref<GeneralStoryboardOptions | null>(null)
-const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 
 const load = async () => {
   loading.value = true
@@ -84,13 +84,8 @@ const clearSearch = () => {
   page.value = 1
   void load()
 }
-const turnPage = (delta: number) => {
-  page.value = Math.min(pageCount.value, Math.max(1, page.value + delta))
-  void load()
-}
-const selectPage = (event: Event) => {
-  const selected = Number((event.target as HTMLSelectElement).value)
-  page.value = Math.min(pageCount.value, Math.max(1, selected || 1))
+const selectPage = (selected: number) => {
+  page.value = selected
   void load()
 }
 const showCreate = () => {
@@ -204,20 +199,13 @@ const remove = async (songCode: string) => {
     </div>
     <div class="list-meta">
       <span>歌曲情感数据</span>
-      <div class="pager top-pager">
-        <span>共 {{ total }} 条</span>
-        <button :disabled="page === 1" @click="turnPage(-1)">上一页</button>
-        <label class="page-picker"
-          >第
-          <select :value="page" aria-label="顶部选择页码" @change="selectPage">
-            <option v-for="pageNumber in pageCount" :key="pageNumber" :value="pageNumber">
-              {{ pageNumber }}
-            </option>
-          </select>
-          / {{ pageCount }} 页</label
-        >
-        <button :disabled="page * pageSize >= total" @click="turnPage(1)">下一页</button>
-      </div>
+      <AdminPagination
+        :page="page"
+        :total="total"
+        :page-size="pageSize"
+        position="顶部"
+        @change="selectPage"
+      />
     </div>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="notice" class="notice">{{ notice }}</p>
@@ -275,20 +263,13 @@ const remove = async (songCode: string) => {
         </tbody>
       </table>
     </div>
-    <div class="pager">
-      <span>共 {{ total }} 条</span
-      ><button :disabled="page === 1" @click="turnPage(-1)">上一页</button
-      ><label class="page-picker"
-        >第
-        <select :value="page" aria-label="底部选择页码" @change="selectPage">
-          <option v-for="pageNumber in pageCount" :key="pageNumber" :value="pageNumber">
-            {{ pageNumber }}
-          </option>
-        </select>
-        / {{ pageCount }} 页</label
-      >
-      ><button :disabled="page * pageSize >= total" @click="turnPage(1)">下一页</button>
-    </div>
+    <AdminPagination
+      :page="page"
+      :total="total"
+      :page-size="pageSize"
+      position="底部"
+      @change="selectPage"
+    />
     <BaseModal
       :open="open"
       :loading="busy"
@@ -312,7 +293,6 @@ const remove = async (songCode: string) => {
 .toolbar,
 .toolbar-actions,
 .search,
-.pager,
 .actions {
   display: flex;
   align-items: center;
@@ -400,23 +380,6 @@ td {
 .empty {
   text-align: center;
   color: var(--text-secondary);
-}
-.pager {
-  justify-content: flex-end;
-  color: var(--text-secondary);
-}
-.page-picker {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-.page-picker select {
-  min-width: 58px;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text);
 }
 .error {
   color: var(--danger);

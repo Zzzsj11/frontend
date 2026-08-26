@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   getVideoBillingDetail,
   getVideoBilling,
@@ -8,6 +8,7 @@ import {
   type VideoBillingDetail,
 } from '../api/adminVideoBilling'
 import AdminVideoBillingDetailModal from './AdminVideoBillingDetailModal.vue'
+import AdminPagination from './base/AdminPagination.vue'
 import { formatChinaDateTime } from '../utils/dateTime'
 import { formatElapsedSeconds } from '../utils/duration'
 
@@ -41,6 +42,7 @@ const origin = ref('')
 const keyword = ref('')
 const offset = ref(0)
 const pageSize = 50
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 
 const money = (value: number) => `¥${value.toFixed(6)}`
 const compactNumber = (value: number, digits = 6) => Number(value.toFixed(digits)).toLocaleString()
@@ -79,8 +81,8 @@ const clearSearch = () => {
   offset.value = 0
   void load()
 }
-const changePage = (delta: number) => {
-  offset.value = Math.max(0, offset.value + delta * pageSize)
+const selectPage = (page: number) => {
+  offset.value = (page - 1) * pageSize
   void load()
 }
 const reconcile = async () => {
@@ -184,6 +186,13 @@ onMounted(load)
     </div>
     <p v-if="error" class="message error">{{ error }}</p>
     <p v-if="notice" class="message notice">{{ notice }}</p>
+    <AdminPagination
+      :page="currentPage"
+      :total="data.total"
+      :page-size="pageSize"
+      position="顶部"
+      @change="selectPage"
+    />
     <div class="table-wrap">
       <table>
         <thead>
@@ -239,11 +248,13 @@ onMounted(load)
       <p v-if="loading" class="empty">加载中…</p>
       <p v-else-if="!data.items.length" class="empty">暂无对账记录</p>
     </div>
-    <div class="pager">
-      <button :disabled="offset === 0" @click="changePage(-1)">上一页</button
-      ><span>{{ offset + 1 }}–{{ Math.min(offset + pageSize, data.total) }} / {{ data.total }}</span
-      ><button :disabled="offset + pageSize >= data.total" @click="changePage(1)">下一页</button>
-    </div>
+    <AdminPagination
+      :page="currentPage"
+      :total="data.total"
+      :page-size="pageSize"
+      position="底部"
+      @change="selectPage"
+    />
     <AdminVideoBillingDetailModal
       :open="detailOpen"
       :loading="detailLoading"

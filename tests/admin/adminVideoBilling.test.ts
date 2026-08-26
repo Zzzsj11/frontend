@@ -95,6 +95,7 @@ describe('AdminVideoBillingPanel', () => {
     expect(wrapper.text()).not.toContain('12 Token')
     expect(wrapper.text()).toContain('生成耗时')
     expect(wrapper.text()).toContain('1 分 36 秒')
+    expect(wrapper.findAll('nav[aria-label$="列表分页"]')).toHaveLength(2)
   })
 
   it('清空搜索条件后回到首页并重新加载完整列表', async () => {

@@ -42,8 +42,7 @@ small {
   gap: 8px;
 }
 .toolbar input,
-.toolbar select,
-.pager button {
+.toolbar select {
   padding: 8px 10px;
   border: 1px solid var(--border-dark);
   border-radius: var(--radius-sm);
@@ -159,13 +158,6 @@ td small {
 .message.notice {
   background: var(--success-light);
   color: var(--success);
-}
-.pager {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-secondary);
 }
 @media (max-width: 900px) {
   .summary {

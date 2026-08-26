@@ -75,15 +75,13 @@ describe('admin song emotion profiles panel', () => {
       'q',
       'SHINEE',
     ])
-    expect(wrapper.findAll('.top-pager button')).toHaveLength(2)
+    expect(wrapper.findAll('nav[aria-label$="列表分页"]')).toHaveLength(2)
   })
   it('clears the search and resets the full list', async () => {
     vi.mocked(listSongEmotions).mockResolvedValue({ total: 120, items: [item] })
     const wrapper = mount(AdminSongEmotionProfilesPanel)
-    await vi.waitFor(() =>
-      expect(wrapper.get('[aria-label="顶部选择页码"]').findAll('option')).toHaveLength(3),
-    )
-    await wrapper.get('[aria-label="顶部选择页码"]').setValue('3')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('/ 3 页'))
+    await wrapper.get('[aria-label="顶部输入页码"]').setValue('3')
     await wrapper.get('input[aria-label="搜索歌曲情感库"]').setValue('喜欢你')
     await wrapper.get('button[aria-label="清空搜索"]').trigger('click')
     await vi.waitFor(() => {
@@ -111,15 +109,13 @@ describe('admin song emotion profiles panel', () => {
   it('selects a page from both pagination controls', async () => {
     vi.mocked(listSongEmotions).mockResolvedValue({ total: 120, items: [item] })
     const wrapper = mount(AdminSongEmotionProfilesPanel)
-    await vi.waitFor(() =>
-      expect(wrapper.get('[aria-label="顶部选择页码"]').findAll('option')).toHaveLength(3),
-    )
-    await wrapper.get('[aria-label="顶部选择页码"]').setValue('3')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('/ 3 页'))
+    await wrapper.get('[aria-label="顶部输入页码"]').setValue('3')
     await vi.waitFor(() =>
       expect(vi.mocked(listSongEmotions).mock.calls.at(-1)![0].get('offset')).toBe('100'),
     )
     await vi.waitFor(() =>
-      expect(wrapper.get<HTMLSelectElement>('[aria-label="底部选择页码"]').element.value).toBe('3'),
+      expect(wrapper.get<HTMLInputElement>('[aria-label="底部输入页码"]').element.value).toBe('3'),
     )
   })
   it('uses linked category and season defaults for a new profile', async () => {

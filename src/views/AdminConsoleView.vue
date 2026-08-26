@@ -11,6 +11,7 @@ import AdminSideNav from '../components/AdminSideNav.vue'
 import AdminSongEmotionProfilesPanel from '../components/AdminSongEmotionProfilesPanel.vue'
 import AdminTopBar from '../components/AdminTopBar.vue'
 import AdminVideoBillingPanel from '../components/AdminVideoBillingPanel.vue'
+import AdminPagination from '../components/base/AdminPagination.vue'
 import BaseModal from '../components/base/BaseModal.vue'
 import { perfSnapshot } from '../perf'
 import { useAuthStore } from '../stores/auth'
@@ -236,16 +237,20 @@ const promptsReloadToken = ref(0)
 /** 通用 offset 分页：projects/errors/audit/llm/requests 共用，切 tab 重置 */
 const pageOffset = ref(0)
 const pageSize = 50
-const pageCount = computed(() => Math.max(1, Math.ceil((data.value?.total || 0) / pageSize)))
 const currentPage = computed(() => Math.floor(pageOffset.value / pageSize) + 1)
 const isPagedTab = computed(() =>
   ['projects', 'errors', 'audit', 'llm', 'requests'].includes(tab.value),
 )
-const turnPage = (delta: number) => {
-  pageOffset.value = Math.max(
-    0,
-    Math.min((pageCount.value - 1) * pageSize, pageOffset.value + delta * pageSize),
-  )
+const hasPagination = computed(() => isPagedTab.value || tab.value === 'jobs')
+const paginationPage = computed(() => (tab.value === 'jobs' ? jobPage.value : currentPage.value))
+const paginationPageSize = computed(() => (tab.value === 'jobs' ? jobPageSize : pageSize))
+const selectAdminPage = (page: number) => {
+  if (tab.value === 'jobs') jobPage.value = page
+  else pageOffset.value = (page - 1) * pageSize
+  void load()
+}
+const searchPaged = () => {
+  pageOffset.value = 0
   void load()
 }
 const llmEndpoint = computed(() => {
@@ -412,10 +417,6 @@ const toggleModel = async (row: AdminRow) => {
 }
 const searchJobs = () => {
   jobPage.value = 1
-  void load()
-}
-const turnJobPage = (delta: number) => {
-  jobPage.value = Math.max(1, jobPage.value + delta)
   void load()
 }
 const syncJob = async (row: AdminRow) => {
@@ -807,22 +808,9 @@ onMounted(() => {
               @keyup.enter="searchJobs"
             />
             <button class="refresh" @click="searchJobs">查询</button>
-            <span class="pager">
-              <button class="action" :disabled="jobPage <= 1" @click="turnJobPage(-1)">
-                上一页
-              </button>
-              第 {{ jobPage }} 页 · 共 {{ data?.total || 0 }} 条
-              <button
-                class="action"
-                :disabled="jobPage * jobPageSize >= (data?.total || 0)"
-                @click="turnJobPage(1)"
-              >
-                下一页
-              </button>
-            </span>
           </div>
           <div v-if="tab === 'requests'" class="filters">
-            <select v-model="reqFilters.runId" @change="load">
+            <select v-model="reqFilters.runId" @change="searchPaged">
               <option value="">全部批次</option>
               <option v-for="r in reqRuns" :key="r.runId" :value="r.runId">
                 {{ r.runId }}（{{ r.requests }} 次 · 均 {{ r.avgMs }}ms · 峰 {{ r.maxMs }}ms · 错
@@ -832,9 +820,9 @@ onMounted(() => {
             <input
               v-model="reqFilters.path"
               placeholder="路径过滤 如 /api/auth"
-              @keyup.enter="load"
+              @keyup.enter="searchPaged"
             />
-            <button class="refresh" @click="load">查询</button>
+            <button class="refresh" @click="searchPaged">查询</button>
           </div>
           <div v-if="tab === 'llm'" class="filters">
             <input v-model="llmFilters.projectTaskId" placeholder="projectTaskId 过滤" />
@@ -844,7 +832,7 @@ onMounted(() => {
               <option value="ok">ok</option>
               <option value="error">error</option>
             </select>
-            <button class="refresh" @click="load">查询</button>
+            <button class="refresh" @click="searchPaged">查询</button>
           </div>
           <form v-if="tab === 'users'" class="filters" @submit.prevent="createUser">
             <input v-model="userForm.username" placeholder="用户名" required minlength="3" />
@@ -867,17 +855,15 @@ onMounted(() => {
             /></label>
             <button class="refresh" type="submit">创建用户</button>
           </form>
-          <div v-if="isPagedTab" class="pager-bar">
-            <span class="pager">
-              <button class="action" :disabled="currentPage <= 1" @click="turnPage(-1)">
-                上一页
-              </button>
-              第 {{ currentPage }} 页 · 共 {{ data?.total || 0 }} 条 · 每页 {{ pageSize }} 条
-              <button class="action" :disabled="currentPage >= pageCount" @click="turnPage(1)">
-                下一页
-              </button>
-            </span>
-          </div>
+          <AdminPagination
+            v-if="hasPagination"
+            class="pager-bar"
+            :page="paginationPage"
+            :total="data?.total || 0"
+            :page-size="paginationPageSize"
+            position="顶部"
+            @change="selectAdminPage"
+          />
           <section
             v-if="
               ![
@@ -972,6 +958,15 @@ onMounted(() => {
             </table>
             <p v-if="!rows.length" class="empty">暂无数据</p>
           </section>
+          <AdminPagination
+            v-if="hasPagination"
+            class="pager-bar"
+            :page="paginationPage"
+            :total="data?.total || 0"
+            :page-size="paginationPageSize"
+            position="底部"
+            @change="selectAdminPage"
+          />
         </template>
       </main>
     </div>
