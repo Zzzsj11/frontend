@@ -1,15 +1,22 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { useProjectStore } from '../stores/project'
+import { DEFAULT_SHOT_OPTIONS, useProjectStore } from '../stores/project'
 import ScriptLineItem from './ScriptLine.vue'
 import ShotDetailModal from './ShotDetailModal.vue'
 import MagicScriptModal from './MagicScriptModal.vue'
 import GeneralStoryboardModal from './GeneralStoryboardModal.vue'
 import AppIcon from './AppIcon.vue'
 import StoryboardOutlineModal from './StoryboardOutlineModal.vue'
+import { apiRequest } from '../api/client'
+import type { AccountBalance } from '../stores/auth'
+import { confirmDialog } from '../composables/useConfirmDialog'
+import { normalizeShotOptions } from '../mediaConstraints'
+import { VIDEO_MODEL_OPTIONS } from '../generationModels'
+import { estimateVideoBatchCost } from '../utils/videoBatchCost'
 
 const store = useProjectStore()
 const lineListRef = ref<HTMLDivElement>()
+const checkingBatchCost = ref(false)
 
 /** 时间线或其他入口选中不可见分镜时，将对应卡片平滑滚动到列表中央 */
 watch(
@@ -110,15 +117,64 @@ const storyboardPercent = computed(() => {
 })
 
 /** 可批量生成视频的分镜数：提示词就绪且视频「未生成/失败」（生成中的不计） */
-const batchGeneratableCount = computed(
-  () =>
-    store.lines.filter(
-      (line) =>
-        line.generationStatus === 'succeeded' &&
-        line.shot.status !== 'done' &&
-        line.shot.status !== 'generating',
-    ).length,
+const batchGeneratableLines = computed(() =>
+  store.lines.filter(
+    (line) =>
+      line.generationStatus === 'succeeded' &&
+      line.shot.status !== 'done' &&
+      line.shot.status !== 'generating',
+  ),
 )
+const batchGeneratableCount = computed(() => batchGeneratableLines.value.length)
+
+const confirmBatchGenerate = async () => {
+  if (!batchGeneratableCount.value || checkingBatchCost.value || store.batchShooting) return
+  checkingBatchCost.value = true
+  try {
+    const items = batchGeneratableLines.value.map((line) => {
+      const options = normalizeShotOptions(line.shotOptions ?? DEFAULT_SHOT_OPTIONS)
+      return { duration: options.duration, model: options.videoModel }
+    })
+    const { totalSeconds, estimatedCost } = estimateVideoBatchCost(items)
+    const modelCodes = [...new Set(items.map((item) => item.model).filter(Boolean))]
+    const modelText = modelCodes
+      .map(
+        (code) =>
+          VIDEO_MODEL_OPTIONS.find((option) => option.value === code)?.label || code || 'SD2.0',
+      )
+      .join('、')
+    const balance = await apiRequest<AccountBalance>('/account/balance?force=true')
+    const keyRemaining = balance.available ? balance.key?.remaining : null
+    const unlimited = Boolean(balance.available && balance.key && balance.key.quotaAmt === null)
+    const keyText =
+      keyRemaining == null
+        ? balance.key?.remainingDisplay || '暂时无法获取'
+        : keyRemaining.toFixed(2)
+    const sufficient = unlimited || (keyRemaining != null && keyRemaining + 1e-9 >= estimatedCost)
+    const conclusion = sufficient
+      ? '【余额充足，可以开始批量生成任务】'
+      : '【余额不足，请联系负责人进行充值】'
+    const message = `本次将生成总计：${items.length} 条，共：${totalSeconds} 秒，${modelText || '视频模型'} 视频，预计总费用为：${estimatedCost.toFixed(2)} 元，当前子账号余额还有：${keyText} 元。\n\n${conclusion}`
+    const confirmed = await confirmDialog({
+      title: sufficient ? '确认批量生成视频' : '子账号余额不足',
+      message,
+      confirmText: sufficient ? '确定生成' : '知道了',
+      cancelText: sufficient ? '取消' : '稍后处理',
+      danger: !sufficient,
+    })
+    if (sufficient && confirmed) void store.generateAllShots()
+  } catch (error) {
+    await confirmDialog({
+      title: '费用预估失败',
+      message: error instanceof Error ? error.message : '余额暂时无法查询，请稍后重试',
+      confirmText: '知道了',
+      cancelText: '关闭',
+      danger: true,
+    })
+  } finally {
+    checkingBatchCost.value = false
+  }
+}
 </script>
 
 <template>
@@ -143,13 +199,19 @@ const batchGeneratableCount = computed(
       <div class="header-actions">
         <button
           class="btn-outline"
-          :disabled="!batchGeneratableCount || store.batchShooting || store.songSwitching"
+          :disabled="
+            !batchGeneratableCount ||
+            store.batchShooting ||
+            store.songSwitching ||
+            checkingBatchCost
+          "
           title="批量生成全部「提示词就绪但视频未生成/失败」分镜的视频片段（最多同时生成 200 个）"
-          @click="store.generateAllShots()"
+          @click="confirmBatchGenerate"
         >
-          <span v-if="store.batchShooting" class="spinner" />
+          <span v-if="store.batchShooting || checkingBatchCost" class="spinner" />
           <AppIcon v-else name="sparkles" :size="15" />
-          批量生成{{ batchGeneratableCount ? `（${batchGeneratableCount}）` : '' }}
+          {{ checkingBatchCost ? '正在核算费用…' : '批量生成'
+          }}{{ batchGeneratableCount ? `（${batchGeneratableCount}）` : '' }}
         </button>
         <button class="btn-outline" @click="store.openLibrary()">
           <AppIcon name="users" :size="15" />

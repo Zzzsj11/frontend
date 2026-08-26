@@ -11,6 +11,7 @@ import type {
 import { GENERAL_GENDER_OPTIONS } from '../types'
 import { useProjectStore } from '../stores/project'
 import { confirmDialog } from '../composables/useConfirmDialog'
+import { estimateVideoBatchCost, videoEstimateUnitPrice } from '../utils/videoBatchCost'
 import AppIcon from './AppIcon.vue'
 import BaseModal from './base/BaseModal.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
@@ -178,15 +179,22 @@ const submit = async () => {
     estimatingCost.value = true
     try {
       const seconds = request.totalDuration * (request.groupCount ?? 1)
-      const unitPrice = request.videoModel.startsWith('minimax-h3') ? 0.5 : 1
-      const estimatedCost = Math.round(seconds * unitPrice * 100) / 100
+      const unitPrice = videoEstimateUnitPrice(request.videoModel)
+      const { estimatedCost } = estimateVideoBatchCost([
+        { duration: seconds, model: request.videoModel },
+      ])
       const balance = await apiRequest<AccountBalance>('/account/balance?force=true')
       const keyRemaining = balance.available ? balance.key?.remaining : null
       const keyLabel = balance.key?.keyName || balance.key?.keyMasked || '当前视频 Key'
-      if (keyRemaining != null && keyRemaining + 1e-9 < estimatedCost) {
+      const unlimited = Boolean(balance.available && balance.key && balance.key.quotaAmt === null)
+      if (!unlimited && (keyRemaining == null || keyRemaining + 1e-9 < estimatedCost)) {
+        const balanceDetail =
+          keyRemaining == null
+            ? `${keyLabel} 的剩余额度暂时无法获取。`
+            : `${keyLabel} 当前剩余额度 ¥${keyRemaining.toFixed(2)}，尚缺 ¥${(estimatedCost - keyRemaining).toFixed(2)}。`
         await confirmDialog({
           title: '余额额度不足',
-          message: `本次预计费用 ¥${estimatedCost.toFixed(2)}，${keyLabel} 当前剩余额度 ¥${keyRemaining.toFixed(2)}，尚缺 ¥${(estimatedCost - keyRemaining).toFixed(2)}。\n\n请先完成充值或提升子账号 Key 的余额上限后再试，本次不会创建项目或提交视频任务。`,
+          message: `本次预计费用 ¥${estimatedCost.toFixed(2)}，${balanceDetail}\n\n请先完成充值或提升子账号 Key 的余额上限后再试，本次不会创建项目或提交视频任务。`,
           confirmText: '知道了',
           cancelText: '稍后处理',
           danger: true,
