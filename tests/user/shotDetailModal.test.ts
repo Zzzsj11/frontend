@@ -13,7 +13,7 @@ describe('ShotDetailModal general MV character controls', () => {
     document.body.innerHTML = ''
   })
 
-  it('hides character preview and cast editing for general lines', async () => {
+  it('hides character preview when a general line sends no character material', async () => {
     const store = useProjectStore()
     const line = {
       id: 'general-character-line',
@@ -41,6 +41,50 @@ describe('ShotDetailModal general MV character controls', () => {
     expect(document.body.querySelector('.cast-row')).toBeNull()
     expect(document.body.textContent).toContain('选择视频或场景，调整对应内容')
     expect(document.body.textContent).not.toContain('管理阵容')
+  })
+
+  it('shows character preview when a general line sends character material', async () => {
+    const store = useProjectStore()
+    store.digitalHumans = [
+      {
+        id: 'dh-selected',
+        name: '定制人物',
+        avatar: '/character.jpg',
+        style: '写实',
+        source: 'upload',
+        scope: 'private',
+      },
+    ]
+    store.castIds = ['dh-selected']
+    const line = {
+      id: 'general-character-line-with-material',
+      source: 'general',
+      shotType: 'character',
+      plannedDuration: 5,
+      lyrics: '',
+      scenePrompt: '城市夜景',
+      shotPrompt: '定制人物走过街道',
+      digitalHumanIds: ['dh-selected'],
+      voice: { status: 'none' },
+      scene: { status: 'none' },
+      shot: { status: 'none', assets: [] },
+      generationStatus: 'succeeded',
+    } as ScriptLine
+    store.lines = [line]
+    store.editingLineId = line.id
+    store.editingTab = 'cast'
+
+    const wrapper = mount(ShotDetailModal, { attachTo: document.body })
+    await wrapper.vm.$nextTick()
+
+    expect(document.body.querySelectorAll('.preview-cards .pcard')).toHaveLength(3)
+    const portrait = document.body.querySelector('.pcard-avatars [role="img"]') as HTMLElement
+    expect(portrait.getAttribute('aria-label')).toBe('定制人物')
+    expect(portrait.style.backgroundImage).toContain('/character.jpg')
+    expect(document.body.textContent).toContain('选择人物、视频或场景，调整对应内容')
+    expect(document.body.textContent).toContain('出演角色')
+    expect(document.body.textContent).toContain('定制人物')
+    expect(document.body.textContent).toContain('管理阵容')
   })
 
   it('shows server-based elapsed seconds while video is generating', async () => {

@@ -94,6 +94,8 @@ const castOfLine = computed(() => {
   const line = store.editingLine
   return line ? store.lineHumans(line) : []
 })
+// 与视频请求的 characterUrls 判定保持一致：通用分镜只有实际解析出人物素材时才展示人物板块。
+const showsCast = computed(() => !isGeneral.value || castOfLine.value.length > 0)
 
 // 分镜预览：当前选用片段的视频 / 封面
 const shotVideo = computed(() => {
@@ -171,8 +173,7 @@ watch(
     scenePromptDraft.value = line?.scenePrompt ?? ''
     shotPromptDraft.value = line?.shotPrompt ?? ''
     optionsDraft.value = normalizeShotOptions(line?.shotOptions ?? DEFAULT_SHOT_OPTIONS)
-    activeTab.value =
-      line?.source === 'general' && store.editingTab === 'cast' ? 'shot' : store.editingTab
+    activeTab.value = !showsCast.value && store.editingTab === 'cast' ? 'shot' : store.editingTab
     previewAsset.value = null
     // 脚本载入只带当前选用资产（P2 响应裁剪），打开弹窗时懒加载完整历史版本
     if (line) void store.ensureShotHistory(line.id)
@@ -243,13 +244,13 @@ const cancel = () => store.closeEditor()
     <template v-if="store.editingLine">
       <div class="modal-body">
         <p class="body-tip">
-          {{ isGeneral ? '选择视频或场景，调整对应内容' : '选择人物、视频或场景，调整对应内容' }}
+          {{ showsCast ? '选择人物、视频或场景，调整对应内容' : '选择视频或场景，调整对应内容' }}
         </p>
 
         <!-- 三个预览：人物 / 分镜 / 场景 -->
-        <div class="preview-cards" :class="{ 'without-cast': isGeneral }">
+        <div class="preview-cards" :class="{ 'without-cast': !showsCast }">
           <!-- 人物 -->
-          <div v-if="!isGeneral" class="pcard" :class="{ open: activeTab === 'cast' }">
+          <div v-if="showsCast" class="pcard" :class="{ open: activeTab === 'cast' }">
             <div class="pcard-media" title="点击展开人物调整" @click="activeTab = 'cast'">
               <div v-if="castOfLine.length" class="pcard-avatars">
                 <CharacterPortrait
@@ -338,7 +339,7 @@ const cancel = () => store.closeEditor()
         </div>
 
         <!-- 人物调整面板 -->
-        <div v-if="!isGeneral && activeTab === 'cast'" class="tab-panel">
+        <div v-if="showsCast && activeTab === 'cast'" class="tab-panel">
           <div class="panel-head">
             <span class="panel-title">出演角色</span>
             <button class="btn-outline regen-btn" @click="store.openLibrary()">
