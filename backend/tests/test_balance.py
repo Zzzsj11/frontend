@@ -219,8 +219,13 @@ async def test_ppio_balance_and_channel_cost_precheck(monkeypatch) -> None:
             return None
 
         async def get(self, url, headers):
+            assert headers == {
+                "Authorization": "Bearer ppio-test-key",
+                "Content-Type": "application/json",
+            }
+            if url == "https://api.ppio.com/v3/user":
+                return FakeResponse({"credit_balance": 25000000})
             assert url == "https://api.ppio.com/openapi/v1/billing/balance/detail"
-            assert headers == {"Authorization": "Bearer ppio-test-key"}
             return FakeResponse(
                 {
                     "availableBalance": "1000000",
@@ -234,17 +239,21 @@ async def test_ppio_balance_and_channel_cost_precheck(monkeypatch) -> None:
     ppio_settings = SimpleNamespace(
         ppio_api_key="ppio-test-key",
         ppio_balance_url="https://api.ppio.com/openapi/v1/billing/balance/detail",
+        ppio_model_balance_url="https://api.ppio.com/v3/user",
         ppio_balance_timeout=10,
     )
     monkeypatch.setattr(balance, "settings", ppio_settings)
     monkeypatch.setattr(balance.httpx, "AsyncClient", lambda **_kwargs: PpioClient())
     result = await balance.query_ppio_balance()
     assert result["rawBalance"] == "1000000"
-    assert result["balance"] == "100"
-    assert result["balanceDisplay"] == "100.00"
+    assert result["balance"] == "125"
+    assert result["balanceDisplay"] == "125.00"
     assert result["unitScale"] == 10000
     assert result["details"]["cashBalance"] == 80
     assert result["details"]["creditLimit"] == 20
+    assert result["details"]["accountAvailableBalance"] == 100
+    assert result["details"]["modelCreditBalance"] == 25
+    assert result["rawModelCreditBalance"] == "25000000"
     assert result["rawDetails"]["cashBalance"] == "800000"
 
     async def provider_balances(force=False):

@@ -18,6 +18,7 @@ SD20_ESTIMATE_PRICE_PER_SECOND = 0.83
 H3_ESTIMATE_PRICE_PER_SECOND = 0.425
 PPIO_SD20_ESTIMATE_PRICE_PER_SECOND = 0.8
 PPIO_BALANCE_UNIT_SCALE = Decimal("10000")
+PPIO_MODEL_CREDIT_UNIT_SCALE = Decimal("1000000")
 
 
 def build_balance_sign(user_id: str, timestamp: int, api_key: str) -> str:
@@ -51,6 +52,16 @@ def _ppio_amount_in_yuan(value: Any) -> Decimal | None:
         return None
     try:
         return Decimal(str(value)) / PPIO_BALANCE_UNIT_SCALE
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _ppio_model_credit_in_yuan(value: Any) -> Decimal | None:
+    """模型 API 的 credit_balance 使用百万分之一元精度。"""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return Decimal(str(value)) / PPIO_MODEL_CREDIT_UNIT_SCALE
     except (InvalidOperation, ValueError, TypeError):
         return None
 
@@ -164,13 +175,22 @@ async def query_ppio_balance() -> dict[str, Any]:
         return unavailable_balance("未配置 PPIO_API_KEY")
     try:
         async with httpx.AsyncClient(timeout=settings.ppio_balance_timeout) as client:
-            response = await client.get(settings.ppio_balance_url, headers={"Authorization": f"Bearer {settings.ppio_api_key}"})
-            response.raise_for_status()
-            data = response.json()
+            headers = {"Authorization": f"Bearer {settings.ppio_api_key}", "Content-Type": "application/json"}
+            account_response = await client.get(settings.ppio_balance_url, headers=headers)
+            account_response.raise_for_status()
+            data = account_response.json()
+            model_response = await client.get(settings.ppio_model_balance_url, headers=headers)
+            model_response.raise_for_status()
+            model_data = model_response.json()
         raw_available = data.get("availableBalance")
-        available = _ppio_amount_in_yuan(raw_available)
-        if available is None:
+        account_available = _ppio_amount_in_yuan(raw_available)
+        if account_available is None:
             raise ValueError("PPIO 余额接口未返回 availableBalance")
+        raw_model_credit = model_data.get("credit_balance")
+        model_credit = _ppio_model_credit_in_yuan(raw_model_credit)
+        if model_credit is None:
+            raise ValueError("PPIO 模型余额接口未返回 credit_balance")
+        available = account_available + model_credit
         raw_details = {
             "cashBalance": data.get("cashBalance"),
             "creditLimit": data.get("creditLimit"),
@@ -185,10 +205,16 @@ async def query_ppio_balance() -> dict[str, Any]:
             "balanceDisplay": f"{available:.2f}",
             "currency": "CNY",
             "unitScale": int(PPIO_BALANCE_UNIT_SCALE),
+            "modelCreditUnitScale": int(PPIO_MODEL_CREDIT_UNIT_SCALE),
             "updatedAt": datetime.now(UTC).isoformat(),
             "message": None,
             "rawDetails": raw_details,
-            "details": {key: float(value) if value is not None else None for key, value in details.items()},
+            "rawModelCreditBalance": str(raw_model_credit),
+            "details": {
+                **{key: float(value) if value is not None else None for key, value in details.items()},
+                "accountAvailableBalance": float(account_available),
+                "modelCreditBalance": float(model_credit),
+            },
         }
     except (httpx.HTTPError, ValueError, TypeError) as exc:
         return unavailable_balance(str(exc) or "PPIO 余额服务请求失败")

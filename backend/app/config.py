@@ -141,6 +141,7 @@ class Settings:
     ppio_api_base_url: str = os.getenv("PPIO_API_BASE_URL", "https://api.ppio.com").rstrip("/")
     ppio_api_key: str = _read_provider_value("PPIO_API_KEY")
     ppio_balance_url: str = os.getenv("PPIO_BALANCE_URL", "https://api.ppio.com/openapi/v1/billing/balance/detail")
+    ppio_model_balance_url: str = os.getenv("PPIO_MODEL_BALANCE_URL", "https://api.ppio.com/v3/user")
     ppio_balance_timeout: float = float(os.getenv("PPIO_BALANCE_TIMEOUT", "10"))
     storage_backend: str = os.getenv("STORAGE_BACKEND", "tos").lower()
     tos_endpoint: str = os.getenv("TOS_ENDPOINT", "")

@@ -33,7 +33,7 @@ const ppioBalanceTitle = computed(() => {
   if (!balance) return 'PPIO 余额暂不可用'
   if (balance.message) return balance.message
   const details = balance.details
-  return `PPIO 可用余额 ¥${balance.balanceDisplay} · 现金 ¥${details?.cashBalance ?? '--'} · 信用额度 ¥${details?.creditLimit ?? '--'} · 待入账 ¥${details?.pendingCharges ?? '--'} · 未结账单 ¥${details?.outstandingInvoices ?? '--'} · 点击刷新`
+  return `PPIO 可用总额 ¥${balance.balanceDisplay} · 模型额度 ¥${details?.modelCreditBalance ?? '--'} · 账户可用 ¥${details?.accountAvailableBalance ?? '--'}（现金 ¥${details?.cashBalance ?? '--'} + 信用额度 ¥${details?.creditLimit ?? '--'}）· 待入账 ¥${details?.pendingCharges ?? '--'} · 未结账单 ¥${details?.outstandingInvoices ?? '--'} · 点击刷新`
 })
 
 const logout = async () => {
