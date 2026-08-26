@@ -92,6 +92,9 @@ const money = (value: number) => `¥${value.toFixed(6)}`
               </a>
               <b>{{ reference.label }}</b>
               <small>{{ reference.type }}</small>
+              <small v-if="reference.providerUrl" class="provider-reference">
+                供应商引用：{{ reference.providerUrl }}
+              </small>
             </article>
           </div>
           <p v-if="!detail.references.length" class="empty">本次生成没有参考素材</p>
@@ -213,6 +216,9 @@ pre {
 }
 .media-link {
   color: var(--primary);
+}
+.provider-reference {
+  overflow-wrap: anywhere;
 }
 video {
   width: 100%;

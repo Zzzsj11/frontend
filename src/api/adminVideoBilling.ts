@@ -53,7 +53,7 @@ export interface VideoBillingDetail {
   amount: number
   billingStatus: string
   prompts: { label: string; content: string }[]
-  references: { label: string; type: string; url: string }[]
+  references: { label: string; type: string; url: string; providerUrl?: string }[]
   rawUsage: Record<string, unknown>
   result: { videoUrl?: string; coverUrl?: string; duration?: number; ratio?: string }
 }

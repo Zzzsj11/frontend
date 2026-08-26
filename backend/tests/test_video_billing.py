@@ -8,12 +8,23 @@ import pytest
 from sqlalchemy import select
 
 from app.database import session_factory
-from app.models import GenerationJobModel, TokenUsageModel, VideoPricingRuleModel
+from app.models import DigitalHumanModel, GenerationJobModel, TokenUsageModel, VideoPricingRuleModel
 
 
 async def _seed_billing_fixtures() -> None:
     now = datetime.now(timezone.utc)
     async with session_factory() as db:
+        db.add(
+            DigitalHumanModel(
+                id="billing-human",
+                user_id="user-admin",
+                name="费用详情人物",
+                avatar_url="https://tos.test/billing-human.jpg",
+                asset_avatar_url="asset://billing-human-1",
+                scope="private",
+                deleted_at=now,
+            )
+        )
         for rule in (
             VideoPricingRuleModel(
                 id="test-price-sd-720",
@@ -90,7 +101,7 @@ async def _seed_billing_fixtures() -> None:
                     "duration": 12,
                     "prompt": "最终 H3 提示词",
                     "_sourcePrompt": "原始业务提示词",
-                    "image_urls": ["https://example.com/reference.jpg"],
+                    "image_urls": ["asset://billing-human-1", "https://example.com/reference.jpg"],
                 },
                 provider="yinghe-h3",
                 error="供应商失败",
@@ -231,7 +242,13 @@ async def test_video_billing_reconciles_success_failed_and_excluded(client):
         {"label": "最终提交提示词", "content": "最终 H3 提示词"},
         {"label": "原始业务提示词", "content": "原始业务提示词"},
     ]
-    assert detail.json()["references"][0]["url"] == "https://example.com/reference.jpg"
+    assert detail.json()["references"][0] == {
+        "label": "图片 1",
+        "type": "图片",
+        "url": "https://tos.test/billing-human.jpg",
+        "providerUrl": "asset://billing-human-1",
+    }
+    assert detail.json()["references"][1]["url"] == "https://example.com/reference.jpg"
     assert detail.json()["rawUsage"] == {"output_seconds": 12}
     assert detail.json()["generationOrigin"] == "agent_test"
     assert detail.json()["generationElapsedSeconds"] == 96

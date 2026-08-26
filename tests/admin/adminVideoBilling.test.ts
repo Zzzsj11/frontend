@@ -158,7 +158,14 @@ describe('AdminVideoBillingPanel', () => {
             amount: 5.1,
             billingStatus: 'priced',
             prompts: [{ label: '最终提交提示词', content: '完整视频提示词' }],
-            references: [{ label: 'Picture 1', type: 'image', url: 'https://example.com/a.jpg' }],
+            references: [
+              {
+                label: 'Picture 1',
+                type: 'image',
+                url: 'https://tos.example.com/a.jpg',
+                providerUrl: 'asset://human-1',
+              },
+            ],
             rawUsage: { output_seconds: 12 },
             result: {},
           })
@@ -173,8 +180,9 @@ describe('AdminVideoBillingPanel', () => {
     expect(document.body.textContent).toContain('完整视频提示词')
     expect(document.body.textContent).toContain('¥0.425 / 秒')
     expect(document.body.querySelector('img')?.getAttribute('src')).toBe(
-      'https://example.com/a.jpg',
+      'https://tos.example.com/a.jpg',
     )
+    expect(document.body.textContent).toContain('供应商引用：asset://human-1')
     wrapper.unmount()
   })
 })

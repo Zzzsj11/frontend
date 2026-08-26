@@ -643,6 +643,35 @@ async def video_billing_reconcile(request: Request, user: CurrentUser, db: Async
     return result
 
 
+async def _billing_reference_url_map(db: AsyncSession, urls: set[str]) -> dict[str, str]:
+    """把供应商 asset:// 引用反查为可在管理后台预览的 TOS 原图。
+
+    历史对账不能受人物软删除影响，因此这里刻意不筛 deleted_at；原始 asset://
+    仍由详情响应的 providerUrl 返回，避免丢失供应商侧审计依据。
+    """
+    asset_urls = {url for url in urls if url.startswith("asset://")}
+    if not asset_urls:
+        return {}
+    humans = (
+        (
+            await db.execute(
+                select(DigitalHumanModel)
+                .where(DigitalHumanModel.asset_avatar_url.in_(asset_urls))
+                .order_by(DigitalHumanModel.deleted_at.is_(None).desc(), DigitalHumanModel.updated_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    resolved: dict[str, str] = {}
+    for human in humans:
+        asset_url = str(human.asset_avatar_url or "")
+        preview_url = str(human.avatar_url or human.avatar_thumbnail_url or "")
+        if asset_url and preview_url and asset_url not in resolved:
+            resolved[asset_url] = preview_url
+    return resolved
+
+
 @router.get("/video-billing/{record_id}")
 async def video_billing_detail(record_id: str, user: CurrentUser, db: AsyncSession = Db):
     require_admin(user)
@@ -659,18 +688,30 @@ async def video_billing_detail(record_id: str, user: CurrentUser, db: AsyncSessi
     request_data = job.request or {}
     result_data = job.result or {}
     bindings = request_data.get("_referenceBindings") if isinstance(request_data.get("_referenceBindings"), dict) else {}
-    references = []
-    seen = set()
+    raw_references = []
+    seen: set[str] = set()
     for kind, key in (("图片", "image_urls"), ("视频", "video_urls"), ("音频", "audio_urls")):
         for url in request_data.get(key) or []:
             if isinstance(url, str) and url not in seen:
                 seen.add(url)
-                references.append({"label": f"{kind} {len(references) + 1}", "type": kind, "url": url})
+                raw_references.append({"label": f"{kind} {len(raw_references) + 1}", "type": kind, "url": url})
     for label, value in bindings.items():
         url = value.get("url") if isinstance(value, dict) else None
         if isinstance(url, str) and url not in seen:
             seen.add(url)
-            references.append({"label": label, "type": str(value.get("type") or "参考"), "url": url})
+            raw_references.append({"label": label, "type": str(value.get("type") or "参考"), "url": url})
+    resolved_urls = await _billing_reference_url_map(db, seen)
+    references = []
+    for reference in raw_references:
+        provider_url = reference["url"]
+        preview_url = resolved_urls.get(provider_url, provider_url)
+        references.append(
+            {
+                **reference,
+                "url": preview_url,
+                **({"providerUrl": provider_url} if preview_url != provider_url else {}),
+            }
+        )
     prompts = []
     for label, key in (("最终提交提示词", "prompt"), ("H3 编译提示词", "_compiledPrompt"), ("原始业务提示词", "_sourcePrompt")):
         value = request_data.get(key)
