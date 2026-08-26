@@ -322,6 +322,21 @@ class JobManager:
     async def _persist_asset(self, job: Job) -> None:
         if not job.result:
             return
+        if job.kind == "video" and job.result.get("videoUrl"):
+            from .video_metadata import probe_video_url, provider_resolution
+
+            request = job.request or {}
+            requested = str(request.get("resolution") or "720p")
+            job.result["requestedResolution"] = requested
+            job.result["providerResolution"] = provider_resolution(
+                str(request.get("model") or ""),
+                requested,
+                request.get("_capabilities") if isinstance(request.get("_capabilities"), dict) else None,
+            )
+            try:
+                job.result.update(await probe_video_url(str(job.result["videoUrl"])))
+            except Exception:
+                logger.exception("video metadata probe failed: job_id=%s", job.id)
         async with session_factory() as session:
             model = await session.get(GenerationJobModel, job.id)
             terminal = bool(model and model.status in {"failed", "cancelled"})
@@ -394,6 +409,14 @@ class JobManager:
                         video_url=job.result["videoUrl"],
                         duration=float(job.result.get("duration") or 0),
                         resolution=str(request.get("resolution") or "720p"),
+                        requested_resolution=str(job.result.get("requestedResolution") or request.get("resolution") or "720p"),
+                        provider_resolution=str(job.result.get("providerResolution") or ""),
+                        actual_width=int(job.result.get("actualWidth") or 0) or None,
+                        actual_height=int(job.result.get("actualHeight") or 0) or None,
+                        fps=float(job.result.get("fps") or 0) or None,
+                        codec=str(job.result.get("codec") or ""),
+                        actual_duration=float(job.result.get("actualDuration") or 0) or None,
+                        file_size=int(job.result.get("fileSize") or 0) or None,
                         ratio=str(job.result.get("ratio") or request.get("ratio") or "16:9"),
                         prompt=str(request.get("prompt") or ""),
                         is_current=True,

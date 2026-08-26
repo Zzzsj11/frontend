@@ -37,6 +37,7 @@ from .storyboard_options import (
     seed_item_id,
 )
 from .system_humans import SYSTEM_HUMAN_ASSET_URLS, SYSTEM_HUMANS
+from .video_estimation import video_estimate_policy
 
 
 async def seed_prompts(session) -> None:
@@ -198,6 +199,7 @@ async def seed_system_data() -> None:
                     "executionPool": "yinghe-generation",
                     "executionConcurrency": 200,
                     "providerCode": "yinghe",
+                    "billing": video_estimate_policy("doubao-seedance-2.0").capability(),
                     "sortOrder": 10,
                 },
                 True,
@@ -214,6 +216,11 @@ async def seed_system_data() -> None:
                     "ratios": ["16:9", "9:16", "4:3", "1:1"],
                     "resolutions": ["480p", "720p", "1080p"],
                     "resolutionLabels": {"720p": "736P"},
+                    "providerResolutionMap": {
+                        "480p": {"stage1": 0.2, "stage2": 0.4, "label": "0.4MP"},
+                        "720p": {"stage1": 0.4, "stage2": 0.9, "label": "0.9MP"},
+                        "1080p": {"stage1": 0.9, "stage2": 1.8, "label": "1.8MP"},
+                    },
                     "variants": {
                         "t2va": {"images": {"min": 0, "max": 0}},
                         "i2va": {"images": {"min": 1, "max": 1}},
@@ -238,6 +245,7 @@ async def seed_system_data() -> None:
                     "executionPool": "runninghub-h3",
                     "executionConcurrency": 2,
                     "providerCode": "runninghub",
+                    "billing": video_estimate_policy("minimax-h3-runninghub").capability(),
                     "sortOrder": 50,
                 },
                 False,
@@ -254,6 +262,7 @@ async def seed_system_data() -> None:
                     "ratios": ["16:9", "9:16", "4:3", "1:1"],
                     "resolutions": ["720p", "1080p"],
                     "resolutionLabels": {"720p": "768P", "1080p": "2K"},
+                    "providerResolutionMap": {"720p": "768P", "1080p": "2K"},
                     "h3Modes": ["auto", "text", "first_frame", "first_last", "reference"],
                     "referenceImage": {"min": 0, "max": 6},
                     "referenceVideo": {"min": 0, "max": 1},
@@ -267,6 +276,7 @@ async def seed_system_data() -> None:
                     "executionPool": "yinghe-h3",
                     "executionConcurrency": 200,
                     "providerCode": "yinghe",
+                    "billing": video_estimate_policy("minimax-h3").capability(),
                     "sortOrder": 20,
                 },
                 False,
@@ -286,6 +296,7 @@ async def seed_system_data() -> None:
                     "executionPool": "ppio-seedance",
                     "executionConcurrency": 200,
                     "providerCode": "ppio",
+                    "billing": video_estimate_policy("doubao-seedance-2.0-ppio").capability(),
                     "sortOrder": 30,
                 },
                 False,
@@ -302,6 +313,7 @@ async def seed_system_data() -> None:
                     "ratios": ["16:9", "9:16", "4:3", "1:1"],
                     "resolutions": ["720p", "1080p"],
                     "resolutionLabels": {"720p": "768P", "1080p": "2K"},
+                    "providerResolutionMap": {"720p": "768P", "1080p": "2K"},
                     "h3Modes": ["auto", "text", "first_frame", "first_last", "reference"],
                     "referenceImage": {"min": 0, "max": 6},
                     "referenceVideo": {"min": 0, "max": 1},
@@ -315,12 +327,15 @@ async def seed_system_data() -> None:
                     "executionPool": "ppio-h3",
                     "executionConcurrency": 200,
                     "providerCode": "ppio",
+                    "billing": video_estimate_policy("minimax-h3-ppio").capability(),
                     "sortOrder": 40,
                 },
                 False,
             ),
         ]
         for mid, model_provider_id, code, name, modality, provider_id, capabilities, is_default in defaults:
+            if code in {"doubao-seedance-2.0", "minimax-h3-runninghub", "minimax-h3", "doubao-seedance-2.0-ppio", "minimax-h3-ppio"}:
+                capabilities = {**capabilities, "systemManaged": True}
             ppio_model_enabled = not code.endswith("-ppio") or bool(settings.ppio_api_key) or settings.app_env != "production"
             model = await session.get(AiModelModel, mid)
             if not model:
@@ -343,8 +358,9 @@ async def seed_system_data() -> None:
                 model.name = name
                 model.provider_model_id = provider_id or code
                 model.capabilities = capabilities
-                model.status = "active" if ppio_model_enabled else "inactive"
-                model.user_visible = True
+                # 系统维护协议与能力；管理员维护启停和可见性，重启不得撤销人工操作。
+                if not ppio_model_enabled:
+                    model.status = "inactive"
         system_style_specs = [
             ("style-system-male", "男", 0),
             ("style-system-female", "女", 1),

@@ -76,6 +76,15 @@ export interface ShotAsset {
   duration: number
   /** 实际生成该片段的模型代码；H3 片段据此展示徽标。 */
   model?: string
+  resolution?: string
+  requestedResolution?: string
+  providerResolution?: string
+  actualWidth?: number
+  actualHeight?: number
+  fps?: number
+  codec?: string
+  actualDuration?: number
+  fileSize?: number
   /** 生成时出演的数字人（可为空 = 空镜头） */
   digitalHumanIds: string[]
 }

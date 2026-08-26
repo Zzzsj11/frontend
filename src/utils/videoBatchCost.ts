@@ -1,3 +1,5 @@
+import { videoModelCapabilities } from '../generationModels'
+
 export interface VideoCostItem {
   duration: number
   model?: string
@@ -7,16 +9,31 @@ export const SD20_ESTIMATE_PRICE_PER_SECOND = 0.83
 export const H3_ESTIMATE_PRICE_PER_SECOND = 0.425
 export const PPIO_SD20_ESTIMATE_PRICE_PER_SECOND = 0.8
 
-export type VideoProviderCode = 'yinghe' | 'ppio'
+export type VideoProviderCode = 'yinghe' | 'ppio' | 'runninghub'
 
-export const videoProviderForModel = (model?: string): VideoProviderCode =>
-  model?.endsWith('-ppio') ? 'ppio' : 'yinghe'
+export const videoProviderForModel = (model?: string): VideoProviderCode => {
+  const configured = videoModelCapabilities(model).billing?.provider
+  if (configured === 'ppio' || configured === 'runninghub' || configured === 'yinghe') {
+    return configured
+  }
+  if (model === 'minimax-h3-runninghub') return 'runninghub'
+  return model?.endsWith('-ppio') ? 'ppio' : 'yinghe'
+}
 
 export const videoEstimateUnitPrice = (model?: string): number => {
+  const configured = videoModelCapabilities(model).billing?.unitPricePerSecond
+  if (Number.isFinite(configured)) return Number(configured)
+  if (model === 'minimax-h3-runninghub') return 0
   if (model?.startsWith('minimax-h3')) return H3_ESTIMATE_PRICE_PER_SECOND
   return videoProviderForModel(model) === 'ppio'
     ? PPIO_SD20_ESTIMATE_PRICE_PER_SECOND
     : SD20_ESTIMATE_PRICE_PER_SECOND
+}
+
+export const videoBalanceCheckRequired = (model?: string): boolean => {
+  const configured = videoModelCapabilities(model).billing?.balanceCheck
+  if (typeof configured === 'boolean') return configured
+  return model !== 'minimax-h3-runninghub'
 }
 
 export const formatVideoEstimateUnitPrice = (price: number): string =>
@@ -36,6 +53,7 @@ export const estimateVideoBatchCost = (items: VideoCostItem[]) => {
 
 export const estimateVideoBatchCostByProvider = (items: VideoCostItem[]) =>
   items.reduce<Partial<Record<VideoProviderCode, number>>>((totals, item) => {
+    if (!videoBalanceCheckRequired(item.model)) return totals
     const provider = videoProviderForModel(item.model)
     totals[provider] =
       Math.round(

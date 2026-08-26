@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import traceback as traceback_module
 import uuid
 from typing import Any
@@ -13,6 +14,18 @@ from .models import ApiErrorLogModel
 SENSITIVE_KEYS = {"password", "current_password", "new_password", "access_token", "refresh_token", "token", "authorization", "cookie"}
 # 键名比较前去掉下划线并小写，使 accessToken / access_token 等写法都能命中
 _SENSITIVE_NORMALIZED = {key.replace("_", "") for key in SENSITIVE_KEYS}
+_SECRET_TEXT_PATTERNS = (
+    re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+"),
+    re.compile(r"(?i)\b(sk[_-])[A-Za-z0-9_-]{12,}"),
+    re.compile(r"(?i)([?&](?:signature|x-tos-signature|token|access_token|api_key)=)[^&\s]+"),
+)
+
+
+def _redact_text(value: str) -> str:
+    redacted = value
+    for pattern in _SECRET_TEXT_PATTERNS:
+        redacted = pattern.sub(r"\1***", redacted)
+    return redacted[:2000] + "…" if len(redacted) > 2000 else redacted
 
 
 def _redact(value: Any) -> Any:
@@ -20,8 +33,8 @@ def _redact(value: Any) -> Any:
         return {key: ("***" if key.lower().replace("_", "") in _SENSITIVE_NORMALIZED else _redact(item)) for key, item in value.items()}
     if isinstance(value, list):
         return [_redact(item) for item in value[:50]]
-    if isinstance(value, str) and len(value) > 2000:
-        return value[:2000] + "…"
+    if isinstance(value, str):
+        return _redact_text(value)
     return value
 
 

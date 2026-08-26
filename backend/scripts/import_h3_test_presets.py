@@ -42,45 +42,53 @@ async def main() -> None:
     args = parser.parse_args()
     workflow_dir = Path(__file__).resolve().parents[1] / "app" / "workflows"
     async with session_factory() as db:
-            user = (await db.execute(select(UserModel).where(UserModel.username == args.username, UserModel.deleted_at.is_(None)))).scalar_one()
-            uploaded_refs: list[dict] = []
-            if args.reference_video_dir:
-                for index in range(1, 4):
-                    path = args.reference_video_dir / f"ref{index}.mp4"
-                    if path.exists():
-                        url = await get_storage().put_file(safe_key(f"h3-tests/videos/{user.id}", path.name), path, "video/mp4")
-                        uploaded_refs.append({"type": "video", "name": f"参考视频 {index}", "url": url})
-            for order, (task_id, name, mode, filename, node_id, duration) in enumerate(TASKS):
-                existing = (
-                    await db.execute(
-                        select(H3TestPresetModel).where(
-                            H3TestPresetModel.user_id == user.id,
-                            H3TestPresetModel.task_id == task_id,
-                            H3TestPresetModel.deleted_at.is_(None),
-                        )
-                    )
-                ).scalar_one_or_none()
-                if existing:
-                    print("exists", task_id)
-                    continue
-                result = await query_task(task_id)
-                outputs = []
-                for index, output in enumerate(result.get("results") or []):
-                    source = output["url"]
-                    url = await import_remote(source, f"h3-tests/videos/{user.id}", f"{task_id}-{index}.mp4")
-                    outputs.append({**output, "type": "video", "sourceUrl": source, "url": url})
-                inputs = uploaded_refs if task_id == "2089335383799332866" else []
-                db.add(
-                    H3TestPresetModel(
-                        id=f"h3test-{uuid.uuid4().hex}", user_id=user.id, name=name, mode=mode,
-                        prompt=load_prompt(args.reference_workflow if filename == "reference-api.json" else workflow_dir / filename, node_id), duration=duration,
-                        aspect_ratio="16:9 (Widescreen)", input_media=inputs, output_media=outputs,
-                        task_id=task_id, task_status=result.get("status", "SUCCESS"), usage_data=result.get("usage") or {},
-                        sort_order=order,
+        user = (await db.execute(select(UserModel).where(UserModel.username == args.username, UserModel.deleted_at.is_(None)))).scalar_one()
+        uploaded_refs: list[dict] = []
+        if args.reference_video_dir:
+            for index in range(1, 4):
+                path = args.reference_video_dir / f"ref{index}.mp4"
+                if path.exists():
+                    url = await get_storage().put_file(safe_key(f"h3-tests/videos/{user.id}", path.name), path, "video/mp4")
+                    uploaded_refs.append({"type": "video", "name": f"参考视频 {index}", "url": url})
+        for order, (task_id, name, mode, filename, node_id, duration) in enumerate(TASKS):
+            existing = (
+                await db.execute(
+                    select(H3TestPresetModel).where(
+                        H3TestPresetModel.user_id == user.id,
+                        H3TestPresetModel.task_id == task_id,
+                        H3TestPresetModel.deleted_at.is_(None),
                     )
                 )
-                print("imported", task_id, url)
-            await db.commit()
+            ).scalar_one_or_none()
+            if existing:
+                print("exists", task_id)
+                continue
+            result = await query_task(task_id)
+            outputs = []
+            for index, output in enumerate(result.get("results") or []):
+                source = output["url"]
+                url = await import_remote(source, f"h3-tests/videos/{user.id}", f"{task_id}-{index}.mp4")
+                outputs.append({**output, "type": "video", "sourceUrl": source, "url": url})
+            inputs = uploaded_refs if task_id == "2089335383799332866" else []
+            db.add(
+                H3TestPresetModel(
+                    id=f"h3test-{uuid.uuid4().hex}",
+                    user_id=user.id,
+                    name=name,
+                    mode=mode,
+                    prompt=load_prompt(args.reference_workflow if filename == "reference-api.json" else workflow_dir / filename, node_id),
+                    duration=duration,
+                    aspect_ratio="16:9 (Widescreen)",
+                    input_media=inputs,
+                    output_media=outputs,
+                    task_id=task_id,
+                    task_status=result.get("status", "SUCCESS"),
+                    usage_data=result.get("usage") or {},
+                    sort_order=order,
+                )
+            )
+            print("imported", task_id, url)
+        await db.commit()
 
 
 if __name__ == "__main__":

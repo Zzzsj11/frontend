@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   estimateVideoBatchCost,
   formatVideoEstimateUnitPrice,
+  videoBalanceCheckRequired,
+  videoProviderForModel,
   videoEstimateUnitPrice,
 } from '../../src/utils/videoBatchCost'
 
@@ -24,5 +26,11 @@ describe('video batch estimate cost', () => {
   it('PPIO SD2.0 按八折后的 0.8 元每秒估算', () => {
     expect(videoEstimateUnitPrice('doubao-seedance-2.0-ppio')).toBe(0.8)
     expect(videoEstimateUnitPrice('minimax-h3-ppio')).toBe(0.425)
+  })
+
+  it('RunningHub 暂不估价且不归入英和余额', () => {
+    expect(videoEstimateUnitPrice('minimax-h3-runninghub')).toBe(0)
+    expect(videoProviderForModel('minimax-h3-runninghub')).toBe('runninghub')
+    expect(videoBalanceCheckRequired('minimax-h3-runninghub')).toBe(false)
   })
 })

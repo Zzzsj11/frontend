@@ -1271,6 +1271,25 @@ def test_translate_provider_error_english_to_chinese() -> None:
     assert translate_provider_error("") == ""
 
 
+def test_non_json_provider_error_redacts_credentials() -> None:
+    import httpx
+
+    from app.providers import ProviderRejectedError, _raise_for_status
+
+    response = httpx.Response(
+        500,
+        request=httpx.Request("POST", "https://provider.test/tasks"),
+        text="upstream Bearer secret-token-value sk_exampleSecret12345?token=signed-value",
+    )
+    with pytest.raises(ProviderRejectedError) as captured:
+        _raise_for_status(response)
+    message = str(captured.value)
+    assert "secret-token-value" not in message
+    assert "exampleSecret12345" not in message
+    assert "signed-value" not in message
+    assert "***" in message
+
+
 def test_poll_translates_fail_reason() -> None:
     """视频任务 FAILED 的 failReason 为英文时，落到 job.error 前应翻译为中文。"""
     import httpx

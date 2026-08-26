@@ -10,6 +10,7 @@
 说明：幂等；处理 active 且英合或 PPIO asset 链接为空的人物；复用 seed.py 的
 ensure_pending_asset_avatars。文件锁防止与上一分钟的任务重入。
 """
+
 from __future__ import annotations
 
 import asyncio

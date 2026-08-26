@@ -92,7 +92,7 @@ from .server_monitoring import monitoring_summary
 from .storage import get_storage, import_remote, safe_key
 from .storyboard_options import OPTION_KINDS, load_general_storyboard_options
 from .token_usage import add_llm_call_log, add_token_usage
-from .video_billing import reconcile_video_billing, video_discount_label, video_discount_rate
+from .video_billing import run_video_billing_reconciliation, video_discount_label, video_discount_rate
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 Db = Depends(database_session)
@@ -575,9 +575,9 @@ async def video_billing(
         .outerjoin(ProjectTaskModel, ProjectTaskModel.id == VideoBillingRecordModel.project_task_id)
         .where(*conditions)
     )
-    all_rows = (await db.execute(joined.order_by(VideoBillingRecordModel.completed_at.desc()))).all()
+    rows = (await db.execute(joined.order_by(VideoBillingRecordModel.completed_at.desc()).offset(offset).limit(limit))).all()
     items = []
-    for record, username, project_name, task_title, job in all_rows[offset : offset + limit]:
+    for record, username, project_name, task_title, job in rows:
         duration = _money((job.result or {}).get("duration") or (job.request or {}).get("duration"))
         items.append(
             {
@@ -595,6 +595,10 @@ async def video_billing(
                 "provider": record.provider,
                 "model": record.model,
                 "resolution": record.resolution,
+                "providerResolution": str((job.result or {}).get("providerResolution") or ""),
+                "actualWidth": (job.result or {}).get("actualWidth"),
+                "actualHeight": (job.result or {}).get("actualHeight"),
+                "fps": (job.result or {}).get("fps"),
                 "durationSeconds": duration,
                 "generationElapsedSeconds": generation_elapsed_seconds(
                     created_at=job.created_at,
@@ -613,23 +617,56 @@ async def video_billing(
                 "completedAt": iso(record.completed_at),
             }
         )
-    total_amount = sum(_money(row[0].amount) for row in all_rows)
-    failed_rows = [row[0] for row in all_rows if row[0].is_failed]
-    models = sorted({row[0].model for row in all_rows if row[0].model})
+    aggregate = (
+        await db.execute(
+            select(
+                func.count(VideoBillingRecordModel.id),
+                func.coalesce(func.sum(VideoBillingRecordModel.amount), 0),
+                func.sum(case((VideoBillingRecordModel.billing_status == "priced", 1), else_=0)),
+                func.sum(case((VideoBillingRecordModel.is_failed.is_(True), 1), else_=0)),
+                func.coalesce(func.sum(case((VideoBillingRecordModel.is_failed.is_(True), VideoBillingRecordModel.amount), else_=0)), 0),
+                func.sum(case((VideoBillingRecordModel.billing_status == "excluded", 1), else_=0)),
+                func.sum(case((VideoBillingRecordModel.billing_status == "unpriced", 1), else_=0)),
+                func.sum(case((VideoBillingRecordModel.billing_status == "no_usage", 1), else_=0)),
+                func.sum(case((GenerationJobModel.generation_origin == "agent_test", 1), else_=0)),
+                func.sum(case((GenerationJobModel.generation_origin == "business", 1), else_=0)),
+            )
+            .select_from(VideoBillingRecordModel)
+            .join(GenerationJobModel, GenerationJobModel.id == VideoBillingRecordModel.generation_job_id)
+            .outerjoin(UserModel, UserModel.id == VideoBillingRecordModel.user_id)
+            .outerjoin(ProjectModel, ProjectModel.id == VideoBillingRecordModel.project_id)
+            .outerjoin(ProjectTaskModel, ProjectTaskModel.id == VideoBillingRecordModel.project_task_id)
+            .where(*conditions)
+        )
+    ).one()
+    models = list(
+        (
+            await db.execute(
+                select(VideoBillingRecordModel.model)
+                .join(GenerationJobModel, GenerationJobModel.id == VideoBillingRecordModel.generation_job_id)
+                .outerjoin(UserModel, UserModel.id == VideoBillingRecordModel.user_id)
+                .outerjoin(ProjectModel, ProjectModel.id == VideoBillingRecordModel.project_id)
+                .outerjoin(ProjectTaskModel, ProjectTaskModel.id == VideoBillingRecordModel.project_task_id)
+                .where(*conditions, VideoBillingRecordModel.model != "")
+                .distinct()
+                .order_by(VideoBillingRecordModel.model)
+            )
+        ).scalars()
+    )
     return {
-        "total": len(all_rows),
+        "total": int(aggregate[0] or 0),
         "items": items,
         "models": models,
         "summary": {
-            "totalAmount": round(total_amount, 8),
-            "pricedRecords": sum(1 for row in all_rows if row[0].billing_status == "priced"),
-            "failedRecords": len(failed_rows),
-            "failedAmount": round(sum(_money(row.amount) for row in failed_rows), 8),
-            "excludedRecords": sum(1 for row in all_rows if row[0].billing_status == "excluded"),
-            "unpricedRecords": sum(1 for row in all_rows if row[0].billing_status == "unpriced"),
-            "noUsageRecords": sum(1 for row in all_rows if row[0].billing_status == "no_usage"),
-            "agentTestRecords": sum(1 for row in all_rows if row[4].generation_origin == "agent_test"),
-            "businessRecords": sum(1 for row in all_rows if row[4].generation_origin == "business"),
+            "totalAmount": _money(aggregate[1]),
+            "pricedRecords": int(aggregate[2] or 0),
+            "failedRecords": int(aggregate[3] or 0),
+            "failedAmount": _money(aggregate[4]),
+            "excludedRecords": int(aggregate[5] or 0),
+            "unpricedRecords": int(aggregate[6] or 0),
+            "noUsageRecords": int(aggregate[7] or 0),
+            "agentTestRecords": int(aggregate[8] or 0),
+            "businessRecords": int(aggregate[9] or 0),
         },
     }
 
@@ -637,10 +674,30 @@ async def video_billing(
 @router.post("/video-billing/reconcile")
 async def video_billing_reconcile(request: Request, user: CurrentUser, db: AsyncSession = Db):
     require_admin(user)
-    result = await reconcile_video_billing(db)
-    await audit(db, request, user, "video_billing.reconcile", "video_billing", after=result)
+    active = (
+        await db.execute(
+            select(GenerationJobModel)
+            .where(
+                GenerationJobModel.kind == "billing_reconcile",
+                GenerationJobModel.status.in_(("queued", "running")),
+                GenerationJobModel.deleted_at.is_(None),
+            )
+            .order_by(GenerationJobModel.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if active:
+        return {"jobId": active.id, "status": active.status, "reused": True}
+    job = await job_manager.enqueue(
+        db,
+        "billing_reconcile",
+        {"_provider": "internal", "requestedBy": user.id},
+        user_id=user.id,
+    )
+    await audit(db, request, user, "video_billing.reconcile", "video_billing", after={"jobId": job.id})
     await db.commit()
-    return result
+    await job_manager.dispatch(job, run_video_billing_reconciliation)
+    return {"jobId": job.id, "status": job.status, "reused": False}
 
 
 async def _billing_reference_url_map(db: AsyncSession, urls: set[str]) -> dict[str, str]:
@@ -729,6 +786,13 @@ async def video_billing_detail(record_id: str, user: CurrentUser, db: AsyncSessi
         "model": record.model,
         "provider": record.provider,
         "resolution": record.resolution,
+        "providerResolution": str(result_data.get("providerResolution") or ""),
+        "actualWidth": result_data.get("actualWidth"),
+        "actualHeight": result_data.get("actualHeight"),
+        "fps": result_data.get("fps"),
+        "codec": str(result_data.get("codec") or ""),
+        "actualDuration": result_data.get("actualDuration"),
+        "fileSize": result_data.get("fileSize"),
         "durationSeconds": _money(result_data.get("duration") or request_data.get("duration")),
         "generationElapsedSeconds": generation_elapsed_seconds(
             created_at=job.created_at,
@@ -821,6 +885,8 @@ async def update_model(model_id: str, payload: dict, request: Request, user: Cur
     if not item or item.deleted_at:
         raise HTTPException(404, "模型不存在")
     allowed = {"name", "status", "user_visible", "is_default", "capabilities", "sort_order"}
+    if (item.capabilities or {}).get("systemManaged") and "capabilities" in payload:
+        raise HTTPException(422, "内置模型能力由版本化代码管理；后台仅可调整启停、可见性和排序")
     before = {k: getattr(item, k) for k in allowed}
     for k, v in payload.items():
         if k in allowed:

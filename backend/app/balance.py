@@ -10,13 +10,11 @@ from typing import Any
 import httpx
 
 from .config import SHARED_PROVIDER_KEY, settings
+from .video_estimation import video_estimate_policy
 
 _cache: dict[str, Any] | None = None
 _cache_expires_at = 0.0
 _lock = asyncio.Lock()
-SD20_ESTIMATE_PRICE_PER_SECOND = 0.83
-H3_ESTIMATE_PRICE_PER_SECOND = 0.425
-PPIO_SD20_ESTIMATE_PRICE_PER_SECOND = 0.8
 PPIO_BALANCE_UNIT_SCALE = Decimal("10000")
 PPIO_MODEL_CREDIT_UNIT_SCALE = Decimal("1000000")
 
@@ -227,22 +225,21 @@ async def query_provider_balances(*, force: bool = False) -> dict[str, Any]:
 
 def estimate_item_cost(item: Any) -> tuple[str, float]:
     model = str(item.model or "")
-    provider = "ppio" if model.endswith("-ppio") else "yinghe"
-    if model.startswith("minimax-h3"):
-        unit_price = H3_ESTIMATE_PRICE_PER_SECOND
-    elif provider == "ppio":
-        unit_price = PPIO_SD20_ESTIMATE_PRICE_PER_SECOND
-    else:
-        unit_price = SD20_ESTIMATE_PRICE_PER_SECOND
-    return provider, float(item.duration) * unit_price
+    policy = video_estimate_policy(model)
+    return policy.provider, float(item.duration) * policy.unit_price_per_second
 
 
 async def ensure_video_batch_balance(items: list[Any]) -> dict[str, Any]:
     """按实际渠道分别预检批量视频余额，避免用一个渠道的余额替另一个渠道兜底。"""
     estimates: dict[str, float] = {}
     for item in items:
+        policy = video_estimate_policy(str(item.model or ""))
+        if not policy.balance_check:
+            continue
         provider, amount = estimate_item_cost(item)
         estimates[provider] = estimates.get(provider, 0) + amount
+    if not estimates:
+        return {"estimatedCost": 0, "availableBalance": -1.0, "providerEstimates": {}}
     balances = await query_provider_balances(force=True)
     available_by_provider: dict[str, float] = {}
     for provider, estimated in estimates.items():

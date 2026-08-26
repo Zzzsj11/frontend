@@ -196,10 +196,10 @@ async def test_video_batch_cost_estimate_and_insufficient_key_balance(monkeypatc
 
     monkeypatch.setattr(balance, "query_provider_balances", enough_providers)
     items = [SimpleNamespace(duration=10, model="doubao-seedance-2.0"), SimpleNamespace(duration=10, model="minimax-h3-runninghub")]
-    assert (await balance.ensure_video_batch_balance(items))["estimatedCost"] == 12.55
+    assert (await balance.ensure_video_batch_balance(items))["estimatedCost"] == 8.3
 
     async def insufficient(force=False):
-        return {"available": True, "key": {"remaining": 12.54}}
+        return {"available": True, "key": {"remaining": 8.29}}
 
     async def insufficient_providers(force=False):
         return {"providers": {"yinghe": await insufficient(force), "ppio": balance.unavailable_balance()}}
@@ -270,3 +270,13 @@ async def test_ppio_balance_and_channel_cost_precheck(monkeypatch) -> None:
     monkeypatch.setattr(balance, "query_provider_balances", insufficient_provider_balances)
     with pytest.raises(ValueError, match="PPIO 余额不足，请先完成充值或提升余额上限后再试"):
         await balance.ensure_video_batch_balance([SimpleNamespace(duration=10, model="doubao-seedance-2.0-ppio"), SimpleNamespace(duration=10, model="minimax-h3-ppio")])
+
+
+@pytest.mark.asyncio
+async def test_runninghub_batch_is_excluded_from_cost_and_balance_check(monkeypatch):
+    async def should_not_query(*, force=False):
+        raise AssertionError("RunningHub 暂不计费时不应查询英和或 PPIO 余额")
+
+    monkeypatch.setattr(balance, "query_provider_balances", should_not_query)
+    estimate = await balance.ensure_video_batch_balance([SimpleNamespace(duration=10, model="minimax-h3-runninghub")])
+    assert estimate == {"estimatedCost": 0, "availableBalance": -1.0, "providerEstimates": {}}

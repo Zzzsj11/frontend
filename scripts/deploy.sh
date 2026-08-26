@@ -12,6 +12,15 @@ if [[ ! -f .deployment/info.json ]]; then
 fi
 export RELEASE_VERSION="$version"
 compose=(docker compose --env-file "$env_file" -f docker-compose.yml -f "docker-compose.${env_name}.yml")
+if [[ "${DEPLOY_TLS:-0}" == "1" ]]; then
+  : "${TLS_DOMAIN:?set TLS_DOMAIN when DEPLOY_TLS=1}"
+  : "${TLS_CERT_DIR:?set TLS_CERT_DIR when DEPLOY_TLS=1}"
+  [[ -r "$TLS_CERT_DIR/fullchain.pem" && -r "$TLS_CERT_DIR/privkey.pem" ]] || {
+    echo "TLS_CERT_DIR must contain readable fullchain.pem and privkey.pem" >&2
+    exit 1
+  }
+  compose+=(-f docker-compose.tls.yml)
+fi
 if [[ "${DEPLOY_SKIP_PULL:-0}" != "1" ]]; then
   "${compose[@]}" pull
 fi

@@ -22,7 +22,7 @@ from .redis_store import close_redis, wait_for_worker_wakeup
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
 
 logger = logging.getLogger("mvagent.worker")
-REPLAYABLE_INTERNAL_KINDS = {"ass_outline", "general_outline", "ass_segment_retry", "storyboard_line"}
+REPLAYABLE_INTERNAL_KINDS = {"ass_outline", "general_outline", "ass_segment_retry", "storyboard_line", "billing_reconcile"}
 MAX_INTERNAL_ATTEMPTS = 3
 
 
@@ -187,6 +187,10 @@ def _runner(job: Job):
     if job.kind == "chat":
         session_id = str(request.get("session_id") or "")
         return lambda item: chat_manager.run_persisted(session_id, item)
+    if job.kind == "billing_reconcile":
+        from .video_billing import run_video_billing_reconciliation
+
+        return run_video_billing_reconciliation
     if job.kind in REPLAYABLE_INTERNAL_KINDS:
         return run_storyboard_job
     raise RuntimeError(f"unsupported worker job kind: {job.kind}")

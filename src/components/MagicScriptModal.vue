@@ -12,7 +12,7 @@ import {
   VIDEO_MODEL_OPTIONS,
   generationModelLabel,
   loadGenerationModels,
-  videoModelCapabilities,
+  videoResolutionChoices,
   videoResolutionLabel,
 } from '../generationModels'
 
@@ -32,10 +32,7 @@ const assInputRef = ref<HTMLInputElement>()
 
 const canSubmit = computed(() => songId.value.trim() !== '' && assFile.value !== null)
 const resolutionChoices = computed<ShotGenOptions['resolution'][]>(() => {
-  const configured = videoModelCapabilities(videoModel.value).resolutions
-  return Array.isArray(configured) && configured.length
-    ? (configured as ShotGenOptions['resolution'][])
-    : ['480p', '720p', '1080p']
+  return videoResolutionChoices(videoModel.value) as ShotGenOptions['resolution'][]
 })
 
 const resetForm = () => {

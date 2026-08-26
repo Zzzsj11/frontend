@@ -12,6 +12,10 @@ export interface VideoBillingItem {
   provider: string
   model: string
   resolution: string
+  providerResolution?: string
+  actualWidth?: number
+  actualHeight?: number
+  fps?: number
   durationSeconds: number
   generationElapsedSeconds?: number
   generationStatus: string
@@ -41,6 +45,13 @@ export interface VideoBillingDetail {
   model: string
   provider: string
   resolution: string
+  providerResolution?: string
+  actualWidth?: number
+  actualHeight?: number
+  fps?: number
+  codec?: string
+  actualDuration?: number
+  fileSize?: number
   durationSeconds: number
   generationElapsedSeconds?: number
   usageQuantity: number
@@ -79,10 +90,18 @@ export const getVideoBilling = (query: URLSearchParams) =>
   apiRequest<VideoBillingResponse>(`/admin/video-billing?${query.toString()}`)
 
 export const reconcileVideoBilling = () =>
-  apiRequest<{ processed: number; priced: number; failed: number }>(
-    '/admin/video-billing/reconcile',
-    { method: 'POST' },
-  )
+  apiRequest<{ jobId: string; status: string; reused: boolean }>('/admin/video-billing/reconcile', {
+    method: 'POST',
+  })
+
+export const getVideoBillingReconcileJob = (jobId: string) =>
+  apiRequest<{
+    id: string
+    status: string
+    progress: number
+    error?: string
+    result?: { processed: number; priced: number; failed: number }
+  }>(`/generations/${encodeURIComponent(jobId)}`, { headers: { 'X-Polling': '1' } })
 
 export const getVideoBillingDetail = (id: string) =>
   apiRequest<VideoBillingDetail>(`/admin/video-billing/${encodeURIComponent(id)}`)

@@ -16,6 +16,7 @@ import {
   formatVideoEstimateUnitPrice,
   videoProviderForModel,
   videoEstimateUnitPrice,
+  videoBalanceCheckRequired,
 } from '../utils/videoBatchCost'
 import AppIcon from './AppIcon.vue'
 import BaseModal from './base/BaseModal.vue'
@@ -32,7 +33,7 @@ import {
   VIDEO_MODEL_OPTIONS,
   generationModelLabel,
   loadGenerationModels,
-  videoModelCapabilities,
+  videoResolutionChoices,
   videoResolutionLabel,
 } from '../generationModels'
 
@@ -86,10 +87,7 @@ const averageDuration = computed(() =>
   totalShots.value ? Math.round((totalDuration.value / totalShots.value) * 10) / 10 : 0,
 )
 const resolutionChoices = computed<ShotGenOptions['resolution'][]>(() => {
-  const configured = videoModelCapabilities(videoModel.value).resolutions
-  return Array.isArray(configured) && configured.length
-    ? (configured as ShotGenOptions['resolution'][])
-    : ['480p', '720p', '1080p']
+  return videoResolutionChoices(videoModel.value) as ShotGenOptions['resolution'][]
 })
 const durationIsValid = computed(
   () =>
@@ -201,9 +199,20 @@ const submit = async () => {
       const { estimatedCost } = estimateVideoBatchCost([
         { duration: seconds, model: request.videoModel },
       ])
+      if (!videoBalanceCheckRequired(request.videoModel)) {
+        const confirmed = await confirmDialog({
+          title: '确认批量生成视频',
+          message: `本次将创建 ${request.groupCount ?? 1} 组、每组 ${request.totalDuration} 秒的视频任务。RunningHub 当前仅作测试通道，暂不纳入平台费用和余额预检。`,
+          confirmText: '确定生成',
+          cancelText: '取消',
+        })
+        if (confirmed) void store.runRandomGeneralStoryboard(request)
+        return
+      }
       const balance = await apiRequest<AccountBalance>('/account/balance?force=true')
       const providerCode = videoProviderForModel(request.videoModel)
-      const providerBalance = balance.providers?.[providerCode] ?? balance
+      const providerBalance =
+        providerCode === 'runninghub' ? balance : (balance.providers?.[providerCode] ?? balance)
       const keyRemaining =
         providerCode === 'ppio'
           ? providerBalance.balance == null

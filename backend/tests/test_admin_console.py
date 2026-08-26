@@ -33,6 +33,13 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     assert h3["name"] == "H3（RunningHub，2并发，仅测试时用）"
     assert h3["capabilities"]["executionConcurrency"] == 2
     assert h3["capabilities"]["resolutionLabels"]["720p"] == "736P"
+    assert h3["capabilities"]["billing"] == {
+        "provider": "runninghub",
+        "unitPricePerSecond": 0,
+        "balanceCheck": False,
+        "billingMode": "excluded",
+        "currency": "CNY",
+    }
     assert direct_h3["name"] == "H3（英和）"
     assert direct_h3["capabilities"]["executionConcurrency"] == 200
     assert direct_h3["capabilities"]["executionPool"] == "yinghe-h3"

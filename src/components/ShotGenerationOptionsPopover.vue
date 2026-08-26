@@ -7,7 +7,7 @@ import {
   VIDEO_MODEL_OPTIONS,
   generationModelLabel,
   isH3VideoModel,
-  videoModelCapabilities,
+  videoResolutionChoices,
   videoResolutionLabel,
 } from '../generationModels'
 import {
@@ -29,10 +29,7 @@ const popover = ref<HTMLElement | null>(null)
 const open = ref(false)
 const popoverStyle = ref<Record<string, string>>({})
 const resolutionChoices = computed<ShotGenOptions['resolution'][]>(() => {
-  const configured = videoModelCapabilities(props.modelValue.videoModel).resolutions
-  return Array.isArray(configured) && configured.length
-    ? (configured as ShotGenOptions['resolution'][])
-    : ['480p', '720p', '1080p']
+  return videoResolutionChoices(props.modelValue.videoModel) as ShotGenOptions['resolution'][]
 })
 const ratioChoices: ShotGenOptions['ratio'][] = ['16:9', '9:16', '4:3', '1:1']
 const durationChoices = VIDEO_DURATION_CHOICES
@@ -55,11 +52,7 @@ const updateOption = <K extends keyof ShotGenOptions>(key: K, value: ShotGenOpti
   emit('update:modelValue', { ...props.modelValue, [key]: value })
 }
 const updateVideoModel = (model: string) => {
-  const configured = videoModelCapabilities(model).resolutions
-  const allowed: ShotGenOptions['resolution'][] =
-    Array.isArray(configured) && configured.length
-      ? (configured as ShotGenOptions['resolution'][])
-      : ['480p', '720p', '1080p']
+  const allowed = videoResolutionChoices(model) as ShotGenOptions['resolution'][]
   emit('update:modelValue', {
     ...props.modelValue,
     videoModel: model,

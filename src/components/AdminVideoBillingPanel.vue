@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import {
   getVideoBillingDetail,
   getVideoBilling,
+  getVideoBillingReconcileJob,
   reconcileVideoBilling,
   type VideoBillingResponse,
   type VideoBillingDetail,
@@ -89,8 +90,23 @@ const reconcile = async () => {
   reconciling.value = true
   notice.value = ''
   try {
-    const result = await reconcileVideoBilling()
-    notice.value = `历史核算完成：${result.processed} 条，其中失败任务 ${result.failed} 条、已计费 ${result.priced} 条`
+    const accepted = await reconcileVideoBilling()
+    notice.value = accepted.reused
+      ? '已有历史核算任务正在执行，已继续跟踪'
+      : '历史核算任务已进入后台队列'
+    while (true) {
+      const job = await getVideoBillingReconcileJob(accepted.jobId)
+      if (job.status === 'succeeded') {
+        const result = job.result ?? { processed: 0, failed: 0, priced: 0 }
+        notice.value = `历史核算完成：${result.processed} 条，其中失败任务 ${result.failed} 条、已计费 ${result.priced} 条`
+        break
+      }
+      if (job.status === 'failed' || job.status === 'cancelled') {
+        throw new Error(job.error || '历史核算任务失败')
+      }
+      notice.value = `历史核算进行中：${job.progress}%`
+      await new Promise((resolve) => window.setTimeout(resolve, 1000))
+    }
     await load()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '历史核算失败'
@@ -218,7 +234,12 @@ onMounted(load)
             </td>
             <td>
               {{ item.model || '-'
-              }}<small>{{ item.provider || '-' }} · {{ item.resolution }}</small>
+              }}<small>
+                {{ item.provider || '-' }} · {{ item.providerResolution || item.resolution }}
+                <template v-if="item.actualWidth && item.actualHeight">
+                  · {{ item.actualWidth }}×{{ item.actualHeight }}
+                </template>
+              </small>
               <span v-if="item.discountLabel" class="discount-badge">{{ item.discountLabel }}</span>
             </td>
             <td>

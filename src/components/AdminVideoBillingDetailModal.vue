@@ -44,7 +44,22 @@ const money = (value: number) => `¥${value.toFixed(6)}`
             <span>模型 / 渠道</span><b>{{ detail.model }} / {{ detail.provider }}</b>
           </div>
           <div>
-            <span>规格</span><b>{{ detail.resolution }} · {{ detail.durationSeconds || '-' }} 秒</b>
+            <span>请求 / 供应商规格</span
+            ><b>{{ detail.resolution }} / {{ detail.providerResolution || '-' }}</b>
+          </div>
+          <div>
+            <span>实际媒体规格</span
+            ><b>
+              <template v-if="detail.actualWidth && detail.actualHeight">
+                {{ detail.actualWidth }}×{{ detail.actualHeight }} · {{ detail.fps || '-' }} FPS ·
+                {{ detail.codec || '-' }}
+              </template>
+              <template v-else>历史任务未采集</template>
+            </b>
+          </div>
+          <div>
+            <span>请求 / 实际时长</span
+            ><b>{{ detail.durationSeconds || '-' }} 秒 / {{ detail.actualDuration || '-' }} 秒</b>
           </div>
           <div>
             <span>计价标准</span><b>{{ detail.rateLabel }}</b>

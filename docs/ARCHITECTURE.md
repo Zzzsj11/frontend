@@ -1,5 +1,9 @@
 # 技术架构
 
+计价预检以模型能力中的 `billing` 为单一产品配置：声明渠道、每秒粗估价、是否检查余额和是否排除。RunningHub 测试通道不计费且不检查英和余额；最终对账仍以版本化 `video_pricing_rules` 和供应商真实用量为财务事实。
+
+视频归档完成后，媒体 Worker 在受控并发下使用 ffprobe 读取 TOS 文件，将请求档位、供应商档位、实际宽高、FPS、编码、真实时长和文件大小固化到任务结果与 `shot_assets`。历史素材可用 `backend/scripts/backfill_video_metadata.py` 幂等补齐。管理后台历史重算通过 `billing_reconcile` 持久化 Worker 工单执行，每批 500 条，支持进度、重复请求复用和中断重放。
+
 项目是 Vue 3 + TypeScript 前端、FastAPI + SQLAlchemy 后端、PostgreSQL 持久化、Redis 缓存/任务状态、TOS 媒体存储的 MV AI 生产平台。Nginx 托管前端并代理 `/api`。
 
 主要领域：认证和多用户隔离、项目/子项目、ASS 与通用分镜、系统及私有人物、场景/视频/音频资产、模型注册、生成任务、Token 用量、错误日志、管理后台。

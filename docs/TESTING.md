@@ -146,6 +146,8 @@ ADMIN_CONSOLE_E2E=1 npx playwright test e2e/admin/admin-console.spec.ts  # 远�
 
 ## 上线验收清单
 
+真实视频规格验收：每个供应商的低成本 Agent 测试必须同时核对 `requestedResolution/providerResolution/actualWidth/actualHeight/fps/codec/actualDuration/fileSize`，不得只相信请求参数或供应商状态字段。规格变化先报警并人工确认，不静默改写产品档位。RunningHub 测试不得占用或检查英和余额。
+
 域名与 HTTPS：域名解析到公网 IP；HTTPS 可打开且 HTTP 自动跳转；证书签发与自动续期正常；Nginx 为域名模式。
 容器与数据：四服务 healthy；`/api/health` 200；迁移自动执行；种子数据就绪；数据库/Redis 不公网开放（调试走 SSH 隧道，必须开放则 IP 白名单）。
 账号与业务：管理员登录、双 Token、改密、多用户隔离可用；ASS 解析/歌曲编号匹配/情感命中/通用分镜/场景图/视频/单镜重生成/批量生成/素材导出全通。

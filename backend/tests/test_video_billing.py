@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from app.database import session_factory
 from app.models import DigitalHumanModel, GenerationJobModel, TokenUsageModel, VideoPricingRuleModel
+from app.video_billing import reconcile_video_billing
 
 
 async def _seed_billing_fixtures() -> None:
@@ -206,7 +207,11 @@ async def test_video_billing_reconciles_success_failed_and_excluded(client):
     await _seed_billing_fixtures()
     reconciled = client.post("/api/admin/video-billing/reconcile")
     assert reconciled.status_code == 200
-    assert reconciled.json()["processed"] >= 3
+    assert reconciled.json()["jobId"].startswith("job-")
+    async with session_factory() as db:
+        result = await reconcile_video_billing(db)
+        await db.commit()
+    assert result["processed"] >= 3
 
     response = client.get("/api/admin/video-billing", params={"q": "billing-", "limit": 20})
     assert response.status_code == 200
@@ -256,6 +261,13 @@ async def test_video_billing_reconciles_success_failed_and_excluded(client):
     agent_only = client.get("/api/admin/video-billing", params={"origin": "agent_test", "q": "billing-"}).json()
     assert agent_only["total"] == 1
     assert agent_only["summary"]["agentTestRecords"] == 1
+
+    first_page = client.get("/api/admin/video-billing", params={"q": "billing-", "limit": 1, "offset": 0}).json()
+    second_page = client.get("/api/admin/video-billing", params={"q": "billing-", "limit": 1, "offset": 1}).json()
+    assert first_page["total"] == second_page["total"] == 5
+    assert len(first_page["items"]) == len(second_page["items"]) == 1
+    assert first_page["items"][0]["id"] != second_page["items"][0]["id"]
+    assert first_page["summary"] == second_page["summary"]
 
     # 重复核算必须更新同一工单账单，不得重复入账。
     assert client.post("/api/admin/video-billing/reconcile").status_code == 200

@@ -263,6 +263,18 @@ WORKER_STALE_SECONDS=180
 
 ## 5. 每次发布的标准流程
 
+### 5.0 可选正式域名 HTTPS
+
+域名解析和证书就绪后，在服务器准备只读证书目录，文件名固定为 `fullchain.pem`、`privkey.pem`。发布环境设置 `TLS_DOMAIN`、`TLS_CERT_DIR`，使用：
+
+```bash
+TLS_DOMAIN=example.com \
+TLS_CERT_DIR=/etc/letsencrypt/live/example.com \
+DEPLOY_TLS=1 DEPLOY_ENV=production ./scripts/deploy-local-images.sh
+```
+
+部署脚本会校验证书文件，并组合 `docker-compose.tls.yml`：80 自动 308 跳转、443 仅启用 TLS 1.2/1.3、响应带 HSTS，后端 Refresh Cookie 自动启用 Secure。证书续期后需重建 frontend 使 Nginx 重新读取文件。没有 DNS 与证书控制权时禁止用自签证书冒充完成。
+
 ### 5.1 本地侧
 
 ```bash

@@ -125,7 +125,13 @@ describe('AdminVideoBillingPanel', () => {
     await flushPromises()
     expect(apiRequest.mock.calls.at(-1)?.[0]).toContain('status=failed')
     apiRequest
-      .mockResolvedValueOnce({ processed: 2, priced: 1, failed: 2 })
+      .mockResolvedValueOnce({ jobId: 'job-reconcile-1', status: 'queued', reused: false })
+      .mockResolvedValueOnce({
+        id: 'job-reconcile-1',
+        status: 'succeeded',
+        progress: 100,
+        result: { processed: 2, priced: 1, failed: 2 },
+      })
       .mockResolvedValueOnce(response)
     await wrapper.get('button.primary').trigger('click')
     await flushPromises()

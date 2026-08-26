@@ -108,7 +108,7 @@ services:
     command:
       [
         '--kinds',
-        'ass_outline,general_outline,ass_segment_retry,storyboard_line',
+        'ass_outline,general_outline,ass_segment_retry,storyboard_line,billing_reconcile',
         '--concurrency',
         '${STORYBOARD_WORKER_CONCURRENCY:-64}',
       ]

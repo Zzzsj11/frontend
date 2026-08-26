@@ -4,6 +4,13 @@ import { apiRequest } from './api/client'
 export type ImageModelId = string
 export type VideoModelId = string
 export interface GenerationModelCapabilities {
+  billing?: {
+    provider?: string
+    unitPricePerSecond?: number
+    balanceCheck?: boolean
+    billingMode?: string
+    currency?: string
+  }
   executionConcurrency?: number
   executionPool?: string
   nativeAudio?: boolean
@@ -20,6 +27,7 @@ interface GenerationModelOption {
 }
 export const DEFAULT_IMAGE_MODEL: ImageModelId = 'gpt-image-2'
 export const DEFAULT_VIDEO_MODEL: VideoModelId = 'doubao-seedance-2.0'
+export const DEFAULT_VIDEO_RESOLUTIONS = ['480p', '720p', '1080p'] as const
 export const IMAGE_MODEL_OPTIONS = reactive<Array<GenerationModelOption>>([
   { value: DEFAULT_IMAGE_MODEL, label: 'Img2' },
 ])
@@ -28,6 +36,12 @@ export const VIDEO_MODEL_OPTIONS = reactive<Array<GenerationModelOption>>([
 ])
 export const videoModelCapabilities = (modelId?: string): GenerationModelCapabilities =>
   VIDEO_MODEL_OPTIONS.find((item) => item.value === modelId)?.capabilities ?? {}
+export const videoResolutionChoices = (modelId?: string): string[] => {
+  const configured = videoModelCapabilities(modelId).resolutions
+  return Array.isArray(configured) && configured.length
+    ? configured.filter((item): item is string => typeof item === 'string')
+    : [...DEFAULT_VIDEO_RESOLUTIONS]
+}
 export const videoResolutionLabel = (modelId: string | undefined, resolution: string): string => {
   const labels = videoModelCapabilities(modelId).resolutionLabels
   if (labels && typeof labels === 'object' && !Array.isArray(labels)) {

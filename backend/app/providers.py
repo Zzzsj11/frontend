@@ -125,7 +125,7 @@ def _raise_for_status(response: httpx.Response) -> None:
             code = (data or {}).get("code", "") if isinstance(data, dict) else ""
             msg = _provider_error_message(body)
         except Exception:
-            raw_body = response.text.strip()
+            raw_body = str(_redact(response.text.strip()))
             suffix = f"；供应商响应：{raw_body[:_PROVIDER_ERROR_BODY_MAX_CHARS]}" if raw_body else ""
             raise ProviderRejectedError(f"{exc}{suffix}") from exc
         body_text = _provider_error_body(body)
@@ -700,10 +700,12 @@ async def generate_direct_h3_video(request: VideoGenerationCreate, job: Job) -> 
         mode = "reference" if request.image_urls or request.video_urls or request.audio_urls else "text"
     job.idempotency_key = f"{job.id}:h3:{mode}"
     headers["Idempotency-Key"] = job.idempotency_key
+    resolution_map = ((job.request or {}).get("_capabilities") or {}).get("providerResolutionMap") or {}
+    provider_resolution = str(resolution_map.get(request.resolution) or ("2K" if request.resolution == "1080p" else "768P"))
     payload = {
         "model": str((job.request or {}).get("_providerModelId") or "MiniMax-H3"),
         "content": _direct_h3_content(request, mode),
-        "resolution": "2K" if request.resolution == "1080p" else "768P",
+        "resolution": provider_resolution,
         "duration": request.duration,
         "ratio": request.ratio,
         "aigc_watermark": request.watermark,
@@ -810,7 +812,11 @@ def _h3_first_frame_aspect_ratio(ratio: str) -> str:
     }.get(ratio, "16:9 (Widescreen)")
 
 
-def _h3_megapixels(resolution: str) -> tuple[float, float]:
+def _h3_megapixels(resolution: str, capabilities: dict[str, Any] | None = None) -> tuple[float, float]:
+    configured = (capabilities or {}).get("providerResolutionMap") or {}
+    item = configured.get(resolution)
+    if isinstance(item, dict) and item.get("stage1") is not None and item.get("stage2") is not None:
+        return float(item["stage1"]), float(item["stage2"])
     return {
         "480p": (0.2, 0.4),
         "720p": (0.4, 0.9),
@@ -900,7 +906,7 @@ async def generate_h3_video(request: VideoGenerationCreate, job: Job) -> dict[st
     mode = str((job.request or {}).get("_h3Mode") or request.h3_mode)
     if mode == "auto":
         mode = "reference" if images or videos or audios else "text"
-    stage1, stage2 = _h3_megapixels(request.resolution)
+    stage1, stage2 = _h3_megapixels(request.resolution, ((job.request or {}).get("_capabilities") or {}))
     try:
         if mode == "text":
             await jobs.mark_provider_submitting(job)
