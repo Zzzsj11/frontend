@@ -1188,6 +1188,17 @@ def test_raise_for_status_translates_aigc_error_codes() -> None:
     # body 非 JSON：回退为 HTTP 状态错误描述
     with pytest.raises(ProviderError):
         _raise_for_status(make_response(502, None))
+    # PPIO 使用 error/message 结构；错误正文必须保留，方便定位必现的参数 400。
+    with pytest.raises(ProviderError, match=r'duration is invalid.*供应商响应.*"code":"InvalidParameter".*"field":"duration"'):
+        _raise_for_status(
+            make_response(
+                400,
+                {"error": {"code": "InvalidParameter", "message": "duration is invalid", "field": "duration"}},
+            )
+        )
+    # 上游若意外回显凭证，落库前必须脱敏。
+    with pytest.raises(ProviderError, match=r'"token":"\*\*\*"'):
+        _raise_for_status(make_response(400, {"message": "bad request", "token": "secret-value"}))
     # 2xx 正常返回不抛错
     _raise_for_status(make_response(200, {"code": 200, "data": {}}))
 

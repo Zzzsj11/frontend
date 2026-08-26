@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import re
 import tempfile
@@ -16,6 +17,7 @@ from urllib.parse import urlparse
 import httpx
 
 from .config import settings
+from .error_logging import _redact
 from .jobs import Job, jobs
 from .runninghub import RunningHubError
 from .runninghub import query_task as runninghub_query_task
@@ -61,6 +63,34 @@ _PROVIDER_ERROR_TRANSLATIONS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 _REQUEST_ID_RE = re.compile(r"request\s*id[:\s]*([a-zA-Z0-9\-]+)", re.IGNORECASE)
+_PROVIDER_ERROR_BODY_MAX_CHARS = 4000
+
+
+def _provider_error_body(body: Any) -> str:
+    """保留供应商原始错误正文，同时避免密钥等敏感字段进入工单错误。"""
+    try:
+        text = json.dumps(_redact(body), ensure_ascii=False, separators=(",", ":"))
+    except Exception:
+        text = str(body)
+    if len(text) > _PROVIDER_ERROR_BODY_MAX_CHARS:
+        return f"{text[:_PROVIDER_ERROR_BODY_MAX_CHARS]}…（响应正文已截断）"
+    return text
+
+
+def _provider_error_message(body: Any) -> str:
+    if not isinstance(body, dict):
+        return ""
+    for value in (body.get("msg"), body.get("message"), body.get("detail")):
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    error = body.get("error")
+    if isinstance(error, str):
+        return error.strip()
+    if isinstance(error, dict):
+        for value in (error.get("message"), error.get("msg"), error.get("detail"), error.get("code")):
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ""
 
 
 def translate_provider_error(msg: str) -> str:
@@ -90,16 +120,21 @@ def _raise_for_status(response: httpx.Response) -> None:
     except httpx.HTTPStatusError as exc:
         try:
             body = response.json()
-            code = (body.get("data") or {}).get("code", "")
-            msg = body.get("msg", "")
+            data = body.get("data") if isinstance(body, dict) else None
+            code = (data or {}).get("code", "") if isinstance(data, dict) else ""
+            msg = _provider_error_message(body)
         except Exception:
-            raise ProviderRejectedError(str(exc)) from exc
+            raw_body = response.text.strip()
+            suffix = f"；供应商响应：{raw_body[:_PROVIDER_ERROR_BODY_MAX_CHARS]}" if raw_body else ""
+            raise ProviderRejectedError(f"{exc}{suffix}") from exc
+        body_text = _provider_error_body(body)
+        body_suffix = f"；供应商响应：{body_text}"
         friendly = _AIGC_FRIENDLY_ERRORS.get(code)
         if friendly:
-            raise ProviderRejectedError(friendly) from exc
+            raise ProviderRejectedError(f"{friendly}{body_suffix}") from exc
         if msg:
-            raise ProviderRejectedError(translate_provider_error(msg)) from exc
-        raise ProviderRejectedError(str(exc)) from exc
+            raise ProviderRejectedError(f"{translate_provider_error(msg)}{body_suffix}") from exc
+        raise ProviderRejectedError(f"{exc}{body_suffix}") from exc
 
 
 def _headers(api_key: str, *, x_api_key: bool = False) -> dict[str, str]:
