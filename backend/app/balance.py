@@ -13,6 +13,8 @@ from .config import SHARED_PROVIDER_KEY, settings
 _cache: dict[str, Any] | None = None
 _cache_expires_at = 0.0
 _lock = asyncio.Lock()
+SD20_ESTIMATE_PRICE_PER_SECOND = 0.83
+H3_ESTIMATE_PRICE_PER_SECOND = 0.425
 
 
 def build_balance_sign(user_id: str, timestamp: int, api_key: str) -> str:
@@ -141,8 +143,8 @@ async def query_business_balance(*, force: bool = False) -> dict[str, Any]:
 
 
 async def ensure_video_batch_balance(items: list[Any]) -> dict[str, float]:
-    """按当前 Key 剩余额度预检批量视频；H3 0.5 元/秒，其余视频 1 元/秒。"""
-    estimated = sum(float(item.duration) * (0.5 if str(item.model or "").startswith("minimax-h3") else 1.0) for item in items)
+    """按当前 Key 剩余额度预检批量视频；H3 0.425 元/秒，SD2.0 0.83 元/秒。"""
+    estimated = sum(float(item.duration) * (H3_ESTIMATE_PRICE_PER_SECOND if str(item.model or "").startswith("minimax-h3") else SD20_ESTIMATE_PRICE_PER_SECOND) for item in items)
     balance = await query_business_balance(force=True)
     key_remaining = ((balance.get("key") or {}).get("remaining")) if balance.get("available") else None
     available = _to_float(key_remaining)

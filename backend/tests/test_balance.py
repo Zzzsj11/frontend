@@ -193,10 +193,10 @@ async def test_video_batch_cost_estimate_and_insufficient_key_balance(monkeypatc
 
     monkeypatch.setattr(balance, "query_business_balance", enough)
     items = [SimpleNamespace(duration=10, model="doubao-seedance-2.0"), SimpleNamespace(duration=10, model="minimax-h3-runninghub")]
-    assert (await balance.ensure_video_batch_balance(items))["estimatedCost"] == 15
+    assert (await balance.ensure_video_batch_balance(items))["estimatedCost"] == 12.55
 
     async def insufficient(force=False):
-        return {"available": True, "key": {"remaining": 14.99}}
+        return {"available": True, "key": {"remaining": 12.54}}
 
     monkeypatch.setattr(balance, "query_business_balance", insufficient)
     with pytest.raises(ValueError, match="子账号 Key 余额额度不足，请先完成充值或提升余额上限后再试"):

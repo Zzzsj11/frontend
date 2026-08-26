@@ -11,7 +11,11 @@ import type {
 import { GENERAL_GENDER_OPTIONS } from '../types'
 import { useProjectStore } from '../stores/project'
 import { confirmDialog } from '../composables/useConfirmDialog'
-import { estimateVideoBatchCost, videoEstimateUnitPrice } from '../utils/videoBatchCost'
+import {
+  estimateVideoBatchCost,
+  formatVideoEstimateUnitPrice,
+  videoEstimateUnitPrice,
+} from '../utils/videoBatchCost'
 import AppIcon from './AppIcon.vue'
 import BaseModal from './base/BaseModal.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
@@ -207,7 +211,7 @@ const submit = async () => {
           : `¥${keyRemaining.toFixed(2)}`
       const confirmed = await confirmDialog({
         title: '确认批量生成视频',
-        message: `将生成 ${request.groupCount ?? 1} 组随机通用分镜，共约 ${seconds} 秒视频。\n\n计费模型：${labelOf(request.videoModel, VIDEO_MODEL_OPTIONS)}\n预估单价：¥${unitPrice.toFixed(2)}/秒\n本次预估费用：¥${estimatedCost.toFixed(2)}\n${keyLabel} 剩余额度：${remainingText}\n\n实际费用以供应商最终用量为准，确认后将立即创建子项目并提交视频任务。`,
+        message: `将生成 ${request.groupCount ?? 1} 组随机通用分镜，共约 ${seconds} 秒视频。\n\n计费模型：${labelOf(request.videoModel, VIDEO_MODEL_OPTIONS)}\n预估单价：¥${formatVideoEstimateUnitPrice(unitPrice)}/秒\n本次预估费用：¥${estimatedCost.toFixed(2)}\n${keyLabel} 剩余额度：${remainingText}\n\n实际费用以供应商最终用量为准，确认后将立即创建子项目并提交视频任务。`,
         confirmText: '确认生成',
         cancelText: '返回修改',
       })

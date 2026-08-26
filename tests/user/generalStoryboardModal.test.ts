@@ -211,7 +211,7 @@ describe('general storyboard defaults', () => {
     await vi.waitFor(() => expect(confirm).toHaveBeenCalled())
     expect(confirm.mock.calls[0][0]).toMatchObject({ title: '确认批量生成视频' })
     expect(String((confirm.mock.calls[0][0] as { message: string }).message)).toContain(
-      '本次预估费用：¥210.00',
+      '本次预估费用：¥174.30',
     )
     expect(run).toHaveBeenCalledTimes(1)
     wrapper.unmount()
