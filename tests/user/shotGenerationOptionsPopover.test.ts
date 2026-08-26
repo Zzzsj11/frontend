@@ -106,6 +106,7 @@ describe('ShotGenerationOptionsPopover', () => {
     })
     await wrapper.get('[aria-label="调整生成参数"]').trigger('click')
     const select = document.querySelector('[aria-label="H3 生成模式"]') as HTMLSelectElement
+    expect(select.value).toBe('reference')
     expect(Array.from(select.options).map((option) => option.value)).toEqual([
       'auto',
       'text',

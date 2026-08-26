@@ -23,7 +23,7 @@ import * as imageGen from '../api/imageGen'
 import { generateVoice } from '../api/voice'
 import { nextId } from '../utils/id'
 import { ApiError, reportApiError } from '../errorBus'
-import { DEFAULT_VIDEO_DURATION, normalizeShotOptions } from '../mediaConstraints'
+import { DEFAULT_H3_MODE, DEFAULT_VIDEO_DURATION, normalizeShotOptions } from '../mediaConstraints'
 import { OUTLINE_WATCH_TIMEOUT_MS } from '../generationConstraints'
 import {
   DEFAULT_IMAGE_MODEL,
@@ -82,6 +82,7 @@ export const DEFAULT_SHOT_OPTIONS: ShotGenOptions = {
   videoModel: DEFAULT_VIDEO_MODEL,
   generateAudio: false,
   watermark: false,
+  h3Mode: DEFAULT_H3_MODE,
 }
 
 let rafId = 0

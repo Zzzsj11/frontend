@@ -408,6 +408,7 @@ def test_h3_video_provider_archives_output(monkeypatch) -> None:
             ratio="16:9",
             resolution="720p",
             image_urls=["https://tos.test/person.jpg"],
+            h3_mode="first_frame",
             model="minimax-h3-runninghub",
         )
         job = Job(
@@ -419,6 +420,7 @@ def test_h3_video_provider_archives_output(monkeypatch) -> None:
                 "duration": 5,
                 "ratio": "16:9",
                 "image_urls": ["https://tos.test/person.jpg"],
+                "_h3Mode": "first_frame",
                 "_provider": "runninghub",
             },
         )

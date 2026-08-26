@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { DEFAULT_H3_MODE } from '../mediaConstraints'
 import type { ShotGenOptions } from '../types'
 
 const props = defineProps<{ modelValue: ShotGenOptions }>()
 const emit = defineEmits<{ 'update:modelValue': [value: ShotGenOptions] }>()
-const selectedMode = computed(() => props.modelValue.h3Mode ?? 'auto')
+const selectedMode = computed(() => props.modelValue.h3Mode ?? DEFAULT_H3_MODE)
 const update = <K extends keyof ShotGenOptions>(key: K, value: ShotGenOptions[K]) =>
   emit('update:modelValue', { ...props.modelValue, [key]: value })
 const urls = (value: string, max: number) =>

@@ -9,7 +9,11 @@ import {
   isH3VideoModel,
   videoModelCapabilities,
 } from '../generationModels'
-import { DEFAULT_VIDEO_DURATION, VIDEO_DURATION_CHOICES } from '../mediaConstraints'
+import {
+  DEFAULT_H3_MODE,
+  DEFAULT_VIDEO_DURATION,
+  VIDEO_DURATION_CHOICES,
+} from '../mediaConstraints'
 import type { ShotGenOptions } from '../types'
 import H3GenerationModeFields from './H3GenerationModeFields.vue'
 
@@ -73,7 +77,7 @@ const restoreDefaults = () => {
           watermark: false,
         }
       : { imageModel: DEFAULT_IMAGE_MODEL }),
-    h3Mode: 'auto',
+    h3Mode: DEFAULT_H3_MODE,
     h3FirstFrameUrl: undefined,
     h3LastFrameUrl: undefined,
     referenceImageUrls: [],

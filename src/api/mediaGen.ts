@@ -1,6 +1,7 @@
 import type { ShotGenOptions } from '../types'
 import type { ImageModelId } from '../generationModels'
 import { isH3VideoModel } from '../generationModels'
+import { DEFAULT_H3_MODE } from '../mediaConstraints'
 import { apiRequest } from './client'
 import { watchGenerationJob, type GenerationJobSnapshot } from '../utils/generationPoller'
 
@@ -83,7 +84,7 @@ export async function generateShotVideo(
   signal?: AbortSignal,
   onSubmitted?: (submittedAt: string) => void,
 ): Promise<{ coverUrl: string; coverThumbnailUrl?: string; videoUrl: string; duration: number }> {
-  const mode = options.h3Mode ?? 'auto'
+  const mode = options.h3Mode ?? DEFAULT_H3_MODE
   const automaticImages = [referenceImageUrl, ...characterImageUrls].filter(Boolean) as string[]
   const explicitFirst = options.h3FirstFrameUrl || referenceImageUrl
   const imageUrls =

@@ -29,9 +29,9 @@ class H3PromptCompilation:
 def detect_h3_mode(payload: VideoGenerationCreate) -> str:
     if payload.h3_mode != "auto":
         return payload.h3_mode
-    if payload.video_urls or payload.audio_urls or len(payload.image_urls) > 1:
+    if payload.image_urls or payload.video_urls or payload.audio_urls:
         return "reference"
-    return "first_frame" if payload.image_urls else "text"
+    return "text"
 
 
 def _already_structured(prompt: str, sections: tuple[str, ...]) -> bool:

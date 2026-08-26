@@ -48,7 +48,7 @@ def test_h3_base_modes():
     text = VideoGenerationCreate(prompt="雨中的城市")
     first = VideoGenerationCreate(prompt="人物转身", image_urls=["first.png"])
     assert detect_h3_mode(text) == "text"
-    assert detect_h3_mode(first) == "first_frame"
+    assert detect_h3_mode(first) == "reference"
     assert compile_h3_prompt(text).prompt.startswith("integrated_multimodal_description:")
     assert "generate a silent video with no audio track" in compile_h3_prompt(text).prompt
 

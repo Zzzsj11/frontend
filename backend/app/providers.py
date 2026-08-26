@@ -697,7 +697,7 @@ async def generate_direct_h3_video(request: VideoGenerationCreate, job: Job) -> 
     base, headers = _ppio_config() if provider == "ppio" else _video_config()
     mode = str((job.request or {}).get("_h3Mode") or request.h3_mode)
     if mode == "auto":
-        mode = "reference" if request.video_urls or request.audio_urls or len(request.image_urls) > 1 else ("first_frame" if request.image_urls else "text")
+        mode = "reference" if request.image_urls or request.video_urls or request.audio_urls else "text"
     job.idempotency_key = f"{job.id}:h3:{mode}"
     headers["Idempotency-Key"] = job.idempotency_key
     payload = {
@@ -899,7 +899,7 @@ async def generate_h3_video(request: VideoGenerationCreate, job: Job) -> dict[st
     audios = [url.strip() for url in request.audio_urls if url.strip()]
     mode = str((job.request or {}).get("_h3Mode") or request.h3_mode)
     if mode == "auto":
-        mode = "reference" if videos or audios or len(images) > 1 else ("first_frame" if images else "text")
+        mode = "reference" if images or videos or audios else "text"
     stage1, stage2 = _h3_megapixels(request.resolution)
     try:
         if mode == "text":
@@ -980,11 +980,7 @@ async def _store_h3_video_result(job: Job, data: dict[str, Any]) -> dict[str, An
     request = job.request or {}
     generation_mode = request.get("_h3Mode")
     if not generation_mode:
-        generation_mode = (
-            "reference"
-            if request.get("video_urls") or request.get("audio_urls") or len(request.get("image_urls") or []) > 1
-            else ("first_frame" if request.get("image_urls") else "text")
-        )
+        generation_mode = "reference" if request.get("image_urls") or request.get("video_urls") or request.get("audio_urls") else "text"
     return {
         "provider": "runninghub",
         "providerTaskId": task_id,
