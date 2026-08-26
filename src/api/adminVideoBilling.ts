@@ -20,6 +20,9 @@ export interface VideoBillingItem {
   usageQuantity: number
   usageUnit: string
   unitPrice: number
+  listUnitPrice: number
+  discountRate: number
+  discountLabel: string
   rateLabel: string
   amount: number
   currency: string
@@ -43,6 +46,9 @@ export interface VideoBillingDetail {
   usageQuantity: number
   usageUnit: string
   unitPrice: number
+  listUnitPrice: number
+  discountRate: number
+  discountLabel: string
   rateLabel: string
   amount: number
   billingStatus: string

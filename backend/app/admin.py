@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import timedelta
+from decimal import Decimal
 from io import BytesIO
 from typing import Any
 from zipfile import BadZipFile
@@ -91,7 +92,7 @@ from .server_monitoring import monitoring_summary
 from .storage import get_storage, import_remote, safe_key
 from .storyboard_options import OPTION_KINDS, load_general_storyboard_options
 from .token_usage import add_llm_call_log, add_token_usage
-from .video_billing import reconcile_video_billing
+from .video_billing import reconcile_video_billing, video_discount_label, video_discount_rate
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 Db = Depends(database_session)
@@ -516,6 +517,27 @@ def _money(value) -> float:
     return round(float(value or 0), 8)
 
 
+def _video_rate_json(record: VideoBillingRecordModel) -> dict:
+    unit_price = _money(record.unit_price)
+    discount_rate = video_discount_rate(model=record.model, provider=record.provider)
+    discount_label = video_discount_label(model=record.model, provider=record.provider)
+    list_unit_price = _money(Decimal(str(unit_price)) / discount_rate) if unit_price and discount_rate < 1 else unit_price
+    unit_label = "100万 Token" if record.usage_type == "completion_tokens" else "秒"
+    if not unit_price:
+        rate_label = "暂不计费"
+    elif discount_label:
+        rate_label = f"¥{unit_price:g} / {unit_label}（原价 ¥{list_unit_price:g}，{discount_label}）"
+    else:
+        rate_label = f"¥{unit_price:g} / {unit_label}"
+    return {
+        "unitPrice": unit_price,
+        "listUnitPrice": list_unit_price,
+        "discountRate": float(discount_rate),
+        "discountLabel": discount_label,
+        "rateLabel": rate_label,
+    }
+
+
 @router.get("/video-billing")
 async def video_billing(
     user: CurrentUser,
@@ -585,8 +607,7 @@ async def video_billing(
                 "usageType": record.usage_type,
                 "usageQuantity": _money(record.usage_quantity),
                 "usageUnit": record.usage_unit,
-                "unitPrice": _money(record.unit_price),
-                "rateLabel": f"¥{_money(record.unit_price):g} / {'100万 Token' if record.usage_type == 'completion_tokens' else '秒'}" if record.unit_price else "暂不计费",
+                **_video_rate_json(record),
                 "amount": _money(record.amount),
                 "currency": record.currency,
                 "completedAt": iso(record.completed_at),
@@ -675,8 +696,7 @@ async def video_billing_detail(record_id: str, user: CurrentUser, db: AsyncSessi
         ),
         "usageQuantity": _money(record.usage_quantity),
         "usageUnit": record.usage_unit,
-        "unitPrice": _money(record.unit_price),
-        "rateLabel": f"¥{_money(record.unit_price):g} / {'100万 Token' if record.usage_type == 'completion_tokens' else '秒'}" if record.unit_price else "暂不计费",
+        **_video_rate_json(record),
         "amount": _money(record.amount),
         "billingStatus": record.billing_status,
         "prompts": prompts,

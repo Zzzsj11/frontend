@@ -50,7 +50,7 @@ async def _seed_billing_fixtures() -> None:
                 kind="video",
                 status="succeeded",
                 request={"model": "doubao-seedance-2.0", "resolution": "720p"},
-                provider="yinhe",
+                provider="yinghe",
                 finished_at=now,
             ),
             GenerationJobModel(
@@ -94,7 +94,7 @@ async def _seed_billing_fixtures() -> None:
                     user_id="user-admin",
                     generation_job_id="billing-sd-ok",
                     operation="generation_video",
-                    provider="yinhe",
+                    provider="yinghe",
                     model="doubao-seedance-2.0",
                     output_tokens=100_000,
                     total_tokens=100_000,
@@ -134,7 +134,12 @@ async def test_video_billing_reconciles_success_failed_and_excluded(client):
     response = client.get("/api/admin/video-billing", params={"q": "billing-", "limit": 20})
     assert response.status_code == 200
     items = {item["generationJobId"]: item for item in response.json()["items"]}
-    assert items["billing-sd-ok"]["amount"] == pytest.approx(4.6)
+    assert items["billing-sd-ok"]["amount"] == pytest.approx(3.818)
+    assert items["billing-sd-ok"]["unitPrice"] == pytest.approx(38.18)
+    assert items["billing-sd-ok"]["listUnitPrice"] == pytest.approx(46)
+    assert items["billing-sd-ok"]["discountRate"] == pytest.approx(0.83)
+    assert items["billing-sd-ok"]["discountLabel"] == "英和 83 折"
+    assert "原价 ¥46" in items["billing-sd-ok"]["rateLabel"]
     assert items["billing-h3-failed"]["isFailed"] is True
     assert items["billing-h3-failed"]["billingStatus"] == "priced"
     assert items["billing-h3-failed"]["amount"] == pytest.approx(5.1)

@@ -49,6 +49,9 @@ const money = (value: number) => `¥${value.toFixed(6)}`
           <div>
             <span>计价标准</span><b>{{ detail.rateLabel }}</b>
           </div>
+          <div v-if="detail.discountLabel">
+            <span>供应商折扣</span><b class="discount">{{ detail.discountLabel }}</b>
+          </div>
           <div>
             <span>计费用量</span><b>{{ detail.usageQuantity }} {{ detail.usageUnit }}</b>
           </div>
@@ -144,6 +147,9 @@ small,
 }
 .agent {
   color: var(--primary);
+}
+.discount {
+  color: var(--warning);
 }
 .failed {
   color: var(--danger);

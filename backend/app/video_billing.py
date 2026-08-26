@@ -12,6 +12,17 @@ from .models import GenerationJobModel, TokenUsageModel, VideoBillingRecordModel
 
 TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
 ZERO = Decimal("0")
+YINGHE_SD20_DISCOUNT_RATE = Decimal("0.83")
+
+
+def video_discount_rate(*, model: str, provider: str) -> Decimal:
+    if model == "doubao-seedance-2.0" and provider == "yinghe":
+        return YINGHE_SD20_DISCOUNT_RATE
+    return Decimal("1")
+
+
+def video_discount_label(*, model: str, provider: str) -> str:
+    return "英和 83 折" if video_discount_rate(model=model, provider=provider) < 1 else ""
 
 
 def _decimal(value: Any) -> Decimal:
@@ -105,7 +116,11 @@ async def reconcile_video_job(db: AsyncSession, job: GenerationJobModel) -> Vide
         billing_status = "unpriced"
 
     if rule and billing_status == "priced":
-        amount = (quantity / _decimal(rule.unit_size) * _decimal(rule.unit_price)).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_UP)
+        discount_rate = video_discount_rate(model=model, provider=provider)
+        applied_unit_price = (_decimal(rule.unit_price) * discount_rate).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_UP)
+        amount = (quantity / _decimal(rule.unit_size) * applied_unit_price).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_UP)
+    else:
+        applied_unit_price = ZERO
 
     record = (await db.execute(select(VideoBillingRecordModel).where(VideoBillingRecordModel.generation_job_id == job.id))).scalar_one_or_none()
     if record is None:
@@ -125,7 +140,7 @@ async def reconcile_video_job(db: AsyncSession, job: GenerationJobModel) -> Vide
     record.usage_type = usage_type
     record.usage_quantity = quantity
     record.usage_unit = usage_unit
-    record.unit_price = _decimal(rule.unit_price) if rule else ZERO
+    record.unit_price = applied_unit_price
     record.amount = amount
     record.currency = rule.currency if rule else "CNY"
     record.raw_usage = raw_usage

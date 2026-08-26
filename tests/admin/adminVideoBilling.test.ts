@@ -29,8 +29,8 @@ const response = {
       username: 'dev01',
       projectName: '项目A',
       taskTitle: '子项目A',
-      provider: 'yinghe-h3',
-      model: 'minimax-h3',
+      provider: 'yinghe',
+      model: 'doubao-seedance-2.0',
       resolution: '720p',
       durationSeconds: 12,
       generationElapsedSeconds: 96,
@@ -39,8 +39,11 @@ const response = {
       billingStatus: 'priced',
       usageQuantity: 12,
       usageUnit: '秒',
-      unitPrice: 0.425,
-      rateLabel: '¥0.425 / 秒',
+      unitPrice: 38.18,
+      listUnitPrice: 46,
+      discountRate: 0.83,
+      discountLabel: '英和 83 折',
+      rateLabel: '¥38.18 / 100万 Token（原价 ¥46，英和 83 折）',
       amount: 5.1,
       currency: 'CNY',
       completedAt: '2026-08-25T00:00:00Z',
@@ -65,6 +68,9 @@ const response = {
       usageQuantity: 80,
       usageUnit: 'RH币',
       unitPrice: 0,
+      listUnitPrice: 0,
+      discountRate: 1,
+      discountLabel: '',
       rateLabel: '暂不计费',
       amount: 0,
       currency: 'CNY',
@@ -95,6 +101,7 @@ describe('AdminVideoBillingPanel', () => {
     expect(wrapper.text()).not.toContain('12 Token')
     expect(wrapper.text()).toContain('生成耗时')
     expect(wrapper.text()).toContain('1 分 36 秒')
+    expect(wrapper.text()).toContain('英和 83 折')
     expect(wrapper.findAll('nav[aria-label$="列表分页"]')).toHaveLength(2)
   })
 
@@ -144,6 +151,9 @@ describe('AdminVideoBillingPanel', () => {
             usageQuantity: 12,
             usageUnit: '秒',
             unitPrice: 0.425,
+            listUnitPrice: 0.425,
+            discountRate: 1,
+            discountLabel: '',
             rateLabel: '¥0.425 / 秒',
             amount: 5.1,
             billingStatus: 'priced',

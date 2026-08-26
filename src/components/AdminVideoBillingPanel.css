@@ -143,6 +143,16 @@ td small {
   color: var(--primary);
   font-weight: 600;
 }
+.discount-badge {
+  display: inline-block;
+  margin-top: 5px;
+  padding: 3px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--warning-light);
+  color: var(--warning);
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
 .amount {
   font-weight: 700;
 }

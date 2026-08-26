@@ -219,6 +219,7 @@ onMounted(load)
             <td>
               {{ item.model || '-'
               }}<small>{{ item.provider || '-' }} · {{ item.resolution }}</small>
+              <span v-if="item.discountLabel" class="discount-badge">{{ item.discountLabel }}</span>
             </td>
             <td>
               <span :class="['origin-badge', { agent: item.generationOrigin === 'agent_test' }]">
