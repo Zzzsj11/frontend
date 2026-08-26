@@ -7,10 +7,11 @@ current="$(crontab -l 2>/dev/null | grep -v "$marker" || true)"
 {
   printf '%s\n' "$current"
   printf '*/5 * * * * PROJECT_DIR=%q %q >> %q 2>&1 %s\n' "$root" "$root/scripts/online-health-check.sh" "$logs/health-cron.log" "$marker"
+  printf '* * * * * PROJECT_DIR=%q %q >> %q 2>&1 %s\n' "$root" "$root/scripts/sync-digital-human-assets.sh" "$logs/asset-sync-cron.log" "$marker"
   if ! systemctl is-enabled mv-agent-metrics.timer >/dev/null 2>&1; then
     printf '* * * * * PROJECT_DIR=%q %q >> %q 2>&1 %s\n' "$root" "$root/scripts/collect-server-metrics.sh" "$logs/server-metrics-cron.log" "$marker"
   fi
   printf '15 3 * * * BACKUP_DIR=%q %q >> %q 2>&1 %s\n' "$backups" "$root/scripts/backup-postgres.sh" "$logs/backup-cron.log" "$marker"
   printf '15 4 * * 0 BACKUP_DIR=%q %q >> %q 2>&1 %s\n' "$backups" "$root/scripts/verify-latest-backup.sh" "$logs/backup-verify-cron.log" "$marker"
 } | crontab -
-echo "installed health, backup, restore verification, and metrics cron fallback (systemd timer preferred)"
+echo "installed health, digital-human asset sync, backup, restore verification, and metrics cron fallback (systemd timer preferred)"

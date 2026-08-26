@@ -72,7 +72,7 @@ crontab 配置（**宿主机**上，每分钟）：
 | 环境           | 命令                                                                                                         | 日志                                              |
 | -------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
 | 本地（macOS）  | `/usr/local/bin/docker exec mv-agent-frontend-backend-1 python /srv/mvagent/scripts/ensure_asset_avatars.py` | `/tmp/mvagent-asset-sync.log`                     |
-| 线上（Ubuntu） | `docker exec mv-agent-frontend-backend-1 python /srv/mvagent/scripts/ensure_asset_avatars.py`                | `/opt/mv-agent-frontend/logs/asset-sync-cron.log` |
+| 线上（Ubuntu） | `PROJECT_DIR=/opt/mv-agent-frontend /opt/mv-agent-frontend/scripts/sync-digital-human-assets.sh`           | `/var/lib/docker/mv-agent-maintenance/logs/asset-sync-cron.log` |
 
 容器内脚本路径：`/srv/mvagent/scripts/ensure_asset_avatars.py`（容器内无 scripts 目录时需要先 `mkdir -p`）。手动执行：`docker exec mv-agent-frontend-backend-1 python /srv/mvagent/scripts/ensure_asset_avatars.py`。
 
@@ -97,6 +97,7 @@ crontab 配置（**宿主机**上，每分钟）：
 | `backend/app/models.py`                         | `DigitalHumanModel.asset_avatar_url` 字段                                                               |
 | `backend/migrations/versions/d4f2b8e6a1c0_*.py` | 加列迁移（head：d4f2b8e6a1c0）                                                                          |
 | `backend/scripts/ensure_asset_avatars.py`       | cron 补扫脚本                                                                                           |
+| `scripts/sync-digital-human-assets.sh`          | 宿主机 Compose 包装入口，读取当前部署版本后在 backend 容器执行补扫                                    |
 | `backend/tests/test_generation_jobs.py`         | 全部相关自动化测试                                                                                      |
 
 ## 8. 自动化测试覆盖
