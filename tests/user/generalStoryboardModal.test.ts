@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import GeneralStoryboardModal from '../../src/components/GeneralStoryboardModal.vue'
 import { DEFAULT_SHOT_OPTIONS, useProjectStore } from '../../src/stores/project'
+import * as apiClient from '../../src/api/client'
+import * as confirmDialogModule from '../../src/composables/useConfirmDialog'
 
 describe('general storyboard defaults', () => {
   beforeEach(() => {
@@ -166,6 +168,90 @@ describe('general storyboard defaults', () => {
       document.body.querySelectorAll('input[type="number"]'),
     ) as HTMLInputElement[]
     expect(numbers.map((input) => input.value)).toEqual(['3', '14', '210', '1'])
+    wrapper.unmount()
+  })
+
+  it('随机批量生成会展示费用和 Key 余额，确认后才提交', async () => {
+    const store = useProjectStore()
+    store.generalStoryboardOptions = {
+      genres: [{ value: 'pop', label: '流行歌曲' }],
+      seasons: ['秋'],
+      ageGroups: ['青年'],
+      visualStyles: ['电影写实'],
+      ratios: ['16:9'],
+    }
+    store.randomGeneralStoryboardOpen = true
+    const run = vi.spyOn(store, 'runRandomGeneralStoryboard').mockResolvedValue()
+    vi.spyOn(apiClient, 'apiRequest').mockImplementation((path: string) => {
+      if (path.startsWith('/account/balance')) {
+        return Promise.resolve({
+          available: true,
+          balance: '500',
+          balanceDisplay: '500.00',
+          currency: 'CNY',
+          updatedAt: '',
+          key: {
+            keyMasked: 'yh-test***',
+            keyName: '视频子账号',
+            quotaAmt: 500,
+            usedAmt: 100,
+            remaining: 400,
+            remainingDisplay: '400.00',
+          },
+        })
+      }
+      return Promise.resolve([])
+    })
+    const confirm = vi.spyOn(confirmDialogModule, 'confirmDialog').mockResolvedValue(true)
+    const wrapper = mount(GeneralStoryboardModal, {
+      props: { random: true },
+      attachTo: document.body,
+    })
+    ;(document.body.querySelector('.modal-footer .btn-primary') as HTMLButtonElement).click()
+    await vi.waitFor(() => expect(confirm).toHaveBeenCalled())
+    expect(confirm.mock.calls[0][0]).toMatchObject({ title: '确认批量生成视频' })
+    expect(String((confirm.mock.calls[0][0] as { message: string }).message)).toContain(
+      '本次预估费用：¥210.00',
+    )
+    expect(run).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('Key 剩余额度不足时阻止创建项目和视频任务', async () => {
+    const store = useProjectStore()
+    store.generalStoryboardOptions = {
+      genres: [{ value: 'pop', label: '流行歌曲' }],
+      seasons: ['秋'],
+      ageGroups: ['青年'],
+      visualStyles: ['电影写实'],
+      ratios: ['16:9'],
+    }
+    store.randomGeneralStoryboardOpen = true
+    const run = vi.spyOn(store, 'runRandomGeneralStoryboard').mockResolvedValue()
+    vi.spyOn(apiClient, 'apiRequest').mockResolvedValue({
+      available: true,
+      balance: '100',
+      balanceDisplay: '100.00',
+      currency: 'CNY',
+      updatedAt: '',
+      key: {
+        keyMasked: 'yh-low***',
+        keyName: '低额度 Key',
+        quotaAmt: 100,
+        usedAmt: 90,
+        remaining: 10,
+        remainingDisplay: '10.00',
+      },
+    })
+    const confirm = vi.spyOn(confirmDialogModule, 'confirmDialog').mockResolvedValue(false)
+    const wrapper = mount(GeneralStoryboardModal, {
+      props: { random: true },
+      attachTo: document.body,
+    })
+    ;(document.body.querySelector('.modal-footer .btn-primary') as HTMLButtonElement).click()
+    await vi.waitFor(() => expect(confirm).toHaveBeenCalled())
+    expect(confirm.mock.calls[0][0]).toMatchObject({ title: '余额额度不足', danger: true })
+    expect(run).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

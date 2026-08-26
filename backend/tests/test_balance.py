@@ -199,5 +199,5 @@ async def test_video_batch_cost_estimate_and_insufficient_key_balance(monkeypatc
         return {"available": True, "key": {"remaining": 14.99}}
 
     monkeypatch.setattr(balance, "query_business_balance", insufficient)
-    with pytest.raises(ValueError, match="余额不足，请补足余额再试"):
+    with pytest.raises(ValueError, match="子账号 Key 余额额度不足，请先完成充值或提升余额上限后再试"):
         await balance.ensure_video_batch_balance(items)

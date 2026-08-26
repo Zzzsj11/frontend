@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { apiRequest } from '../api/client'
+import type { AccountBalance } from '../stores/auth'
 import type {
   GeneralGender,
   GeneralStoryboardRequest,
@@ -8,6 +10,7 @@ import type {
 } from '../types'
 import { GENERAL_GENDER_OPTIONS } from '../types'
 import { useProjectStore } from '../stores/project'
+import { confirmDialog } from '../composables/useConfirmDialog'
 import AppIcon from './AppIcon.vue'
 import BaseModal from './base/BaseModal.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
@@ -43,6 +46,7 @@ const emptyShotCount = ref(4)
 const characterShotCount = ref(13)
 const totalDuration = ref(210)
 const groupCount = ref(1)
+const estimatingCost = ref(false)
 const extraRequirement = ref('')
 const selectedHumanIds = ref<string[]>([])
 
@@ -148,9 +152,10 @@ const toggleHuman = (id: string) => {
 const labelOf = (value: string, options: Array<{ value: string; label: string }>) =>
   options.find((item) => item.value === value)?.label ?? value
 
-const submit = () => {
+const submit = async () => {
   if (
     !canSubmit.value ||
+    estimatingCost.value ||
     (props.random ? store.randomGeneralStoryboardLoading : store.generalStoryboardLoading)
   )
     return
@@ -170,7 +175,41 @@ const submit = () => {
       groupCount: Math.round(groupCount.value),
       extraRequirement: extraRequirement.value.trim() || undefined,
     }
-    store.runRandomGeneralStoryboard(request)
+    estimatingCost.value = true
+    try {
+      const seconds = request.totalDuration * (request.groupCount ?? 1)
+      const unitPrice = request.videoModel.startsWith('minimax-h3') ? 0.5 : 1
+      const estimatedCost = Math.round(seconds * unitPrice * 100) / 100
+      const balance = await apiRequest<AccountBalance>('/account/balance?force=true')
+      const keyRemaining = balance.available ? balance.key?.remaining : null
+      const keyLabel = balance.key?.keyName || balance.key?.keyMasked || '当前视频 Key'
+      if (keyRemaining != null && keyRemaining + 1e-9 < estimatedCost) {
+        await confirmDialog({
+          title: '余额额度不足',
+          message: `本次预计费用 ¥${estimatedCost.toFixed(2)}，${keyLabel} 当前剩余额度 ¥${keyRemaining.toFixed(2)}，尚缺 ¥${(estimatedCost - keyRemaining).toFixed(2)}。\n\n请先完成充值或提升子账号 Key 的余额上限后再试，本次不会创建项目或提交视频任务。`,
+          confirmText: '知道了',
+          cancelText: '稍后处理',
+          danger: true,
+        })
+        return
+      }
+      const remainingText =
+        keyRemaining == null
+          ? balance.key?.remainingDisplay || '暂时无法获取，提交时将再次校验'
+          : `¥${keyRemaining.toFixed(2)}`
+      const confirmed = await confirmDialog({
+        title: '确认批量生成视频',
+        message: `将生成 ${request.groupCount ?? 1} 组随机通用分镜，共约 ${seconds} 秒视频。\n\n计费模型：${labelOf(request.videoModel, VIDEO_MODEL_OPTIONS)}\n预估单价：¥${unitPrice.toFixed(2)}/秒\n本次预估费用：¥${estimatedCost.toFixed(2)}\n${keyLabel} 剩余额度：${remainingText}\n\n实际费用以供应商最终用量为准，确认后将立即创建子项目并提交视频任务。`,
+        confirmText: '确认生成',
+        cancelText: '返回修改',
+      })
+      if (confirmed) void store.runRandomGeneralStoryboard(request)
+    } catch (error) {
+      store.randomGeneralStoryboardError =
+        error instanceof Error ? error.message : '费用预估失败，请稍后重试'
+    } finally {
+      estimatingCost.value = false
+    }
     return
   }
   const request: GeneralStoryboardRequest = {
@@ -449,19 +488,30 @@ const submit = () => {
         :disabled="
           !canSubmit ||
           (random ? store.randomGeneralStoryboardLoading : store.generalStoryboardLoading) ||
+          (random && estimatingCost) ||
           !store.generalStoryboardOptions
         "
         @click="submit"
       >
         <span
-          v-if="random ? store.randomGeneralStoryboardLoading : store.generalStoryboardLoading"
+          v-if="
+            random
+              ? store.randomGeneralStoryboardLoading || estimatingCost
+              : store.generalStoryboardLoading
+          "
           class="spinner light"
         />
         <AppIcon v-else name="sparkles" :size="15" />
         {{
-          (random ? store.randomGeneralStoryboardLoading : store.generalStoryboardLoading)
+          (
+            random
+              ? store.randomGeneralStoryboardLoading || estimatingCost
+              : store.generalStoryboardLoading
+          )
             ? random
-              ? '正在提交视频…'
+              ? estimatingCost
+                ? '正在核算费用…'
+                : '正在提交视频…'
               : '正在生成视频脚本…'
             : '批量生成'
         }}

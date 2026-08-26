@@ -147,5 +147,5 @@ async def ensure_video_batch_balance(items: list[Any]) -> dict[str, float]:
     key_remaining = ((balance.get("key") or {}).get("remaining")) if balance.get("available") else None
     available = _to_float(key_remaining)
     if available is not None and available + 1e-9 < estimated:
-        raise ValueError("余额不足，请补足余额再试")
+        raise ValueError("子账号 Key 余额额度不足，请先完成充值或提升余额上限后再试")
     return {"estimatedCost": round(estimated, 2), "availableBalance": available if available is not None else -1.0}
