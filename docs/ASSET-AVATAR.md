@@ -19,7 +19,7 @@ The request failed because the input image 'content[1]' 'content[2]' may contain
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | TOS 路径      | 原始图片地址（火山引擎对象存储 `media-generate-chouka.tos-cn-beijing.volces.com`），用于前端展示、素材导出等，**永远保留不变**            |
 | asset:// 链接 | `asset://asset-xxxxxxxx`，AIGC 平台虚拟资产的引用形式；图片上传到平台后被平台托管（转移到平台自己的存储），生成视频时引用它不触发人脸检测 |
-| 字段映射      | `digital_humans.asset_avatar_url` 存 asset 链接，`avatar_url` / `avatar_thumbnail_url` 仍是 TOS 路径                                      |
+| 字段映射      | `asset_avatar_url` 存英合链接，`ppio_asset_avatar_url` 存 PPIO 链接；`avatar_url` / `avatar_thumbnail_url` 始终保留 TOS 路径                 |
 
 ## 3. 虚拟资产注册 API（AIGC 平台 V3）
 
@@ -39,6 +39,8 @@ The request failed because the input image 'content[1]' 'content[2]' may contain
 
 > 2026-08-17 迁移至 V3：旧版 `/virtual/assets/*` 与 `/video/generation/tasks/*` 已停用（素材通道按 key 授权，旧 key 未获 V3 授权）。当前使用 key `yh-ftbq...`（VIDEO_API_KEY/IMAGE_API_KEY），视频任务走 `POST /v3/video/tasks`（Seedance 官方报文：创建返回 `id`，轮询 `GET /v3/video/tasks/{id}`，结果在 `content.video_url` / `content.last_frame_url`，失败原因在 `error.message`），请求带 `return_last_frame: true` 直接拿尾帧做封面。两套体系的素材库不互通，换 key/迁 V3 后所有数字人必须重新注册资产。
 
+PPIO 使用独立账号和原厂素材接口，资产不能复用英合 ID：`POST /v3/synthetic-cn/bytedance/ark?Action=CreateAsset&Version=2024-01-01` 创建图片素材，随后以 `Action=GetAsset` 轮询至 `Active`。成功链接写入 `ppio_asset_avatar_url`。创建名称由稳定 TOS 路径计算，PPIO 对相同 URL、类型和名称提供幂等返回。
+
 ## 4. 数据链路：三个入库路径 + 两层兜底
 
 ### 4.1 入库路径（人物入库时如何拿到 asset）
@@ -54,7 +56,7 @@ The request failed because the input image 'content[1]' 'content[2]' may contain
 ### 4.2 兜底体系（两层，注册失败不阻断）
 
 1. **入库时同步注册**：创建/换图时立即注册；失败只记错误日志（`api_error_logs`，error_type=AssetError），人物正常入库，`asset_avatar_url` 留空，生成视频降级用 TOS 路径（可能撞人脸校验）
-2. **cron 每分钟补扫**：独立脚本 `backend/scripts/ensure_asset_avatars.py`，每分钟扫一次补齐（复用 `seed.py::ensure_pending_asset_avatars()`），保证上游抖动导致的失败**最多 1 分钟内**被修复
+2. **cron 每分钟补扫**：独立脚本 `backend/scripts/ensure_asset_avatars.py`，每分钟分别补齐英合与 PPIO 缺失资产（复用 `seed.py::ensure_pending_asset_avatars()`），保证单渠道抖动导致的失败可自动恢复
 
 > 注：曾有过"服务启动时再扫一次"的第三层，与 cron 功能重复且无防重入锁（可能与 cron 并发导致同一人物重复注册资产），已移除。补注册统一由 cron 负责，部署新环境时务必同步配置 crontab（见 §5）。
 
@@ -78,7 +80,7 @@ crontab 配置（**宿主机**上，每分钟）：
 
 `main.py::create_video_generation`（POST /api/generations/videos）中，提交给供应商前调用 `_resolve_asset_avatar_urls()`：
 
-- 遍历 `payload.image_urls`，**数字人头像 URL（原图或缩略图）→ 替换为对应 `asset_avatar_url`**（asset:// 链接）
+- 遍历 `payload.image_urls`，数字人头像 URL 按所选模型渠道替换：英合 SD2.0 使用 `asset_avatar_url`，PPIO SD2.0 使用 `ppio_asset_avatar_url`
 - 场景图等其他 URL 查不到映射，**原样保留**
 - 前端照旧传 TOS URL，无需感知 asset 机制
 

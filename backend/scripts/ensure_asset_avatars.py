@@ -7,7 +7,7 @@
 宿主机 crontab（每分钟）：
     */1 * * * * docker exec mv-agent-frontend-backend-1 python /srv/mvagent/scripts/ensure_asset_avatars.py >> /var/log/mvagent-asset-sync.log 2>&1
 
-说明：幂等；仅处理 active 且 asset_avatar_url 为空的人物；复用 seed.py 的
+说明：幂等；处理 active 且英合或 PPIO asset 链接为空的人物；复用 seed.py 的
 ensure_pending_asset_avatars。文件锁防止与上一分钟的任务重入。
 """
 from __future__ import annotations
@@ -35,7 +35,7 @@ def main() -> int:
             print(f"[{time.strftime('%H:%M:%S')}] another sync is running, skip")
             return 0
 
-    from sqlalchemy import func, select
+    from sqlalchemy import func, or_, select
 
     from app.database import session_factory
     from app.models import DigitalHumanModel
@@ -48,7 +48,7 @@ def main() -> int:
                 .select_from(DigitalHumanModel)
                 .where(
                     DigitalHumanModel.deleted_at.is_(None),
-                    DigitalHumanModel.asset_avatar_url.is_(None),
+                    or_(DigitalHumanModel.asset_avatar_url.is_(None), DigitalHumanModel.ppio_asset_avatar_url.is_(None)),
                     DigitalHumanModel.avatar_url.isnot(None),
                     DigitalHumanModel.avatar_url != "",
                 )

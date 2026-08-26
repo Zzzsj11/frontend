@@ -114,6 +114,8 @@ class DigitalHumanModel(LifecycleMixin, Base):
     avatar_thumbnail_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     # AIGC 平台虚拟资产链接（asset://xxx）：生成视频时用其替代原始 TOS 路径，以通过真人人脸校验
     asset_avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # PPIO 账号下的独立虚拟人物资产；供应商资产 ID 不可跨账号/渠道复用。
+    ppio_asset_avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     avatar_prompt: Mapped[str] = mapped_column(Text, default="")
     asset_code: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     gender: Mapped[str | None] = mapped_column(String(32), nullable=True)

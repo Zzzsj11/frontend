@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import math
 import re
@@ -170,6 +171,7 @@ POLL_SCHEDULER_TICK_SECONDS = 1.0
 
 ASSET_POLL_TIMEOUT_SECONDS = 180
 ASSET_POLL_INTERVAL_SECONDS = 3.0
+PPIO_SYNTHETIC_ASSET_VERSION = "2024-01-01"
 
 
 async def create_real_face_asset(public_url: str, *, name: str) -> str:
@@ -204,6 +206,68 @@ async def create_real_face_asset(public_url: str, *, name: str) -> str:
             if status in {"Rejected", "Failed"}:
                 raise ProviderError(f"虚拟资产审核未通过：{detail.get('errorMessage') or detail.get('errorCode') or status}")
         raise ProviderError(f"虚拟资产创建超时：{asset_id}")
+
+
+def _ppio_ark_result(body: Any) -> dict[str, Any]:
+    """解析 PPIO 火山 Ark 原厂响应，并兼容网关可能增加的 data 包装。"""
+    if not isinstance(body, dict):
+        raise ProviderError("PPIO 虚拟人物素材接口返回格式异常")
+    metadata = body.get("ResponseMetadata")
+    if isinstance(metadata, dict) and metadata.get("Error"):
+        raise ProviderRejectedError(f"PPIO 虚拟人物素材接口返回错误；供应商响应：{_provider_error_body(body)}")
+    result = body.get("Result") or body.get("result")
+    if not isinstance(result, dict) and isinstance(body.get("data"), dict):
+        data = body["data"]
+        result = data.get("Result") or data.get("result") or data
+    if not isinstance(result, dict):
+        raise ProviderError(f"PPIO 虚拟人物素材接口未返回 Result；供应商响应：{_provider_error_body(body)}")
+    return result
+
+
+def _ppio_asset_name(public_url: str) -> str:
+    """名称与稳定 URL 路径绑定，使 Worker 重放和同图多工单命中 PPIO 幂等。"""
+    parsed = urlparse(public_url)
+    stable_source = f"{parsed.netloc}{parsed.path}"
+    return f"mv-{hashlib.sha256(stable_source.encode()).hexdigest()[:24]}"
+
+
+async def create_ppio_synthetic_image_asset(public_url: str) -> str:
+    """将公网图片注册到 PPIO 虚拟人物素材库，等待 Active 后返回 asset://。"""
+    if public_url.startswith("asset://"):
+        return public_url
+    base, headers = _ppio_config()
+    endpoint = f"{base}/v3/synthetic-cn/bytedance/ark"
+    name = _ppio_asset_name(public_url)
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(
+            endpoint,
+            params={"Action": "CreateAsset", "Version": PPIO_SYNTHETIC_ASSET_VERSION},
+            headers=headers,
+            json={"URL": public_url, "AssetType": "Image", "Name": name},
+        )
+        _raise_for_status(response)
+        created = _ppio_ark_result(response.json())
+        asset_id = str(created.get("Id") or created.get("id") or "")
+        if not asset_id:
+            raise ProviderError(f"PPIO 虚拟人物素材创建成功但未返回 Id；供应商响应：{_provider_error_body(response.json())}")
+        deadline = time.monotonic() + ASSET_POLL_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            detail_response = await client.post(
+                endpoint,
+                params={"Action": "GetAsset", "Version": PPIO_SYNTHETIC_ASSET_VERSION},
+                headers=headers,
+                json={"Id": asset_id},
+            )
+            _raise_for_status(detail_response)
+            detail = _ppio_ark_result(detail_response.json())
+            status = str(detail.get("Status") or detail.get("status") or "")
+            if status.lower() == "active":
+                return f"asset://{asset_id}"
+            if status.lower() in {"failed", "rejected"}:
+                error = detail.get("Error") or detail.get("error") or status
+                raise ProviderRejectedError(f"PPIO 虚拟人物素材处理失败：{error}；供应商响应：{_provider_error_body(detail_response.json())}")
+            await asyncio.sleep(ASSET_POLL_INTERVAL_SECONDS)
+    raise ProviderError(f"PPIO 虚拟人物素材处理超时：{asset_id}")
 
 
 def _image_config() -> tuple[str, dict[str, str]]:

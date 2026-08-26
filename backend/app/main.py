@@ -644,17 +644,18 @@ async def create_image_generation(payload: ImageGenerationCreate, user: CurrentU
     return {**job.public(), "prompt": payload.prompt}
 
 
-async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str]) -> list[str]:
-    """把数字人头像 TOS 路径替换为 AIGC 平台 asset:// 链接（过真人人脸校验）；非头像 URL 原样保留。"""
+async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str], *, provider_code: str = "yinghe") -> list[str]:
+    """按视频模型渠道，把人物 TOS 原图替换为该供应商账号下的 asset://。"""
     if not image_urls:
         return image_urls
+    asset_field = DigitalHumanModel.ppio_asset_avatar_url if provider_code == "ppio" else DigitalHumanModel.asset_avatar_url
     humans = (
         (
             await db.execute(
                 select(DigitalHumanModel).where(
                     DigitalHumanModel.deleted_at.is_(None),
-                    DigitalHumanModel.asset_avatar_url.isnot(None),
-                    DigitalHumanModel.asset_avatar_url != "",
+                    asset_field.isnot(None),
+                    asset_field != "",
                 )
             )
         )
@@ -663,9 +664,10 @@ async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str]) ->
     )
     lookup: dict[str, str] = {}
     for human in humans:
-        lookup[human.avatar_url] = human.asset_avatar_url
+        asset_url = human.ppio_asset_avatar_url if provider_code == "ppio" else human.asset_avatar_url
+        lookup[human.avatar_url] = asset_url
         if human.avatar_thumbnail_url:
-            lookup[human.avatar_thumbnail_url] = human.asset_avatar_url
+            lookup[human.avatar_thumbnail_url] = asset_url
     return [lookup.get(url, url) for url in image_urls]
 
 
@@ -679,9 +681,9 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
         validate_h3_mode_inputs(payload)
     await _check_concurrency(db, user.id, "video", settings.video_generation_concurrency)
     await consume_daily_quota(db, user_id=user.id, category="video")
-    # ASS 数字人头像优先用平台虚拟资产（asset://），其余 URL（如场景图）原样保留
-    if provider.code == "yinghe" and model.provider_model_id != "MiniMax-H3":
-        payload.image_urls = await _resolve_asset_avatar_urls(db, payload.image_urls)
+    # Seedance 按模型所属渠道选择同渠道 asset://；H3 不使用火山人物资产协议。
+    if provider.code in {"yinghe", "ppio"} and model.provider_model_id != "MiniMax-H3":
+        payload.image_urls = await _resolve_asset_avatar_urls(db, payload.image_urls, provider_code=provider.code)
     h3_compilation = compile_h3_prompt(payload) if is_h3 else None
     if h3_compilation:
         payload.prompt = h3_compilation.prompt

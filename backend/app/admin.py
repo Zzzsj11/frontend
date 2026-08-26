@@ -656,7 +656,7 @@ async def _billing_reference_url_map(db: AsyncSession, urls: set[str]) -> dict[s
         (
             await db.execute(
                 select(DigitalHumanModel)
-                .where(DigitalHumanModel.asset_avatar_url.in_(asset_urls))
+                .where(or_(DigitalHumanModel.asset_avatar_url.in_(asset_urls), DigitalHumanModel.ppio_asset_avatar_url.in_(asset_urls)))
                 .order_by(DigitalHumanModel.deleted_at.is_(None).desc(), DigitalHumanModel.updated_at.desc())
             )
         )
@@ -665,10 +665,10 @@ async def _billing_reference_url_map(db: AsyncSession, urls: set[str]) -> dict[s
     )
     resolved: dict[str, str] = {}
     for human in humans:
-        asset_url = str(human.asset_avatar_url or "")
         preview_url = str(human.avatar_url or human.avatar_thumbnail_url or "")
-        if asset_url and preview_url and asset_url not in resolved:
-            resolved[asset_url] = preview_url
+        for asset_url in (str(human.asset_avatar_url or ""), str(human.ppio_asset_avatar_url or "")):
+            if asset_url and preview_url and asset_url not in resolved:
+                resolved[asset_url] = preview_url
     return resolved
 
 

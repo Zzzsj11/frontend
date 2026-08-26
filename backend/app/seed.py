@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 
 from .config import settings
 from .database import session_factory
@@ -441,13 +441,10 @@ async def seed_system_data() -> None:
 
 
 async def ensure_pending_asset_avatars() -> None:
-    """为尚无 asset:// 链接的数字人（系统 + 用户上传）注册 AIGC 平台虚拟资产（幂等，启动后台执行）。
+    """补齐数字人在英合和 PPIO 两个账号下的 asset://，供 cron 幂等执行。"""
+    import asyncio
 
-    数字人头像注册到平台后返回 asset:// 链接，生成视频时用它替代原始 TOS 路径，
-    可绕过上游对真实人物的直接检测；创建失败只记日志，不影响启动与原有 TOS 路径可用性，
-    下次启动会继续补注册（创建接口同步失败的用户头像由此兜底）。
-    """
-    from .providers import create_real_face_asset
+    from .providers import create_ppio_synthetic_image_asset, create_real_face_asset
 
     async with session_factory() as session:
         pending = (
@@ -455,7 +452,7 @@ async def ensure_pending_asset_avatars() -> None:
                 await session.execute(
                     select(DigitalHumanModel).where(
                         DigitalHumanModel.deleted_at.is_(None),
-                        DigitalHumanModel.asset_avatar_url.is_(None),
+                        or_(DigitalHumanModel.asset_avatar_url.is_(None), DigitalHumanModel.ppio_asset_avatar_url.is_(None)),
                         DigitalHumanModel.avatar_url.isnot(None),
                         DigitalHumanModel.avatar_url != "",
                     )
@@ -464,22 +461,37 @@ async def ensure_pending_asset_avatars() -> None:
             .scalars()
             .all()
         )
-    for human in pending:
-        try:
-            asset_url = await create_real_face_asset(human.avatar_url, name=f"mv-{human.asset_code or human.id}")
-        except Exception as exc:
-            await log_background_error(
-                user_id=human.user_id,
-                path="/v3/assets",
-                error_type="AssetError",
-                message=f"digital human asset create failed: {human.id}: {exc}",
-            )
-            continue
+    semaphore = asyncio.Semaphore(4)
+
+    async def sync_human(human: DigitalHumanModel) -> None:
+        registrations = []
+        if human.asset_avatar_url is None:
+            registrations.append(("yinghe", "asset_avatar_url", "/v3/assets", create_real_face_asset(human.avatar_url, name=f"mv-{human.asset_code or human.id}")))
+        if human.ppio_asset_avatar_url is None:
+            registrations.append(("ppio", "ppio_asset_avatar_url", "/v3/synthetic-cn/bytedance/ark", create_ppio_synthetic_image_asset(human.avatar_url)))
+        async with semaphore:
+            results = await asyncio.gather(*(call for _, _, _, call in registrations), return_exceptions=True)
         async with session_factory() as session:
             current = await session.get(DigitalHumanModel, human.id)
-            if current and current.asset_avatar_url is None:
-                current.asset_avatar_url = asset_url
+            if not current:
+                return
+            changed = False
+            for (provider, field, path, _), result in zip(registrations, results, strict=True):
+                if isinstance(result, Exception):
+                    await log_background_error(
+                        user_id=human.user_id,
+                        path=path,
+                        error_type="AssetError",
+                        message=f"digital human {provider} asset create failed: {human.id}: {result}",
+                    )
+                    continue
+                if getattr(current, field) is None:
+                    setattr(current, field, result)
+                    changed = True
+            if changed:
                 await session.commit()
+
+    await asyncio.gather(*(sync_human(human) for human in pending))
 
 
 async def recover_stale_storyboard_generation() -> None:

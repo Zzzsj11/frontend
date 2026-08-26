@@ -641,6 +641,49 @@ async def test_ppio_seedance_uses_standard_model_and_metered_routes(monkeypatch)
     assert result["usage"]["completion_tokens"] == 50638
 
 
+@pytest.mark.asyncio
+async def test_create_ppio_synthetic_image_asset_polls_until_active(monkeypatch) -> None:
+    import httpx
+
+    from app import providers
+
+    calls: list[tuple[str, dict, dict]] = []
+    asset_statuses = iter(["Processing", "Active"])
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, headers=None, json=None, params=None):
+            calls.append((url, dict(params or {}), dict(json or {})))
+            request = httpx.Request("POST", url)
+            action = (params or {}).get("Action")
+            if action == "CreateAsset":
+                return httpx.Response(200, json={"ResponseMetadata": {}, "Result": {"Id": "asset-ppio-1"}}, request=request)
+            if action == "GetAsset":
+                return httpx.Response(200, json={"ResponseMetadata": {}, "Result": {"Id": "asset-ppio-1", "Status": next(asset_statuses)}}, request=request)
+            raise AssertionError(f"unexpected action: {action}")
+
+    async def no_op(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(providers, "_ppio_config", lambda: ("https://api.ppio.test", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", lambda **_kwargs: Client())
+    monkeypatch.setattr(providers.asyncio, "sleep", no_op)
+    result = await providers.create_ppio_synthetic_image_asset("https://tos.test/users/u1/person.jpg")
+
+    assert result == "asset://asset-ppio-1"
+    assert [params.get("Action") for _, params, _ in calls] == ["CreateAsset", "GetAsset", "GetAsset"]
+    assert calls[0][2] == {
+        "URL": "https://tos.test/users/u1/person.jpg",
+        "AssetType": "Image",
+        "Name": providers._ppio_asset_name("https://tos.test/users/u1/person.jpg"),
+    }
+
+
 def test_direct_h3_video_reports_tos_archive_stage_when_source_url_is_rejected(monkeypatch) -> None:
     from app import providers
     from app.jobs import Job
@@ -1582,6 +1625,7 @@ async def test_resolve_asset_avatar_urls_maps_human_tos_to_asset(client) -> None
                 avatar_url="https://tos.test/human.jpg",
                 avatar_thumbnail_url="https://tos.test/human-thumb.jpg",
                 asset_avatar_url="asset://human-1",
+                ppio_asset_avatar_url="asset://ppio-human-1",
                 scope="private",
             )
         )
@@ -1594,6 +1638,14 @@ async def test_resolve_asset_avatar_urls_maps_human_tos_to_asset(client) -> None
         )
     # 头像（原图与缩略图）映射为 asset://，非头像 URL（场景图、已是 asset:// 的）原样保留
     assert result == ["asset://human-1", "https://tos.test/scene.png", "asset://human-1", "asset://already-asset"]
+
+    async with session_factory() as db:
+        ppio_result = await _resolve_asset_avatar_urls(
+            db,
+            ["https://tos.test/human.jpg", "https://tos.test/scene.png", "https://tos.test/human-thumb.jpg"],
+            provider_code="ppio",
+        )
+    assert ppio_result == ["asset://ppio-human-1", "https://tos.test/scene.png", "asset://ppio-human-1"]
 
 
 def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) -> None:
@@ -1655,6 +1707,70 @@ def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) ->
             connection.close()
 
 
+def test_ppio_video_endpoint_uses_ppio_asset_avatar_url(client, monkeypatch) -> None:
+    """选择 PPIO SD2.0 时必须使用 PPIO 账号资产，不能误传英合 asset://。"""
+    import time
+
+    from app import main
+
+    user = client.get("/api/auth/me").json()
+    _fail_active_jobs()
+    captured: dict[str, list[str]] = {}
+
+    async def fake_video(payload, job) -> dict:
+        captured["image_urls"] = list(payload.image_urls)
+        return {"videoUrl": "https://tos.test/videos/ppio.mp4", "coverUrl": "https://tos.test/images/ppio.png", "duration": 5}
+
+    monkeypatch.setattr(main, "generate_video", fake_video)
+
+    async def seed_human() -> None:
+        from app.database import session_factory
+        from app.models import DigitalHumanModel
+
+        async with session_factory() as db:
+            db.add(
+                DigitalHumanModel(
+                    id="dh-video-ppio-asset",
+                    user_id=user["id"],
+                    name="video-ppio-asset",
+                    description="",
+                    avatar_url="https://tos.test/video-ppio-human.jpg",
+                    asset_avatar_url="asset://yinghe-human-1",
+                    ppio_asset_avatar_url="asset://ppio-human-1",
+                    scope="private",
+                )
+            )
+            await db.commit()
+
+    asyncio.run(seed_human())
+    try:
+        response = client.post(
+            "/api/generations/videos",
+            json={
+                "prompt": "test PPIO video",
+                "image_urls": ["https://tos.test/video-ppio-human.jpg"],
+                "model": "doubao-seedance-2.0-ppio",
+            },
+        )
+        assert response.status_code == 202, response.text
+        job_id = response.json()["id"]
+        for _ in range(50):
+            state = client.get(f"/api/generations/{job_id}").json()
+            if state["status"] in {"succeeded", "failed"}:
+                break
+            time.sleep(0.05)
+        assert state["status"] == "succeeded"
+        assert captured["image_urls"] == ["asset://ppio-human-1"]
+    finally:
+        _fail_active_jobs()
+        connection = sqlite3.connect(TEST_DB, timeout=10)
+        try:
+            connection.execute("DELETE FROM daily_usage_quotas WHERE user_id = ? AND category = 'video'", (user["id"],))
+            connection.commit()
+        finally:
+            connection.close()
+
+
 def test_h3_endpoint_enforces_official_reference_capabilities(client) -> None:
     base = {
         "prompt": "故宫舞蹈",
@@ -1676,7 +1792,7 @@ def test_h3_endpoint_enforces_official_reference_capabilities(client) -> None:
 
 
 def test_create_human_registers_asset_avatar(client, monkeypatch) -> None:
-    """用户上传数字人创建时，同步注册平台虚拟资产并入库 asset:// 链接。"""
+    """用户上传人物时并行注册英合与 PPIO 两份 asset://。"""
     from app import domain
 
     created: list[str] = []
@@ -1685,7 +1801,11 @@ def test_create_human_registers_asset_avatar(client, monkeypatch) -> None:
         created.append(public_url)
         return f"asset://user-{len(created)}"
 
+    async def fake_create_ppio_asset(public_url: str) -> str:
+        return "asset://ppio-user-1"
+
     monkeypatch.setattr("app.providers.create_real_face_asset", fake_create_asset)
+    monkeypatch.setattr("app.providers.create_ppio_synthetic_image_asset", fake_create_ppio_asset)
     payload = {
         "name": "上传人物-测试",
         "description": "t",
@@ -1696,6 +1816,7 @@ def test_create_human_registers_asset_avatar(client, monkeypatch) -> None:
     assert response.status_code == 201, response.text
     body = response.json()
     assert body["assetAvatarUrl"] == "asset://user-1"
+    assert body["providerAssetAvatarUrls"] == {"yinghe": "asset://user-1", "ppio": "asset://ppio-user-1"}
     assert body["originalAvatar"] == payload["avatar_url"]  # TOS 原路径保留
     assert created == [payload["avatar_url"]]
     assert domain._sync_human_asset_avatar is not None  # 引用保证函数存在
@@ -1709,12 +1830,20 @@ def test_update_human_re_registers_asset_avatar_on_avatar_change(client, monkeyp
         created.append(public_url)
         return f"asset://user-{len(created)}"
 
+    ppio_created: list[str] = []
+
+    async def fake_create_ppio_asset(public_url: str) -> str:
+        ppio_created.append(public_url)
+        return f"asset://ppio-user-{len(ppio_created)}"
+
     monkeypatch.setattr("app.providers.create_real_face_asset", fake_create_asset)
+    monkeypatch.setattr("app.providers.create_ppio_synthetic_image_asset", fake_create_ppio_asset)
     first = client.post(
         "/api/digital-humans",
         json={"name": "换图人物", "description": "t", "avatar_url": "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/old.jpg", "source": "uploaded"},
     ).json()
     assert first["assetAvatarUrl"] == "asset://user-1"
+    assert first["providerAssetAvatarUrls"]["ppio"] == "asset://ppio-user-1"
 
     second = client.patch(
         f"/api/digital-humans/{first['id']}",
@@ -1722,14 +1851,17 @@ def test_update_human_re_registers_asset_avatar_on_avatar_change(client, monkeyp
     )
     assert second.status_code == 200, second.text
     assert second.json()["assetAvatarUrl"] == "asset://user-2"
+    assert second.json()["providerAssetAvatarUrls"]["ppio"] == "asset://ppio-user-2"
     assert created == [
         "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/old.jpg",
         "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/new.jpg",
     ]
+    assert ppio_created == created
 
     # 未换图时（只改名字）不重新注册资产
     renamed = client.patch(f"/api/digital-humans/{first['id']}", json={"name": "改名字"})
     assert renamed.json()["assetAvatarUrl"] == "asset://user-2"
+    assert renamed.json()["providerAssetAvatarUrls"]["ppio"] == "asset://ppio-user-2"
     assert len(created) == 2
 
 
@@ -1741,10 +1873,12 @@ def test_create_human_asset_failure_degrades_gracefully(client, monkeypatch) -> 
         raise ProviderError("上游挂了")
 
     monkeypatch.setattr("app.providers.create_real_face_asset", boom)
+    monkeypatch.setattr("app.providers.create_ppio_synthetic_image_asset", lambda _url: boom(_url, name="ppio"))
     response = client.post(
         "/api/digital-humans",
         json={"name": "降级人物", "description": "t", "avatar_url": "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/face.jpg", "source": "uploaded"},
     )
     assert response.status_code == 201, response.text
     assert response.json()["assetAvatarUrl"] is None
+    assert response.json()["providerAssetAvatarUrls"] == {"yinghe": None, "ppio": None}
     assert response.json()["originalAvatar"].startswith("https://")
