@@ -182,9 +182,9 @@ export interface ShotGenOptions {
 export interface ScriptLine {
   id: string
   /** 脚本来源；通用分镜不包含歌词与翻译 */
-  source?: 'ass' | 'general' | 'general_random' | 'manual'
+  source?: 'ass' | 'general' | 'general_random' | 'manual' | 'creative'
   /** 通用分镜的镜头类型 */
-  shotType?: 'empty' | 'character' | 'random'
+  shotType?: 'empty' | 'character' | 'random' | 'creative'
   /** 脚本规划时长（秒），不等同于单次视频生成时长 */
   plannedDuration?: number
   /** ASS 时间轴起止时间（秒） */
@@ -198,6 +198,14 @@ export interface ScriptLine {
   scenePrompt: string
   /** 分镜提示词（镜头运动、角色表演等，与场景、角色一起生成视频片段） */
   shotPrompt: string
+  /** 创意分镜中用户最初提交的目标描述。 */
+  originalPrompt?: string
+  /** 经模型优化且允许用户继续编辑的当前提示词。 */
+  optimizedPrompt?: string
+  /** 已持久化到 TOS 的创意参考素材。 */
+  referenceMedia?: CreativeReferenceMedia[]
+  optimizerProvider?: 'gemini' | 'minimax' | ''
+  optimizationTaskId?: string
   /** 出演该分镜的数字人（从全局角色阵容中挑选，可为空 = 空镜头，也可多个） */
   digitalHumanIds: string[]
   voice: VoiceInfo
@@ -215,6 +223,15 @@ export interface ScriptLine {
   generationJobId?: string
   generationFailedAt?: string
   generationAttempt?: number
+}
+
+export interface CreativeReferenceMedia {
+  kind: 'image' | 'video' | 'audio'
+  url: string
+  thumbnailUrl?: string
+  name: string
+  mimeType: string
+  role?: string
 }
 
 export interface StoryOutlineShot {

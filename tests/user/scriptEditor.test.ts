@@ -103,4 +103,14 @@ describe('ScriptEditor batch generation confirmation', () => {
     expect(scrollTo).toHaveBeenCalledWith({ top: 1200, behavior: 'smooth' })
     wrapper.unmount()
   })
+
+  it('在单个视频旁提供创意视频入口', async () => {
+    const store = useProjectStore()
+    const wrapper = mount(ScriptEditor)
+    const buttons = wrapper.findAll('.editor-footer .btn-add')
+    expect(buttons.map((button) => button.text())).toEqual(['单个视频', '创意视频'])
+    await buttons[1].trigger('click')
+    expect(store.creativeOpen).toBe(true)
+    wrapper.unmount()
+  })
 })

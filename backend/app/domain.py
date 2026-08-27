@@ -2071,6 +2071,13 @@ async def replace_cast(task_id: str, payload: CastUpdate, user: CurrentUser, db:
 @router.post("/tasks/{task_id}/storyboard/lines", status_code=201)
 async def create_line(task_id: str, payload: StoryboardLineCreate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     await owned_task(db, user.id, task_id)
+    if payload.source == "creative":
+        if payload.shot_type != "creative" or not payload.original_prompt.strip() or not payload.optimized_prompt.strip():
+            raise HTTPException(422, "创意分镜必须包含原始提示词和优化提示词")
+        if payload.digital_human_ids:
+            raise HTTPException(422, "创意分镜不使用项目人物引用")
+        if any(not is_tos_url(str(item.get("url") or "")) for item in payload.reference_media):
+            raise HTTPException(422, "创意分镜参考素材必须存储在 TOS")
     visible = await visible_humans(db, user.id, payload.digital_human_ids)
     if len({item.id for item in visible}) != len(set(payload.digital_human_ids)):
         raise HTTPException(422, "包含不可用角色")
@@ -2088,6 +2095,9 @@ async def create_line(task_id: str, payload: StoryboardLineCreate, user: Current
 @router.patch("/storyboard-lines/{line_id}")
 async def update_line(line_id: str, payload: StoryboardLineUpdate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     line = await owned_line(db, user.id, line_id)
+    if line.source == "creative" and payload.reference_media is not None:
+        if any(not is_tos_url(str(item.get("url") or "")) for item in payload.reference_media):
+            raise HTTPException(422, "创意分镜参考素材必须存储在 TOS")
     data = payload.model_dump(exclude_unset=True, exclude={"digital_human_ids"})
     for key, value in data.items():
         setattr(line, key, value)
@@ -2198,6 +2208,11 @@ def _line_json_from_assets(
         "end": line.end_time,
         "scenePrompt": line.scene_prompt,
         "shotPrompt": line.shot_prompt,
+        "originalPrompt": line.original_prompt,
+        "optimizedPrompt": line.optimized_prompt,
+        "referenceMedia": line.reference_media,
+        "optimizerProvider": line.optimizer_provider,
+        "optimizationTaskId": line.optimization_task_id,
         "shotOptions": line.shot_options,
         "generationStatus": line.generation_status,
         "generationError": line.generation_error,

@@ -107,8 +107,8 @@ class DigitalHumanUpdate(BaseModel):
 
 
 class StoryboardLineCreate(BaseModel):
-    source: Literal["ass", "general", "general_random", "manual"] = "manual"
-    shot_type: Literal["empty", "character", "random"] | None = None
+    source: Literal["ass", "general", "general_random", "manual", "creative"] = "manual"
+    shot_type: Literal["empty", "character", "random", "creative"] | None = None
     planned_duration: float | None = Field(default=None, gt=0)
     lyrics: str = ""
     lyrics_zh: str | None = None
@@ -116,17 +116,27 @@ class StoryboardLineCreate(BaseModel):
     end_time: float | None = Field(default=None, ge=0)
     scene_prompt: str = ""
     shot_prompt: str = ""
+    original_prompt: str = Field(default="", max_length=7000)
+    optimized_prompt: str = Field(default="", max_length=30000)
+    reference_media: list[dict] = Field(default_factory=list, max_length=15)
+    optimizer_provider: Literal["", "gemini", "minimax"] = ""
+    optimization_task_id: str | None = Field(default=None, max_length=80)
     shot_options: dict = Field(default_factory=dict)
     digital_human_ids: list[str] = Field(default_factory=list)
 
 
 class StoryboardLineUpdate(BaseModel):
-    shot_type: Literal["empty", "character"] | None = None
+    shot_type: Literal["empty", "character", "creative"] | None = None
     planned_duration: float | None = Field(default=None, gt=0)
     lyrics: str | None = None
     lyrics_zh: str | None = None
     scene_prompt: str | None = None
     shot_prompt: str | None = None
+    original_prompt: str | None = Field(default=None, max_length=7000)
+    optimized_prompt: str | None = Field(default=None, max_length=30000)
+    reference_media: list[dict] | None = Field(default=None, max_length=15)
+    optimizer_provider: Literal["", "gemini", "minimax"] | None = None
+    optimization_task_id: str | None = Field(default=None, max_length=80)
     shot_options: dict | None = None
     digital_human_ids: list[str] | None = None
 

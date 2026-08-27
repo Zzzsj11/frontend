@@ -29,6 +29,7 @@ const translation = computed(() => store.translationOf(props.line))
 const isGeneral = computed(
   () => props.line.source === 'general' || props.line.source === 'general_random',
 )
+const isCreative = computed(() => props.line.source === 'creative')
 
 /** ASS 大纲状态：pending=待生成 / failed=所在场景段生成失败 */
 const outlineStatus = computed(() => props.line.shotOptions?.outlineStatus)
@@ -159,7 +160,7 @@ const retryPromptGeneration = () => {
         </button>
         <button @click.stop="retryPromptGeneration">重新生成</button>
       </div>
-      <div v-if="isGeneral" class="general-meta">
+      <div v-if="isGeneral || isCreative" class="general-meta">
         <span v-if="line.shotType !== 'random'" class="shot-type" :class="line.shotType">{{
           shotTypeLabel(line)
         }}</span>
@@ -178,7 +179,7 @@ const retryPromptGeneration = () => {
           </select>
         </label>
       </div>
-      <template v-else>
+      <template v-else-if="!isCreative">
         <div v-if="segmentBadge || timeRange" class="ass-meta">
           <span v-if="segmentBadge" class="segment-tag">{{ segmentBadge }}</span>
           <span v-if="timeRange" class="time-range">{{ timeRange }}</span>
@@ -197,10 +198,18 @@ const retryPromptGeneration = () => {
       >
         <span class="zh-tag">译</span>{{ translation }}
       </p>
-      <p v-if="isGeneral" class="scene-summary editable-text" @click.stop="openSceneDetail">
+      <template v-if="isCreative">
+        <p class="scene-summary editable-text" @click.stop="openShotDetail">
+          原始：{{ line.originalPrompt || '未保存原始提示词' }}
+        </p>
+        <p class="prompt editable-text" @click.stop="openShotDetail">
+          优化：{{ line.optimizedPrompt || line.shotPrompt || '暂无优化提示词' }}
+        </p>
+      </template>
+      <p v-else-if="isGeneral" class="scene-summary editable-text" @click.stop="openSceneDetail">
         {{ line.scenePrompt || '暂无场景提示词' }}
       </p>
-      <p class="prompt editable-text" @click.stop="openShotDetail">
+      <p v-if="!isCreative" class="prompt editable-text" @click.stop="openShotDetail">
         {{ line.shotPrompt || line.scenePrompt || '暂无提示词，点击编辑场景与视频' }}
       </p>
     </div>
@@ -440,6 +449,10 @@ const retryPromptGeneration = () => {
 .shot-type.character {
   color: var(--primary);
   background: var(--primary-light);
+}
+.shot-type.creative {
+  color: var(--warning);
+  background: var(--warning-light);
 }
 .planned-duration {
   color: var(--text-secondary);

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { useAuthStore } from './auth'
 import type {
+  CreativeReferenceMedia,
   DigitalHuman,
   GeneralStoryboardOptions,
   GeneralStoryboardRequest,
@@ -173,6 +174,8 @@ export const useProjectStore = defineStore('project', {
     libraryOpen: false,
     /** AI 魔法脚本弹窗开关 */
     magicOpen: false,
+    /** 创意视频创建弹窗开关。 */
+    creativeOpen: false,
     magicError: null as string | null,
     /** 通用分镜参数弹窗 */
     generalStoryboardOpen: false,
@@ -1230,6 +1233,38 @@ export const useProjectStore = defineStore('project', {
           })
     },
 
+    async addCreativeLine(input: {
+      originalPrompt: string
+      optimizedPrompt: string
+      referenceMedia: CreativeReferenceMedia[]
+      optimizerProvider: 'gemini' | 'minimax'
+      optimizationTaskId?: string
+      options: ShotGenOptions
+    }) {
+      if (!this.activeTaskId) throw new Error('请先选择一个项目')
+      const saved = await api.createStoryboardLine(this.activeTaskId, {
+        source: 'creative',
+        shot_type: 'creative',
+        planned_duration: input.options.duration,
+        lyrics: '',
+        scene_prompt: '',
+        shot_prompt: input.optimizedPrompt,
+        original_prompt: input.originalPrompt,
+        optimized_prompt: input.optimizedPrompt,
+        reference_media: input.referenceMedia,
+        optimizer_provider: input.optimizerProvider,
+        optimization_task_id: input.optimizationTaskId,
+        shot_options: input.options,
+        digital_human_ids: [],
+      })
+      const line = saved as unknown as ScriptLine
+      line.manual = true
+      this.lines.push(line)
+      this.selectedLineId = line.id
+      this.creativeOpen = false
+      return line
+    },
+
     removeLine(lineId: string) {
       const idx = this.lines.findIndex((l) => l.id === lineId)
       if (idx < 0) return
@@ -1265,6 +1300,19 @@ export const useProjectStore = defineStore('project', {
         line.shotPrompt = shotPrompt
         void api.updateStoryboardLine(lineId, { shot_prompt: shotPrompt })
       }
+    },
+
+    updateCreativePrompts(lineId: string, originalPrompt: string, optimizedPrompt: string) {
+      const line = this.lines.find((item) => item.id === lineId)
+      if (!line || line.source !== 'creative') return
+      line.originalPrompt = originalPrompt
+      line.optimizedPrompt = optimizedPrompt
+      line.shotPrompt = optimizedPrompt
+      void api.updateStoryboardLine(lineId, {
+        original_prompt: originalPrompt,
+        optimized_prompt: optimizedPrompt,
+        shot_prompt: optimizedPrompt,
+      })
     },
 
     /** 更新分镜视频生成参数（清晰度 / 时长 / 画幅） */
@@ -1655,6 +1703,12 @@ export const useProjectStore = defineStore('project', {
     },
     closeMagic() {
       this.magicOpen = false
+    },
+    openCreative() {
+      this.creativeOpen = true
+    },
+    closeCreative() {
+      this.creativeOpen = false
     },
 
     async openGeneralStoryboard() {

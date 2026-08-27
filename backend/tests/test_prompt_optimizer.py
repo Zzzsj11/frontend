@@ -3,6 +3,7 @@ import asyncio
 from sqlalchemy import select
 
 from app import admin as admin_module
+from app import creative as creative_module
 from app.database import session_factory
 from app.models import PromptOptimizationTaskModel, TokenUsageModel
 
@@ -198,3 +199,32 @@ def test_prompt_optimizer_rejects_non_tos_media(client, monkeypatch) -> None:
     )
     assert response.status_code == 422
     assert "TOS" in response.json()["detail"]
+
+
+def test_creative_gemini_optimization_is_available_to_authenticated_user(client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        creative_module,
+        "provider_status",
+        lambda: {
+            "gemini": {"configured": True, "model": "gemini-3.7-flash", "keyTail": "…test"},
+            "minimax": {"configured": False, "model": "MiniMax-H3", "keyTail": ""},
+        },
+    )
+
+    async def fake_optimize(**_kwargs):
+        return {
+            "prompt": "subject_definitions:\ncreative test",
+            "usage": {"prompt_tokens": 4, "completion_tokens": 6, "total_tokens": 10},
+            "requestId": "creative-gemini-1",
+            "durationMs": 20,
+            "requestSnapshot": [{"role": "user", "content": "creative"}],
+        }
+
+    monkeypatch.setattr(creative_module, "call_gemini", fake_optimize)
+    response = client.post(
+        "/api/creative/optimizations",
+        json={"provider": "gemini", "prompt": "创意视频", "duration": 8, "ratio": "16:9", "media": []},
+    )
+    assert response.status_code == 201
+    assert response.json()["status"] == "succeeded"
+    assert response.json()["outputPrompt"].endswith("creative test")

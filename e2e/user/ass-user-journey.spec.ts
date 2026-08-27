@@ -48,6 +48,20 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
       ]),
     }),
   )
+  await page.route('**/api/creative/status', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        providers: {
+          gemini: { configured: true, model: 'gemini-3.7-flash' },
+          minimax: { configured: true, model: 'MiniMax-H3' },
+        },
+        limits: { images: 9, videos: 3, audios: 3, videoSeconds: 15, audioSeconds: 15 },
+        ratios: ['16:9', '4:3', '1:1', '9:16'],
+        durationRange: [4, 15],
+      }),
+    }),
+  )
   // 通用分镜选项（需求 7 起由后端组装，e2e 全 mock 环境按种子口径补齐）
   await page.route('**/api/storyboards/general/options', (route) =>
     route.fulfill({
@@ -302,4 +316,15 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await expect(random.getByText('视觉与人物设定')).toHaveCount(0)
   await expect(random.getByText(/人物素材/)).toHaveCount(0)
   await expect(random.getByLabel('图片模型 *')).toHaveCount(0)
+  await random.getByRole('button', { name: '取消' }).click()
+
+  await page.locator('.editor-footer').getByRole('button', { name: '创意视频' }).click()
+  const creative = page.locator('.modal').filter({ hasText: '创意视频' })
+  await expect(creative).toBeVisible()
+  await expect(creative.getByRole('button', { name: /^Gemini / })).toBeVisible()
+  await expect(creative.getByRole('button', { name: /^MiniMax 官方 / })).toBeVisible()
+  await expect(creative.getByRole('button', { name: '文生视频' })).toBeVisible()
+  await expect(creative.getByRole('button', { name: '首帧生成' })).toBeVisible()
+  await expect(creative.getByRole('button', { name: '首尾帧生成' })).toBeVisible()
+  await expect(creative.getByRole('button', { name: '多参考生成' })).toBeVisible()
 })

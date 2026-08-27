@@ -42,6 +42,7 @@ from .auth import (
 from .balance import ensure_video_batch_balance, query_provider_balances
 from .chat import chat_manager
 from .config import settings, validate_runtime_security
+from .creative import router as creative_router
 from .database import close_database, database_ok, database_session, init_database
 from .domain import owned_line, owned_project, owned_task, project_audio_json, uid, visible_humans
 from .domain import router as domain_router
@@ -184,6 +185,7 @@ app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), al
 app.middleware("http")(api_request_log_middleware)
 app.middleware("http")(agent_attribution_middleware)
 app.include_router(domain_router)
+app.include_router(creative_router)
 app.include_router(admin_router)
 app.include_router(model_options_router)
 

@@ -5,6 +5,7 @@ import ScriptLineItem from './ScriptLine.vue'
 import ShotDetailModal from './ShotDetailModal.vue'
 import MagicScriptModal from './MagicScriptModal.vue'
 import GeneralStoryboardModal from './GeneralStoryboardModal.vue'
+import CreativeVideoModal from './CreativeVideoModal.vue'
 import AppIcon from './AppIcon.vue'
 import StoryboardOutlineModal from './StoryboardOutlineModal.vue'
 import { apiRequest } from '../api/client'
@@ -390,7 +391,7 @@ const confirmBatchGenerate = async () => {
       </div>
 
       <p v-if="!store.songSwitching && store.lines.length === 0" class="empty-tip">
-        暂无视频，可点击下方【单个视频】或顶部三种分镜入口开始创作
+        暂无视频，可点击下方【单个视频】、【创意视频】或顶部三种分镜入口开始创作
       </p>
     </div>
 
@@ -399,6 +400,10 @@ const confirmBatchGenerate = async () => {
         <AppIcon name="plus" :size="14" />
         单个视频
       </button>
+      <button class="btn-add" @click="store.openCreative()">
+        <AppIcon name="sparkles" :size="14" />
+        创意视频
+      </button>
     </footer>
 
     <!-- 弹层懒挂载（P3d）：关闭时不保留组件实例/watchers；打开时的初始化由各弹窗 immediate watch 完成 -->
@@ -406,6 +411,7 @@ const confirmBatchGenerate = async () => {
     <MagicScriptModal v-if="store.magicOpen" />
     <GeneralStoryboardModal v-if="store.generalStoryboardOpen" />
     <GeneralStoryboardModal v-if="store.randomGeneralStoryboardOpen" random />
+    <CreativeVideoModal v-if="store.creativeOpen" />
     <StoryboardOutlineModal v-if="store.outlineOpen && !!store.activeStoryBible" />
   </section>
 </template>
@@ -582,6 +588,7 @@ const confirmBatchGenerate = async () => {
 .editor-footer {
   display: flex;
   justify-content: center;
+  gap: 10px;
   padding-top: 14px;
 }
 .btn-add {
@@ -590,7 +597,7 @@ const confirmBatchGenerate = async () => {
   gap: 6px;
   border: 1px dashed var(--border-dark);
   border-radius: var(--radius-sm);
-  background: #fff;
+  background: var(--surface);
   color: var(--text);
   padding: 8px 28px;
   font-size: var(--font-md);

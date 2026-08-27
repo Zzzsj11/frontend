@@ -21,5 +21,6 @@ describe('shotTypeLabel', () => {
   it('keeps legacy fallback labels', () => {
     expect(shotTypeLabel({ shotType: 'character', shotOptions: undefined })).toBe('人物镜')
     expect(shotTypeLabel({ shotType: 'empty', shotOptions: undefined })).toBe('空镜')
+    expect(shotTypeLabel({ shotType: 'creative', shotOptions: undefined })).toBe('创意分镜')
   })
 })

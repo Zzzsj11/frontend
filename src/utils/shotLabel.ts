@@ -8,6 +8,7 @@ type ShotWithComposition = {
 
 export function shotTypeLabel(shot: ShotWithComposition): string {
   if (shot.shotType === 'empty') return '空镜'
+  if (shot.shotType === 'creative') return '创意分镜'
   const composition = shot.shotOptions?.characterComposition || shot.characterComposition
   return composition?.label || '人物镜'
 }

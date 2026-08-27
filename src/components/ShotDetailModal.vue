@@ -18,6 +18,7 @@ void loadGenerationModels()
 
 // 弹窗内的编辑草稿，保存时才写回 store
 const lyricsDraft = ref('')
+const originalPromptDraft = ref('')
 const scenePromptDraft = ref('')
 const shotPromptDraft = ref('')
 const scenePromptInput = ref<HTMLTextAreaElement | null>(null)
@@ -80,6 +81,7 @@ const lyricsTranslation = computed(() => {
   return zh
 })
 const isGeneral = computed(() => store.editingLine?.source === 'general')
+const isCreative = computed(() => store.editingLine?.source === 'creative')
 const nonLyricSegmentLabel = computed(() => {
   const labels: Partial<Record<NonNullable<ShotGenOptions['segmentType']>, string>> = {
     intro: '前奏',
@@ -171,6 +173,7 @@ watch(
   () => {
     const line = store.editingLine
     lyricsDraft.value = line?.lyrics ?? ''
+    originalPromptDraft.value = line?.originalPrompt ?? ''
     scenePromptDraft.value = line?.scenePrompt ?? ''
     shotPromptDraft.value = line?.shotPrompt ?? ''
     optionsDraft.value = normalizeShotOptions(line?.shotOptions ?? DEFAULT_SHOT_OPTIONS)
@@ -214,6 +217,8 @@ const regenShot = async () => {
   )
     return
   // 重新生成前先持久化当前编辑中的场景提示词
+  if (line.source === 'creative')
+    store.updateCreativePrompts(line.id, originalPromptDraft.value, shotPromptDraft.value)
   store.updateScenePrompt(line.id, scenePromptDraft.value)
   store.generateShotFor(line.id, shotPromptDraft.value, { ...optionsDraft.value })
 }
@@ -221,6 +226,8 @@ const regenShot = async () => {
 const save = () => {
   const line = store.editingLine
   if (line) {
+    if (line.source === 'creative')
+      store.updateCreativePrompts(line.id, originalPromptDraft.value, shotPromptDraft.value)
     store.updateLyrics(line.id, lyricsDraft.value)
     store.updateScenePrompt(line.id, scenePromptDraft.value)
     store.updateShotPrompt(line.id, shotPromptDraft.value)
@@ -371,7 +378,11 @@ const cancel = () => store.closeEditor()
 
         <!-- 分镜调整面板 -->
         <div v-if="activeTab === 'shot'" class="tab-panel">
-          <template v-if="!isGeneral">
+          <template v-if="isCreative">
+            <p class="panel-title">用户原始提示词</p>
+            <textarea v-model="originalPromptDraft" class="prompt-input" rows="4" />
+          </template>
+          <template v-else-if="!isGeneral">
             <p class="panel-title">歌词（{{ nonLyricSegmentLabel || '当前视频' }}）</p>
             <input
               v-model="lyricsDraft"
@@ -434,7 +445,7 @@ const cancel = () => store.closeEditor()
             </div>
           </template>
 
-          <p class="panel-title mt">视频提示词</p>
+          <p class="panel-title mt">{{ isCreative ? '优化后的提示词' : '视频提示词' }}</p>
           <div class="prompt-editor">
             <textarea
               ref="shotPromptInput"
