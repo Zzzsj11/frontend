@@ -19,14 +19,21 @@ const lineListRef = ref<HTMLDivElement>()
 const checkingBatchCost = ref(false)
 const addingSingleVideo = ref(false)
 
+const afterBrowserLayout = () =>
+  new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()))
+  })
+
 /** 底部新增单条视频后，将已有滚动条的分镜列表滚到最底部，露出新条目。 */
 const addSingleVideo = async () => {
   addingSingleVideo.value = true
   try {
     store.addLine()
     await nextTick()
+    // nextTick 只保证 DOM 已更新；再等两帧让浏览器完成 content-visibility 行的高度计算。
+    await afterBrowserLayout()
     const list = lineListRef.value
-    if (!list || list.scrollHeight <= list.clientHeight) return
+    if (!list) return
     list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' })
   } finally {
     addingSingleVideo.value = false

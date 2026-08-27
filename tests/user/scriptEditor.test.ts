@@ -85,6 +85,10 @@ describe('ScriptEditor batch generation confirmation', () => {
   it('从底部新增单个视频后将已有滚动条的列表滚到底部', async () => {
     const store = useProjectStore()
     store.lines = Array.from({ length: 8 }, (_, index) => pendingLine(`line-${index}`))
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0)
+      return 1
+    })
     const wrapper = mount(ScriptEditor)
     const list = wrapper.get('.line-list').element as HTMLDivElement
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 240 })
