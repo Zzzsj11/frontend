@@ -142,6 +142,14 @@ export interface ShotGenOptions {
   /** H3 Ref2VA 可选参考音频（最多3段，同类型总时长≤15秒）。 */
   referenceAudioUrls?: string[]
   h3AudioUsage?: 'reference' | 'reuse' | 'generated' | 'mute'
+  /** 人物镜的结构化构成；shotType 仍保持粗粒度以兼容历史数据。 */
+  characterComposition?: {
+    count: number
+    countLabel: string
+    demographicLabel: string
+    label: string
+    protagonists?: string[]
+  }
   segmentType?: 'lyric' | 'intro' | 'interlude' | 'outro'
   timelineLabel?: string
   /** 时间轴原始时长（秒，未归一化） */
@@ -203,6 +211,8 @@ export interface StoryOutlineShot {
   stage: string
   lyrics?: string
   shotType: 'empty' | 'character'
+  /** 人物镜人数、年龄和性别的细分类。 */
+  characterComposition?: ShotGenOptions['characterComposition']
   /** 大纲生成状态：failed = 所在场景段生成失败的占位镜头 */
   outlineStatus?: 'pending' | 'ready' | 'failed'
   /** 所属场景段序号 */

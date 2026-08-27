@@ -8,6 +8,7 @@ import BaseIconButton from './base/BaseIconButton.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
 import GenerationErrorDetailModal from './GenerationErrorDetailModal.vue'
 import { confirmDialog } from '../composables/useConfirmDialog'
+import { shotTypeLabel } from '../utils/shotLabel'
 
 const props = defineProps<{
   line: ScriptLine
@@ -160,7 +161,7 @@ const retryPromptGeneration = () => {
       </div>
       <div v-if="isGeneral" class="general-meta">
         <span v-if="line.shotType !== 'random'" class="shot-type" :class="line.shotType">{{
-          line.shotType === 'empty' ? '空镜' : '人物镜'
+          shotTypeLabel(line)
         }}</span>
         <span
           v-if="line.plannedDuration && line.generationStatus !== 'succeeded'"

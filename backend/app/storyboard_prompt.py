@@ -923,6 +923,15 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
             result = _validate(_extract_json(repaired), source=source, current=current, allowed_humans=allowed_humans)
         except Exception as exc:
             raise StoryboardPromptError(str(exc), usage_records=usage_records) from exc
+    if source == "general" and current.get("shotType") == "character":
+        composition = (current.get("outline") or {}).get("characterComposition") or {}
+        label = str(composition.get("label") or "人物镜")
+        protagonists = composition.get("protagonists") or []
+        if not protagonists:
+            protagonists = [str(item.get("systemPrompt") or item.get("appearanceStyle") or item.get("name") or "人物") for item in allowed_humans]
+        protagonist_text = "；".join(str(item) for item in protagonists if item) or "依据本镜人物设定"
+        body = re.sub(r"^(?:【人物镜[^】]*】)?(?:【主角：[^】]*】)?", "", result["shotPrompt"]).lstrip()
+        result["shotPrompt"] = f"【{label}】【主角：{protagonist_text}】{body}"
     return {**result, "usage": _sum_usage(usage_records), "usageRecords": usage_records, "requestId": usage_records[-1].get("requestId")}
 
 

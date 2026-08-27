@@ -678,19 +678,18 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
     music_path = " / ".join(value for value in (payload.genre, payload.secondary_category, payload.tertiary_category) if value)
     common_prompt_parts = [
         f"音乐属性：{music_path}。",
-        f"生成规模：共{total}个镜头，其中{payload.empty_shot_count}个空镜、{payload.character_shot_count}个人物镜，{payload.ratio}画幅，{payload.resolution}清晰度。",
     ]
     if payload.extra_requirement.strip():
         common_prompt_parts.append(f"额外要求：{payload.extra_requirement.strip()}。")
     common_prompt = "".join(common_prompt_parts)
-    empty_prompt = common_prompt + "本镜为空镜：画面中不得出现人物、人影或可识别的人体主体；请自由设计环境、景物、光影与镜头运动。"
-    character_prompt = common_prompt + "本镜为人物镜：必须以人物为明确视觉主体；请自由设计人物动作、场景和镜头运动。"
+    empty_prompt = common_prompt + "【空镜】画面中不得出现人物、人影或可识别的人体主体；请自由设计环境、景物、光影与镜头运动。"
+    character_prompt = common_prompt + "必须以人物为明确视觉主体；请自由设计人物动作、场景和镜头运动。"
     title_base = f"随机通用分镜-{utcnow().astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d-%H-%M-%S')}"
     config = {
         **payload.model_dump(mode="json"),
         "empty_prompt": empty_prompt,
         "character_prompt": character_prompt,
-        "character_prompt_policy": "unique_cast_per_shot_v1",
+        "character_prompt_policy": "structured_cast_per_shot_v2",
         "outlineSkipped": True,
     }
     results = []
@@ -723,33 +722,39 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
                 # 很容易收敛到同一张脸；为每镜指定不同的成人选角特征，并明确禁止跨镜
                 # 复用演员身份，让每条请求本身就携带足够强的身份差异信号。
                 cast_profiles = (
-                    "二十多岁女性，短卷发，圆脸与明亮眼神，穿柠檬黄街头夹克",
-                    "三十多岁男性，寸头，棱角分明的长脸，穿深蓝工装外套",
-                    "四十多岁女性，齐肩直发，成熟方脸，穿酒红色长风衣",
-                    "二十多岁男性，中长卷发，清瘦鹅蛋脸，穿银灰运动套装",
-                    "五十多岁女性，利落短发，宽颧骨与沉静眼神，穿墨绿针织衫",
-                    "三十多岁女性，高马尾，心形脸，穿橙色复古连衣裙",
-                    "六十多岁男性，花白背头，宽阔方脸，穿米色亚麻西装",
-                    "二十多岁女性，黑色波波头，细长脸，穿紫色机能风套装",
-                    "四十多岁男性，自然卷短发，圆方脸与络腮胡，穿棕色皮夹克",
-                    "三十多岁女性，栗色长卷发，鹅蛋脸与雀斑，穿湖蓝色衬衫",
-                    "五十多岁男性，灰色短发，瘦长脸，穿暗红色中式立领外套",
-                    "二十多岁男性，蓬松短发，宽额方脸，穿绿色棒球夹克",
-                    "四十多岁女性，银灰挑染盘发，菱形脸，穿黑白几何套装",
-                    "三十多岁男性，光头，圆脸与浓眉，穿亮橙色连帽衫",
-                    "六十多岁女性，银白齐耳短发，慈祥圆脸，穿靛蓝披肩",
-                    "二十多岁女性，红棕色脏辫，长脸，穿青绿色飞行夹克",
-                    "五十多岁男性，微卷中发，方脸与八字胡，穿浅灰长大衣",
-                    "三十多岁女性，超短发，棱角分明的脸型，穿玫红色西装",
-                    "四十多岁男性，盐胡椒色侧分发，鹅蛋脸，穿藏青色针织开衫",
-                    "二十多岁男性，浅色卷发，窄长脸，穿白色未来感风衣",
+                    ("单人", "青年女性", "二十多岁女性，短卷发，圆脸与明亮眼神，穿柠檬黄街头夹克"),
+                    ("单人", "中年男性", "三十多岁男性，寸头，棱角分明的长脸，穿深蓝工装外套"),
+                    ("单人", "中年女性", "四十多岁女性，齐肩直发，成熟方脸，穿酒红色长风衣"),
+                    ("双人", "青年男性/青年女性", "二十多岁男性，中长卷发，穿银灰运动套装；二十多岁女性，黑色波波头，穿紫色机能风套装"),
+                    ("单人", "中年女性", "五十多岁女性，利落短发，宽颧骨与沉静眼神，穿墨绿针织衫"),
+                    ("双人", "中年女性/中年男性", "三十多岁女性，高马尾，穿橙色复古连衣裙；四十多岁男性，自然卷短发，穿棕色皮夹克"),
+                    ("单人", "老年男性", "六十多岁男性，花白背头，宽阔方脸，穿米色亚麻西装"),
+                    ("单人", "青年女性", "二十多岁女性，黑色波波头，细长脸，穿紫色机能风套装"),
+                    ("单人", "中年男性", "四十多岁男性，自然卷短发，圆方脸与络腮胡，穿棕色皮夹克"),
+                    ("双人", "青年女性/中年女性", "二十多岁女性，红棕色脏辫，穿青绿色飞行夹克；三十多岁女性，栗色长卷发，穿湖蓝色衬衫"),
+                    ("单人", "中年男性", "五十多岁男性，灰色短发，瘦长脸，穿暗红色中式立领外套"),
+                    ("单人", "青年男性", "二十多岁男性，蓬松短发，宽额方脸，穿绿色棒球夹克"),
+                    ("双人", "中年女性/中年男性", "四十多岁女性，银灰挑染盘发，穿黑白几何套装；三十多岁男性，光头浓眉，穿亮橙色连帽衫"),
+                    ("单人", "中年男性", "三十多岁男性，光头，圆脸与浓眉，穿亮橙色连帽衫"),
+                    ("单人", "老年女性", "六十多岁女性，银白齐耳短发，慈祥圆脸，穿靛蓝披肩"),
+                    ("单人", "青年女性", "二十多岁女性，红棕色脏辫，长脸，穿青绿色飞行夹克"),
+                    ("单人", "中年男性", "五十多岁男性，微卷中发，方脸与八字胡，穿浅灰长大衣"),
+                    ("双人", "中年女性/青年男性", "三十多岁女性，超短发，穿玫红色西装；二十多岁男性，浅色卷发，穿白色未来感风衣"),
+                    ("单人", "中年男性", "四十多岁男性，盐胡椒色侧分发，鹅蛋脸，穿藏青色针织开衫"),
+                    ("单人", "青年男性", "二十多岁男性，浅色卷发，窄长脸，穿白色未来感风衣"),
                 )
-                profile = cast_profiles[character_index % len(cast_profiles)]
-                cycle = character_index // len(cast_profiles) + 1
+                cast_count_label, cast_demographic_label, profile = cast_profiles[character_index % len(cast_profiles)]
+                character_composition = {
+                    "count": 2 if cast_count_label == "双人" else 1,
+                    "countLabel": cast_count_label,
+                    "demographicLabel": cast_demographic_label,
+                    "label": f"人物镜*{cast_count_label}*{cast_demographic_label}",
+                    "protagonists": profile.split("；"),
+                }
                 prompt = (
                     character_prompt
-                    + f"本镜独立选角编号 R{cycle}-{character_index + 1}：{profile}。"
-                    + "必须是一位与本任务其他人物镜完全不同的新人物；不得复用相同演员、相同面孔、相同发型或相同服装，尤其不得延续上一镜人物身份。"
+                    + f"【{character_composition['label']}】【主角：{profile}】"
+                    + "本镜人物必须与本任务其他人物镜完全不同；不得复用相同演员、相同面孔、相同发型或相同服装，尤其不得延续上一镜人物身份。"
                 )
                 character_index += 1
             options = {
@@ -758,6 +763,8 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
                 "videoModel": payload.video_model,
                 "duration": normalize_video_duration(duration),
             }
+            if shot_type == "character":
+                options["characterComposition"] = character_composition
             line = StoryboardLineModel(
                 id=uid("line"),
                 project_task_id=task.id,
@@ -1102,7 +1109,44 @@ async def _run_ass_outline_generation(
         return {"taskId": task_id, "storyBibleVersion": story_bible.get("version") or STORY_BIBLE_VERSION}
 
 
-async def _apply_general_outline_to_lines(db: AsyncSession, lines: list[StoryboardLineModel], shots: list[dict], durations: list[float]) -> None:
+def _general_character_composition(shot: dict, config: dict, selected_humans: list[dict]) -> dict | None:
+    if shot.get("shotType") != "character":
+        return None
+    humans_by_id = {str(item.get("id")): item for item in selected_humans}
+    selected = [humans_by_id[item_id] for item_id in shot.get("requiredCharacterIds", []) if item_id in humans_by_id]
+    if selected:
+        demographics = ["".join(value for value in (str(item.get("ageDescription") or ""), str(item.get("gender") or "")) if value) or "人物" for item in selected]
+    else:
+        gender = str(config.get("gender") or "人物")
+        age = str(config.get("age_group") or "")
+        if gender in {"男女", "女女", "男男"}:
+            genders = {"男女": ("男性", "女性"), "女女": ("女性", "女性"), "男男": ("男性", "男性")}[gender]
+            demographics = [f"{age}{item}" for item in genders]
+        elif gender.startswith("多"):
+            demographics = [f"{age}{gender}"]
+        else:
+            demographics = [f"{age}{'女性' if gender == '女' else '男性' if gender == '男' else gender}"]
+    count = len(demographics)
+    count_label = {1: "单人", 2: "双人", 3: "三人"}.get(count, f"{count}人")
+    demographic_label = "/".join(demographics)
+    return {
+        "count": count,
+        "countLabel": count_label,
+        "demographicLabel": demographic_label,
+        "label": f"人物镜*{count_label}*{demographic_label}",
+        "protagonists": [str(item.get("systemPrompt") or item.get("appearanceStyle") or item.get("name") or demographics[index]) for index, item in enumerate(selected)],
+    }
+
+
+async def _apply_general_outline_to_lines(
+    db: AsyncSession,
+    lines: list[StoryboardLineModel],
+    shots: list[dict],
+    durations: list[float],
+    *,
+    config: dict,
+    selected_humans: list[dict],
+) -> None:
     """将通用分镜大纲结果回填到占位 lines（镜头类型、人物、时长与大纲字段）。"""
     now = utcnow()
     line_ids = [line.id for line in lines]
@@ -1110,6 +1154,7 @@ async def _apply_general_outline_to_lines(db: AsyncSession, lines: list[Storyboa
         update(StoryboardLineCastModel).where(StoryboardLineCastModel.storyboard_line_id.in_(line_ids), StoryboardLineCastModel.deleted_at.is_(None)).values(deleted_at=now)
     )
     for line, shot, duration in zip(lines, shots, durations, strict=True):
+        character_composition = _general_character_composition(shot, config, selected_humans)
         line.shot_type = shot["shotType"]
         line.planned_duration = duration
         line.shot_options = {
@@ -1126,6 +1171,10 @@ async def _apply_general_outline_to_lines(db: AsyncSession, lines: list[Storyboa
             "wardrobeByCharacter": shot.get("wardrobeByCharacter") or {},
             "outlineStatus": "ready",
         }
+        if character_composition:
+            line.shot_options["characterComposition"] = character_composition
+        else:
+            line.shot_options.pop("characterComposition", None)
         line.generation_status = "pending"
         line.generation_error = None
         line.prompt_context_hash = None
@@ -1191,6 +1240,10 @@ async def _run_general_outline_generation(
             task.status = "outline_failed"
             await session.commit()
             raise
+        for shot in outline["shots"]:
+            composition = _general_character_composition(shot, config, selected_humans)
+            if composition:
+                shot["characterComposition"] = composition
         story_bible = await build_general_story_bible(config=config, shots=outline["shots"], durations=durations)
         lines = list(
             (
@@ -1209,7 +1262,14 @@ async def _run_general_outline_generation(
         done_config.pop("outlineProgress", None)
         task.storyboard_config = done_config
         task.status = "generating"
-        await _apply_general_outline_to_lines(session, lines, outline["shots"], durations)
+        await _apply_general_outline_to_lines(
+            session,
+            lines,
+            outline["shots"],
+            durations,
+            config=config,
+            selected_humans=selected_humans,
+        )
         _persist_llm_calls(
             session,
             outline["usageRecords"],

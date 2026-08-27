@@ -237,6 +237,32 @@ async def test_generation_records_prompt_key_and_version(client, monkeypatch) ->
     assert record["promptVersion"] >= 1  # 测试库已 seed 发布版，留痕指向实际使用的版本
 
 
+async def test_general_character_prompt_gets_canonical_composition_prefix(client, monkeypatch) -> None:
+    from app import storyboard_prompt
+
+    valid = json.dumps({"scenePrompt": "雨夜街道", "shotPrompt": "人物对望，镜头缓慢推近", "digitalHumanIds": []})
+    monkeypatch.setattr(storyboard_prompt, "settings", replace(storyboard_prompt.settings, llm_api_key="fake-key"))
+    monkeypatch.setattr(storyboard_prompt, "AsyncOpenAI", lambda **kwargs: _FakeOpenAI([valid]))
+
+    result = await storyboard_prompt.generate_storyboard_line(
+        source="general",
+        current={
+            "shotType": "character",
+            "plannedDigitalHumanIds": [],
+            "outline": {
+                "characterComposition": {
+                    "label": "人物镜*双人*青年男性/青年女性",
+                    "protagonists": ["青年男性，短发", "青年女性，长发"],
+                }
+            },
+        },
+        full_context={},
+        allowed_humans=[],
+    )
+    assert result["shotPrompt"].startswith("【人物镜*双人*青年男性/青年女性】【主角：青年男性，短发；青年女性，长发】")
+    assert "本镜独立选角编号" not in result["shotPrompt"]
+
+
 # ── P2：story_bible 策略文案 / 定妆照提示词后端化 / chat 默认人设 ────────────
 
 

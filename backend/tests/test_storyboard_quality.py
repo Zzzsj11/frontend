@@ -640,19 +640,26 @@ def test_random_general_storyboard_skips_outline_and_builds_shot_type_prompts(cl
     empty_prompt = next(line["shotPrompt"] for line in result["lines"] if line["shotType"] == "empty")
     character_prompts = [line["shotPrompt"] for line in result["lines"] if line["shotType"] == "character"]
     assert "流行歌曲 / 通用积极 / 生活" in empty_prompt
-    assert "生成规模：共3个镜头，其中1个空镜、2个人物镜" in empty_prompt
+    assert "生成规模" not in empty_prompt
+    assert "16:9" not in empty_prompt
+    assert "480p" not in empty_prompt
     assert "夏日公路旅行" in empty_prompt
     assert "不得出现人物" in empty_prompt
     assert all("必须以人物为明确视觉主体" in prompt for prompt in character_prompts)
     assert len(set(character_prompts)) == 2
-    assert "独立选角编号 R1-1" in character_prompts[0]
-    assert "独立选角编号 R1-2" in character_prompts[1]
+    assert all("【人物镜*" in prompt and "【主角：" in prompt for prompt in character_prompts)
+    assert all("独立选角编号" not in prompt for prompt in character_prompts)
     assert all("不得复用相同演员、相同面孔" in prompt for prompt in character_prompts)
+    character_lines = [line for line in result["lines"] if line["shotType"] == "character"]
+    assert character_lines[0]["shotOptions"]["characterComposition"]["label"] == "人物镜*单人*青年女性"
+    assert character_lines[1]["shotOptions"]["characterComposition"]["label"] == "人物镜*单人*中年男性"
+    assert all(line["shotOptions"]["ratio"] == "16:9" for line in result["lines"])
+    assert all(line["shotOptions"]["resolution"] == "480p" for line in result["lines"])
     task = client.get(f"/api/tasks/{result['taskId']}").json()
     assert task["storyboardType"] == "general_random"
     assert task["status"] == "ready"
     assert task["storyboardConfig"]["outlineSkipped"] is True
-    assert task["storyboardConfig"]["character_prompt_policy"] == "unique_cast_per_shot_v1"
+    assert task["storyboardConfig"]["character_prompt_policy"] == "structured_cast_per_shot_v2"
 
 
 def test_random_general_storyboard_creates_ten_child_tasks_concurrently(client) -> None:

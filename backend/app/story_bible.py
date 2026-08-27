@@ -118,6 +118,7 @@ async def build_general_story_bible(*, config: dict[str, Any], shots: list[dict[
             {
                 "index": index,
                 "shotType": shot["shotType"],
+                "characterComposition": shot.get("characterComposition"),
                 "stage": _stage(index, total),
                 "outlineScene": shot["outlineScene"],
                 "outlineShot": shot["outlineShot"],

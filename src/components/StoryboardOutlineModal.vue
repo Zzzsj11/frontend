@@ -4,6 +4,7 @@ import { useProjectStore } from '../stores/project'
 import { confirmDialog } from '../composables/useConfirmDialog'
 import AppIcon from './AppIcon.vue'
 import BaseModal from './base/BaseModal.vue'
+import { shotTypeLabel } from '../utils/shotLabel'
 
 const store = useProjectStore()
 
@@ -181,7 +182,7 @@ const regenerate = async () => {
               <div class="shot-head">
                 <strong>{{ shot.stage }}</strong>
                 <span :class="['shot-type', shotTypeOf(shot)]">{{
-                  shotTypeOf(shot) === 'character' ? '人物镜' : '空镜'
+                  shotTypeLabel({ ...shot, shotType: shotTypeOf(shot) })
                 }}</span>
                 <span v-if="shot.outlineStatus === 'failed'" class="failed-tag">大纲未生成</span>
                 <span v-if="shot.generationDuration" class="duration-tag"

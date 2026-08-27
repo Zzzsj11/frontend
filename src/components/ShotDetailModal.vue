@@ -11,6 +11,7 @@ import { confirmDialog } from '../composables/useConfirmDialog'
 import { normalizeShotOptions } from '../mediaConstraints'
 import { loadGenerationModels, VIDEO_MODEL_OPTIONS } from '../generationModels'
 import { formatElapsedSeconds } from '../utils/duration'
+import { shotTypeLabel } from '../utils/shotLabel'
 
 const store = useProjectStore()
 void loadGenerationModels()
@@ -385,7 +386,7 @@ const cancel = () => store.closeEditor()
             <p v-if="lyricsTranslation" class="lyrics-zh-hint">中文翻译：{{ lyricsTranslation }}</p>
           </template>
           <p v-else class="general-shot-tip">
-            {{ store.editingLine.shotType === 'empty' ? '空镜' : '人物镜' }}
+            {{ shotTypeLabel(store.editingLine) }}
             · 规划时长 {{ store.editingLine.plannedDuration ?? 0 }} 秒
           </p>
 
