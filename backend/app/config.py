@@ -158,6 +158,14 @@ class Settings:
     runninghub_base_url: str = os.getenv("RUNNINGHUB_BASE_URL", "https://www.runninghub.cn/openapi/v2").rstrip("/")
     runninghub_workflow_id: str = os.getenv("RUNNINGHUB_WORKFLOW_ID", "2084514856253874178")
     runninghub_timeout: float = float(os.getenv("RUNNINGHUB_TIMEOUT", "60"))
+    # 管理后台多参考提示词优化；密钥仅由后端环境注入，禁止下发浏览器。
+    prompt_optimizer_gemini_base_url: str = os.getenv("PROMPT_OPTIMIZER_GEMINI_BASE_URL", "https://api.ommapi.top/v1").rstrip("/")
+    prompt_optimizer_gemini_api_key: str = os.getenv("PROMPT_OPTIMIZER_GEMINI_API_KEY", "")
+    prompt_optimizer_gemini_model: str = os.getenv("PROMPT_OPTIMIZER_GEMINI_MODEL", "gemini-3.7-flash")
+    prompt_optimizer_minimax_base_url: str = os.getenv("PROMPT_OPTIMIZER_MINIMAX_BASE_URL", "https://api.minimaxi.com").rstrip("/")
+    prompt_optimizer_minimax_api_key: str = os.getenv("PROMPT_OPTIMIZER_MINIMAX_API_KEY", "")
+    prompt_optimizer_minimax_model: str = os.getenv("PROMPT_OPTIMIZER_MINIMAX_MODEL", "MiniMax-H3")
+    prompt_optimizer_timeout: float = float(os.getenv("PROMPT_OPTIMIZER_TIMEOUT", "300"))
     # Kling V3 Omni 视频模型（管理后台测试页）；默认复用英和 AIGC 网关，可用 KLING_* 覆盖
     kling_api_base_url: str = (os.getenv("KLING_API_BASE_URL") or video_api_base_url).rstrip("/")
     kling_api_key: str = os.getenv("KLING_API_KEY") or video_api_key

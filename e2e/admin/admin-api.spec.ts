@@ -22,6 +22,8 @@ test('admin API authorization and contracts', async ({ request }) => {
     '/api/admin/api-errors',
     '/api/admin/audit-logs',
     '/api/admin/song-emotion-profiles?limit=1',
+    '/api/admin/prompt-optimizer/status',
+    '/api/admin/prompt-optimizer/tasks',
   ])
     expect((await request.get(path, { headers })).ok(), path).toBeTruthy()
   const options = await request.get('/api/model-options?modality=video', { headers })

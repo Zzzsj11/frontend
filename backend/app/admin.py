@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import mimetypes
+import time
 import uuid
 from datetime import timedelta
 from decimal import Decimal
@@ -15,6 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .agent_attribution import current_agent_attribution
 from .auth import CurrentUser
 from .config import settings
 from .database import database_session
@@ -44,6 +47,7 @@ from .models import (
     ProjectCastModel,
     ProjectModel,
     ProjectTaskModel,
+    PromptOptimizationTaskModel,
     PromptTemplateModel,
     PromptVersionModel,
     ServerMaintenanceRunModel,
@@ -57,6 +61,13 @@ from .models import (
     WorkerInstanceModel,
     utcnow,
 )
+from .prompt_optimizer import MEDIA_LIMITS as PROMPT_OPTIMIZER_MEDIA_LIMITS
+from .prompt_optimizer import PROVIDERS as PROMPT_OPTIMIZER_PROVIDERS
+from .prompt_optimizer import RATIOS as PROMPT_OPTIMIZER_RATIOS
+from .prompt_optimizer import call_gemini as optimize_with_gemini
+from .prompt_optimizer import create_minimax as create_minimax_optimization
+from .prompt_optimizer import provider_status as prompt_optimizer_provider_status
+from .prompt_optimizer import query_minimax as query_minimax_optimization
 from .prompts import DEFAULT_PROMPTS, invalidate, render_lenient, template_variables
 from .providers import ProviderError, list_video_models, query_provider_task, resume_generation, store_provider_result
 from .rbac import (
@@ -89,7 +100,7 @@ from .runninghub import submit_reference_task as rh_submit_reference_task
 from .runninghub import submit_text_task as rh_submit_text_task
 from .runninghub import upload_media as rh_upload_media
 from .server_monitoring import monitoring_summary
-from .storage import get_storage, import_remote, safe_key
+from .storage import get_storage, import_remote, is_tos_url, put_image_with_thumbnail, safe_key
 from .storyboard_options import OPTION_KINDS, load_general_storyboard_options
 from .token_usage import add_llm_call_log, add_token_usage
 from .video_billing import run_video_billing_reconciliation, video_discount_label, video_discount_rate
@@ -1856,6 +1867,217 @@ async def storyboard_option_delete(item_id: str, request: Request, user: Current
     await audit(db, request, user, "storyboard_option.delete", "storyboard_option_item", item.id, _option_summary(item), {"cascadeCount": len(targets) - 1})
     await db.commit()
     return {"ok": True, "cascadeCount": len(targets) - 1}
+
+
+# ---------------------------------------------------------------------------
+# 多参考提示词优化（Gemini / MiniMax H3-Context-IR）
+# ---------------------------------------------------------------------------
+
+
+class PromptOptimizerMediaIn(BaseModel):
+    kind: str = Field(pattern="^(image|video|audio)$")
+    url: str = Field(min_length=1, max_length=2000)
+    name: str = Field(default="", max_length=255)
+    mime_type: str = Field(default="", max_length=120, alias="mimeType")
+    role: str = Field(default="reference", max_length=120)
+
+    model_config = {"populate_by_name": True}
+
+
+class PromptOptimizerRunIn(BaseModel):
+    provider: str
+    prompt: str = Field(min_length=1, max_length=7000)
+    duration: int = Field(default=8, ge=4, le=15)
+    ratio: str = Field(default="16:9")
+    media: list[PromptOptimizerMediaIn] = Field(default_factory=list, max_length=15)
+
+
+def _prompt_optimizer_json(item: PromptOptimizationTaskModel) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "provider": item.provider,
+        "model": item.model,
+        "status": item.status,
+        "inputPrompt": item.input_prompt,
+        "outputPrompt": item.output_prompt,
+        "duration": item.duration,
+        "ratio": item.ratio,
+        "media": item.input_media,
+        "providerTaskId": item.provider_task_id,
+        "usage": item.usage_data,
+        "error": item.error,
+        "createdAt": iso(item.created_at),
+    }
+
+
+@router.get("/prompt-optimizer/status")
+async def prompt_optimizer_status(user: CurrentUser):
+    require_admin(user)
+    return {
+        "providers": prompt_optimizer_provider_status(),
+        "limits": {"images": 9, "videos": 3, "audios": 3, "videoSeconds": 15, "audioSeconds": 15},
+        "ratios": list(PROMPT_OPTIMIZER_RATIOS),
+        "durationRange": [4, 15],
+    }
+
+
+@router.post("/prompt-optimizer/upload")
+async def prompt_optimizer_upload(file: UploadFile, user: CurrentUser):
+    require_admin(user)
+    content = await file.read(50 * 1024 * 1024 + 1)
+    if len(content) > 50 * 1024 * 1024:
+        raise HTTPException(413, "素材不能超过 50MB")
+    mime_type = (file.content_type or mimetypes.guess_type(file.filename or "")[0] or "application/octet-stream").lower()
+    kind = "image" if mime_type.startswith("image/") else "video" if mime_type.startswith("video/") else "audio" if mime_type.startswith("audio/") else ""
+    if not kind:
+        raise HTTPException(422, "仅支持图片、视频或音频素材")
+    key = safe_key(f"users/{user.id}/prompt-optimizer/{kind}", file.filename or f"reference-{kind}")
+    if kind == "image":
+        url, thumbnail_url = await put_image_with_thumbnail(key, content, mime_type)
+    else:
+        url = await get_storage().put_bytes(key, content, mime_type)
+        thumbnail_url = None
+    return {"kind": kind, "url": url, "thumbnailUrl": thumbnail_url, "name": file.filename or "", "mimeType": mime_type, "size": len(content)}
+
+
+@router.get("/prompt-optimizer/tasks")
+async def prompt_optimizer_tasks(user: CurrentUser, db: AsyncSession = Db):
+    require_admin(user)
+    items = list(
+        (
+            await db.execute(
+                select(PromptOptimizationTaskModel)
+                .where(PromptOptimizationTaskModel.user_id == user.id, PromptOptimizationTaskModel.deleted_at.is_(None))
+                .order_by(PromptOptimizationTaskModel.created_at.desc())
+                .limit(20)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {"items": [_prompt_optimizer_json(item) for item in items]}
+
+
+@router.post("/prompt-optimizer/tasks", status_code=201)
+async def prompt_optimizer_create(payload: PromptOptimizerRunIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    require_admin(user)
+    if payload.provider not in PROMPT_OPTIMIZER_PROVIDERS:
+        raise HTTPException(422, "不支持的提示词优化服务")
+    if payload.ratio not in PROMPT_OPTIMIZER_RATIOS:
+        raise HTTPException(422, "不支持的画面比例")
+    status = prompt_optimizer_provider_status()[payload.provider]
+    if not status["configured"]:
+        raise HTTPException(503, f"{payload.provider} 提示词优化密钥未配置")
+    media = [item.model_dump(by_alias=True) for item in payload.media]
+    counts = {kind: sum(item["kind"] == kind for item in media) for kind in PROMPT_OPTIMIZER_MEDIA_LIMITS}
+    for kind, limit in PROMPT_OPTIMIZER_MEDIA_LIMITS.items():
+        if counts[kind] > limit:
+            raise HTTPException(422, f"{kind} 素材最多 {limit} 个")
+    if not media:
+        raise HTTPException(422, "请至少上传一个参考素材")
+    if any(not is_tos_url(item["url"]) for item in media):
+        raise HTTPException(422, "参考素材必须先通过本页上传到 TOS")
+    origin, agent_name, agent_run_id = current_agent_attribution()
+    item = PromptOptimizationTaskModel(
+        id=f"prompt-opt-{uuid.uuid4().hex}",
+        user_id=user.id,
+        provider=payload.provider,
+        model=status["model"],
+        status="running",
+        input_prompt=payload.prompt,
+        duration=payload.duration,
+        ratio=payload.ratio,
+        input_media=media,
+        generation_origin=origin,
+        agent_name=agent_name,
+        agent_run_id=agent_run_id,
+    )
+    db.add(item)
+    await db.flush()
+    started = time.perf_counter()
+    try:
+        if payload.provider == "gemini":
+            result = await optimize_with_gemini(prompt=payload.prompt, duration=payload.duration, ratio=payload.ratio, media=media)
+            item.status = "succeeded"
+            item.output_prompt = result["prompt"]
+            item.request_id = result.get("requestId")
+            item.usage_data = {**result.get("usage", {}), "usageRecorded": True}
+            add_token_usage(db, operation="admin_prompt_optimization", provider="gemini", model=item.model, usage=result.get("usage"), user_id=user.id, request_id=item.request_id)
+            add_llm_call_log(
+                db,
+                operation="admin_prompt_optimization",
+                provider="gemini",
+                model=item.model,
+                usage=result.get("usage"),
+                user_id=user.id,
+                request_id=item.request_id,
+                duration_ms=result.get("durationMs", 0),
+                request_messages=result.get("requestSnapshot"),
+                response_text=item.output_prompt,
+            )
+        else:
+            result = await create_minimax_optimization(prompt=payload.prompt, duration=payload.duration, ratio=payload.ratio, media=media)
+            item.provider_task_id = result["taskId"]
+            item.request_id = result.get("requestId")
+    except Exception as exc:
+        item.status = "failed"
+        item.error = str(exc)[:2000]
+        add_llm_call_log(
+            db,
+            operation="admin_prompt_optimization",
+            provider=payload.provider,
+            model=item.model,
+            usage={},
+            user_id=user.id,
+            status="error",
+            error=item.error,
+            duration_ms=round((time.perf_counter() - started) * 1000),
+            request_messages=[{"role": "user", "content": payload.prompt}],
+        )
+    await audit(db, request, user, "prompt_optimizer.create", "prompt_optimization_task", item.id, None, {"provider": item.provider, "status": item.status, "mediaCounts": counts})
+    await db.commit()
+    return _prompt_optimizer_json(item)
+
+
+@router.get("/prompt-optimizer/tasks/{task_id}")
+async def prompt_optimizer_query(task_id: str, user: CurrentUser, db: AsyncSession = Db):
+    require_admin(user)
+    item = (
+        await db.execute(
+            select(PromptOptimizationTaskModel).where(
+                PromptOptimizationTaskModel.id == task_id,
+                PromptOptimizationTaskModel.user_id == user.id,
+                PromptOptimizationTaskModel.deleted_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if not item:
+        raise HTTPException(404, "提示词优化任务不存在")
+    if item.provider == "minimax" and item.status in {"queued", "running"} and item.provider_task_id:
+        try:
+            result = await query_minimax_optimization(item.provider_task_id)
+            item.status = result["status"]
+            item.output_prompt = result["prompt"]
+            item.error = result["error"]
+            if item.status == "succeeded" and not (item.usage_data or {}).get("usageRecorded"):
+                item.usage_data = {**result["usage"], "usageRecorded": True}
+                add_token_usage(db, operation="admin_prompt_optimization", provider="minimax", model=item.model, usage=result["usage"], user_id=user.id, request_id=item.request_id)
+                add_llm_call_log(
+                    db,
+                    operation="admin_prompt_optimization",
+                    provider="minimax",
+                    model=item.model,
+                    usage=result["usage"],
+                    user_id=user.id,
+                    request_id=item.request_id,
+                    request_messages=[{"role": "user", "content": item.input_prompt}],
+                    response_text=item.output_prompt,
+                )
+            await db.commit()
+        except Exception as exc:
+            item.error = str(exc)[:2000]
+            await db.commit()
+    return _prompt_optimizer_json(item)
 
 
 # ---------------------------------------------------------------------------

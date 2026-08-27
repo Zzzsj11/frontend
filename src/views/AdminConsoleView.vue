@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { apiRequest } from '../api/client'
 import AdminModelComparisonPanel from '../components/AdminModelComparisonPanel.vue'
+import AdminPromptOptimizerPanel from '../components/AdminPromptOptimizerPanel.vue'
 import AdminPromptsPanel from '../components/AdminPromptsPanel.vue'
 import AdminKlingPanel from '../components/AdminKlingPanel.vue'
 import AdminRunningHubPanel from '../components/AdminRunningHubPanel.vue'
@@ -122,6 +123,7 @@ type Tab =
   | 'runninghub'
   | 'kling'
   | 'chat-comparison'
+  | 'prompt-optimizer'
 const auth = useAuthStore()
 const tab = ref<Tab>(auth.user?.isSuperAdmin ? 'dashboard' : 'song-emotions'),
   loading = ref(false),
@@ -155,6 +157,7 @@ const ALL_NAV_GROUPS: AdminNavGroup[] = [
     label: '模型实验室',
     items: [
       { key: 'chat-comparison', label: 'Chat 模型对比' },
+      { key: 'prompt-optimizer', label: '多参考提示词优化' },
       { key: 'runninghub', label: 'H3 工作流' },
       { key: 'kling', label: 'Kling 测试' },
     ],
@@ -293,6 +296,7 @@ const endpoint = computed(
       runninghub: '',
       kling: '',
       'chat-comparison': '',
+      'prompt-optimizer': '',
     })[tab.value],
 )
 const rows = computed<AdminRow[]>(() =>
@@ -313,6 +317,7 @@ const load = async () => {
     tab.value === 'runninghub' ||
     tab.value === 'kling' ||
     tab.value === 'chat-comparison' ||
+    tab.value === 'prompt-optimizer' ||
     tab.value === 'server' ||
     tab.value === 'usage'
   )
@@ -342,6 +347,7 @@ const select = async (key: string) => {
     value === 'runninghub' ||
     value === 'kling' ||
     value === 'chat-comparison' ||
+    value === 'prompt-optimizer' ||
     value === 'server' ||
     value === 'usage'
   )
@@ -616,6 +622,7 @@ onMounted(() => {
           <AdminRunningHubPanel v-if="tab === 'runninghub'" />
           <AdminKlingPanel v-if="tab === 'kling'" />
           <AdminModelComparisonPanel v-if="tab === 'chat-comparison'" />
+          <AdminPromptOptimizerPanel v-if="tab === 'prompt-optimizer'" />
           <AdminServerMonitoringPanel v-if="tab === 'server'" />
           <AdminVideoBillingPanel v-if="tab === 'usage'" />
           <!-- 性能页：后端全量耗时（慢请求 TOP + 路径聚合） + 本浏览器会话观测 -->
@@ -874,6 +881,7 @@ onMounted(() => {
                 'runninghub',
                 'kling',
                 'chat-comparison',
+                'prompt-optimizer',
                 'server',
               ].includes(tab)
             "

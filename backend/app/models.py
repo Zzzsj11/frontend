@@ -565,6 +565,29 @@ class H3TestPresetModel(LifecycleMixin, Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)
 
 
+class PromptOptimizationTaskModel(LifecycleMixin, Base):
+    """管理员个人的多参考提示词优化工单。"""
+
+    __tablename__ = "prompt_optimization_tasks"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(32), index=True)
+    model: Mapped[str] = mapped_column(String(160), default="")
+    status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
+    input_prompt: Mapped[str] = mapped_column(Text, default="")
+    output_prompt: Mapped[str] = mapped_column(Text, default="")
+    duration: Mapped[int] = mapped_column(Integer, default=8)
+    ratio: Mapped[str] = mapped_column(String(16), default="16:9")
+    input_media: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    provider_task_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    request_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    usage_data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    error: Mapped[str] = mapped_column(Text, default="")
+    generation_origin: Mapped[str] = mapped_column(String(32), default="business", index=True)
+    agent_name: Mapped[str] = mapped_column(String(80), default="", index=True)
+    agent_run_id: Mapped[str] = mapped_column(String(160), default="", index=True)
+
+
 class ServerMetricSampleModel(LifecycleMixin, Base):
     __tablename__ = "server_metric_samples"
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
