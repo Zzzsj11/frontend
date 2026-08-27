@@ -92,6 +92,30 @@ class ProjectTaskModel(LifecycleMixin, Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class ProjectAudioAssetModel(LifecycleMixin, Base):
+    """项目级整首审核音轨；不参与模型生成或导出混音。"""
+
+    __tablename__ = "project_audio_assets"
+    __table_args__ = (
+        Index(
+            "uq_project_audio_current_active",
+            "project_id",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL AND is_current = true"),
+            sqlite_where=text("deleted_at IS NULL AND is_current = 1"),
+        ),
+    )
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    original_filename: Mapped[str] = mapped_column(String(512))
+    audio_url: Mapped[str] = mapped_column(Text)
+    mime_type: Mapped[str] = mapped_column(String(120), default="audio/mpeg")
+    file_size: Mapped[int] = mapped_column(BigInteger)
+    duration_seconds: Mapped[float] = mapped_column(Float)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+
 class DigitalHumanStyleModel(LifecycleMixin, Base):
     __tablename__ = "digital_human_styles"
     __table_args__ = (Index("uq_dh_style_user_name_active", "user_id", "name", unique=True, postgresql_where=text("deleted_at IS NULL"), sqlite_where=text("deleted_at IS NULL")),)

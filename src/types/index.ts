@@ -23,6 +23,17 @@ export interface SongProject {
   tasks: SongTask[]
 }
 
+/** 项目级整首审核音轨，不参与模型生成或导出。 */
+export interface ProjectAudio {
+  id: string
+  projectId: string
+  filename: string
+  url: string
+  mimeType: string
+  fileSize: number
+  duration: number
+}
+
 /** 数字人资产 */
 export interface DigitalHuman {
   id: string

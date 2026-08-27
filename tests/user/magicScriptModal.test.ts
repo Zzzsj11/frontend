@@ -40,6 +40,7 @@ describe('magic script defaults', () => {
       expect(document.body.querySelectorAll('select').length).toBeGreaterThan(0),
     )
     expect(document.body.querySelector('input[type="file"][accept=".ass"]')).toBeTruthy()
+    expect(document.body.querySelector('input[type="file"][accept=".mp3,audio/mpeg"]')).toBeTruthy()
     wrapper.unmount()
   })
 

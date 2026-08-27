@@ -109,6 +109,11 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(main, "get_storage", lambda: storage)
     monkeypatch.setattr(domain, "get_storage", lambda: storage)
 
+    async def fake_audio_duration(_content):
+        return 218.5
+
+    monkeypatch.setattr(main, "probe_audio_duration", fake_audio_duration)
+
     async def fake_storyboard_line(**kwargs):
         assert kwargs["current"]["lyrics"] == "First line Second line"
         assert len(kwargs["full_context"]["timelineWindow"]) >= 1
@@ -170,18 +175,27 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
             "digital_human_ids": '["dh-system-020"]',
             "extra_requirement": "cinematic",
         },
-        files={"ass_file": ("10012204-journey.ass", ASS_CONTENT, "text/plain")},
+        files={
+            "ass_file": ("10012204-journey.ass", ASS_CONTENT, "text/plain"),
+            "audio_file": ("10012204-song.mp3", b"fake-mp3", "audio/mpeg"),
+        },
     )
     assert storyboard.status_code == 200
     # 任务标题由曲库情感档案拼成：「歌名 – 歌曲编号」（song_code 10012204 对应「他不爱我」）
     assert storyboard.json()["title"] == "他不爱我 – 10012204"
     assert storyboard.json()["status"] == "parsed"
+    assert storyboard.json()["projectAudio"]["duration"] == 218.5
+    assert storyboard.json()["projectAudio"]["filename"] == "10012204-song.mp3"
     line = storyboard.json()["lines"][0]
     assert line["generationStatus"] == "pending"
     assert line["plannedDuration"] > 0
     assert line["shotOptions"]["duration"] == normalize_video_duration(line["plannedDuration"])
     assert line["shotOptions"]["gapAfterAllocation"] in {"current", "next", "none"}
     assert line["shotOptions"]["outlineStatus"] == "pending"
+    task_with_audio = client.get(f"/api/tasks/{storyboard.json()['taskId']}")
+    assert task_with_audio.status_code == 200
+    assert task_with_audio.json()["projectAudio"]["url"].startswith("https://tos.test/users/")
+    assert task_with_audio.json()["storyboardConfig"]["audioTrackVisible"] is True
     blocked_line = client.post(f"/api/tasks/{storyboard.json()['taskId']}/storyboard-lines/{line['id']}/generate", json={})
     assert blocked_line.status_code == 422
     outline = client.post(f"/api/tasks/{storyboard.json()['taskId']}/storyboard-outline/regenerate")

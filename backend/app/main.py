@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import re
+import tempfile
 import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -42,7 +43,7 @@ from .balance import ensure_video_batch_balance, query_provider_balances
 from .chat import chat_manager
 from .config import settings, validate_runtime_security
 from .database import close_database, database_ok, database_session, init_database
-from .domain import owned_line, owned_project, owned_task, uid, visible_humans
+from .domain import owned_line, owned_project, owned_task, project_audio_json, uid, visible_humans
 from .domain import router as domain_router
 from .error_logging import record_api_error, request_payload
 from .h3_prompt_compiler import compile_h3_prompt
@@ -53,6 +54,7 @@ from .models import (
     AiProviderModel,
     DigitalHumanModel,
     GenerationJobModel,
+    ProjectAudioAssetModel,
     ProjectCastModel,
     ProjectTaskModel,
     SongEmotionProfileModel,
@@ -82,6 +84,37 @@ from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
 from .usage_quota import consume_daily_quota
 
 logger = logging.getLogger(__name__)
+
+ASS_AUDIO_MAX_BYTES = 100 * 1024 * 1024
+
+
+async def probe_audio_duration(content: bytes) -> float:
+    with tempfile.TemporaryDirectory(prefix="mv-audio-probe-") as directory:
+        path = Path(directory) / "audio.mp3"
+        path.write_bytes(content)
+        process = await asyncio.create_subprocess_exec(
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            raise HTTPException(422, f"MP3 文件无法解析：{stderr.decode(errors='ignore')[:120]}")
+        try:
+            duration = round(float(stdout.decode().strip()), 3)
+        except ValueError as exc:
+            raise HTTPException(422, "MP3 文件缺少有效时长") from exc
+        if duration <= 0:
+            raise HTTPException(422, "MP3 文件缺少有效时长")
+        return duration
+
 
 ALLOWED_UPLOAD_TYPES: dict[str, set[str]] = {
     ".jpg": {"image/jpeg"},
@@ -427,6 +460,7 @@ async def create_ass_storyboard(
     project_id: str = Form(...),
     song_id: str = Form(...),
     ass_file: UploadFile = File(...),
+    audio_file: UploadFile | None = File(None),
     digital_human_ids: str = Form("[]"),
     extra_requirement: str = Form(""),
     ratio: Literal["16:9", "9:16", "4:3", "1:1"] = Form("16:9"),
@@ -484,6 +518,48 @@ async def create_ass_storyboard(
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     ass_url = await get_storage().put_bytes(safe_key(f"users/{user.id}/ass", ass_file.filename), content, ass_file.content_type)
+    project_audio: ProjectAudioAssetModel | None = None
+    if audio_file and audio_file.filename:
+        if not audio_file.filename.lower().endswith(".mp3") or (audio_file.content_type or "").lower().split(";", 1)[0] not in ALLOWED_UPLOAD_TYPES[".mp3"]:
+            raise HTTPException(422, "审核音频仅支持 MP3 文件")
+        audio_content = await audio_file.read(ASS_AUDIO_MAX_BYTES + 1)
+        if not audio_content or len(audio_content) > ASS_AUDIO_MAX_BYTES:
+            raise HTTPException(422, "MP3 文件必须大于 0 且不超过 100MB")
+        audio_duration = await probe_audio_duration(audio_content)
+        audio_url = await get_storage().put_bytes(
+            safe_key(f"users/{user.id}/project-audio/{project_id}", audio_file.filename),
+            audio_content,
+            audio_file.content_type,
+        )
+        now = utcnow()
+        existing_audio = list(
+            (
+                await db.execute(
+                    select(ProjectAudioAssetModel).where(
+                        ProjectAudioAssetModel.project_id == project_id,
+                        ProjectAudioAssetModel.user_id == user.id,
+                        ProjectAudioAssetModel.deleted_at.is_(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for item in existing_audio:
+            item.is_current = False
+            item.deleted_at = now
+        project_audio = ProjectAudioAssetModel(
+            id=uid("paudio"),
+            project_id=project_id,
+            user_id=user.id,
+            original_filename=audio_file.filename,
+            audio_url=audio_url,
+            mime_type=audio_file.content_type or "audio/mpeg",
+            file_size=len(audio_content),
+            duration_seconds=audio_duration,
+            is_current=True,
+        )
+        db.add(project_audio)
     title = f"{emotion.song_name} – {emotion.song_code}"
     task = ProjectTaskModel(
         id=uid("task"),
@@ -501,6 +577,8 @@ async def create_ass_storyboard(
             "resolution": resolution,
             "imageModel": image_model,
             "videoModel": video_model,
+            "audioTrackVisible": bool(project_audio),
+            "audioOffsetSeconds": 0,
             "meta": {"encoding": encoding, "dialogues": len(cues), "segments": len(segments)},
         },
     )
@@ -569,6 +647,7 @@ async def create_ass_storyboard(
         "status": "parsed",
         "songEmotion": emotion_context,
         "lines": result_lines,
+        "projectAudio": project_audio_json(project_audio),
     }
 
 

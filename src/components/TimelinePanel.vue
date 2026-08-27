@@ -30,14 +30,23 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
  * - 同时保留不同时长片段之间的宽度比例。
  */
 const pxPerSec = computed(() => {
-  if (store.totalDuration <= 0 || areaWidth.value <= 0) return PX_MAX
+  if (timelineDuration.value <= 0 || areaWidth.value <= 0) return PX_MAX
   const visibleCount = Math.min(store.timelineClips.length, TARGET_VISIBLE_CLIPS)
   const targetWidth = (areaWidth.value - 2) * (store.timelineClips.length / visibleCount)
-  return Math.min(PX_MAX, targetWidth / store.totalDuration)
+  return Math.min(PX_MAX, targetWidth / timelineDuration.value)
 })
 
+const timelineDuration = computed(() =>
+  Math.max(
+    store.totalDuration,
+    store.audioTrackVisible && store.projectAudio
+      ? store.audioOffsetSeconds + store.projectAudio.duration
+      : 0,
+  ),
+)
+
 const playheadX = computed(() => store.currentTime * pxPerSec.value)
-const totalWidth = computed(() => Math.max(store.totalDuration * pxPerSec.value, 200))
+const totalWidth = computed(() => Math.max(timelineDuration.value * pxPerSec.value, 200))
 
 /** 播放头时间标签半宽（px），贴边时夹取位置，避免被轨道区域左右边缘裁切遮挡 */
 const LABEL_HALF = 26
@@ -52,12 +61,12 @@ const playheadLabelStyle = computed(() => {
 /** 时间刻度（每 5 秒一格） */
 const ticks = computed(() => {
   const list: Array<{ time: number; x: number }> = []
-  for (let t = 5; t <= store.totalDuration + 0.001; t += 5) {
+  for (let t = 5; t <= timelineDuration.value + 0.001; t += 5) {
     list.push({ time: t, x: t * pxPerSec.value })
   }
   // 总时长刻度（非 5 的倍数时）
-  if (store.totalDuration > 0 && store.totalDuration % 5 !== 0) {
-    list.push({ time: store.totalDuration, x: store.totalDuration * pxPerSec.value })
+  if (timelineDuration.value > 0 && timelineDuration.value % 5 !== 0) {
+    list.push({ time: timelineDuration.value, x: timelineDuration.value * pxPerSec.value })
   }
   return list
 })
@@ -93,6 +102,29 @@ const onClipClick = (lineId: string, e: MouseEvent) => {
 }
 
 const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
+
+const resetAudioOffset = () => {
+  store.setAudioOffset(0)
+  void store.persistAudioTrackConfig()
+}
+
+const onAudioTrackDown = (event: MouseEvent) => {
+  event.stopPropagation()
+  const originX = event.clientX
+  const originOffset = store.audioOffsetSeconds
+  store.scrubbing = true
+  const onMove = (move: MouseEvent) => {
+    store.setAudioOffset(originOffset + (move.clientX - originX) / pxPerSec.value)
+  }
+  const onUp = () => {
+    store.scrubbing = false
+    void store.persistAudioTrackConfig()
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
 </script>
 
 <template>
@@ -101,6 +133,14 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
       <div class="title-group">
         <h2>视频时间轴</h2>
         <span class="badge-success">已同步</span>
+      </div>
+      <div v-if="store.projectAudio" class="audio-actions">
+        <button v-if="store.audioTrackVisible" class="audio-toggle" @click="resetAudioOffset">
+          音频归零
+        </button>
+        <button class="audio-toggle" @click="store.setAudioTrackVisible(!store.audioTrackVisible)">
+          {{ store.audioTrackVisible ? '隐藏音频轨道' : '显示音频轨道' }}
+        </button>
       </div>
     </header>
 
@@ -111,6 +151,10 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
         <div class="track-label">
           <span class="track-icon"><AppIcon name="movie" :size="15" /></span>
           <span>视频轨道</span>
+        </div>
+        <div v-if="store.audioTrackVisible && store.projectAudio" class="track-label">
+          <span class="track-icon"><AppIcon name="volume-on" :size="15" /></span>
+          <span>审核音频</span>
         </div>
       </div>
 
@@ -156,6 +200,25 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
             </div>
           </div>
 
+          <div v-if="store.audioTrackVisible && store.projectAudio" class="track audio-track">
+            <div
+              class="clip audio-clip"
+              :style="{
+                left: store.audioOffsetSeconds * pxPerSec + 'px',
+                width: store.projectAudio.duration * pxPerSec + 'px',
+              }"
+              :title="`${store.projectAudio.filename} · 偏移 ${store.audioOffsetSeconds >= 0 ? '+' : ''}${store.audioOffsetSeconds.toFixed(1)} 秒`"
+              @mousedown="onAudioTrackDown"
+            >
+              <AppIcon name="volume-on" :size="14" />
+              <span>{{ store.projectAudio.filename }}</span>
+              <strong
+                >{{ store.audioOffsetSeconds >= 0 ? '+' : ''
+                }}{{ store.audioOffsetSeconds.toFixed(1) }}s</strong
+              >
+            </div>
+          </div>
+
           <!-- 播放指针（transform 位移：只走合成器，避免每帧触发布局） -->
           <div class="playhead" :style="{ transform: `translateX(${playheadX}px)` }">
             <span class="playhead-label" :style="playheadLabelStyle">{{
@@ -180,6 +243,23 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
   display: flex;
   align-items: center;
   gap: 10px;
+}
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.audio-toggle {
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 6px 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.audio-actions {
+  display: flex;
+  gap: 8px;
 }
 .timeline-body {
   display: flex;
@@ -287,6 +367,27 @@ const lineOf = (lineId: string) => store.lines.find((l) => l.id === lineId)
 .shot-clip .clip-thumb ~ .clip-index {
   color: #fff;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+.audio-track {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.audio-clip {
+  height: calc(100% - 8px);
+  flex-direction: row;
+  justify-content: flex-start;
+  padding: 0 12px;
+  background: linear-gradient(90deg, #dff3eb, #c5e8da);
+  border-color: #63a989;
+  color: #28634f;
+  cursor: grab;
+  white-space: nowrap;
+}
+.audio-clip:active {
+  cursor: grabbing;
+}
+.audio-clip strong {
+  margin-left: auto;
 }
 .playhead {
   position: absolute;

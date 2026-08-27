@@ -44,8 +44,8 @@ const syncVideo = (force = false) => {
       }
     }
   }
-  video.muted = store.muted
-  video.volume = store.volume
+  // 生成视频按产品约定始终作为无声视频审核，避免供应商意外音轨与歌曲叠加。
+  video.muted = true
   if (store.isPlaying) {
     video.play().catch(() => {})
   } else {
@@ -78,38 +78,58 @@ watch(
   },
 )
 
-/** 当前应播放的配音 —— 行切换/播放状态变化时同步 audio 元素 */
 const currentVoiceUrl = computed(() => {
   const line = store.currentLine
   return line?.voice.status === 'done' ? line.voice.url : undefined
 })
 
+/** 项目级审核音轨优先；未启用时保留原有逐镜配音播放能力。 */
+const syncReviewAudio = () => {
+  const audio = audioRef.value
+  const asset = store.projectAudio
+  if (!audio) return
+  const useReviewAudio = Boolean(asset && store.audioTrackVisible)
+  const voiceUrl = currentVoiceUrl.value
+  if (!useReviewAudio && !voiceUrl) {
+    audio.pause()
+    return
+  }
+  const url = useReviewAudio ? asset!.url : voiceUrl!
+  if (audio.getAttribute('src') !== url) audio.src = url
+  const clip = store.currentClip
+  const audioTime = useReviewAudio
+    ? store.currentTime - store.audioOffsetSeconds
+    : Math.max(0, store.currentTime - (clip?.start ?? 0))
+  const duration = useReviewAudio ? asset!.duration : (store.currentLine?.voice.duration ?? 0)
+  const inRange = audioTime >= 0 && (duration <= 0 || audioTime < duration)
+  audio.volume = store.muted ? 0 : store.volume
+  if (inRange && Math.abs(audio.currentTime - audioTime) > (store.scrubbing ? 0.05 : 0.3)) {
+    audio.currentTime = audioTime
+  }
+  if (store.isPlaying && inRange) audio.play().catch(() => {})
+  else audio.pause()
+}
+
 watch(
-  () => [store.isPlaying, currentVoiceUrl.value] as const,
-  async ([playing, url]) => {
-    const audio = audioRef.value
-    if (!audio) return
-    if (playing && url) {
-      if (audio.src !== url) audio.src = url
-      // 对齐到片段内偏移
-      const clip = store.currentClip
-      if (clip) audio.currentTime = Math.max(0, store.currentTime - clip.start)
-      audio.volume = store.muted ? 0 : store.volume
-      audio.play().catch(() => {})
-    } else {
-      audio.pause()
-    }
-  },
+  () =>
+    [
+      store.isPlaying,
+      store.projectAudio?.url,
+      store.audioTrackVisible,
+      store.audioOffsetSeconds,
+      currentVoiceUrl.value,
+    ] as const,
+  syncReviewAudio,
+  { flush: 'post' },
 )
+
+watch(() => store.currentTime, syncReviewAudio)
 
 watch(
   () => [store.volume, store.muted] as const,
   ([v, m]) => {
     if (audioRef.value) audioRef.value.volume = m ? 0 : v
-    if (videoRef.value) {
-      videoRef.value.muted = m
-      videoRef.value.volume = v
-    }
+    if (videoRef.value) videoRef.value.muted = true
   },
 )
 
@@ -220,6 +240,7 @@ const toggleFullscreen = () => {
         :src="currentVideoUrl"
         class="preview-img"
         playsinline
+        muted
         @loadeddata="syncVideo()"
       />
       <img v-else-if="currentImage" :src="currentImage" alt="视频预览" class="preview-img" />

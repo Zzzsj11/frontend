@@ -10,6 +10,7 @@ import type {
   OutlineFailedSegment,
   OutlinePlannedLine,
   OutlineProgress,
+  ProjectAudio,
   ScriptLine,
   ShotAsset,
   ShotGenOptions,
@@ -195,6 +196,11 @@ export const useProjectStore = defineStore('project', {
     activeStoryboardType: null as string | null,
     /** 当前任务状态（parsed/outlining/outline_failed/generating/ready/partial/failed） */
     activeTaskStatus: null as string | null,
+    activeStoryboardConfig: {} as Record<string, unknown>,
+    /** 当前歌曲项目的整首审核音轨。 */
+    projectAudio: null as ProjectAudio | null,
+    audioTrackVisible: false,
+    audioOffsetSeconds: 0,
     /** 正在重试的场景段序号（段级大纲重新生成） */
     segmentRetrying: {} as Record<number, boolean>,
     currentTime: 0,
@@ -481,6 +487,10 @@ export const useProjectStore = defineStore('project', {
       this.activeStoryBible = null
       this.activeStoryboardType = null
       this.activeTaskStatus = null
+      this.activeStoryboardConfig = {}
+      this.projectAudio = null
+      this.audioTrackVisible = false
+      this.audioOffsetSeconds = 0
       this.castIds = []
       this.lines = []
       this.selectedLineId = null
@@ -504,6 +514,13 @@ export const useProjectStore = defineStore('project', {
       this.activeStoryBible = script.storyBible ?? null
       this.activeStoryboardType = script.storyboardType || null
       this.activeTaskStatus = script.status || null
+      this.activeStoryboardConfig = script.storyboardConfig ?? {}
+      this.projectAudio = script.projectAudio ?? null
+      this.audioTrackVisible = Boolean(
+        script.projectAudio &&
+        (script.storyboardConfig?.audioTrackVisible ?? script.storyboardType === 'ass'),
+      )
+      this.audioOffsetSeconds = Number(script.storyboardConfig?.audioOffsetSeconds ?? 0)
       this.selectedLineId = this.lines[0]?.id ?? null
       this.currentTime = 0
       if (taskId) {
@@ -1742,6 +1759,9 @@ export const useProjectStore = defineStore('project', {
             .storyboardConfig?.storyBible ?? null
         this.activeStoryboardType = 'general'
         this.activeTaskStatus = 'parsed'
+        this.activeStoryboardConfig = { audioTrackVisible: false, audioOffsetSeconds: 0 }
+        this.audioTrackVisible = false
+        this.audioOffsetSeconds = 0
         this.selectedLineId = this.lines[0]?.id ?? null
         this.currentTime = 0
         this.generalStoryboardOpen = false
@@ -1807,6 +1827,9 @@ export const useProjectStore = defineStore('project', {
         this.activeStoryBible = null
         this.activeStoryboardType = 'general_random'
         this.activeTaskStatus = 'ready'
+        this.activeStoryboardConfig = { audioTrackVisible: false, audioOffsetSeconds: 0 }
+        this.audioTrackVisible = false
+        this.audioOffsetSeconds = 0
         this.selectedLineId = lines[0]?.id ?? null
         this.currentTime = 0
         this.randomGeneralStoryboardOpen = false
@@ -1941,6 +1964,13 @@ export const useProjectStore = defineStore('project', {
           (script as typeof script & { storyBible?: StoryBible }).storyBible ?? null
         this.activeStoryboardType = 'ass'
         this.activeTaskStatus = script.status || 'parsed'
+        this.activeStoryboardConfig = {
+          audioTrackVisible: Boolean(script.projectAudio),
+          audioOffsetSeconds: 0,
+        }
+        this.projectAudio = script.projectAudio ?? null
+        this.audioTrackVisible = Boolean(script.projectAudio)
+        this.audioOffsetSeconds = 0
         this.selectedLineId = this.lines[0]?.id ?? null
         this.currentTime = 0
         this.magicOpen = false
@@ -2318,6 +2348,30 @@ export const useProjectStore = defineStore('project', {
     /** PlayerPanel 挂载/卸载视频元素时登记：播放中主时钟以视频真实进度为准 */
     registerVideoEl(el: HTMLVideoElement | null) {
       activeVideoEl = el
+    },
+
+    setAudioTrackVisible(visible: boolean) {
+      this.audioTrackVisible = visible
+      void this.persistAudioTrackConfig()
+    },
+
+    setAudioOffset(seconds: number) {
+      const duration = this.projectAudio?.duration ?? 0
+      const minimum = duration > 0 ? -duration + 0.5 : 0
+      const maximum = this.totalDuration > 0 ? this.totalDuration - 0.5 : 0
+      this.audioOffsetSeconds = Math.round(Math.min(Math.max(seconds, minimum), maximum) * 10) / 10
+    },
+
+    async persistAudioTrackConfig() {
+      if (!this.activeTaskId) return
+      this.activeStoryboardConfig = {
+        ...this.activeStoryboardConfig,
+        audioTrackVisible: this.audioTrackVisible,
+        audioOffsetSeconds: this.audioOffsetSeconds,
+      }
+      await api.updateTask(this.activeTaskId, {
+        storyboard_config: this.activeStoryboardConfig,
+      })
     },
 
     clampCurrentTime() {

@@ -68,4 +68,29 @@ describe('TimelinePanel clip selection', () => {
     await wrapper.findAll('.clip')[1].trigger('click')
     expect(store.currentTime).toBe(4)
   })
+
+  it('shows one uncut project audio track and can hide it', async () => {
+    const store = useProjectStore()
+    store.lines = [vidLine('l1', 5), vidLine('l2', 5)]
+    store.projectAudio = {
+      id: 'audio-1',
+      projectId: 'project-1',
+      filename: 'song.mp3',
+      url: 'https://tos.test/song.mp3',
+      mimeType: 'audio/mpeg',
+      fileSize: 1024,
+      duration: 30,
+    }
+    store.audioTrackVisible = true
+    store.audioOffsetSeconds = 2.5
+
+    const wrapper = mount(TimelinePanel)
+    expect(wrapper.findAll('.audio-clip')).toHaveLength(1)
+    expect(wrapper.get('.audio-clip').text()).toContain('song.mp3')
+    expect(wrapper.get('.audio-clip').text()).toContain('+2.5s')
+
+    await wrapper.findAll('.audio-toggle').at(-1)!.trigger('click')
+    expect(store.audioTrackVisible).toBe(false)
+    expect(wrapper.find('.audio-clip').exists()).toBe(false)
+  })
 })

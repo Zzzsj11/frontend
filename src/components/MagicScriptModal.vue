@@ -21,6 +21,7 @@ const store = useProjectStore()
 // 表单草稿
 const songId = ref('')
 const assFile = ref<File | null>(null)
+const audioFile = ref<File | null>(null)
 const selectedHumanIds = ref<string[]>([])
 const extraRequirement = ref('')
 const ratio = ref<ShotGenOptions['ratio']>('16:9')
@@ -29,6 +30,7 @@ const imageModel = ref(DEFAULT_IMAGE_MODEL)
 const videoModel = ref(DEFAULT_VIDEO_MODEL)
 
 const assInputRef = ref<HTMLInputElement>()
+const audioInputRef = ref<HTMLInputElement>()
 
 const canSubmit = computed(() => songId.value.trim() !== '' && assFile.value !== null)
 const resolutionChoices = computed<ShotGenOptions['resolution'][]>(() => {
@@ -38,6 +40,7 @@ const resolutionChoices = computed<ShotGenOptions['resolution'][]>(() => {
 const resetForm = () => {
   songId.value = ''
   assFile.value = null
+  audioFile.value = null
   selectedHumanIds.value = []
   extraRequirement.value = ''
   ratio.value = '16:9'
@@ -79,6 +82,21 @@ const onAssChange = (e: Event) => {
 }
 const onAssDrop = (e: DragEvent) => pickAss(e.dataTransfer?.files ?? null)
 
+const pickAudio = (files: FileList | null) => {
+  const file = files?.[0]
+  if (!file) return
+  if (!file.name.toLowerCase().endsWith('.mp3')) {
+    store.magicError = '审核音频仅支持 MP3 文件'
+    return
+  }
+  audioFile.value = file
+  store.magicError = null
+}
+const onAudioChange = (e: Event) => {
+  pickAudio((e.target as HTMLInputElement).files)
+  ;(e.target as HTMLInputElement).value = ''
+}
+
 // ---------- 从已有角色库选择 ----------
 const toggleHuman = (id: string) => {
   const index = selectedHumanIds.value.indexOf(id)
@@ -91,6 +109,7 @@ const submit = () => {
   store.runMagicScript({
     songId: songId.value.trim(),
     assFile: assFile.value!,
+    audioFile: audioFile.value ?? undefined,
     digitalHumanIds: selectedHumanIds.value.length ? [...selectedHumanIds.value] : undefined,
     extraRequirement: extraRequirement.value.trim() || undefined,
     ratio: ratio.value,
@@ -191,7 +210,7 @@ const cancel = () => {
         </div>
       </div>
 
-      <!-- 两栏：ass 文件 / 额外要求 -->
+      <!-- 三栏：ASS / 审核音频 / 额外要求 -->
       <div class="upload-grid">
         <div class="upload-col">
           <p class="field-label">上传 ass 字幕文件 <span class="required">*</span></p>
@@ -214,6 +233,35 @@ const cancel = () => {
             </template>
           </div>
           <input ref="assInputRef" type="file" accept=".ass" hidden @change="onAssChange" />
+        </div>
+
+        <div class="upload-col">
+          <p class="field-label">上传审核音频 <span class="optional">（可选，仅 MP3）</span></p>
+          <div
+            class="dropzone"
+            :class="{ filled: audioFile }"
+            @click="audioInputRef?.click()"
+            @dragover.prevent
+            @drop.prevent="pickAudio($event.dataTransfer?.files ?? null)"
+          >
+            <template v-if="audioFile">
+              <span class="file-icon"><AppIcon name="volume-on" :size="28" /></span>
+              <span class="file-name">{{ audioFile.name }}</span>
+              <button class="file-remove" type="button" @click.stop="audioFile = null">移除</button>
+            </template>
+            <template v-else>
+              <span class="file-icon"><AppIcon name="volume-on" :size="28" /></span>
+              <span class="drop-text">点击选择或拖入 .mp3 文件</span>
+              <span class="file-tip">作为视频质量审核的整首歌曲音轨</span>
+            </template>
+          </div>
+          <input
+            ref="audioInputRef"
+            type="file"
+            accept=".mp3,audio/mpeg"
+            hidden
+            @change="onAudioChange"
+          />
         </div>
 
         <div class="upload-col extra-col">

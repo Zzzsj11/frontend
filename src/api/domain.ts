@@ -11,6 +11,7 @@ import type {
   ScriptLine,
   ShotGenOptions,
   SongProject,
+  ProjectAudio,
   StoryBible,
 } from '../types'
 import * as mediaGen from './mediaGen'
@@ -45,6 +46,8 @@ export async function fetchSongScript(
   cast: string[]
   lines: ScriptLine[]
   storyboardType: string
+  storyboardConfig?: Record<string, unknown>
+  projectAudio?: ProjectAudio
   storyBible?: StoryBible
   status: string
   outlineProgress?: Record<string, unknown>
@@ -54,12 +57,15 @@ export async function fetchSongScript(
     storyboardType: string
     status: string
     storyboardConfig?: { storyBible?: StoryBible; outlineProgress?: Record<string, unknown> }
+    projectAudio?: ProjectAudio
     lines: Array<Record<string, unknown>>
   }>(`/tasks/${taskId}?history=0`, polling ? { headers: { 'X-Polling': '1' } } : {})
   return {
     cast: task.cast,
     storyboardType: task.storyboardType,
     status: task.status,
+    storyboardConfig: task.storyboardConfig,
+    projectAudio: task.projectAudio,
     storyBible: task.storyboardConfig?.storyBible,
     outlineProgress: task.storyboardConfig?.outlineProgress,
     lines: task.lines.map(mapScriptLine),
@@ -178,6 +184,7 @@ export interface MagicScript {
   cast: string[]
   /** 两阶段流程：上传仅完成时间轴拆分（parsed），大纲由独立端点生成 */
   status?: string
+  projectAudio?: ProjectAudio
   lines: Array<{
     id?: string
     lyrics: string
@@ -201,6 +208,8 @@ export interface MagicScriptRequest {
   songId: string
   /** 歌词字幕 .ass 文件 */
   assFile: File
+  /** 可选整首审核音轨；仅用于前端审核播放。 */
+  audioFile?: File
   /** 从已有数字人角色库选择的角色 id（可空/可多选） */
   digitalHumanIds?: string[]
   /** 额外要求（可空） */
@@ -221,6 +230,7 @@ export async function generateMagicScript(
   form.append('song_id', req.songId)
   form.append('project_id', req.projectId)
   form.append('ass_file', req.assFile)
+  if (req.audioFile) form.append('audio_file', req.audioFile)
   form.append('digital_human_ids', JSON.stringify(req.digitalHumanIds ?? []))
   form.append('extra_requirement', req.extraRequirement ?? '')
   form.append('ratio', req.ratio)
@@ -412,6 +422,8 @@ export const updateTaskCast = (taskId: string, ids: string[]) =>
     method: 'PUT',
     body: JSON.stringify({ digital_human_ids: ids }),
   })
+export const updateTask = (taskId: string, input: Record<string, unknown>) =>
+  apiRequest(`/tasks/${taskId}`, { method: 'PATCH', body: JSON.stringify(input) })
 export const generateStoryboardLine = (taskId: string, lineId: string, force = false) =>
   apiRequest<Record<string, unknown>>(`/tasks/${taskId}/storyboard-lines/${lineId}/generate`, {
     method: 'POST',

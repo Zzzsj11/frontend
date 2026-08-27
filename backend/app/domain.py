@@ -39,6 +39,7 @@ from .models import (
     DigitalHumanStyleModel,
     GenerationJobModel,
     MaterialExportModel,
+    ProjectAudioAssetModel,
     ProjectCastModel,
     ProjectModel,
     ProjectTaskModel,
@@ -304,7 +305,7 @@ async def delete_user(user_id: str, user: CurrentUser, db: AsyncSession = Db) ->
     for project in projects:
         project.deleted_at = now
     await soft_delete_task_tree(db, task_ids, now)
-    for model in (RefreshTokenModel, DigitalHumanStyleModel, DigitalHumanModel, ChatSessionModel, GenerationJobModel, MaterialExportModel):
+    for model in (RefreshTokenModel, DigitalHumanStyleModel, DigitalHumanModel, ChatSessionModel, GenerationJobModel, MaterialExportModel, ProjectAudioAssetModel):
         await db.execute(update(model).where(model.user_id == user_id, model.deleted_at.is_(None)).values(deleted_at=now))
     session_ids = list((await db.execute(select(ChatSessionModel.id).where(ChatSessionModel.user_id == user_id))).scalars().all())
     if session_ids:
@@ -421,6 +422,20 @@ def task_json(item: ProjectTaskModel) -> dict:
     }
 
 
+def project_audio_json(item: ProjectAudioAssetModel | None) -> dict | None:
+    if not item:
+        return None
+    return {
+        "id": item.id,
+        "projectId": item.project_id,
+        "filename": item.original_filename,
+        "url": item.audio_url,
+        "mimeType": item.mime_type,
+        "fileSize": item.file_size,
+        "duration": item.duration_seconds,
+    }
+
+
 @router.get("/projects")
 async def list_projects(user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
     projects = list(
@@ -504,6 +519,9 @@ async def delete_project(project_id: str, user: CurrentUser, db: AsyncSession = 
     item.deleted_at = now
     task_ids = list((await db.execute(select(ProjectTaskModel.id).where(ProjectTaskModel.project_id == item.id, ProjectTaskModel.deleted_at.is_(None)))).scalars().all())
     await soft_delete_task_tree(db, task_ids, now)
+    await db.execute(
+        update(ProjectAudioAssetModel).where(ProjectAudioAssetModel.project_id == item.id, ProjectAudioAssetModel.deleted_at.is_(None)).values(deleted_at=now, is_current=False)
+    )
     await db.commit()
     return {"ok": True}
 
@@ -892,8 +910,19 @@ async def get_task(task_id: str, user: CurrentUser, db: AsyncSession = Db, histo
     for prompt_job in prompt_jobs:
         if prompt_job.storyboard_line_id:
             latest_prompt_job.setdefault(prompt_job.storyboard_line_id, prompt_job)
+    project_audio = (
+        await db.execute(
+            select(ProjectAudioAssetModel).where(
+                ProjectAudioAssetModel.project_id == task.project_id,
+                ProjectAudioAssetModel.user_id == user.id,
+                ProjectAudioAssetModel.is_current.is_(True),
+                ProjectAudioAssetModel.deleted_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
     return {
         **task_json(task),
+        "projectAudio": project_audio_json(project_audio),
         "cast": [item.digital_human_id for item in cast],
         "lines": [
             _line_json_from_assets(
