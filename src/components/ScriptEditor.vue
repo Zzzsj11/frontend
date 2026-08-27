@@ -17,6 +17,21 @@ import { estimateVideoBatchCost, estimateVideoBatchCostByProvider } from '../uti
 const store = useProjectStore()
 const lineListRef = ref<HTMLDivElement>()
 const checkingBatchCost = ref(false)
+const addingSingleVideo = ref(false)
+
+/** 底部新增单条视频后，将已有滚动条的分镜列表滚到最底部，露出新条目。 */
+const addSingleVideo = async () => {
+  addingSingleVideo.value = true
+  try {
+    store.addLine()
+    await nextTick()
+    const list = lineListRef.value
+    if (!list || list.scrollHeight <= list.clientHeight) return
+    list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' })
+  } finally {
+    addingSingleVideo.value = false
+  }
+}
 
 const focusNextFailedLine = async () => {
   const failed = store.lines.filter((line) => line.generationStatus === 'failed')
@@ -40,7 +55,7 @@ const focusNextFailedLine = async () => {
 watch(
   () => store.selectedLineId,
   async (lineId) => {
-    if (!lineId) return
+    if (!lineId || addingSingleVideo.value) return
     await nextTick()
     const list = lineListRef.value
     const item = list?.querySelector<HTMLElement>(`[data-line-id="${lineId}"]`)
@@ -373,7 +388,7 @@ const confirmBatchGenerate = async () => {
     </div>
 
     <footer class="editor-footer">
-      <button class="btn-add" @click="store.addLine()">
+      <button class="btn-add" @click="addSingleVideo">
         <AppIcon name="plus" :size="14" />
         单个视频
       </button>

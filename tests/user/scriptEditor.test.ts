@@ -81,4 +81,22 @@ describe('ScriptEditor batch generation confirmation', () => {
     expect(generate).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+
+  it('从底部新增单个视频后将已有滚动条的列表滚到底部', async () => {
+    const store = useProjectStore()
+    store.lines = Array.from({ length: 8 }, (_, index) => pendingLine(`line-${index}`))
+    const wrapper = mount(ScriptEditor)
+    const list = wrapper.get('.line-list').element as HTMLDivElement
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 240 })
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1200 })
+    const scrollTo = vi.fn()
+    list.scrollTo = scrollTo
+
+    await wrapper.get('.editor-footer .btn-add').trigger('click')
+    await vi.waitFor(() => expect(scrollTo).toHaveBeenCalled())
+
+    expect(store.lines).toHaveLength(9)
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1200, behavior: 'smooth' })
+    wrapper.unmount()
+  })
 })
