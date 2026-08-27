@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { dataUrlToBlob, uploadDataUrl } from '../../src/api/domain'
+import { createStoryboardLine, dataUrlToBlob, uploadDataUrl } from '../../src/api/domain'
 
 describe('digital human reference upload', () => {
   afterEach(() => vi.restoreAllMocks())
@@ -29,5 +29,33 @@ describe('digital human reference upload', () => {
     expect(url).toBe('/api/uploads?category=digital-humans')
     expect(init?.body).toBeInstanceOf(FormData)
     expect((init?.body as FormData).get('file')).toBeInstanceOf(Blob)
+  })
+
+  it('normalizes a newly created creative line before immediate H3 generation', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'line-creative',
+          source: 'creative',
+          shotType: 'creative',
+          originalPrompt: '原始描述',
+          optimizedPrompt: 'optimized prompt',
+          shotPrompt: 'optimized prompt',
+          digitalHumanIds: [],
+          sceneAssets: [],
+          shotAssets: [],
+          voiceAssets: [],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+
+    const line = await createStoryboardLine('task-1', { source: 'creative' })
+
+    expect(line.source).toBe('creative')
+    expect(line.manual).toBe(true)
+    expect(line.scene).toEqual({ status: 'none', imageUrl: undefined, originalImageUrl: undefined })
+    expect(line.shot).toMatchObject({ status: 'none', assets: [] })
+    expect(line.voice).toEqual({ status: 'none' })
   })
 })

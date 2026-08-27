@@ -1257,7 +1257,7 @@ export const useProjectStore = defineStore('project', {
         shot_options: input.options,
         digital_human_ids: [],
       })
-      const line = saved as unknown as ScriptLine
+      const line = saved
       line.manual = true
       this.lines.push(line)
       this.selectedLineId = line.id

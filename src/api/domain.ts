@@ -409,11 +409,13 @@ export async function streamMaterialExport(
     }
   }
 }
-export const createStoryboardLine = (taskId: string, input: Record<string, unknown>) =>
-  apiRequest<{ id: string }>(`/tasks/${taskId}/storyboard/lines`, {
-    method: 'POST',
-    body: JSON.stringify(input),
-  })
+export const createStoryboardLine = async (taskId: string, input: Record<string, unknown>) =>
+  mapScriptLine(
+    await apiRequest<Record<string, unknown>>(`/tasks/${taskId}/storyboard/lines`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  )
 export const updateStoryboardLine = (id: string, input: Record<string, unknown>) =>
   apiRequest(`/storyboard-lines/${id}`, { method: 'PATCH', body: JSON.stringify(input) })
 export const deleteStoryboardLine = (id: string) =>
