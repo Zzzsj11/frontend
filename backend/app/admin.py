@@ -1924,6 +1924,7 @@ async def prompt_optimizer_status(user: CurrentUser):
 @router.post("/prompt-optimizer/upload")
 async def prompt_optimizer_upload(file: UploadFile, user: CurrentUser):
     require_admin(user)
+    _runninghub_guard()
     content = await file.read(50 * 1024 * 1024 + 1)
     if len(content) > 50 * 1024 * 1024:
         raise HTTPException(413, "素材不能超过 50MB")
@@ -1937,7 +1938,20 @@ async def prompt_optimizer_upload(file: UploadFile, user: CurrentUser):
     else:
         url = await get_storage().put_bytes(key, content, mime_type)
         thumbnail_url = None
-    return {"kind": kind, "url": url, "thumbnailUrl": thumbnail_url, "name": file.filename or "", "mimeType": mime_type, "size": len(content)}
+    try:
+        runninghub = await rh_upload_media(content, file.filename or f"reference-{kind}")
+    except RunningHubError as exc:
+        raise _runninghub_error(exc) from exc
+    return {
+        "kind": kind,
+        "url": url,
+        "thumbnailUrl": thumbnail_url,
+        "runningHubFileName": runninghub["fileName"],
+        "runningHubDownloadUrl": runninghub.get("downloadUrl", ""),
+        "name": file.filename or "",
+        "mimeType": mime_type,
+        "size": len(content),
+    }
 
 
 @router.get("/prompt-optimizer/tasks")

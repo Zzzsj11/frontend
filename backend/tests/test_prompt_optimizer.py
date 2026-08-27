@@ -25,6 +25,28 @@ def test_prompt_optimizer_status_is_admin_only(client, monkeypatch) -> None:
     assert body["durationRange"] == [4, 15]
 
 
+def test_prompt_optimizer_upload_registers_tos_and_runninghub(client, monkeypatch) -> None:
+    monkeypatch.setattr(admin_module, "_runninghub_guard", lambda: None)
+
+    async def fake_put_image(_key, _content, _mime_type):
+        return "https://tos.example/person.jpg", "https://tos.example/person-thumb.jpg"
+
+    async def fake_rh_upload(_content, filename):
+        assert filename == "person.jpg"
+        return {"fileName": "rh-person.jpg", "downloadUrl": "https://rh.example/person.jpg", "size": "5"}
+
+    monkeypatch.setattr(admin_module, "put_image_with_thumbnail", fake_put_image)
+    monkeypatch.setattr(admin_module, "rh_upload_media", fake_rh_upload)
+    response = client.post(
+        "/api/admin/prompt-optimizer/upload",
+        files={"file": ("person.jpg", b"image", "image/jpeg")},
+    )
+    assert response.status_code == 200
+    assert response.json()["url"] == "https://tos.example/person.jpg"
+    assert response.json()["thumbnailUrl"] == "https://tos.example/person-thumb.jpg"
+    assert response.json()["runningHubFileName"] == "rh-person.jpg"
+
+
 def test_prompt_optimizer_gemini_records_user_task_and_usage(client, monkeypatch) -> None:
     monkeypatch.setattr(
         admin_module,

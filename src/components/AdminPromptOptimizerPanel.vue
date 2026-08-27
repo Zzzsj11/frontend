@@ -12,6 +12,15 @@ import {
   type PromptOptimizerStatus,
   type PromptOptimizerTask,
 } from '../api/adminPromptOptimizer'
+import {
+  fetchRunningHubStatus,
+  queryRunningHubTask,
+  submitRunningHubTask,
+  type RunningHubStatus,
+  type RunningHubTaskResult,
+} from '../api/adminRunningHub'
+
+type GenerationMode = 'text' | 'first_frame' | 'first_last' | 'reference'
 
 const status = ref<PromptOptimizerStatus | null>(null)
 const provider = ref<PromptOptimizerProvider>('minimax')
@@ -21,13 +30,20 @@ const ratio = ref('16:9')
 const media = ref<PromptOptimizerMedia[]>([])
 const tasks = ref<PromptOptimizerTask[]>([])
 const current = ref<PromptOptimizerTask | null>(null)
+const generationMode = ref<GenerationMode>('reference')
+const runningHubStatus = ref<RunningHubStatus | null>(null)
+const generation = ref<RunningHubTaskResult | null>(null)
+const generationLoading = ref(false)
+const generationError = ref('')
 const loading = ref(false)
 const uploading = ref(false)
 const dragging = ref(false)
 const error = ref('')
 const copied = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
+const promptInput = ref<HTMLTextAreaElement | null>(null)
 let pollTimer: ReturnType<typeof setTimeout> | null = null
+let generationPollTimer: ReturnType<typeof setTimeout> | null = null
 
 const providerInfo = computed(() => status.value?.providers[provider.value])
 const counts = computed(() => ({
@@ -42,6 +58,37 @@ const canSubmit = computed(
     media.value.length > 0 &&
     !loading.value &&
     !uploading.value,
+)
+const generationImages = computed(() => media.value.filter((item) => item.kind === 'image'))
+const generationVideos = computed(() => media.value.filter((item) => item.kind === 'video'))
+const generationAudios = computed(() => media.value.filter((item) => item.kind === 'audio'))
+const generationPrompt = computed(() => current.value?.outputPrompt?.trim() || prompt.value.trim())
+const canGenerate = computed(() => {
+  if (!runningHubStatus.value?.configured || generationLoading.value || !generationPrompt.value)
+    return false
+  if (media.value.some((item) => !item.runningHubFileName)) return false
+  if (generationMode.value === 'text') return true
+  if (generationMode.value === 'first_frame') return generationImages.value.length >= 1
+  if (generationMode.value === 'first_last') return generationImages.value.length >= 2
+  return (
+    generationImages.value.length + generationVideos.value.length > 0 &&
+    generationImages.value.length <= 6 &&
+    generationVideos.value.length <= 1 &&
+    generationAudios.value.length <= 3 &&
+    media.value.length <= 10
+  )
+})
+const generationHint = computed(() => {
+  if (generationMode.value === 'text') return '无需参考素材，直接根据提示词生成。'
+  if (generationMode.value === 'first_frame') return '使用第 1 张图片作为视频首帧。'
+  if (generationMode.value === 'first_last') return '依次使用第 1、2 张图片作为首帧和尾帧。'
+  return '最多使用 6 张图片、1 段视频和 3 段音频，合计不超过 10 个素材。'
+})
+const generationVideoUrl = computed(
+  () =>
+    generation.value?.results?.find((item) => item.outputType === 'mp4')?.url ||
+    generation.value?.results?.[0]?.url ||
+    '',
 )
 
 const limitFor = (kind: PromptOptimizerMediaKind) =>
@@ -90,9 +137,122 @@ const onDrop = async (event: DragEvent) => {
 
 const removeMedia = (index: number) => media.value.splice(index, 1)
 
+const referenceLabel = (item: PromptOptimizerMedia, index: number) => {
+  const kindLabel = item.kind === 'image' ? '图片' : item.kind === 'video' ? '视频' : '音频'
+  const kindIndex = media.value
+    .slice(0, index + 1)
+    .filter((entry) => entry.kind === item.kind).length
+  return `${kindLabel}${kindIndex}`
+}
+
+const insertReference = async (item: PromptOptimizerMedia, index: number) => {
+  const input = promptInput.value
+  const token = `@${referenceLabel(item, index)}`
+  if (!input) {
+    prompt.value = `${prompt.value}${prompt.value ? ' ' : ''}${token} `
+    return
+  }
+  const start = input.selectionStart
+  const end = input.selectionEnd
+  const prefix = prompt.value.slice(0, start)
+  const suffix = prompt.value.slice(end)
+  const leadingSpace = prefix && !prefix.endsWith(' ') ? ' ' : ''
+  prompt.value = `${prefix}${leadingSpace}${token} ${suffix}`.slice(0, 7000)
+  await Promise.resolve()
+  const cursor = Math.min(prefix.length + leadingSpace.length + token.length + 1, 7000)
+  input.focus()
+  input.setSelectionRange(cursor, cursor)
+}
+
 const stopPoll = () => {
   if (pollTimer) clearTimeout(pollTimer)
   pollTimer = null
+}
+
+const stopGenerationPoll = () => {
+  if (generationPollTimer) clearTimeout(generationPollTimer)
+  generationPollTimer = null
+}
+
+const runningHubRatio = () => {
+  const options =
+    generationMode.value === 'text'
+      ? runningHubStatus.value?.textAspectRatios
+      : generationMode.value === 'first_frame' || generationMode.value === 'first_last'
+        ? runningHubStatus.value?.firstFrameAspectRatios
+        : runningHubStatus.value?.aspectRatios
+  if (!options?.length) return '16:9 (Widescreen)'
+  return options.find((value) => value.startsWith(ratio.value)) || options[0]
+}
+
+const pollGeneration = (taskId: string) => {
+  stopGenerationPoll()
+  const tick = async () => {
+    try {
+      const result = await queryRunningHubTask(taskId)
+      generation.value = result
+      if (result.status === 'RUNNING' || result.status === 'QUEUED') {
+        generationPollTimer = setTimeout(tick, 4000)
+        return
+      }
+      if (result.status !== 'SUCCESS')
+        generationError.value = result.errorMessage || 'H3 视频生成失败'
+    } catch (reason) {
+      generationError.value = reason instanceof Error ? reason.message : '查询 H3 任务失败'
+    }
+    generationPollTimer = null
+  }
+  generationPollTimer = setTimeout(tick, 1500)
+}
+
+const generateVideo = async () => {
+  if (!canGenerate.value || !runningHubStatus.value) return
+  generationLoading.value = true
+  generationError.value = ''
+  generation.value = null
+  stopGenerationPoll()
+  try {
+    const images = generationImages.value.map((item) => item.runningHubFileName!)
+    const created = await submitRunningHubTask({
+      mode: generationMode.value,
+      prompt: generationPrompt.value,
+      duration: duration.value,
+      aspectRatio: runningHubRatio(),
+      images:
+        generationMode.value === 'text'
+          ? []
+          : images.slice(
+              0,
+              generationMode.value === 'first_last'
+                ? 2
+                : generationMode.value === 'first_frame'
+                  ? 1
+                  : 6,
+            ),
+      videos:
+        generationMode.value === 'reference'
+          ? generationVideos.value.slice(0, 1).map((item) => item.runningHubFileName!)
+          : [],
+      audios:
+        generationMode.value === 'reference'
+          ? generationAudios.value.slice(0, 3).map((item) => item.runningHubFileName!)
+          : [],
+      ...(generationMode.value === 'text'
+        ? { textMegapixels: runningHubStatus.value.textMegapixelsDefault }
+        : generationMode.value === 'first_frame' || generationMode.value === 'first_last'
+          ? { firstFrameMegapixels: runningHubStatus.value.firstFrameMegapixelsDefault }
+          : {
+              stage1Megapixels: runningHubStatus.value.megapixelsDefault[0],
+              stage2Megapixels: runningHubStatus.value.megapixelsDefault[1],
+            }),
+    })
+    generation.value = { taskId: created.taskId, status: created.status }
+    pollGeneration(created.taskId)
+  } catch (reason) {
+    generationError.value = reason instanceof Error ? reason.message : 'H3 视频任务提交失败'
+  } finally {
+    generationLoading.value = false
+  }
 }
 
 const updateTask = (task: PromptOptimizerTask) => {
@@ -157,13 +317,15 @@ const copyOutput = async () => {
 
 onMounted(async () => {
   try {
-    const [nextStatus, history] = await Promise.all([
+    const [nextStatus, history, nextRunningHubStatus] = await Promise.all([
       fetchPromptOptimizerStatus(),
       fetchPromptOptimizerTasks(),
+      fetchRunningHubStatus(),
     ])
     status.value = nextStatus
     tasks.value = history.items
     current.value = history.items[0] || null
+    runningHubStatus.value = nextRunningHubStatus
     if (!nextStatus.providers.minimax.configured && nextStatus.providers.gemini.configured)
       provider.value = 'gemini'
   } catch (reason) {
@@ -171,7 +333,10 @@ onMounted(async () => {
   }
 })
 
-onBeforeUnmount(stopPoll)
+onBeforeUnmount(() => {
+  stopPoll()
+  stopGenerationPoll()
+})
 </script>
 
 <template>
@@ -201,10 +366,50 @@ onBeforeUnmount(stopPoll)
         当前服务未配置后端密钥，请先设置对应的 PROMPT_OPTIMIZER_* 环境变量。
       </p>
 
-      <label class="field-label" for="optimizer-prompt">目标描述</label>
+      <div class="generation-mode" role="group" aria-label="H3 生成模式">
+        <button
+          v-for="item in [
+            { value: 'text', label: '文生视频' },
+            { value: 'first_frame', label: '首帧生成' },
+            { value: 'first_last', label: '首尾帧生成' },
+            { value: 'reference', label: '多参考生成' },
+          ] as Array<{ value: GenerationMode; label: string }>"
+          :key="item.value"
+          type="button"
+          :class="{ active: generationMode === item.value }"
+          @click="generationMode = item.value"
+        >
+          {{ item.label }}
+        </button>
+      </div>
+      <p class="generation-hint">{{ generationHint }}</p>
+
+      <div class="prompt-title">
+        <label class="field-label" for="optimizer-prompt">目标描述</label>
+        <button v-if="prompt" type="button" @click="prompt = ''">一键清空</button>
+      </div>
       <div class="prompt-box">
+        <div v-if="media.length" class="prompt-references" aria-label="已上传素材引用">
+          <button
+            v-for="(item, index) in media"
+            :key="`reference-${item.url}-${index}`"
+            type="button"
+            :class="`kind-${item.kind}`"
+            :title="`插入 @${referenceLabel(item, index)}`"
+            @click="insertReference(item, index)"
+          >
+            <img
+              v-if="item.kind !== 'audio'"
+              :src="item.thumbnailUrl || item.url"
+              :alt="item.name"
+            />
+            <span v-else class="reference-audio-icon">♪</span>
+            {{ referenceLabel(item, index) }}
+          </button>
+        </div>
         <textarea
           id="optimizer-prompt"
+          ref="promptInput"
           v-model="prompt"
           maxlength="7000"
           placeholder="描述目标视频，并用图片1、视频1、音频1等自然语言说明各素材用途…"
@@ -221,20 +426,6 @@ onBeforeUnmount(stopPoll)
         </div>
       </div>
 
-      <button
-        type="button"
-        class="drop-zone"
-        :class="{ dragging }"
-        :disabled="uploading"
-        @click="fileInput?.click()"
-        @dragenter.prevent="dragging = true"
-        @dragover.prevent
-        @dragleave.prevent="dragging = false"
-        @drop.prevent="onDrop"
-      >
-        <b>＋</b>
-        <span>{{ uploading ? '正在上传到 TOS…' : '点击或拖拽上传图片、视频或音频' }}</span>
-      </button>
       <input
         ref="fileInput"
         class="file-input"
@@ -244,14 +435,32 @@ onBeforeUnmount(stopPoll)
         @change="onFileChange"
       />
 
-      <div v-if="media.length" class="media-grid">
+      <div
+        class="media-strip"
+        :class="{ dragging }"
+        @dragenter.prevent="dragging = true"
+        @dragover.prevent
+        @dragleave.prevent="dragging = false"
+        @drop.prevent="onDrop"
+      >
+        <button
+          type="button"
+          class="add-media-card"
+          :disabled="uploading"
+          aria-label="上传参考素材"
+          @click="fileInput?.click()"
+        >
+          <b>＋</b>
+          <span>{{ uploading ? '上传中' : '添加素材' }}</span>
+        </button>
         <article v-for="(item, index) in media" :key="`${item.url}-${index}`" class="media-card">
+          <span class="media-order">{{ index + 1 }}</span>
           <img v-if="item.kind === 'image'" :src="item.thumbnailUrl || item.url" :alt="item.name" />
           <video v-else-if="item.kind === 'video'" :src="item.url" muted preload="metadata" />
           <div v-else class="audio-preview">♫</div>
           <div class="media-info">
             <b>{{ item.name }}</b>
-            <small>{{ item.kind }}</small>
+            <small>{{ referenceLabel(item, index) }}</small>
           </div>
           <button type="button" title="移除素材" aria-label="移除素材" @click="removeMedia(index)">
             ×
@@ -290,6 +499,10 @@ onBeforeUnmount(stopPoll)
               : '使用 MiniMax 官方优化提示词'
         }}
       </button>
+      <button class="generate-button" type="button" :disabled="!canGenerate" @click="generateVideo">
+        {{ generationLoading ? '正在提交 H3…' : '使用 H3 生成视频' }}
+      </button>
+      <p v-if="generationError" class="form-error">{{ generationError }}</p>
     </section>
 
     <section class="result-panel">
@@ -343,6 +556,22 @@ onBeforeUnmount(stopPoll)
           <small>{{ task.duration }}s · {{ task.ratio }}</small>
         </button>
       </div>
+
+      <div v-if="generation" class="generation-result">
+        <div>
+          <b>H3 视频任务</b>
+          <span>{{ generation.status }}</span>
+          <small>{{ generation.taskId }}</small>
+        </div>
+        <video v-if="generationVideoUrl" :src="generationVideoUrl" controls playsinline />
+        <div
+          v-else-if="generation.status === 'RUNNING' || generation.status === 'QUEUED'"
+          class="generation-progress"
+        >
+          <span class="spinner" />
+          RunningHub 正在生成视频
+        </div>
+      </div>
     </section>
   </div>
 </template>
@@ -385,6 +614,36 @@ header p,
   gap: 10px;
   margin: 20px 0;
 }
+.generation-mode {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+  padding: 5px;
+}
+.generation-hint {
+  margin: 0 0 18px;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+}
+.generation-mode button {
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  padding: 8px 5px;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+.generation-mode button.active {
+  border-color: var(--primary-border);
+  background: var(--primary-light);
+  color: var(--primary);
+  font-weight: 700;
+}
 .provider-switch button {
   display: flex;
   flex-direction: column;
@@ -424,16 +683,76 @@ header p,
   font-size: 13px;
   font-weight: 700;
 }
+.prompt-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.prompt-title button {
+  border: 0;
+  background: transparent;
+  padding: 0 0 8px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.prompt-title button:hover {
+  color: var(--primary);
+}
 .prompt-box {
   position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+}
+.prompt-box:focus-within {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary-border);
+}
+.prompt-references {
+  display: flex;
+  gap: 8px;
+  padding: 12px 12px 0;
+  overflow-x: auto;
+}
+.prompt-references button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--primary-border);
+  border-radius: var(--radius-pill);
+  background: var(--primary-light);
+  padding: 4px 9px 4px 5px;
+  color: var(--primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+.prompt-references button.kind-audio {
+  border-color: var(--success);
+  background: var(--success-light);
+  color: var(--success);
+}
+.prompt-references img,
+.reference-audio-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-xs);
+  object-fit: cover;
+}
+.reference-audio-icon {
+  display: grid;
+  place-items: center;
+  background: var(--success-light);
+  font-size: var(--font-lg);
 }
 .prompt-box textarea {
   width: 100%;
   min-height: 150px;
   resize: vertical;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-subtle);
+  border: 0;
+  outline: 0;
+  background: transparent;
   padding: 13px 14px 28px;
   color: var(--text);
   line-height: 1.6;
@@ -463,64 +782,86 @@ header p,
 }
 .media-counts span {
   border: 1px solid var(--border);
-  border-radius: 99px;
+  border-radius: var(--radius-pill);
   padding: 3px 7px;
 }
-.drop-zone {
+.file-input {
+  display: none;
+}
+.media-strip {
   display: flex;
-  width: 100%;
-  min-height: 76px;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
+  gap: 10px;
+  min-height: 108px;
+  margin-top: 10px;
+  padding: 4px;
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+}
+.media-strip.dragging {
+  background: var(--primary-light);
+  box-shadow: inset 0 0 0 1px var(--primary-border);
+}
+.add-media-card {
+  display: grid;
+  min-width: 96px;
+  min-height: 96px;
+  flex: 0 0 96px;
+  place-content: center;
+  justify-items: center;
+  gap: 5px;
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-sm);
   background: var(--surface-subtle);
   color: var(--text-muted);
   cursor: pointer;
 }
-.drop-zone.dragging {
-  border-color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
-}
-.drop-zone b {
+.add-media-card b {
   color: var(--primary);
-  font-size: 24px;
+  font-size: 26px;
 }
-.file-input {
-  display: none;
-}
-.media-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 10px;
+.add-media-card span {
+  font-size: var(--font-sm);
 }
 .media-card {
   position: relative;
-  display: grid;
-  grid-template-columns: 54px minmax(0, 1fr) 24px;
-  gap: 8px;
-  align-items: center;
+  display: flex;
+  min-width: 112px;
+  max-width: 112px;
+  flex: 0 0 112px;
+  flex-direction: column;
   border: 1px solid var(--border);
-  border-radius: var(--radius-xs);
-  padding: 6px;
-  min-width: 0;
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+  padding: 4px;
 }
 .media-card img,
 .media-card video,
 .audio-preview {
-  width: 54px;
-  height: 42px;
-  border-radius: 6px;
+  width: 100%;
+  height: 68px;
+  border-radius: var(--radius-xs);
   object-fit: cover;
-  background: #101828;
+  background: var(--surface-dark);
 }
 .audio-preview {
   display: grid;
   place-items: center;
-  color: #fff;
+  color: var(--surface);
   font-size: 20px;
+}
+.media-order {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--primary);
+  color: var(--surface);
+  font-size: var(--font-sm);
+  font-weight: 700;
 }
 .media-info {
   display: flex;
@@ -538,10 +879,18 @@ header p,
   color: var(--text-muted);
 }
 .media-card > button {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: var(--radius-pill);
   border: 0;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 20px;
+  background: var(--surface-dark);
+  color: var(--surface);
+  font-size: var(--font-lg);
   cursor: pointer;
 }
 .settings-row,
@@ -594,6 +943,24 @@ header p,
   color: #fff;
   font-weight: 700;
   cursor: pointer;
+}
+.generate-button {
+  width: 100%;
+  margin-top: 8px;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 12px;
+  color: var(--primary);
+  font-weight: 700;
+  cursor: pointer;
+}
+.generate-button:hover:not(:disabled) {
+  background: var(--primary-light);
+}
+.generate-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .optimize-button:disabled {
   opacity: 0.4;
@@ -698,6 +1065,43 @@ header p,
 .history-strip small {
   font-size: 10px;
 }
+.generation-result {
+  border-top: 1px solid var(--border);
+  padding: 14px;
+}
+.generation-result > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--text-muted);
+}
+.generation-result > div:first-child b {
+  color: var(--text);
+}
+.generation-result > div:first-child small {
+  margin-left: auto;
+}
+.generation-result video {
+  display: block;
+  width: 100%;
+  max-height: 440px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-dark);
+}
+.generation-progress {
+  display: flex;
+  min-height: 180px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+  color: var(--text-muted);
+}
+.generation-progress .spinner {
+  margin: 0;
+}
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -715,8 +1119,8 @@ header p,
   .control-panel {
     padding: 14px;
   }
-  .media-grid {
-    grid-template-columns: 1fr;
+  .generation-mode {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>

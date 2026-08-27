@@ -9,6 +9,12 @@ import {
   uploadPromptOptimizerMedia,
 } from '../../src/api/adminPromptOptimizer'
 import AdminPromptOptimizerPanel from '../../src/components/AdminPromptOptimizerPanel.vue'
+import {
+  fetchRunningHubStatus,
+  queryRunningHubTask,
+  submitRunningHubTask,
+  type RunningHubStatus,
+} from '../../src/api/adminRunningHub'
 
 vi.mock('../../src/api/adminPromptOptimizer', () => ({
   createPromptOptimizerTask: vi.fn(),
@@ -16,6 +22,12 @@ vi.mock('../../src/api/adminPromptOptimizer', () => ({
   fetchPromptOptimizerTasks: vi.fn(),
   queryPromptOptimizerTask: vi.fn(),
   uploadPromptOptimizerMedia: vi.fn(),
+}))
+
+vi.mock('../../src/api/adminRunningHub', () => ({
+  fetchRunningHubStatus: vi.fn(),
+  queryRunningHubTask: vi.fn(),
+  submitRunningHubTask: vi.fn(),
 }))
 
 const configuredStatus = {
@@ -28,6 +40,21 @@ const configuredStatus = {
   durationRange: [4, 15] as [number, number],
 }
 
+const runningHubStatus: RunningHubStatus = {
+  configured: true,
+  keyTail: '…c817',
+  workflowId: 'workflow-1',
+  modes: ['reference', 'text', 'first_frame', 'first_last'],
+  aspectRatios: ['16:9 (Widescreen)'],
+  firstFrameAspectRatios: ['16:9 (Widescreen)'],
+  textAspectRatios: ['16:9 (Widescreen)'],
+  durationRange: [4, 15] as [number, number],
+  megapixelsPresets: [{ value: 0.9, size: '1280×736' }],
+  megapixelsDefault: [0.4, 0.9] as [number, number],
+  textMegapixelsDefault: 0.9,
+  firstFrameMegapixelsDefault: 0.9,
+}
+
 describe('admin prompt optimizer panel', () => {
   beforeEach(() => {
     vi.mocked(fetchPromptOptimizerStatus).mockReset().mockResolvedValue(configuredStatus)
@@ -35,6 +62,9 @@ describe('admin prompt optimizer panel', () => {
     vi.mocked(uploadPromptOptimizerMedia).mockReset()
     vi.mocked(createPromptOptimizerTask).mockReset()
     vi.mocked(queryPromptOptimizerTask).mockReset()
+    vi.mocked(fetchRunningHubStatus).mockReset().mockResolvedValue(runningHubStatus)
+    vi.mocked(queryRunningHubTask).mockReset()
+    vi.mocked(submitRunningHubTask).mockReset()
   })
 
   it('uploads mixed media and submits to the selected provider', async () => {
@@ -46,6 +76,7 @@ describe('admin prompt optimizer panel', () => {
       mimeType: 'image/jpeg',
       size: 100,
       role: 'reference',
+      runningHubFileName: 'rh-person.jpg',
     })
     vi.mocked(createPromptOptimizerTask).mockResolvedValue({
       id: 'task-1',
@@ -73,6 +104,12 @@ describe('admin prompt optimizer panel', () => {
     Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
     await input.trigger('change')
     await vi.waitFor(() => expect(uploadPromptOptimizerMedia).toHaveBeenCalledWith(file))
+    expect(wrapper.find('.prompt-references').text()).toContain('图片1')
+    expect(wrapper.find('.media-order').text()).toBe('1')
+    await wrapper.find('.prompt-references button').trigger('click')
+    expect((wrapper.find('#optimizer-prompt').element as HTMLTextAreaElement).value).toContain(
+      '@图片1',
+    )
     await wrapper.find('#optimizer-prompt').setValue('保持人物身份')
     await wrapper.find('.optimize-button').trigger('click')
     await vi.waitFor(() => expect(createPromptOptimizerTask).toHaveBeenCalled())
@@ -83,6 +120,32 @@ describe('admin prompt optimizer panel', () => {
     expect(wrapper.find('.result-output').element.getAttribute('value')).toContain(
       'subject_definitions:',
     )
+  })
+
+  it('supports all four H3 generation modes and submits text generation directly', async () => {
+    vi.mocked(submitRunningHubTask).mockResolvedValue({ taskId: 'h3-task-1', status: 'QUEUED' })
+    const wrapper = mount(AdminPromptOptimizerPanel)
+    await vi.waitFor(() => expect(fetchRunningHubStatus).toHaveBeenCalled())
+
+    expect(wrapper.findAll('.generation-mode button').map((item) => item.text())).toEqual([
+      '文生视频',
+      '首帧生成',
+      '首尾帧生成',
+      '多参考生成',
+    ])
+    await wrapper.find('#optimizer-prompt').setValue('宫廷舞蹈，镜头缓慢推进')
+    await wrapper.findAll('.generation-mode button')[0].trigger('click')
+    await wrapper.find('.generate-button').trigger('click')
+    await vi.waitFor(() => expect(submitRunningHubTask).toHaveBeenCalled())
+    expect(submitRunningHubTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'text',
+        prompt: '宫廷舞蹈，镜头缓慢推进',
+        images: [],
+        aspectRatio: '16:9 (Widescreen)',
+      }),
+    )
+    wrapper.unmount()
   })
 
   it('shows configuration warning and disables optimization when a provider has no key', async () => {

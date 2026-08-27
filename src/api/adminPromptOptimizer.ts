@@ -7,6 +7,8 @@ export interface PromptOptimizerMedia {
   kind: PromptOptimizerMediaKind
   url: string
   thumbnailUrl?: string | null
+  runningHubFileName?: string
+  runningHubDownloadUrl?: string
   name: string
   mimeType: string
   size?: number
