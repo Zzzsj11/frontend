@@ -104,6 +104,9 @@ function mapScriptLine(item: Record<string, unknown>): ScriptLine {
     shotOptions: item.shotOptions as ScriptLine['shotOptions'],
     generationStatus: item.generationStatus as ScriptLine['generationStatus'],
     generationError: item.generationError as string | undefined,
+    generationErrorSummary: item.generationErrorSummary as string | undefined,
+    generationJobId: item.generationJobId as string | undefined,
+    generationFailedAt: item.generationFailedAt as string | undefined,
     generationAttempt: Number(item.generationAttempt || 0),
     voice: { status: 'none' },
     scene: {

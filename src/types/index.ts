@@ -190,6 +190,11 @@ export interface ScriptLine {
   manual?: boolean
   generationStatus?: 'pending' | 'running' | 'succeeded' | 'failed'
   generationError?: string
+  /** 面向用户的简短错误分类；完整脱敏异常保留在 generationError。 */
+  generationErrorSummary?: string
+  /** 最近一次提示词生成工单，便于用户复制后排障。 */
+  generationJobId?: string
+  generationFailedAt?: string
   generationAttempt?: number
 }
 

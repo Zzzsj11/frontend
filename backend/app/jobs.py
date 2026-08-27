@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .agent_attribution import current_agent_attribution
 from .config import settings
 from .database import session_factory
+from .error_logging import redact_error_text
 from .models import GenerationJobModel, SceneAssetModel, ShotAssetModel, utcnow
 from .redis_store import acquire_execution_lease, cache_job, get_cached_job, notify_worker, release_execution_lease, renew_execution_lease
 from .token_usage import add_token_usage
@@ -302,7 +303,7 @@ class JobManager:
             job.status = "failed"
             job.phase = "manual_review" if uncertain_submission else "failed"
             prefix = "供应商创建结果不确定且不支持幂等重提，请先人工核对供应商任务；" if uncertain_submission else ""
-            job.error = f"{prefix}{exc}"[:2000]
+            job.error = redact_error_text(f"{prefix}{exc}")
             async with session_factory() as session:
                 add_token_usage(
                     session,
@@ -566,7 +567,7 @@ class JobManager:
 
     async def finalize_failure(self, job: Job, error: str) -> Job:
         if job.status != "failed":
-            job.status, job.error = "failed", error[:2000]
+            job.status, job.error = "failed", redact_error_text(error)
             await self._persist(job)
         return job
 

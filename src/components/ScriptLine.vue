@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { ScriptLine } from '../types'
 import { DEFAULT_SHOT_OPTIONS, formatTime, useProjectStore } from '../stores/project'
 import { VIDEO_DURATION_CHOICES } from '../mediaConstraints'
 import AppIcon from './AppIcon.vue'
 import BaseIconButton from './base/BaseIconButton.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
+import GenerationErrorDetailModal from './GenerationErrorDetailModal.vue'
 import { confirmDialog } from '../composables/useConfirmDialog'
 
 const props = defineProps<{
@@ -14,6 +15,7 @@ const props = defineProps<{
 }>()
 
 const store = useProjectStore()
+const errorDetailOpen = ref(false)
 const selected = computed(() => store.selectedLineId === props.line.id)
 /** 出演角色（可空/可多个） */
 const humans = computed(() => store.lineHumans(props.line))
@@ -81,6 +83,11 @@ const onGenerateShot = async () => {
     return
   store.generateShotFor(props.line.id)
 }
+
+const retryPromptGeneration = () => {
+  errorDetailOpen.value = false
+  store.retryStoryboardLine(props.line.id)
+}
 </script>
 
 <template>
@@ -139,10 +146,17 @@ const onGenerateShot = async () => {
         {{ line.generationStatus === 'pending' ? '等待生成提示词' : '正在生成提示词' }}
       </div>
       <div v-else-if="line.generationStatus === 'failed'" class="prompt-generation-state failed">
-        <span class="error-text" :title="line.generationError"
-          >生成失败{{ line.generationError ? `：${line.generationError}` : '' }}</span
+        <button
+          type="button"
+          class="error-detail-trigger"
+          title="点击查看并复制完整错误信息"
+          @click.stop="errorDetailOpen = true"
         >
-        <button @click.stop="store.retryStoryboardLine(line.id)">重新生成</button>
+          <AppIcon name="alert" :size="13" />
+          {{ line.generationErrorSummary || '提示词生成失败，请查看详情' }}
+          <span>查看详情</span>
+        </button>
+        <button @click.stop="retryPromptGeneration">重新生成</button>
       </div>
       <div v-if="isGeneral" class="general-meta">
         <span v-if="line.shotType !== 'random'" class="shot-type" :class="line.shotType">{{
@@ -228,6 +242,13 @@ const onGenerateShot = async () => {
         @click="store.removeLine(line.id)"
       />
     </div>
+    <GenerationErrorDetailModal
+      :open="errorDetailOpen"
+      :line="line"
+      :index="index"
+      @close="errorDetailOpen = false"
+      @retry="retryPromptGeneration"
+    />
   </div>
 </template>
 
@@ -262,6 +283,20 @@ const onGenerateShot = async () => {
   color: var(--primary);
   cursor: pointer;
   padding: 0;
+}
+.prompt-generation-state .error-detail-trigger {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  color: var(--danger-active);
+  font: inherit;
+}
+.error-detail-trigger > span {
+  flex: 0 0 auto;
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .script-line.selected {
   border-color: var(--primary);

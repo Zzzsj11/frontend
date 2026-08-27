@@ -28,6 +28,11 @@ def _redact_text(value: str) -> str:
     return redacted[:2000] + "…" if len(redacted) > 2000 else redacted
 
 
+def redact_error_text(value: str) -> str:
+    """Public boundary for user-visible/persisted background-job errors."""
+    return _redact_text(value)
+
+
 def _redact(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: ("***" if key.lower().replace("_", "") in _SENSITIVE_NORMALIZED else _redact(item)) for key, item in value.items()}

@@ -567,10 +567,13 @@ export const useProjectStore = defineStore('project', {
           if (local && this.activeTaskId === taskId) {
             local.generationStatus = 'running'
             local.generationError = undefined
+            local.generationErrorSummary = undefined
+            local.generationFailedAt = undefined
           }
           localGeneratingLines.add(lineId)
           try {
             let item = await api.generateStoryboardLine(taskId, lineId, force)
+            if (local && item.id) local.generationJobId = String(item.id)
             if (item.id && ['queued', 'running'].includes(String(item.status || ''))) {
               await api.waitGenerationJob(String(item.id))
               item = (await api.fetchStoryboardLine(taskId, lineId)) as unknown as Record<
@@ -585,6 +588,8 @@ export const useProjectStore = defineStore('project', {
               current.digitalHumanIds = (item.digitalHumanIds as string[]) || []
               current.generationStatus = 'succeeded'
               current.generationError = undefined
+              current.generationErrorSummary = undefined
+              current.generationFailedAt = undefined
               current.generationAttempt = Number(
                 item.generationAttempt || current.generationAttempt || 1,
               )
@@ -605,6 +610,8 @@ export const useProjectStore = defineStore('project', {
                 current.generationStatus = 'failed'
                 current.generationError =
                   error instanceof Error ? error.message : '单条视频提示词生成失败'
+                current.generationErrorSummary = '提示词生成失败，请查看详情'
+                current.generationFailedAt = new Date().toISOString()
               }
             }
           } finally {
@@ -624,6 +631,8 @@ export const useProjectStore = defineStore('project', {
         if (uniqueIds.includes(line.id)) {
           line.generationStatus = 'running'
           line.generationError = undefined
+          line.generationErrorSummary = undefined
+          line.generationFailedAt = undefined
         }
       }
       try {
@@ -688,6 +697,7 @@ export const useProjectStore = defineStore('project', {
         if (!line) continue
         if (job.kind === 'storyboard_line') {
           line.generationStatus = 'running'
+          line.generationJobId = job.id
           resumedGenerationJobs.add(job.id)
           void (async () => {
             try {
@@ -701,6 +711,8 @@ export const useProjectStore = defineStore('project', {
                 current.generationStatus = 'failed'
                 current.generationError =
                   error instanceof Error ? error.message : '单条视频提示词生成失败'
+                current.generationErrorSummary = '提示词生成失败，请查看详情'
+                current.generationFailedAt = new Date().toISOString()
               }
             } finally {
               resumedGenerationJobs.delete(job.id)
@@ -802,6 +814,9 @@ export const useProjectStore = defineStore('project', {
               current.digitalHumanIds = freshLine.digitalHumanIds
               current.generationStatus = freshLine.generationStatus
               current.generationError = freshLine.generationError
+              current.generationErrorSummary = freshLine.generationErrorSummary
+              current.generationJobId = freshLine.generationJobId
+              current.generationFailedAt = freshLine.generationFailedAt
               current.generationAttempt = freshLine.generationAttempt
             }
           }

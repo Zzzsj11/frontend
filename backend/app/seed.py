@@ -550,6 +550,87 @@ async def recover_stale_storyboard_generation() -> None:
             config["outlineProgress"] = progress
             task.storyboard_config = config
             task.status = "outline_failed"
+        # A worker may have persisted a terminal job while its line-level failure
+        # transaction was rolled back (for example the historical deadlock bug).
+        # Reconcile those stale "running" rows from the durable latest job in every
+        # execution mode so the UI never spins forever.
+        stale_running_lines = list(
+            (
+                await session.execute(
+                    select(StoryboardLineModel).where(
+                        StoryboardLineModel.generation_status == "running",
+                        StoryboardLineModel.deleted_at.is_(None),
+                        StoryboardLineModel.updated_at < cutoff,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        stale_line_ids = [line.id for line in stale_running_lines]
+        recent_jobs = list(
+            (
+                await session.execute(
+                    select(GenerationJobModel)
+                    .where(
+                        GenerationJobModel.storyboard_line_id.in_(stale_line_ids) if stale_line_ids else False,
+                        GenerationJobModel.kind == "storyboard_line",
+                        GenerationJobModel.deleted_at.is_(None),
+                    )
+                    .order_by(GenerationJobModel.created_at.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        latest_job_by_line: dict[str, GenerationJobModel] = {}
+        for recent_job in recent_jobs:
+            if recent_job.storyboard_line_id:
+                latest_job_by_line.setdefault(recent_job.storyboard_line_id, recent_job)
+        affected_task_ids: set[str] = set()
+        for line in stale_running_lines:
+            terminal_job = latest_job_by_line.get(line.id)
+            if not terminal_job or terminal_job.status not in {"failed", "cancelled", "succeeded"}:
+                continue
+            affected_task_ids.add(line.project_task_id)
+            if terminal_job.status == "succeeded" and line.scene_prompt and line.shot_prompt:
+                line.generation_status, line.generation_error = "succeeded", None
+            else:
+                line.generation_status = "failed"
+                line.generation_error = (terminal_job.error or "上次提示词生成失败，请重新生成")[:2000]
+        for task_id in affected_task_ids:
+            task = await session.get(ProjectTaskModel, task_id)
+            if not task or task.deleted_at is not None:
+                continue
+            statuses = list(
+                (
+                    await session.execute(
+                        select(StoryboardLineModel.generation_status).where(
+                            StoryboardLineModel.project_task_id == task_id,
+                            StoryboardLineModel.deleted_at.is_(None),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if statuses and all(value == "succeeded" for value in statuses):
+                task.status = "ready"
+            elif any(value == "succeeded" for value in statuses) and any(value == "failed" for value in statuses):
+                task.status = "partial"
+            elif statuses and all(value == "failed" for value in statuses):
+                task.status = "failed"
+            else:
+                task.status = "generating"
+            config = dict(task.storyboard_config or {})
+            progress = dict(config.get("outlineProgress") or {})
+            progress_job_id = str(progress.get("jobId") or "")
+            if any(job.id == progress_job_id and job.status in {"failed", "cancelled", "succeeded"} for job in recent_jobs):
+                progress.pop("error", None)
+                progress.pop("jobId", None)
+                progress["phase"] = "complete"
+                config["outlineProgress"] = progress
+                task.storyboard_config = config
         # Worker 模式由租约恢复器接管逐镜工单，API 启动不能抢先把可重放任务判失败。
         if settings.job_execution_mode != "worker":
             stale_jobs = list(

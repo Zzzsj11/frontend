@@ -11,6 +11,95 @@ import pytest
 from conftest import TEST_DB
 
 
+def test_storyboard_deadlock_is_classified_for_clear_user_feedback() -> None:
+    from app import domain
+
+    error = RuntimeError("asyncpg.exceptions.DeadlockDetectedError: deadlock detected")
+    assert domain._is_deadlock_error(error) is True
+    assert domain._storyboard_error_summary(str(error)) == "系统并发写入冲突，可重新生成"
+
+
+def test_storyboard_line_failure_does_not_mark_outline_failed(monkeypatch) -> None:
+    from app import domain
+    from app.jobs import Job
+
+    async def fail_line(_job: Job) -> dict:
+        raise RuntimeError("line failed")
+
+    def forbidden_session():
+        raise AssertionError("storyboard_line failure must not enter outline failure persistence")
+
+    monkeypatch.setattr(domain, "_run_storyboard_line_generation", fail_line)
+    monkeypatch.setattr(domain, "session_factory", forbidden_session)
+    job = Job(
+        id="job-line-failed",
+        kind="storyboard_line",
+        user_id="user-1",
+        project_id="project-1",
+        project_task_id="task-1",
+        storyboard_line_id="line-1",
+        request={},
+    )
+
+    with pytest.raises(RuntimeError, match="line failed"):
+        asyncio.run(domain.run_storyboard_job(job))
+
+
+def test_storyboard_status_refresh_retries_postgres_deadlock(monkeypatch) -> None:
+    from sqlalchemy.exc import DBAPIError
+
+    from app import domain
+
+    class Deadlock(Exception):
+        sqlstate = "40P01"
+
+    class Result:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self.value
+
+    task = type("Task", (), {"id": "task-1", "status": "generating"})()
+    attempts = 0
+
+    class Session:
+        calls = 0
+
+        async def __aenter__(self):
+            nonlocal attempts
+            attempts += 1
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def execute(self, _statement):
+            self.calls += 1
+            if attempts < 3:
+                raise DBAPIError("select", {}, Deadlock(), False)
+            return Result(task if self.calls == 1 else ["succeeded", "succeeded"])
+
+        async def commit(self):
+            return None
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(domain, "session_factory", Session)
+    monkeypatch.setattr(domain.asyncio, "sleep", no_sleep)
+    asyncio.run(domain._refresh_storyboard_status_for_task("task-1"))
+
+    assert attempts == 3
+    assert task.status == "ready"
+
+
 def test_job_manager_keeps_excess_provider_calls_queued(monkeypatch) -> None:
     from app.jobs import Job, JobManager
 

@@ -18,6 +18,24 @@ const store = useProjectStore()
 const lineListRef = ref<HTMLDivElement>()
 const checkingBatchCost = ref(false)
 
+const focusNextFailedLine = async () => {
+  const failed = store.lines.filter((line) => line.generationStatus === 'failed')
+  if (!failed.length) return
+  const currentIndex = failed.findIndex((line) => line.id === store.selectedLineId)
+  const lineId = failed[(currentIndex + 1) % failed.length].id
+  store.selectLine(lineId)
+  await nextTick()
+  const list = lineListRef.value
+  const item = list?.querySelector<HTMLElement>(`[data-line-id="${lineId}"]`)
+  if (!list || !item) return
+  const listRect = list.getBoundingClientRect()
+  const itemRect = item.getBoundingClientRect()
+  list.scrollTo({
+    top: list.scrollTop + itemRect.top - listRect.top - (list.clientHeight - itemRect.height) / 2,
+    behavior: 'smooth',
+  })
+}
+
 /** 时间线或其他入口选中不可见分镜时，将对应卡片平滑滚动到列表中央 */
 watch(
   () => store.selectedLineId,
@@ -206,13 +224,12 @@ const confirmBatchGenerate = async () => {
             <span class="generation-progress-fill" :style="{ width: `${storyboardPercent}%` }" />
           </span>
           已生成 {{ store.storyboardProgress.completed }}/{{ store.storyboardProgress.total }}
-          <button
-            v-if="store.storyboardProgress.failed"
-            class="retry-all"
-            @click="store.retryFailedStoryboardLines()"
-          >
-            {{ store.storyboardProgress.failed }} 条失败，重试
-          </button>
+          <template v-if="store.storyboardProgress.failed">
+            <button class="retry-all" title="跳转到下一条失败分镜" @click="focusNextFailedLine">
+              {{ store.storyboardProgress.failed }} 条失败
+            </button>
+            <button class="retry-all" @click="store.retryFailedStoryboardLines()">重试全部</button>
+          </template>
         </span>
       </div>
       <div class="header-actions">

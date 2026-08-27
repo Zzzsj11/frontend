@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import tempfile
 import uuid
 import zipfile
@@ -16,11 +17,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import case, func, or_, select, update
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import CurrentUser, hash_password, user_public
 from .config import settings
 from .database import database_session, session_factory
+from .error_logging import redact_error_text
 from .generation_constraints import OUTLINE_STALE_SECONDS
 from .generation_timing import generation_elapsed_seconds
 from .jobs import Job, jobs
@@ -87,8 +90,10 @@ from .token_usage import add_llm_call_log, add_token_usage, normalize_usage
 from .usage_quota import consume_daily_quota
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
 Db = Depends(database_session)
 storyboard_generation_slots = asyncio.Semaphore(settings.storyboard_generation_concurrency)
+STORYBOARD_STATUS_RETRY_LIMIT = 3
 export_slots = asyncio.Semaphore(settings.export_concurrency)
 export_progress_locks: dict[str, asyncio.Lock] = {}
 
@@ -861,6 +866,25 @@ async def get_task(task_id: str, user: CurrentUser, db: AsyncSession = Db, histo
         )
         for job in generation_jobs
     }
+    prompt_jobs = list(
+        (
+            await db.execute(
+                select(GenerationJobModel)
+                .where(
+                    GenerationJobModel.storyboard_line_id.in_(line_ids) if line_ids else False,
+                    GenerationJobModel.kind == "storyboard_line",
+                    GenerationJobModel.deleted_at.is_(None),
+                )
+                .order_by(GenerationJobModel.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    latest_prompt_job: dict[str, GenerationJobModel] = {}
+    for prompt_job in prompt_jobs:
+        if prompt_job.storyboard_line_id:
+            latest_prompt_job.setdefault(prompt_job.storyboard_line_id, prompt_job)
     return {
         **task_json(task),
         "cast": [item.digital_human_id for item in cast],
@@ -880,6 +904,7 @@ async def get_task(task_id: str, user: CurrentUser, db: AsyncSession = Db, histo
                 if not history
                 else None,
                 job_elapsed_seconds=job_elapsed,
+                prompt_job=latest_prompt_job.get(line.id),
             )
             for line in lines
         ],
@@ -1450,6 +1475,68 @@ async def _run_segment_retry(
         return {"taskId": task_id, "sceneIndex": scene_index, "shotStart": shot_start, "shotCount": shot_count}
 
 
+def _is_deadlock_error(exc: BaseException) -> bool:
+    """PostgreSQL deadlock SQLSTATE is stable even when wrapped by SQLAlchemy/asyncpg."""
+    current: BaseException | None = exc
+    while current is not None:
+        if getattr(current, "sqlstate", None) == "40P01" or getattr(current, "pgcode", None) == "40P01":
+            return True
+        current = getattr(current, "orig", None) or current.__cause__
+    return "DeadlockDetectedError" in type(exc).__name__ or "deadlock detected" in str(exc).lower()
+
+
+async def _refresh_storyboard_status_for_task(task_id: str) -> None:
+    """Aggregate project status in a standalone transaction with bounded deadlock retries.
+
+    Keeping this transaction separate is important: prompt persistence inserts usage rows
+    whose foreign keys hold KEY SHARE locks on the project task. Trying to upgrade that
+    transaction to FOR UPDATE is the lock-order inversion that caused production deadlocks.
+    """
+    for attempt in range(1, STORYBOARD_STATUS_RETRY_LIMIT + 1):
+        try:
+            async with session_factory() as session:
+                task = (
+                    await session.execute(select(ProjectTaskModel).where(ProjectTaskModel.id == task_id, ProjectTaskModel.deleted_at.is_(None)).with_for_update())
+                ).scalar_one_or_none()
+                if task is None:
+                    return
+                await _refresh_storyboard_status(session, task, lock_task=False)
+                await session.commit()
+            return
+        except DBAPIError as exc:
+            if not _is_deadlock_error(exc) or attempt == STORYBOARD_STATUS_RETRY_LIMIT:
+                raise
+            await asyncio.sleep(0.05 * (2 ** (attempt - 1)))
+
+
+async def _persist_storyboard_line_failure(job: Job, line_id: str, task_id: str, exc: Exception) -> None:
+    async with session_factory() as session:
+        line = await session.get(StoryboardLineModel, line_id)
+        task = await session.get(ProjectTaskModel, task_id)
+        if not line or line.deleted_at is not None or not task or task.deleted_at is not None:
+            raise exc
+        line.generation_status, line.generation_error = "failed", redact_error_text(str(exc))
+        failed_calls = getattr(exc, "usage_records", None) or [
+            {"operation": "storyboard_line_failed", "usage": getattr(exc, "usage", {}), "requestId": getattr(exc, "request_id", None)}
+        ]
+        _persist_llm_calls(
+            session,
+            failed_calls,
+            default_operation="storyboard_line_failed",
+            user_id=job.user_id,
+            project_id=job.project_id,
+            project_task_id=task.id,
+            storyboard_line_id=line.id,
+            generation_job_id=job.id,
+            operation_suffix="_failed",
+        )
+        await session.commit()
+    try:
+        await _refresh_storyboard_status_for_task(task_id)
+    except Exception:
+        logger.exception("storyboard status refresh failed after line failure", extra={"task_id": task_id, "line_id": line_id})
+
+
 async def _run_storyboard_line_generation(job: Job) -> dict[str, Any]:
     """Replay one storyboard prompt job exclusively from its durable request snapshot."""
     request = dict(job.request or {})
@@ -1507,34 +1594,18 @@ async def _run_storyboard_line_generation(job: Job) -> dict[str, Any]:
                 storyboard_line_id=line.id,
                 generation_job_id=job.id,
             )
-            await _refresh_storyboard_status(session, task)
             await session.commit()
-            slim_records = [{key: value for key, value in call.items() if key not in ("requestMessages", "responseText")} for call in result.get("usageRecords") or []]
-            return {**result, "usageRecords": slim_records}
     except Exception as exc:
-        async with session_factory() as session:
-            line = await session.get(StoryboardLineModel, line_id)
-            task = await session.get(ProjectTaskModel, task_id)
-            if not line or line.deleted_at is not None or not task or task.deleted_at is not None:
-                raise
-            line.generation_status, line.generation_error = "failed", str(exc)[:2000]
-            failed_calls = getattr(exc, "usage_records", None) or [
-                {"operation": "storyboard_line_failed", "usage": getattr(exc, "usage", {}), "requestId": getattr(exc, "request_id", None)}
-            ]
-            _persist_llm_calls(
-                session,
-                failed_calls,
-                default_operation="storyboard_line_failed",
-                user_id=job.user_id,
-                project_id=job.project_id,
-                project_task_id=task.id,
-                storyboard_line_id=line.id,
-                generation_job_id=job.id,
-                operation_suffix="_failed",
-            )
-            await _refresh_storyboard_status(session, task)
-            await session.commit()
+        await _persist_storyboard_line_failure(job, line_id, task_id, exc)
         raise
+    try:
+        await _refresh_storyboard_status_for_task(task_id)
+    except Exception:
+        # The generated prompts and their usage are already durable. Do not turn a
+        # successful model call into a failed job solely because summary refresh failed.
+        logger.exception("storyboard status refresh failed after line success", extra={"task_id": task_id, "line_id": line_id})
+    slim_records = [{key: value for key, value in call.items() if key not in ("requestMessages", "responseText")} for call in result.get("usageRecords") or []]
+    return {**result, "usageRecords": slim_records}
 
 
 async def run_storyboard_job(job: Job) -> dict[str, Any]:
@@ -1586,6 +1657,10 @@ async def run_storyboard_job(job: Job) -> dict[str, Any]:
         # Catch failures outside the provider call too (for example story-bible
         # assembly or database application) so the domain state never remains
         # indefinitely in outlining/segment_retry after a durable job fails.
+        # A single prompt-line failure is represented by that line and must not
+        # be mislabeled as a whole-outline failure.
+        if job.kind == "storyboard_line":
+            raise
         async with session_factory() as session:
             task = await session.get(ProjectTaskModel, task_id)
             if task and task.deleted_at is None:
@@ -1969,6 +2044,17 @@ async def reorder_lines(task_id: str, payload: ReorderLines, user: CurrentUser, 
     return {"ok": True}
 
 
+def _storyboard_error_summary(error: str | None) -> str | None:
+    if not error:
+        return None
+    lowered = error.lower()
+    if "deadlock detected" in lowered or "deadlockdetectederror" in lowered:
+        return "系统并发写入冲突，可重新生成"
+    if "timeout" in lowered or "timed out" in lowered or "超时" in error:
+        return "生成超时，可重新生成"
+    return "提示词生成失败，请查看详情"
+
+
 def _line_json_from_assets(
     line: StoryboardLineModel,
     cast: list[str],
@@ -1979,6 +2065,7 @@ def _line_json_from_assets(
     include_history: bool = True,
     asset_counts: dict[str, int] | None = None,
     job_elapsed_seconds: dict[str, float | None] | None = None,
+    prompt_job: GenerationJobModel | None = None,
 ) -> dict:
     """组装单行脚本 JSON（纯函数，资产由调用方预取）。
 
@@ -2025,6 +2112,9 @@ def _line_json_from_assets(
         "shotOptions": line.shot_options,
         "generationStatus": line.generation_status,
         "generationError": line.generation_error,
+        "generationErrorSummary": _storyboard_error_summary(line.generation_error),
+        "generationJobId": prompt_job.id if prompt_job else None,
+        "generationFailedAt": prompt_job.finished_at.isoformat() if prompt_job and prompt_job.finished_at else None,
         "generationAttempt": line.generation_attempt,
         "generatedAt": line.generated_at.isoformat() if line.generated_at else None,
         "digitalHumanIds": cast,
@@ -2068,7 +2158,19 @@ async def line_json(db: AsyncSession, line: StoryboardLineModel, cast: list[str]
         )
         for job in generation_jobs
     }
-    return _line_json_from_assets(line, cast, scenes, shots, voices, job_elapsed_seconds=job_elapsed)
+    prompt_job = (
+        await db.execute(
+            select(GenerationJobModel)
+            .where(
+                GenerationJobModel.storyboard_line_id == line.id,
+                GenerationJobModel.kind == "storyboard_line",
+                GenerationJobModel.deleted_at.is_(None),
+            )
+            .order_by(GenerationJobModel.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return _line_json_from_assets(line, cast, scenes, shots, voices, job_elapsed_seconds=job_elapsed, prompt_job=prompt_job)
 
 
 @router.get("/tasks/{task_id}/storyboard-lines/{line_id}")
@@ -2092,9 +2194,10 @@ async def get_storyboard_line(task_id: str, line_id: str, user: CurrentUser, db:
     return await line_json(db, line, [item.digital_human_id for item in line_cast])
 
 
-async def _refresh_storyboard_status(db: AsyncSession, task: ProjectTaskModel) -> None:
+async def _refresh_storyboard_status(db: AsyncSession, task: ProjectTaskModel, *, lock_task: bool = True) -> None:
     # 多条提示词可同时完成；仅串行化最终状态汇总，避免旧快照晚提交把 ready 覆盖回 generating。
-    await db.execute(select(ProjectTaskModel.id).where(ProjectTaskModel.id == task.id).with_for_update())
+    if lock_task:
+        await db.execute(select(ProjectTaskModel.id).where(ProjectTaskModel.id == task.id).with_for_update())
     statuses = list(
         (await db.execute(select(StoryboardLineModel.generation_status).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None))))
         .scalars()
