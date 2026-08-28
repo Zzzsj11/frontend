@@ -37,7 +37,7 @@ test('deployed frontend login, project and storyboard configuration journey', as
     accessToken = loginBody.accessToken
     await expect(page.getByRole('heading', { name: '视频编辑器' })).toBeVisible()
     await expect(page.locator('.balance-pill.yinghe .balance-value')).not.toHaveText('--')
-    await expect(page.locator('[data-test="ppio-balance"]')).toContainText('--')
+    await expect(page.locator('[data-test="ppio-balance"]')).not.toContainText('--')
     await expect(page.locator('header').or(page.locator('.top-bar')).first()).toBeVisible()
     await page.screenshot({ path: join(output, '01-login.png'), fullPage: true })
 
