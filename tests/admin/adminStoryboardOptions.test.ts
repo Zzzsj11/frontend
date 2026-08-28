@@ -5,6 +5,7 @@ import {
   createStoryboardOption,
   deleteStoryboardOption,
   listStoryboardOptions,
+  reorderStoryboardOptions,
   updateStoryboardOption,
 } from '../../src/api/adminStoryboardOptions'
 import AdminStoryboardOptionsPanel from '../../src/components/AdminStoryboardOptionsPanel.vue'
@@ -13,6 +14,7 @@ vi.mock('../../src/api/adminStoryboardOptions', () => ({
   listStoryboardOptions: vi.fn(),
   createStoryboardOption: vi.fn(),
   updateStoryboardOption: vi.fn(),
+  reorderStoryboardOptions: vi.fn(),
   deleteStoryboardOption: vi.fn(),
 }))
 
@@ -33,12 +35,29 @@ describe('admin storyboard options panel', () => {
     vi.mocked(listStoryboardOptions).mockReset()
     vi.mocked(createStoryboardOption).mockReset()
     vi.mocked(updateStoryboardOption).mockReset()
+    vi.mocked(reorderStoryboardOptions).mockReset()
     vi.mocked(deleteStoryboardOption).mockReset()
     vi.mocked(listStoryboardOptions).mockResolvedValue(genreItems as never)
+    vi.mocked(createStoryboardOption).mockResolvedValue({
+      id: 'new',
+      kind: 'genre',
+      parentId: null,
+      name: '新曲风',
+      sortOrder: 2,
+      castPolicy: null,
+    })
+    vi.mocked(reorderStoryboardOptions).mockImplementation(async (itemIds) => ({
+      ok: true,
+      items: itemIds.map((id, sortOrder) => ({
+        ...(genreItems.find((item) => item.id === id) as (typeof genreItems)[number]),
+        sortOrder,
+        castPolicy: null,
+      })),
+    }))
   })
 
   it('renders the genre category as an indented tree', async () => {
-    const wrapper = mount(AdminStoryboardOptionsPanel)
+    const wrapper = mount(AdminStoryboardOptionsPanel, { attachTo: document.body })
     await flush()
     expect(listStoryboardOptions).toHaveBeenCalledWith('genre')
     const names = wrapper.findAll('.name-cell')
@@ -65,17 +84,69 @@ describe('admin storyboard options panel', () => {
   })
 
   it('creates a child option under a genre node', async () => {
-    const wrapper = mount(AdminStoryboardOptionsPanel)
+    vi.mocked(createStoryboardOption).mockResolvedValue({
+      id: 'new-child',
+      kind: 'genre',
+      parentId: 'g2',
+      name: '新子类',
+      sortOrder: 1,
+      castPolicy: null,
+    })
+    const wrapper = mount(AdminStoryboardOptionsPanel, { attachTo: document.body })
     await flush()
     const row = wrapper.findAll('tr').find((r) => r.text().includes('爱情消极'))!
     await row.find('button[title="新增子级"]').trigger('click')
-    await wrapper.find('.inline-form input').setValue('新子类')
-    await wrapper.find('.inline-form .op-btn.primary').trigger('click')
+    const addRow = wrapper.find('.inline-add-row')
+    expect(addRow.exists()).toBe(true)
+    expect(row.element.nextElementSibling).toBe(addRow.element)
+    expect(document.activeElement).toBe(addRow.find('input').element)
+    await addRow.find('input').setValue('新子类')
+    await addRow.find('.op-btn.primary').trigger('click')
     expect(createStoryboardOption).toHaveBeenCalledWith({
       kind: 'genre',
       parentId: 'g2',
       name: '新子类',
     })
+    expect(wrapper.text()).toContain('新子类')
+    expect(listStoryboardOptions).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('moves siblings optimistically and persists their order in one request', async () => {
+    const wrapper = mount(AdminStoryboardOptionsPanel)
+    await flush()
+    const operaRow = wrapper.findAll('tr').find((row) => row.text().includes('戏曲'))!
+    await operaRow
+      .findAll('button')
+      .find((button) => button.text() === '上移')!
+      .trigger('click')
+    expect(reorderStoryboardOptions).toHaveBeenCalledWith(['g4', 'g1'])
+    await vi.waitFor(() => {
+      const rootNames = wrapper
+        .findAll('.name-cell')
+        .filter((cell) => !cell.text().startsWith('└'))
+        .map((cell) => cell.text())
+      expect(rootNames).toEqual(['戏曲', '流行歌曲'])
+    })
+    expect(listStoryboardOptions).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('rolls an optimistic move back when persistence fails', async () => {
+    vi.mocked(reorderStoryboardOptions).mockRejectedValue(new Error('排序保存失败'))
+    const wrapper = mount(AdminStoryboardOptionsPanel)
+    await flush()
+    const operaRow = wrapper.findAll('tr').find((row) => row.text().includes('戏曲'))!
+    await operaRow
+      .findAll('button')
+      .find((button) => button.text() === '上移')!
+      .trigger('click')
+    await vi.waitFor(() => expect(wrapper.find('.error').text()).toContain('排序保存失败'))
+    const rootNames = wrapper
+      .findAll('.name-cell')
+      .filter((cell) => !cell.text().startsWith('└'))
+      .map((cell) => cell.text())
+    expect(rootNames).toEqual(['流行歌曲', '戏曲'])
     wrapper.unmount()
   })
 

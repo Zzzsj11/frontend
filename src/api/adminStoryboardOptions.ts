@@ -51,6 +51,13 @@ export const updateStoryboardOption = (
     }),
   })
 
+/** 一次性保存完整的同级顺序，避免相邻两次更新产生中间态。 */
+export const reorderStoryboardOptions = (itemIds: string[]) =>
+  apiRequest<{ ok: boolean; items: StoryboardOptionItem[] }>('/admin/storyboard-options/reorder', {
+    method: 'PATCH',
+    body: JSON.stringify({ item_ids: itemIds }),
+  })
+
 export const deleteStoryboardOption = (id: string) =>
   apiRequest<{ ok: boolean; cascadeCount: number }>(
     `/admin/storyboard-options/${encodeURIComponent(id)}`,

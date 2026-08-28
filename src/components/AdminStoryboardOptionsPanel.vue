@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   createStoryboardOption,
   deleteStoryboardOption,
   listStoryboardOptions,
+  reorderStoryboardOptions,
   updateStoryboardOption,
   type StoryboardOptionItem,
   type StoryboardOptionKind,
@@ -30,7 +31,7 @@ const load = async () => {
   loading.value = true
   error.value = ''
   try {
-    items.value = await listStoryboardOptions(kind.value)
+    items.value = [...(await listStoryboardOptions(kind.value))]
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载失败'
   } finally {
@@ -105,11 +106,17 @@ const submitEdit = async (item: StoryboardOptionItem) => {
 // ---------- 新增（行内表单；addingUnder: null=根级，string=父节点 id） ----------
 const addingUnder = ref<string | null | undefined>(undefined)
 const addingName = ref('')
-const startAdd = (parentId: string | null) => {
+const addInput = ref<HTMLInputElement | null>(null)
+const setAddInput = (element: unknown) => {
+  addInput.value = element instanceof HTMLInputElement ? element : null
+}
+const startAdd = async (parentId: string | null) => {
   cancelEdit()
   confirmingId.value = ''
   addingUnder.value = parentId
   addingName.value = ''
+  await nextTick()
+  addInput.value?.focus()
 }
 const cancelAdd = () => {
   addingUnder.value = undefined
@@ -121,9 +128,13 @@ const submitAdd = async () => {
   busy.value = true
   error.value = ''
   try {
-    await createStoryboardOption({ kind: kind.value, parentId: addingUnder.value ?? null, name })
+    const created = await createStoryboardOption({
+      kind: kind.value,
+      parentId: addingUnder.value ?? null,
+      name,
+    })
+    items.value.push(created)
     cancelAdd()
-    await load()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '新增失败'
   } finally {
@@ -147,19 +158,28 @@ const removeItem = async (item: StoryboardOptionItem) => {
   }
 }
 
-// ---------- 排序：与相邻兄弟交换 sortOrder ----------
+// ---------- 排序：本地即时换位，后端一次性原子保存完整同级顺序 ----------
 const moveItem = async (item: StoryboardOptionItem, delta: -1 | 1) => {
   const siblings = siblingsOf(item)
   const index = siblings.findIndex((x) => x.id === item.id)
   const other = siblings[index + delta]
   if (!other || busy.value) return
+  const previous = items.value.map((entry) => ({ ...entry }))
+  const orderedIds = siblings.map((entry) => entry.id)
+  ;[orderedIds[index], orderedIds[index + delta]] = [orderedIds[index + delta], orderedIds[index]]
+  const sortOrderById = new Map(orderedIds.map((id, sortOrder) => [id, sortOrder]))
+  items.value = items.value.map((entry) => {
+    const sortOrder = sortOrderById.get(entry.id)
+    return sortOrder === undefined ? entry : { ...entry, sortOrder }
+  })
   busy.value = true
   error.value = ''
   try {
-    await updateStoryboardOption(item.id, { sortOrder: other.sortOrder })
-    await updateStoryboardOption(other.id, { sortOrder: item.sortOrder })
-    await load()
+    const result = await reorderStoryboardOptions(orderedIds)
+    const savedById = new Map(result.items.map((entry) => [entry.id, entry]))
+    items.value = items.value.map((entry) => savedById.get(entry.id) ?? entry)
   } catch (e) {
+    items.value = previous
     error.value = e instanceof Error ? e.message : '排序失败'
   } finally {
     busy.value = false
@@ -210,9 +230,10 @@ const addingUnderName = computed(() => {
     <p v-if="error" class="error">{{ error }}</p>
 
     <!-- 行内新增表单 -->
-    <div v-if="addingUnder !== undefined" class="inline-form">
+    <div v-if="addingUnder === null" class="inline-form">
       <span class="form-label">新增到「{{ addingUnderName }}」：</span>
       <input
+        :ref="setAddInput"
         v-model="addingName"
         class="name-input"
         :placeholder="`请输入${kindLabel}名称`"
@@ -238,89 +259,117 @@ const addingUnderName = computed(() => {
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in rows" :key="row.item.id">
-          <td>
-            <span class="name-cell" :style="{ paddingLeft: `${row.depth * 22}px` }">
-              <span v-if="row.depth > 0" class="depth-mark">└</span>
-              <template v-if="editingId === row.item.id">
-                <input
-                  v-model="editingName"
-                  class="name-input"
-                  maxlength="60"
-                  @keyup.enter="submitEdit(row.item)"
-                  @keyup.esc="cancelEdit"
-                />
-                <button class="op-btn primary" :disabled="busy" @click="submitEdit(row.item)">
-                  <AppIcon name="check" :size="13" />
+        <template v-for="row in rows" :key="row.item.id">
+          <tr>
+            <td>
+              <span class="name-cell" :style="{ paddingLeft: `${row.depth * 22}px` }">
+                <span v-if="row.depth > 0" class="depth-mark">└</span>
+                <template v-if="editingId === row.item.id">
+                  <input
+                    v-model="editingName"
+                    class="name-input"
+                    maxlength="60"
+                    @keyup.enter="submitEdit(row.item)"
+                    @keyup.esc="cancelEdit"
+                  />
+                  <button class="op-btn primary" :disabled="busy" @click="submitEdit(row.item)">
+                    <AppIcon name="check" :size="13" />
+                  </button>
+                  <button class="op-btn" :disabled="busy" @click="cancelEdit">
+                    <AppIcon name="close" :size="13" />
+                  </button>
+                </template>
+                <template v-else>{{ row.item.name }}</template>
+              </span>
+            </td>
+            <td v-if="kind === 'genre'">
+              <select
+                class="policy-select"
+                :value="row.item.castPolicy ?? ''"
+                :disabled="busy"
+                :aria-label="`${row.item.name}人物选择策略`"
+                @change="updateCastPolicy(row.item, $event)"
+              >
+                <option value="">继承上级（默认自动匹配）</option>
+                <option value="required">必须手动选择</option>
+                <option value="optional_random">可选，未选自动匹配</option>
+              </select>
+            </td>
+            <td class="ops-col">
+              <template v-if="confirmingId === row.item.id">
+                <span class="danger-text"
+                  >确认删除{{ row.depth < 2 && kind === 'genre' ? '（含子级）' : '' }}？</span
+                >
+                <button class="op-btn danger" :disabled="busy" @click="removeItem(row.item)">
+                  确认
                 </button>
-                <button class="op-btn" :disabled="busy" @click="cancelEdit">
-                  <AppIcon name="close" :size="13" />
+                <button class="op-btn" :disabled="busy" @click="confirmingId = ''">取消</button>
+              </template>
+              <template v-else>
+                <button class="op-btn" title="重命名" :disabled="busy" @click="startEdit(row.item)">
+                  <AppIcon name="edit" :size="13" />
+                </button>
+                <button
+                  v-if="kind === 'genre' && row.depth < 2"
+                  class="op-btn"
+                  title="新增子级"
+                  :disabled="busy"
+                  @click="startAdd(row.item.id)"
+                >
+                  <AppIcon name="plus" :size="13" />
+                </button>
+                <button
+                  class="op-btn text"
+                  :disabled="busy || isFirst(row.item)"
+                  @click="moveItem(row.item, -1)"
+                >
+                  上移
+                </button>
+                <button
+                  class="op-btn text"
+                  :disabled="busy || isLast(row.item)"
+                  @click="moveItem(row.item, 1)"
+                >
+                  下移
+                </button>
+                <button
+                  class="op-btn"
+                  title="删除"
+                  :disabled="busy"
+                  @click="confirmingId = row.item.id"
+                >
+                  <AppIcon name="trash" :size="13" />
                 </button>
               </template>
-              <template v-else>{{ row.item.name }}</template>
-            </span>
-          </td>
-          <td v-if="kind === 'genre'">
-            <select
-              class="policy-select"
-              :value="row.item.castPolicy ?? ''"
-              :disabled="busy"
-              :aria-label="`${row.item.name}人物选择策略`"
-              @change="updateCastPolicy(row.item, $event)"
-            >
-              <option value="">继承上级（默认自动匹配）</option>
-              <option value="required">必须手动选择</option>
-              <option value="optional_random">可选，未选自动匹配</option>
-            </select>
-          </td>
-          <td class="ops-col">
-            <template v-if="confirmingId === row.item.id">
-              <span class="danger-text"
-                >确认删除{{ row.depth < 2 && kind === 'genre' ? '（含子级）' : '' }}？</span
-              >
-              <button class="op-btn danger" :disabled="busy" @click="removeItem(row.item)">
-                确认
-              </button>
-              <button class="op-btn" :disabled="busy" @click="confirmingId = ''">取消</button>
-            </template>
-            <template v-else>
-              <button class="op-btn" title="重命名" :disabled="busy" @click="startEdit(row.item)">
-                <AppIcon name="edit" :size="13" />
-              </button>
-              <button
-                v-if="kind === 'genre' && row.depth < 2"
-                class="op-btn"
-                title="新增子级"
-                :disabled="busy"
-                @click="startAdd(row.item.id)"
-              >
-                <AppIcon name="plus" :size="13" />
-              </button>
-              <button
-                class="op-btn text"
-                :disabled="busy || isFirst(row.item)"
-                @click="moveItem(row.item, -1)"
-              >
-                上移
-              </button>
-              <button
-                class="op-btn text"
-                :disabled="busy || isLast(row.item)"
-                @click="moveItem(row.item, 1)"
-              >
-                下移
-              </button>
-              <button
-                class="op-btn"
-                title="删除"
-                :disabled="busy"
-                @click="confirmingId = row.item.id"
-              >
-                <AppIcon name="trash" :size="13" />
-              </button>
-            </template>
-          </td>
-        </tr>
+            </td>
+          </tr>
+          <tr v-if="addingUnder === row.item.id" class="inline-add-row">
+            <td :colspan="kind === 'genre' ? 3 : 2">
+              <div class="inline-form embedded">
+                <span class="form-label">新增到「{{ addingUnderName }}」：</span>
+                <input
+                  :ref="setAddInput"
+                  v-model="addingName"
+                  class="name-input"
+                  :placeholder="`请输入${kindLabel}名称`"
+                  maxlength="60"
+                  @keyup.enter="submitAdd"
+                  @keyup.esc="cancelAdd"
+                />
+                <button
+                  class="op-btn primary"
+                  :disabled="busy || !addingName.trim()"
+                  @click="submitAdd"
+                >
+                  <AppIcon name="check" :size="13" /> 保存
+                </button>
+                <button class="op-btn" :disabled="busy" @click="cancelAdd">
+                  <AppIcon name="close" :size="13" /> 取消
+                </button>
+              </div>
+            </td>
+          </tr>
+        </template>
         <tr v-if="!rows.length">
           <td :colspan="kind === 'genre' ? 3 : 2" class="muted">
             暂无选项，点击右上角「新增{{ kindLabel }}」
@@ -397,6 +446,13 @@ const addingUnderName = computed(() => {
   margin-bottom: 12px;
   border: 1px dashed var(--primary);
   border-radius: var(--radius-sm);
+  background: var(--primary-light);
+}
+.inline-form.embedded {
+  margin-bottom: 0;
+}
+.inline-add-row > td {
+  padding: 8px 12px;
   background: var(--primary-light);
 }
 .form-label {

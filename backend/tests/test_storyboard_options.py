@@ -59,6 +59,35 @@ def test_storyboard_option_admin_crud_and_genre_cascade(client):
     assert "storyboard_option.create" in actions and "storyboard_option.delete" in actions
 
 
+def test_storyboard_option_reorder_is_atomic_and_requires_complete_siblings(client):
+    seasons = client.get("/api/admin/storyboard-options", params={"kind": "season"}).json()
+    original_ids = [item["id"] for item in seasons]
+    reordered_ids = list(reversed(original_ids))
+
+    reordered = client.patch(
+        "/api/admin/storyboard-options/reorder",
+        json={"item_ids": reordered_ids},
+    )
+    assert reordered.status_code == 200
+    assert [item["id"] for item in reordered.json()["items"]] == reordered_ids
+    assert [item["sortOrder"] for item in reordered.json()["items"]] == list(range(len(reordered_ids)))
+    persisted = client.get("/api/admin/storyboard-options", params={"kind": "season"}).json()
+    assert [item["id"] for item in persisted] == reordered_ids
+
+    partial = client.patch(
+        "/api/admin/storyboard-options/reorder",
+        json={"item_ids": reordered_ids[:-1]},
+    )
+    assert partial.status_code == 422
+    assert [item["id"] for item in client.get("/api/admin/storyboard-options", params={"kind": "season"}).json()] == reordered_ids
+
+    restored = client.patch(
+        "/api/admin/storyboard-options/reorder",
+        json={"item_ids": original_ids},
+    )
+    assert restored.status_code == 200
+
+
 def test_storyboard_options_admin_endpoints_require_admin(client):
     created = client.post("/api/admin/users", json={"username": "option-admin-user", "password": "secure-pass-123"}).json()
     login = client.post("/api/auth/login", json={"username": "option-admin-user", "password": "secure-pass-123"}).json()
@@ -70,6 +99,7 @@ def test_storyboard_options_admin_endpoints_require_admin(client):
     headers = bearer(changed["accessToken"])
     assert client.get("/api/admin/storyboard-options", params={"kind": "season"}, headers=headers).status_code == 403
     assert client.post("/api/admin/storyboard-options", json={"kind": "season", "name": "越权"}, headers=headers).status_code == 403
+    assert client.patch("/api/admin/storyboard-options/reorder", json={"item_ids": ["forbidden"]}, headers=headers).status_code == 403
     # 普通用户仍可读公开 options 端点
     assert client.get("/api/storyboards/general/options", headers=headers).status_code == 200
     client.delete(f"/api/admin/users/{created['id']}")

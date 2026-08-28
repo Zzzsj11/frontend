@@ -1701,6 +1701,10 @@ class StoryboardOptionPatch(BaseModel):
     cast_policy: str | None = None
 
 
+class StoryboardOptionReorderIn(BaseModel):
+    item_ids: list[str] = Field(min_length=1, max_length=500)
+
+
 def _option_summary(x: StoryboardOptionItemModel) -> dict:
     return {
         "id": x.id,
@@ -1807,6 +1811,58 @@ async def storyboard_option_create(payload: StoryboardOptionIn, request: Request
     await audit(db, request, user, "storyboard_option.create", "storyboard_option_item", item.id, None, _option_summary(item))
     await db.commit()
     return _option_summary(item)
+
+
+@router.patch("/storyboard-options/reorder")
+async def storyboard_options_reorder(
+    payload: StoryboardOptionReorderIn,
+    request: Request,
+    user: CurrentUser,
+    db: AsyncSession = Db,
+):
+    """原子保存一个同级集合的完整顺序，杜绝两次交换更新留下重复序号。"""
+    require_permission(user, STORYBOARD_OPTIONS_MANAGE)
+    if len(payload.item_ids) != len(set(payload.item_ids)):
+        raise HTTPException(422, "排序选项不能重复")
+
+    requested = list(
+        (
+            await db.execute(
+                select(StoryboardOptionItemModel).where(
+                    StoryboardOptionItemModel.id.in_(payload.item_ids),
+                    StoryboardOptionItemModel.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if len(requested) != len(payload.item_ids):
+        raise HTTPException(422, "排序包含不存在的选项")
+    first = requested[0]
+    if any(item.kind != first.kind or item.parent_id != first.parent_id for item in requested):
+        raise HTTPException(422, "只能调整同级选项的顺序")
+
+    siblings = list((await db.execute(select(StoryboardOptionItemModel).where(*_sibling_where(first.kind, first.parent_id)).with_for_update())).scalars().all())
+    if {item.id for item in siblings} != set(payload.item_ids):
+        raise HTTPException(422, "排序必须包含同级全部选项")
+
+    by_id = {item.id: item for item in siblings}
+    before = [item.id for item in sorted(siblings, key=lambda item: (item.sort_order, item.created_at))]
+    for sort_order, item_id in enumerate(payload.item_ids):
+        by_id[item_id].sort_order = sort_order
+    await audit(
+        db,
+        request,
+        user,
+        "storyboard_option.reorder",
+        "storyboard_option_item",
+        first.parent_id or f"{first.kind}:root",
+        {"order": before},
+        {"order": payload.item_ids},
+    )
+    await db.commit()
+    return {"ok": True, "items": [_option_summary(by_id[item_id]) for item_id in payload.item_ids]}
 
 
 @router.patch("/storyboard-options/{item_id}")
