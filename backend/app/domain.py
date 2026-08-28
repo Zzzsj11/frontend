@@ -43,6 +43,7 @@ from .models import (
     ProjectCastModel,
     ProjectModel,
     ProjectTaskModel,
+    PromptOptimizationTaskModel,
     RefreshTokenModel,
     SceneAssetModel,
     ShotAssetModel,
@@ -75,7 +76,7 @@ from .schemas import (
     UserCreate,
     UserUpdate,
 )
-from .storage import download_public_url_to_path, get_storage, is_tos_url, safe_key
+from .storage import download_public_url_to_path, get_storage, is_tos_url, is_user_owned_tos_url, safe_key
 from .story_bible import STORY_BIBLE_VERSION, build_ass_story_bible, build_general_story_bible, exact_durations
 from .storyboard_options import load_general_storyboard_options, resolve_genre_cast_policy
 from .storyboard_prompt import (
@@ -2076,8 +2077,12 @@ async def create_line(task_id: str, payload: StoryboardLineCreate, user: Current
             raise HTTPException(422, "创意分镜必须包含原始提示词和优化提示词")
         if payload.digital_human_ids:
             raise HTTPException(422, "创意分镜不使用项目人物引用")
-        if any(not is_tos_url(str(item.get("url") or "")) for item in payload.reference_media):
-            raise HTTPException(422, "创意分镜参考素材必须存储在 TOS")
+        if any(not is_user_owned_tos_url(str(item.get("url") or ""), user.id) for item in payload.reference_media):
+            raise HTTPException(422, "创意分镜参考素材必须属于当前用户")
+        if payload.optimization_task_id:
+            optimization = await db.get(PromptOptimizationTaskModel, payload.optimization_task_id)
+            if not optimization or optimization.user_id != user.id or optimization.deleted_at is not None:
+                raise HTTPException(422, "提示词优化任务不存在或不属于当前用户")
     visible = await visible_humans(db, user.id, payload.digital_human_ids)
     if len({item.id for item in visible}) != len(set(payload.digital_human_ids)):
         raise HTTPException(422, "包含不可用角色")
@@ -2096,8 +2101,12 @@ async def create_line(task_id: str, payload: StoryboardLineCreate, user: Current
 async def update_line(line_id: str, payload: StoryboardLineUpdate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     line = await owned_line(db, user.id, line_id)
     if line.source == "creative" and payload.reference_media is not None:
-        if any(not is_tos_url(str(item.get("url") or "")) for item in payload.reference_media):
-            raise HTTPException(422, "创意分镜参考素材必须存储在 TOS")
+        if any(not is_user_owned_tos_url(str(item.get("url") or ""), user.id) for item in payload.reference_media):
+            raise HTTPException(422, "创意分镜参考素材必须属于当前用户")
+    if line.source == "creative" and payload.optimization_task_id is not None:
+        optimization = await db.get(PromptOptimizationTaskModel, payload.optimization_task_id)
+        if not optimization or optimization.user_id != user.id or optimization.deleted_at is not None:
+            raise HTTPException(422, "提示词优化任务不存在或不属于当前用户")
     data = payload.model_dump(exclude_unset=True, exclude={"digital_human_ids"})
     for key, value in data.items():
         setattr(line, key, value)

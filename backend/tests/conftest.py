@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
-TEST_DB = Path("/tmp/mv-agent-backend-test.sqlite3")
-TEST_DB.unlink(missing_ok=True)
+TEST_DB_DIR = Path(tempfile.mkdtemp(prefix="mv-agent-backend-test-"))
+TEST_DB = TEST_DB_DIR / "database.sqlite3"
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{TEST_DB}"
 os.environ["REDIS_URL"] = "fakeredis://"
 
@@ -41,4 +43,4 @@ def client():
         assert changed.status_code == 200
         test_client.headers["Authorization"] = f"Bearer {changed.json()['accessToken']}"
         yield test_client
-    TEST_DB.unlink(missing_ok=True)
+    shutil.rmtree(TEST_DB_DIR, ignore_errors=True)

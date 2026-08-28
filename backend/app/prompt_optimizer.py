@@ -7,6 +7,7 @@ import httpx
 
 from .agent_attribution import current_agent_attribution
 from .config import settings
+from .error_logging import redact_error_text
 
 PROVIDERS = ("gemini", "minimax")
 RATIOS = ("adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16")
@@ -31,8 +32,9 @@ def provider_status() -> dict[str, dict[str, Any]]:
     }
 
 
-def _agent_headers() -> dict[str, str]:
-    _origin, agent_name, agent_run_id = current_agent_attribution()
+def _agent_headers(agent_name: str = "", agent_run_id: str = "") -> dict[str, str]:
+    if not agent_run_id:
+        _origin, agent_name, agent_run_id = current_agent_attribution()
     if not agent_run_id:
         return {}
     return {
@@ -57,13 +59,21 @@ def enrich_prompt(prompt: str, duration: int, ratio: str, media: list[dict[str, 
     return f"Target duration: exactly {duration} seconds. Target aspect ratio: {ratio}.\nReference bindings:\n" + "\n".join(bindings) + "\n\nUser intent:\n" + prompt.strip()
 
 
-async def call_gemini(*, prompt: str, duration: int, ratio: str, media: list[dict[str, Any]]) -> dict[str, Any]:
+def _raise_provider_error(response: httpx.Response, provider: str) -> None:
+    if response.is_success:
+        return
+    body = redact_error_text(response.text[:4000])
+    raise RuntimeError(f"{provider} HTTP {response.status_code}: {body or 'empty response body'}")
+
+
+async def call_gemini(*, prompt: str, duration: int, ratio: str, media: list[dict[str, Any]], agent_name: str = "", agent_run_id: str = "") -> dict[str, Any]:
     content: list[dict[str, Any]] = [{"type": "text", "text": f"{SYSTEM_INSTRUCTION}\n\n{enrich_prompt(prompt, duration, ratio, media)}"}]
     for item in media:
+        kind = item["kind"]
         content.append(
             {
-                "type": "image_url",
-                "image_url": {"url": item["url"]},
+                "type": f"{kind}_url",
+                f"{kind}_url": {"url": item["url"]},
                 "mime_type": item.get("mimeType") or "application/octet-stream",
             }
         )
@@ -73,11 +83,11 @@ async def call_gemini(*, prompt: str, duration: int, ratio: str, media: list[dic
         "stream": False,
         "max_tokens": 7000,
     }
-    headers = {"Authorization": f"Bearer {settings.prompt_optimizer_gemini_api_key}", "Content-Type": "application/json", **_agent_headers()}
+    headers = {"Authorization": f"Bearer {settings.prompt_optimizer_gemini_api_key}", "Content-Type": "application/json", **_agent_headers(agent_name, agent_run_id)}
     started = time.perf_counter()
     async with httpx.AsyncClient(timeout=settings.prompt_optimizer_timeout) as client:
         response = await client.post(f"{settings.prompt_optimizer_gemini_base_url}/chat/completions", headers=headers, json=payload)
-    response.raise_for_status()
+    _raise_provider_error(response, "Gemini")
     body = response.json()
     return {
         "prompt": body.get("choices", [{}])[0].get("message", {}).get("content", ""),
@@ -88,7 +98,7 @@ async def call_gemini(*, prompt: str, duration: int, ratio: str, media: list[dic
     }
 
 
-async def create_minimax(*, prompt: str, duration: int, ratio: str, media: list[dict[str, Any]]) -> dict[str, Any]:
+async def create_minimax(*, prompt: str, duration: int, ratio: str, media: list[dict[str, Any]], agent_name: str = "", agent_run_id: str = "") -> dict[str, Any]:
     content: list[dict[str, Any]] = [{"type": "text", "text": enrich_prompt(prompt, duration, ratio, media)}]
     for item in media:
         kind = item["kind"]
@@ -100,19 +110,22 @@ async def create_minimax(*, prompt: str, duration: int, ratio: str, media: list[
             }
         )
     payload = {"model": settings.prompt_optimizer_minimax_model, "content": content, "duration": duration, "ratio": ratio}
-    headers = {"Authorization": f"Bearer {settings.prompt_optimizer_minimax_api_key}", "Content-Type": "application/json", **_agent_headers()}
+    headers = {"Authorization": f"Bearer {settings.prompt_optimizer_minimax_api_key}", "Content-Type": "application/json", **_agent_headers(agent_name, agent_run_id)}
     async with httpx.AsyncClient(timeout=settings.prompt_optimizer_timeout) as client:
         response = await client.post(f"{settings.prompt_optimizer_minimax_base_url}/v2/h3_context_ir", headers=headers, json=payload)
-    response.raise_for_status()
+    _raise_provider_error(response, "MiniMax")
     body = response.json()
-    return {"taskId": str(body.get("task_id") or ""), "requestId": response.headers.get("x-request-id")}
+    task_id = str(body.get("task_id") or "").strip()
+    if not task_id:
+        raise RuntimeError(f"MiniMax HTTP {response.status_code}: response missing task_id; body={redact_error_text(response.text[:4000])}")
+    return {"taskId": task_id, "requestId": response.headers.get("x-request-id")}
 
 
-async def query_minimax(task_id: str) -> dict[str, Any]:
-    headers = {"Authorization": f"Bearer {settings.prompt_optimizer_minimax_api_key}", **_agent_headers()}
+async def query_minimax(task_id: str, *, agent_name: str = "", agent_run_id: str = "") -> dict[str, Any]:
+    headers = {"Authorization": f"Bearer {settings.prompt_optimizer_minimax_api_key}", **_agent_headers(agent_name, agent_run_id)}
     async with httpx.AsyncClient(timeout=settings.prompt_optimizer_timeout) as client:
         response = await client.get(f"{settings.prompt_optimizer_minimax_base_url}/v2/query/video_generation/{task_id}", headers=headers)
-    response.raise_for_status()
+    _raise_provider_error(response, "MiniMax")
     task = response.json().get("task") or {}
     return {
         "status": task.get("status") or "running",

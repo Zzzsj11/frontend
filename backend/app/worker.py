@@ -22,7 +22,7 @@ from .redis_store import close_redis, wait_for_worker_wakeup
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
 
 logger = logging.getLogger("mvagent.worker")
-REPLAYABLE_INTERNAL_KINDS = {"ass_outline", "general_outline", "ass_segment_retry", "storyboard_line", "billing_reconcile"}
+REPLAYABLE_INTERNAL_KINDS = {"ass_outline", "general_outline", "ass_segment_retry", "storyboard_line", "billing_reconcile", "prompt_optimization"}
 MAX_INTERNAL_ATTEMPTS = 3
 
 
@@ -149,6 +149,14 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
                     if line and line.deleted_at is None:
                         line.generation_status = "failed"
                         line.generation_error = model.error
+                elif model.kind == "prompt_optimization":
+                    from .models import PromptOptimizationTaskModel
+
+                    optimization_id = str((model.request or {}).get("optimization_task_id") or "")
+                    optimization = await session.get(PromptOptimizationTaskModel, optimization_id) if optimization_id else None
+                    if optimization and optimization.deleted_at is None:
+                        optimization.status = "failed"
+                        optimization.error = model.error
                 elif model.kind in REPLAYABLE_INTERNAL_KINDS and model.project_task_id:
                     task = await session.get(ProjectTaskModel, model.project_task_id)
                     if task and task.deleted_at is None:
@@ -191,6 +199,10 @@ def _runner(job: Job):
         from .video_billing import run_video_billing_reconciliation
 
         return run_video_billing_reconciliation
+    if job.kind == "prompt_optimization":
+        from .creative import run_prompt_optimization_job
+
+        return run_prompt_optimization_job
     if job.kind in REPLAYABLE_INTERNAL_KINDS:
         return run_storyboard_job
     raise RuntimeError(f"unsupported worker job kind: {job.kind}")

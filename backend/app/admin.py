@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import mimetypes
-import time
 import uuid
 from datetime import timedelta
 from decimal import Decimal
@@ -64,10 +63,7 @@ from .models import (
 from .prompt_optimizer import MEDIA_LIMITS as PROMPT_OPTIMIZER_MEDIA_LIMITS
 from .prompt_optimizer import PROVIDERS as PROMPT_OPTIMIZER_PROVIDERS
 from .prompt_optimizer import RATIOS as PROMPT_OPTIMIZER_RATIOS
-from .prompt_optimizer import call_gemini as optimize_with_gemini
-from .prompt_optimizer import create_minimax as create_minimax_optimization
 from .prompt_optimizer import provider_status as prompt_optimizer_provider_status
-from .prompt_optimizer import query_minimax as query_minimax_optimization
 from .prompts import DEFAULT_PROMPTS, invalidate, render_lenient, template_variables
 from .providers import ProviderError, list_video_models, query_provider_task, resume_generation, store_provider_result
 from .rbac import (
@@ -100,7 +96,7 @@ from .runninghub import submit_reference_task as rh_submit_reference_task
 from .runninghub import submit_text_task as rh_submit_text_task
 from .runninghub import upload_media as rh_upload_media
 from .server_monitoring import monitoring_summary
-from .storage import get_storage, import_remote, is_tos_url, put_image_with_thumbnail, safe_key
+from .storage import get_storage, import_remote, is_user_owned_tos_url, put_image_with_thumbnail, safe_key
 from .storyboard_options import OPTION_KINDS, load_general_storyboard_options
 from .token_usage import add_llm_call_log, add_token_usage
 from .video_billing import run_video_billing_reconciliation, video_discount_label, video_discount_rate
@@ -1989,7 +1985,7 @@ async def prompt_optimizer_create(payload: PromptOptimizerRunIn, request: Reques
             raise HTTPException(422, f"{kind} 素材最多 {limit} 个")
     if not media:
         raise HTTPException(422, "请至少上传一个参考素材")
-    if any(not is_tos_url(item["url"]) for item in media):
+    if any(not is_user_owned_tos_url(item["url"], user.id) for item in media):
         raise HTTPException(422, "参考素材必须先通过本页上传到 TOS")
     origin, agent_name, agent_run_id = current_agent_attribution()
     item = PromptOptimizationTaskModel(
@@ -2008,48 +2004,17 @@ async def prompt_optimizer_create(payload: PromptOptimizerRunIn, request: Reques
     )
     db.add(item)
     await db.flush()
-    started = time.perf_counter()
-    try:
-        if payload.provider == "gemini":
-            result = await optimize_with_gemini(prompt=payload.prompt, duration=payload.duration, ratio=payload.ratio, media=media)
-            item.status = "succeeded"
-            item.output_prompt = result["prompt"]
-            item.request_id = result.get("requestId")
-            item.usage_data = {**result.get("usage", {}), "usageRecorded": True}
-            add_token_usage(db, operation="admin_prompt_optimization", provider="gemini", model=item.model, usage=result.get("usage"), user_id=user.id, request_id=item.request_id)
-            add_llm_call_log(
-                db,
-                operation="admin_prompt_optimization",
-                provider="gemini",
-                model=item.model,
-                usage=result.get("usage"),
-                user_id=user.id,
-                request_id=item.request_id,
-                duration_ms=result.get("durationMs", 0),
-                request_messages=result.get("requestSnapshot"),
-                response_text=item.output_prompt,
-            )
-        else:
-            result = await create_minimax_optimization(prompt=payload.prompt, duration=payload.duration, ratio=payload.ratio, media=media)
-            item.provider_task_id = result["taskId"]
-            item.request_id = result.get("requestId")
-    except Exception as exc:
-        item.status = "failed"
-        item.error = str(exc)[:2000]
-        add_llm_call_log(
-            db,
-            operation="admin_prompt_optimization",
-            provider=payload.provider,
-            model=item.model,
-            usage={},
-            user_id=user.id,
-            status="error",
-            error=item.error,
-            duration_ms=round((time.perf_counter() - started) * 1000),
-            request_messages=[{"role": "user", "content": payload.prompt}],
-        )
+    job = await job_manager.enqueue(
+        db,
+        "prompt_optimization",
+        {"optimization_task_id": item.id, "_provider": payload.provider, "_operation": "admin_prompt_optimization", "_agentName": agent_name, "_agentRunId": agent_run_id},
+        user_id=user.id,
+    )
     await audit(db, request, user, "prompt_optimizer.create", "prompt_optimization_task", item.id, None, {"provider": item.provider, "status": item.status, "mediaCounts": counts})
     await db.commit()
+    from .creative import run_prompt_optimization_job
+
+    await job_manager.dispatch(job, run_prompt_optimization_job)
     return _prompt_optimizer_json(item)
 
 
@@ -2067,30 +2032,6 @@ async def prompt_optimizer_query(task_id: str, user: CurrentUser, db: AsyncSessi
     ).scalar_one_or_none()
     if not item:
         raise HTTPException(404, "提示词优化任务不存在")
-    if item.provider == "minimax" and item.status in {"queued", "running"} and item.provider_task_id:
-        try:
-            result = await query_minimax_optimization(item.provider_task_id)
-            item.status = result["status"]
-            item.output_prompt = result["prompt"]
-            item.error = result["error"]
-            if item.status == "succeeded" and not (item.usage_data or {}).get("usageRecorded"):
-                item.usage_data = {**result["usage"], "usageRecorded": True}
-                add_token_usage(db, operation="admin_prompt_optimization", provider="minimax", model=item.model, usage=result["usage"], user_id=user.id, request_id=item.request_id)
-                add_llm_call_log(
-                    db,
-                    operation="admin_prompt_optimization",
-                    provider="minimax",
-                    model=item.model,
-                    usage=result["usage"],
-                    user_id=user.id,
-                    request_id=item.request_id,
-                    request_messages=[{"role": "user", "content": item.input_prompt}],
-                    response_text=item.output_prompt,
-                )
-            await db.commit()
-        except Exception as exc:
-            item.error = str(exc)[:2000]
-            await db.commit()
     return _prompt_optimizer_json(item)
 
 

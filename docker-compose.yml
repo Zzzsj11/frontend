@@ -26,7 +26,7 @@ services:
       APP_HOST: 0.0.0.0
       APP_PORT: 8000
       APP_CORS_ORIGINS: http://120.24.38.200:${FRONTEND_PORT:-5173},http://localhost:${FRONTEND_PORT:-5173}
-      DATABASE_URL: postgresql+asyncpg://mvagent:mvagent@postgres:5432/mvagent
+      DATABASE_URL: postgresql+asyncpg://mvagent:mvagent@postgres:5432/${POSTGRES_DB:-mvagent}
       REDIS_URL: redis://redis:6379/0
       LLM_API_MODE: ${LLM_API_MODE:-openai}
       OUTLINE_PROTOCOL_VERSION: ${OUTLINE_PROTOCOL_VERSION:-v2}
@@ -68,7 +68,7 @@ services:
         required: false
     environment:
       APP_ENV: ${APP_ENV:-development}
-      DATABASE_URL: postgresql+asyncpg://mvagent:mvagent@postgres:5432/mvagent
+      DATABASE_URL: postgresql+asyncpg://mvagent:mvagent@postgres:5432/${POSTGRES_DB:-mvagent}
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:-development-only-change-me-at-least-32-bytes}
       STORAGE_BACKEND: tos
@@ -100,7 +100,7 @@ services:
   worker-chat:
     extends: worker-media
     stop_grace_period: 2m
-    command: ['--kinds', 'chat', '--concurrency', '${CHAT_WORKER_CONCURRENCY:-2}']
+    command: ['--kinds', 'chat,prompt_optimization', '--concurrency', '${CHAT_WORKER_CONCURRENCY:-2}']
 
   worker-storyboard:
     extends: worker-media
@@ -118,7 +118,7 @@ services:
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      POSTGRES_DB: mvagent
+      POSTGRES_DB: ${POSTGRES_DB:-mvagent}
       POSTGRES_USER: mvagent
       POSTGRES_PASSWORD: mvagent
     ports:

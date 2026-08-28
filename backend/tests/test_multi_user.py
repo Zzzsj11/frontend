@@ -84,7 +84,9 @@ def test_all_deletes_are_soft_deletes(client) -> None:
 
     import sqlite3
 
-    with sqlite3.connect("/tmp/mv-agent-backend-test.sqlite3") as connection:
+    from conftest import TEST_DB
+
+    with sqlite3.connect(TEST_DB) as connection:
         owner, deleted_at = connection.execute("SELECT user_id, deleted_at FROM projects WHERE id = ?", (project["id"],)).fetchone()
     assert owner == user_id
     assert deleted_at is not None

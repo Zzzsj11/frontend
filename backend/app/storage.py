@@ -10,7 +10,7 @@ import tempfile
 import uuid
 from pathlib import Path
 from typing import Awaitable, Callable, Protocol
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import quote, unquote, urljoin, urlparse
 
 import httpx
 from PIL import Image, ImageOps
@@ -51,6 +51,14 @@ def is_tos_url(url: str) -> bool:
         if bucket and endpoint:
             allowed.add(f"{bucket}.{endpoint}")
     return urlparse(url).scheme == "https" and host in allowed
+
+
+def is_user_owned_tos_url(url: str, user_id: str) -> bool:
+    """Accept only TOS objects stored below the authenticated user's prefix."""
+    if not is_tos_url(url):
+        return False
+    path = unquote(urlparse(url).path).replace("\\", "/")
+    return f"/users/{user_id}/" in f"/{path.lstrip('/')}"
 
 
 class TosStorage:

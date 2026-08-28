@@ -1,11 +1,25 @@
 import asyncio
+import time
 
 from sqlalchemy import select
 
 from app import admin as admin_module
 from app import creative as creative_module
+from app import prompt_optimizer
 from app.database import session_factory
 from app.models import PromptOptimizationTaskModel, TokenUsageModel
+from app.storage import is_user_owned_tos_url
+
+
+def wait_for_task(client, path: str, expected: str = "succeeded") -> dict:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        body = client.get(path).json()
+        if body["status"] not in {"queued", "running"}:
+            assert body["status"] == expected
+            return body
+        time.sleep(0.05)
+    raise AssertionError("prompt optimization task did not finish")
 
 
 def test_prompt_optimizer_status_is_admin_only(client, monkeypatch) -> None:
@@ -57,7 +71,7 @@ def test_prompt_optimizer_gemini_records_user_task_and_usage(client, monkeypatch
             "minimax": {"configured": False, "model": "MiniMax-H3", "keyTail": ""},
         },
     )
-    monkeypatch.setattr(admin_module, "is_tos_url", lambda _url: True)
+    monkeypatch.setattr(admin_module, "is_user_owned_tos_url", lambda _url, _user_id: True)
 
     async def fake_optimize(**_kwargs):
         return {
@@ -68,7 +82,7 @@ def test_prompt_optimizer_gemini_records_user_task_and_usage(client, monkeypatch
             "requestSnapshot": [{"role": "user", "content": "test"}],
         }
 
-    monkeypatch.setattr(admin_module, "optimize_with_gemini", fake_optimize)
+    monkeypatch.setattr(creative_module, "call_gemini", fake_optimize)
     response = client.post(
         "/api/admin/prompt-optimizer/tasks",
         json={
@@ -89,7 +103,7 @@ def test_prompt_optimizer_gemini_records_user_task_and_usage(client, monkeypatch
     )
     assert response.status_code == 201
     body = response.json()
-    assert body["status"] == "succeeded"
+    body = wait_for_task(client, f"/api/admin/prompt-optimizer/tasks/{body['id']}")
     assert body["outputPrompt"].startswith("subject_definitions:")
 
     async def verify() -> None:
@@ -119,12 +133,12 @@ def test_prompt_optimizer_minimax_poll_records_usage_once(client, monkeypatch) -
             "minimax": {"configured": True, "model": "MiniMax-H3", "keyTail": "…test"},
         },
     )
-    monkeypatch.setattr(admin_module, "is_tos_url", lambda _url: True)
+    monkeypatch.setattr(admin_module, "is_user_owned_tos_url", lambda _url, _user_id: True)
 
     async def fake_create(**_kwargs):
         return {"taskId": "provider-task-1", "requestId": "minimax-request-1"}
 
-    async def fake_query(_task_id):
+    async def fake_query(_task_id, **_kwargs):
         return {
             "status": "succeeded",
             "prompt": "subject_definitions:\n<Subject 1> official",
@@ -133,8 +147,8 @@ def test_prompt_optimizer_minimax_poll_records_usage_once(client, monkeypatch) -
             "requestId": "query-request-1",
         }
 
-    monkeypatch.setattr(admin_module, "create_minimax_optimization", fake_create)
-    monkeypatch.setattr(admin_module, "query_minimax_optimization", fake_query)
+    monkeypatch.setattr(creative_module, "create_minimax", fake_create)
+    monkeypatch.setattr(creative_module, "query_minimax", fake_query)
     created = client.post(
         "/api/admin/prompt-optimizer/tasks",
         json={
@@ -155,9 +169,9 @@ def test_prompt_optimizer_minimax_poll_records_usage_once(client, monkeypatch) -
     assert created.status_code == 201
     assert created.json()["status"] == "running"
     task_id = created.json()["id"]
-    first = client.get(f"/api/admin/prompt-optimizer/tasks/{task_id}")
+    first_body = wait_for_task(client, f"/api/admin/prompt-optimizer/tasks/{task_id}")
     second = client.get(f"/api/admin/prompt-optimizer/tasks/{task_id}")
-    assert first.json()["status"] == "succeeded"
+    assert first_body["status"] == "succeeded"
     assert second.json()["outputPrompt"].endswith("official")
 
     async def verify() -> None:
@@ -226,5 +240,67 @@ def test_creative_gemini_optimization_is_available_to_authenticated_user(client,
         json={"provider": "gemini", "prompt": "创意视频", "duration": 8, "ratio": "16:9", "media": []},
     )
     assert response.status_code == 201
-    assert response.json()["status"] == "succeeded"
-    assert response.json()["outputPrompt"].endswith("creative test")
+    body = wait_for_task(client, f"/api/creative/optimizations/{response.json()['id']}")
+    assert body["outputPrompt"].endswith("creative test")
+
+
+def test_gemini_preserves_multimedia_content_types(monkeypatch) -> None:
+    captured = {}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, _url, **kwargs):
+            captured.update(kwargs["json"])
+            import httpx
+
+            return httpx.Response(200, request=httpx.Request("POST", "https://provider.test"), json={"choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr(prompt_optimizer.httpx, "AsyncClient", lambda **_kwargs: FakeClient())
+    asyncio.run(
+        prompt_optimizer.call_gemini(
+            prompt="test",
+            duration=8,
+            ratio="16:9",
+            media=[
+                {"kind": "image", "url": "https://tos.test/i.jpg"},
+                {"kind": "video", "url": "https://tos.test/v.mp4"},
+                {"kind": "audio", "url": "https://tos.test/a.mp3"},
+            ],
+        )
+    )
+    content = captured["messages"][0]["content"]
+    assert [item["type"] for item in content[1:]] == ["image_url", "video_url", "audio_url"]
+
+
+def test_minimax_missing_task_id_includes_response_body(monkeypatch) -> None:
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, _url, **_kwargs):
+            import httpx
+
+            return httpx.Response(200, request=httpx.Request("POST", "https://provider.test"), json={"message": "accepted without id"})
+
+    monkeypatch.setattr(prompt_optimizer.httpx, "AsyncClient", lambda **_kwargs: FakeClient())
+    try:
+        asyncio.run(prompt_optimizer.create_minimax(prompt="test", duration=8, ratio="16:9", media=[]))
+    except RuntimeError as exc:
+        assert "missing task_id" in str(exc)
+        assert "accepted without id" in str(exc)
+    else:
+        raise AssertionError("missing task_id must fail")
+
+
+def test_user_owned_tos_url_requires_user_prefix(monkeypatch) -> None:
+    monkeypatch.setattr("app.storage.is_tos_url", lambda _url: True)
+    assert is_user_owned_tos_url("https://tos.test/users/user-1/creative/image/a.jpg", "user-1")
+    assert not is_user_owned_tos_url("https://tos.test/users/user-2/creative/image/a.jpg", "user-1")

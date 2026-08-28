@@ -11,10 +11,21 @@ import {
 } from '../api/creative'
 import type { CreativeReferenceMedia, ShotGenOptions } from '../types'
 import { DEFAULT_SHOT_OPTIONS, useProjectStore } from '../stores/project'
+import {
+  VIDEO_MODEL_OPTIONS,
+  generationModelLabel,
+  isH3VideoModel,
+  loadGenerationModels,
+} from '../generationModels'
 import BaseModal from './base/BaseModal.vue'
 import AppIcon from './AppIcon.vue'
+import {
+  creativeModeReady,
+  creativeReferences,
+  type CreativeGenerationMode,
+} from '../utils/creativeVideo'
 
-type GenerationMode = 'text' | 'first_frame' | 'first_last' | 'reference'
+type GenerationMode = CreativeGenerationMode
 const store = useProjectStore()
 const status = ref<CreativeStatus | null>(null)
 const provider = ref<CreativeProvider>('minimax')
@@ -24,6 +35,7 @@ const optimizedPrompt = ref('')
 const media = ref<CreativeReferenceMedia[]>([])
 const duration = ref(15)
 const ratio = ref<ShotGenOptions['ratio']>('16:9')
+const videoModel = ref('minimax-h3')
 const task = ref<CreativeOptimization | null>(null)
 const loading = ref(false)
 const uploading = ref(false)
@@ -42,18 +54,8 @@ const canOptimize = computed(() => {
   return Boolean(status.value?.providers[provider.value].configured)
 })
 const canCreate = computed(() => Boolean(optimizedPrompt.value.trim()) && !loading.value)
-const modeReady = computed(() => {
-  if (mode.value === 'text') return true
-  if (mode.value === 'first_frame') return counts.value.image >= 1
-  if (mode.value === 'first_last') return counts.value.image >= 2
-  return (
-    media.value.length > 0 &&
-    counts.value.image <= 6 &&
-    counts.value.video <= 1 &&
-    counts.value.audio <= 3 &&
-    media.value.length <= 10
-  )
-})
+const h3Models = computed(() => VIDEO_MODEL_OPTIONS.filter((item) => isH3VideoModel(item.value)))
+const modeReady = computed(() => creativeModeReady(mode.value, media.value))
 const labelOf = (item: CreativeReferenceMedia, index: number) => {
   const label = item.kind === 'image' ? '图片' : item.kind === 'video' ? '视频' : '音频'
   return `${label}${media.value.slice(0, index + 1).filter((entry) => entry.kind === item.kind).length}`
@@ -126,22 +128,18 @@ const create = async () => {
   loading.value = true
   error.value = ''
   try {
-    const images = media.value.filter((item) => item.kind === 'image').map((item) => item.url)
+    const references = creativeReferences(mode.value, media.value)
     const options: ShotGenOptions = {
       ...DEFAULT_SHOT_OPTIONS,
       duration: duration.value,
       ratio: ratio.value,
-      videoModel: 'minimax-h3-runninghub',
+      videoModel: videoModel.value,
       h3Mode: mode.value,
-      h3FirstFrameUrl: images[0],
-      h3LastFrameUrl: images[1],
-      referenceImageUrls: images,
-      referenceVideoUrls: media.value
-        .filter((item) => item.kind === 'video')
-        .map((item) => item.url),
-      referenceAudioUrls: media.value
-        .filter((item) => item.kind === 'audio')
-        .map((item) => item.url),
+      h3FirstFrameUrl: references.firstFrameUrl,
+      h3LastFrameUrl: references.lastFrameUrl,
+      referenceImageUrls: references.imageUrls,
+      referenceVideoUrls: references.videoUrls,
+      referenceAudioUrls: references.audioUrls,
     }
     const line = await store.addCreativeLine({
       originalPrompt: originalPrompt.value.trim(),
@@ -160,6 +158,9 @@ const create = async () => {
 }
 onMounted(async () => {
   try {
+    await loadGenerationModels()
+    if (!h3Models.value.some((item) => item.value === videoModel.value))
+      videoModel.value = h3Models.value[0]?.value || 'minimax-h3'
     status.value = await fetchCreativeStatus()
     if (!status.value.providers.minimax.configured && status.value.providers.gemini.configured)
       provider.value = 'gemini'
@@ -206,6 +207,14 @@ onBeforeUnmount(() => pollTimer && clearTimeout(pollTimer))
           {{ item.label }}
         </button>
       </div>
+      <label
+        >视频渠道
+        <select v-model="videoModel">
+          <option v-for="item in h3Models" :key="item.value" :value="item.value">
+            {{ generationModelLabel(item) }}
+          </option>
+        </select>
+      </label>
       <label
         >目标描述<textarea
           v-model="originalPrompt"
