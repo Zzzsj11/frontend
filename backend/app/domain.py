@@ -702,13 +702,15 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
         common_prompt_parts.append(f"额外要求：{payload.extra_requirement.strip()}。")
     common_prompt = "".join(common_prompt_parts)
     empty_prompt = common_prompt + "【空镜】画面中不得出现人物、人影或可识别的人体主体；请自由设计环境、景物、光影与镜头运动。"
-    character_prompt = common_prompt + "必须以人物为明确视觉主体；请自由设计人物动作、场景和镜头运动。"
+    # 随机通用分镜不在应用层预设人物身份、外貌或服装；视频模型仅依据用户输入
+    # 自行生成内容。标记只用于让用户明确看到该镜没有代码拼装的人物设定。
+    character_prompt = common_prompt + "【随机生成】"
     title_base = f"随机通用分镜-{utcnow().astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d-%H-%M-%S')}"
     config = {
         **payload.model_dump(mode="json"),
         "empty_prompt": empty_prompt,
         "character_prompt": character_prompt,
-        "character_prompt_policy": "structured_cast_per_shot_v2",
+        "character_prompt_policy": "video_model_random_v3",
         "outlineSkipped": True,
     }
     results = []
@@ -716,7 +718,6 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
     # environment shots at the beginning.
     empty_positions = {min(total - 1, int(index * total / payload.empty_shot_count)) for index in range(payload.empty_shot_count)} if payload.empty_shot_count else set()
     shot_types = ["empty" if index in empty_positions else "character" for index in range(total)]
-    character_index = 0
     for group_index in range(payload.group_count):
         title = title_base if payload.group_count == 1 else f"{title_base}-{group_index + 1:02d}"
         group_config = {**config, "group_index": group_index + 1}
@@ -732,58 +733,17 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
             cast_ids=[],
         )
         output = []
-        character_index = 0
         for index, (duration, shot_type) in enumerate(zip(durations, shot_types, strict=True)):
             if shot_type == "empty":
                 prompt = empty_prompt
             else:
-                # 随机通用分镜不传人物参考图。若所有人物镜提示词完全相同，视频模型
-                # 很容易收敛到同一张脸；为每镜指定不同的成人选角特征，并明确禁止跨镜
-                # 复用演员身份，让每条请求本身就携带足够强的身份差异信号。
-                cast_profiles = (
-                    ("单人", "青年女性", "二十多岁女性，短卷发，圆脸与明亮眼神，穿柠檬黄街头夹克"),
-                    ("单人", "中年男性", "三十多岁男性，寸头，棱角分明的长脸，穿深蓝工装外套"),
-                    ("单人", "中年女性", "四十多岁女性，齐肩直发，成熟方脸，穿酒红色长风衣"),
-                    ("双人", "青年男性/青年女性", "二十多岁男性，中长卷发，穿银灰运动套装；二十多岁女性，黑色波波头，穿紫色机能风套装"),
-                    ("单人", "中年女性", "五十多岁女性，利落短发，宽颧骨与沉静眼神，穿墨绿针织衫"),
-                    ("双人", "中年女性/中年男性", "三十多岁女性，高马尾，穿橙色复古连衣裙；四十多岁男性，自然卷短发，穿棕色皮夹克"),
-                    ("单人", "老年男性", "六十多岁男性，花白背头，宽阔方脸，穿米色亚麻西装"),
-                    ("单人", "青年女性", "二十多岁女性，黑色波波头，细长脸，穿紫色机能风套装"),
-                    ("单人", "中年男性", "四十多岁男性，自然卷短发，圆方脸与络腮胡，穿棕色皮夹克"),
-                    ("双人", "青年女性/中年女性", "二十多岁女性，红棕色脏辫，穿青绿色飞行夹克；三十多岁女性，栗色长卷发，穿湖蓝色衬衫"),
-                    ("单人", "中年男性", "五十多岁男性，灰色短发，瘦长脸，穿暗红色中式立领外套"),
-                    ("单人", "青年男性", "二十多岁男性，蓬松短发，宽额方脸，穿绿色棒球夹克"),
-                    ("双人", "中年女性/中年男性", "四十多岁女性，银灰挑染盘发，穿黑白几何套装；三十多岁男性，光头浓眉，穿亮橙色连帽衫"),
-                    ("单人", "中年男性", "三十多岁男性，光头，圆脸与浓眉，穿亮橙色连帽衫"),
-                    ("单人", "老年女性", "六十多岁女性，银白齐耳短发，慈祥圆脸，穿靛蓝披肩"),
-                    ("单人", "青年女性", "二十多岁女性，红棕色脏辫，长脸，穿青绿色飞行夹克"),
-                    ("单人", "中年男性", "五十多岁男性，微卷中发，方脸与八字胡，穿浅灰长大衣"),
-                    ("双人", "中年女性/青年男性", "三十多岁女性，超短发，穿玫红色西装；二十多岁男性，浅色卷发，穿白色未来感风衣"),
-                    ("单人", "中年男性", "四十多岁男性，盐胡椒色侧分发，鹅蛋脸，穿藏青色针织开衫"),
-                    ("单人", "青年男性", "二十多岁男性，浅色卷发，窄长脸，穿白色未来感风衣"),
-                )
-                cast_count_label, cast_demographic_label, profile = cast_profiles[character_index % len(cast_profiles)]
-                character_composition = {
-                    "count": 2 if cast_count_label == "双人" else 1,
-                    "countLabel": cast_count_label,
-                    "demographicLabel": cast_demographic_label,
-                    "label": f"人物镜*{cast_count_label}*{cast_demographic_label}",
-                    "protagonists": profile.split("；"),
-                }
-                prompt = (
-                    character_prompt
-                    + f"【{character_composition['label']}】【主角：{profile}】"
-                    + "本镜人物必须与本任务其他人物镜完全不同；不得复用相同演员、相同面孔、相同发型或相同服装，尤其不得延续上一镜人物身份。"
-                )
-                character_index += 1
+                prompt = character_prompt
             options = {
                 "ratio": payload.ratio,
                 "resolution": payload.resolution,
                 "videoModel": payload.video_model,
                 "duration": normalize_video_duration(duration),
             }
-            if shot_type == "character":
-                options["characterComposition"] = character_composition
             line = StoryboardLineModel(
                 id=uid("line"),
                 project_task_id=task.id,
