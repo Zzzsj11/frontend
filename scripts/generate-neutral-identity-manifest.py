@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import time
 from pathlib import Path
@@ -45,6 +46,7 @@ def main() -> None:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--ids", nargs="*")
+    parser.add_argument("--concurrency", type=int, default=4)
     args = parser.parse_args()
 
     headers = _headers(args.token, args.run_id)
@@ -75,7 +77,8 @@ def main() -> None:
         selected = [human for human in selected if human["id"] not in completed]
         if args.limit is not None:
             selected = selected[: args.limit]
-        for index, human in enumerate(selected, 1):
+
+        def generate_one(human: dict) -> dict:
             identity = (
                 "，".join(
                     value
@@ -99,30 +102,42 @@ def main() -> None:
                     human.get("originalAvatar") or human["avatar"],
                 ],
             }
-            created = client.post(
-                "/api/generations/images", headers=headers, json=payload
-            )
-            created.raise_for_status()
-            job = _wait(client, headers, created.json()["id"])
+            with httpx.Client(
+                base_url=args.api_base.rstrip("/"), timeout=90, follow_redirects=True
+            ) as worker_client:
+                created = worker_client.post(
+                    "/api/generations/images", headers=headers, json=payload
+                )
+                created.raise_for_status()
+                job = _wait(worker_client, headers, created.json()["id"])
             result = job.get("result") or {}
             urls = result.get("urls") or []
             if not urls:
                 raise RuntimeError(f"{human['id']}: succeeded without output URL")
-            existing.append(
-                {
-                    "id": human["id"],
-                    "name": human["name"],
-                    "scope": human["scope"],
-                    "source_url": human.get("originalAvatar") or human["avatar"],
-                    "url": urls[0],
-                    "generation_job_id": job["id"],
-                }
-            )
-            args.output.write_text(json.dumps(existing, ensure_ascii=False, indent=2))
-            print(
-                f"generated {index}/{len(selected)} {human['id']} job={job['id']}",
-                flush=True,
-            )
+            return {
+                "id": human["id"],
+                "name": human["name"],
+                "scope": human["scope"],
+                "source_url": human.get("originalAvatar") or human["avatar"],
+                "url": urls[0],
+                "generation_job_id": job["id"],
+            }
+
+        workers = max(1, min(args.concurrency, 8))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(generate_one, human): human for human in selected
+            }
+            for index, future in enumerate(concurrent.futures.as_completed(futures), 1):
+                row = future.result()
+                existing.append(row)
+                args.output.write_text(
+                    json.dumps(existing, ensure_ascii=False, indent=2)
+                )
+                print(
+                    f"generated {index}/{len(selected)} {row['id']} job={row['generation_job_id']}",
+                    flush=True,
+                )
 
 
 if __name__ == "__main__":
