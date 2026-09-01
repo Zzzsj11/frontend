@@ -193,7 +193,7 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
                 "严格执行 currentShot.outline 中的 characterAction、emotionalFocus、cameraPurpose、motifIds 和 locationChange；未列入 motifIds 的视觉母题不得擅自加入。",
                 "一致性来自时间、天气、色彩与空间衔接，不等于所有镜头停留在同一场景。scenePrompt 必须体现大纲规划的场景推进。",
                 "当 source 为 ass 且 plannedDigitalHumanIds 非空时，shotPrompt 必须逐一写入对应 allowedCharacters 的面部身份信息，并逐字写出 currentShot.outline.wardrobeByCharacter 中对应角色的本场服装。参考图只用于锁定面部、五官、脸型、肤色、年龄感和发型，必须明确忽略参考图中的原始服装，严格换成本大场景服装；同一 sceneIndex 内服装一致，不同 sceneIndex 必须换装。严禁出现未列入本镜的其他人物。",
-                "当 source 为 general 且 plannedDigitalHumanIds 非空时，人物参考图会提交给视频模型；shotPrompt 必须明确保持参考人物的面部身份、五官、脸型、肤色、年龄感和发型一致，并逐字使用 currentShot.outline.wardrobeByCharacter 的本组服装与动作。服装的材质、色彩、层次和正式程度必须呼应 currentShot.outline.wardrobeIntent 以及本镜场景、光线、主色和情绪；忽略参考图原始服装。同一 wardrobeGroupIndex 内服装一致，切换组后必须换装。",
+                "当 source 为 general 且 plannedDigitalHumanIds 非空时，人物参考图会提交给视频模型；参考卡只负责人物面部身份、五官、脸型、肤色、年龄感、发型和身体比例，必须忽略卡片的白色T恤、灰色背景、多视图排版及任何原始年代或职业暗示。shotPrompt 必须逐字使用 currentShot.outline.wardrobeByCharacter 的本组服装与动作；服装首先服从用户要求和歌曲曲风，再结合歌词情绪、叙事、场景与光线确定。同一 wardrobeGroupIndex 内服装一致，切换组后必须换装。",
                 "当 source 为 general、shotType 为 character 且 plannedDigitalHumanIds 为空时，digitalHumanIds 必须为空，但 shotPrompt 应依据曲风、性别、年龄、场景和动作自由设计本镜人物，不要求跨镜为同一个人。人物镜开头必须使用【人物镜*人数*年龄性别】和【主角：人物描述】；例如【人物镜*单人*中年女性】【主角：三十多岁女性，短发，穿深色风衣】。不得输出本镜独立选角编号或 R1-2 一类内部编号。",
                 "当 source 为 general、shotType 为 character 且 plannedDigitalHumanIds 非空时，人物镜开头同样必须使用【人物镜*人数*年龄性别】和【主角：人物描述】，年龄性别及人物描述必须来自 allowedCharacters，不得虚构或输出内部角色编号。",
                 "当 shotType 为 empty 或 source 不为 general 且 plannedDigitalHumanIds 为空时，digitalHumanIds 必须为空，shotPrompt 必须明确为无人出镜的空镜，不得描写可识别人物。",
@@ -340,7 +340,7 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
         "format": "text",
         "variables": {},
         "required_fragments": ["空镜严禁人物"],
-        "content": "空镜严禁人物；选择人物后，人物面部身份与发型跨镜一致，服装按 wardrobeGroupIndex 每 3 镜成组：同组严格一致，切换组时明显换整套；每套服装必须在材质、色彩、层次和正式程度上呼应场景、季节、曲风、光线、主色与叙事情绪。未选择人物时，每个人物镜可独立生成人物，不要求跨镜身份或着装一致。",
+        "content": "空镜严禁人物；选择人物后，参考卡仅锁定人物面部身份、年龄感、发型和身体比例，必须忽略卡片中的白色T恤、灰色背景和多视图排版。服装按 wardrobeGroupIndex 每 3 镜成组：同组严格一致，切换组时明显换整套；造型优先服从用户要求和歌曲曲风，再结合歌词情绪、叙事、场景、季节、光线与主色。未选择人物时，每个人物镜可独立生成人物，不要求跨镜身份或着装一致。",
     },
     # ── 数字人定妆照（image 引擎；条件拼接逻辑留在代码，模板只含固定文案） ────
     "portrait.digital_human_ref": {
@@ -349,8 +349,8 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
         "engine": "image",
         "format": "text",
         "variables": {"extra": "角色描述与画面风格附加段（代码拼装，可为空串）"},
-        "required_fragments": ["参照第一张参考图", "保持一致"],
-        "content": "参照第一张参考图的构图版式、光线风格和清晰度。将参考图中的人物，替换为上传照片中的人物，保持一模一样的人物外貌、服装和配饰。{{extra}}除此之外的光线、背景、排版、画面品质，完全与参考图保持一致。",
+        "required_fragments": ["第一张参考图", "第二张参考图", "禁止继承"],
+        "content": "第一张参考图只定义身份参考卡的构图版式：中性灰背景，左侧大幅正面头肩像，右侧依次排列头部正面/侧面/背面和全身正面/侧面/背面，棚拍柔光，清晰写实。第二张参考图只定义人物身份：必须保持其五官、脸型、肤色、年龄感、发型和身体比例一致。所有人物统一穿纯白无图案圆领短袖T恤与中性浅灰下装，不佩戴饰品，不持道具。禁止继承任一参考图中的原服装、配饰、职业、年代、场景、文字、Logo或水印。{{extra}}附加描述只可影响人物身份特征，不得改变统一服装、背景与排版。",
     },
     # ── Chat 默认 system prompt ─────────────────────────────────────────────
     "chat.default_system": {

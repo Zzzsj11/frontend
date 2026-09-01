@@ -1099,6 +1099,18 @@ async def _run_ass_outline_generation(
         return {"taskId": task_id, "storyBibleVersion": story_bible.get("version") or STORY_BIBLE_VERSION}
 
 
+def _identity_only_human(item: DigitalHumanModel) -> dict[str, str]:
+    """发送给分镜模型的最小人物身份信息，禁止人物库服装/年代/曲风污染当前 MV。"""
+    identity = "，".join(value for value in (item.age_description, item.gender) if value) or item.name
+    return {
+        "id": item.id,
+        "name": item.name,
+        "gender": item.gender or "",
+        "ageDescription": item.age_description or "",
+        "identityDescription": identity,
+    }
+
+
 def _general_character_composition(shot: dict, config: dict, selected_humans: list[dict]) -> dict | None:
     if shot.get("shotType") != "character":
         return None
@@ -1124,7 +1136,7 @@ def _general_character_composition(shot: dict, config: dict, selected_humans: li
         "countLabel": count_label,
         "demographicLabel": demographic_label,
         "label": f"人物镜*{count_label}*{demographic_label}",
-        "protagonists": [str(item.get("systemPrompt") or item.get("appearanceStyle") or item.get("name") or demographics[index]) for index, item in enumerate(selected)],
+        "protagonists": [str(item.get("identityDescription") or item.get("name") or demographics[index]) for index, item in enumerate(selected)],
     }
 
 
@@ -1299,19 +1311,7 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
     role_ids = [item.digital_human_id for item in cast_links]
     humans = await visible_humans(db, user.id, role_ids)
     human_by_id = {item.id: item for item in humans}
-    selected_humans = [
-        {
-            "id": item.id,
-            "name": item.name,
-            "gender": item.gender,
-            "ageDescription": item.age_description,
-            "appearanceStyle": item.appearance_style,
-            "clothingDescription": item.clothing_description,
-            "systemPrompt": item.system_prompt or item.avatar_prompt or item.description,
-        }
-        for human_id in role_ids
-        if (item := human_by_id.get(human_id))
-    ]
+    selected_humans = [_identity_only_human(item) for human_id in role_ids if (item := human_by_id.get(human_id))]
     config_for_cast = dict(task.storyboard_config or {})
     if not selected_humans and (task.storyboard_type != "general" or int(config_for_cast.get("character_shot_count", 0)) > 0):
         raise HTTPException(422, "该任务还未选择人物，请先在人物栏选择人物后再生成分镜大纲")
@@ -1756,19 +1756,7 @@ async def regenerate_storyboard_outline_segment(task_id: str, scene_index: int, 
     role_ids = [item.digital_human_id for item in cast_links]
     humans = await visible_humans(db, user.id, role_ids)
     human_by_id = {item.id: item for item in humans}
-    selected_humans = [
-        {
-            "id": item.id,
-            "name": item.name,
-            "gender": item.gender,
-            "ageDescription": item.age_description,
-            "appearanceStyle": item.appearance_style,
-            "clothingDescription": item.clothing_description,
-            "systemPrompt": item.system_prompt or item.avatar_prompt or item.description,
-        }
-        for human_id in role_ids
-        if (item := human_by_id.get(human_id))
-    ]
+    selected_humans = [_identity_only_human(item) for human_id in role_ids if (item := human_by_id.get(human_id))]
     if not selected_humans:
         raise HTTPException(422, "该任务还未选择人物，请先在人物栏选择人物后再重试场景段")
     segments = [
@@ -2389,20 +2377,7 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
         (await db.execute(select(DigitalHumanModel).where(DigitalHumanModel.id.in_(allowed_ids) if allowed_ids else False, DigitalHumanModel.deleted_at.is_(None)))).scalars().all()
     )
     human_by_id = {item.id: item for item in human_models}
-    allowed_humans = [
-        {
-            "id": human.id,
-            "name": human.name,
-            "gender": human.gender,
-            "ageDescription": human.age_description,
-            "appearanceStyle": human.appearance_style,
-            "clothingDescription": human.clothing_description,
-            "suitableMusicStyles": human.suitable_music_styles,
-            "systemPrompt": human.system_prompt or human.avatar_prompt or human.description,
-        }
-        for human_id in allowed_ids
-        if (human := human_by_id.get(human_id))
-    ]
+    allowed_humans = [_identity_only_human(human) for human_id in allowed_ids if (human := human_by_id.get(human_id))]
     current = {
         "id": line.id,
         "index": line.sort_order,

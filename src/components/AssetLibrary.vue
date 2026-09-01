@@ -169,7 +169,6 @@ const editing = computed(() => store.digitalHumans.find((d) => d.id === editId.v
 const editName = ref('')
 const editStyle = ref('')
 const editDesc = ref('')
-const editPrompt = ref('')
 const editError = ref('')
 const regenBusy = computed(() => !!editing.value && store.dhRegeneratingId === editing.value.id)
 
@@ -193,7 +192,6 @@ const openEdit = (id: string) => {
   editName.value = dh.name
   editStyle.value = dh.style
   editDesc.value = dh.description
-  editPrompt.value = dh.avatarPrompt ?? ''
   editError.value = ''
 }
 
@@ -209,7 +207,6 @@ const applyEdit = () => {
     name: editName.value.trim() || editing.value.name,
     style: editStyle.value.trim() || '自定义',
     description: editDesc.value.trim() || editing.value.description,
-    avatarPrompt: editPrompt.value.trim(),
   })
 }
 
@@ -220,7 +217,7 @@ const saveEdit = () => {
 
 /** 用当前提示词重新生成形象，成功后图片本地化存储并替换头像（会覆盖当前形象，需二次确认） */
 const regenAvatar = async () => {
-  if (!editing.value || regenBusy.value || !editPrompt.value.trim()) return
+  if (!editing.value || regenBusy.value) return
   if (
     !(await confirmDialog({
       title: '重新生成数字人形象',
@@ -232,7 +229,7 @@ const regenAvatar = async () => {
   editError.value = ''
   applyEdit()
   try {
-    await store.regenerateDigitalHumanAvatar(editing.value.id, editPrompt.value.trim())
+    await store.regenerateDigitalHumanAvatar(editing.value.id)
   } catch (e) {
     editError.value = e instanceof Error ? e.message : '生成失败，请稍后重试'
   }
@@ -314,7 +311,7 @@ const removeDh = async () => {
             v-model="upDesc"
             class="gen-desc"
             rows="2"
-            placeholder="形象描述（可选）"
+            placeholder="身份特征（可选，仅填写五官、年龄感、发型等；不要填写服装）"
             :disabled="store.dhGenerating"
           />
         </div>
@@ -496,15 +493,12 @@ const removeDh = async () => {
               />
             </div>
           </div>
-          <label class="edit-label">形象描述</label>
+          <label class="edit-label">身份特征（不含服装、年代或职业）</label>
           <textarea v-model="editDesc" class="gen-desc" rows="2" :disabled="editing.readOnly" />
-          <label class="edit-label">生成提示词（修改后可重新生成形象，图片自动存储到 TOS）</label>
-          <textarea
-            v-model="editPrompt"
-            class="gen-desc edit-prompt"
-            rows="5"
-            :disabled="editing.readOnly"
-          />
+          <span class="readonly-tip"
+            >人物参考卡固定使用中性灰背景、白色圆领 T
+            恤和多视图排版；视频造型由歌曲曲风与当前分镜决定。</span
+          >
           <span v-if="editing.readOnly" class="readonly-tip"
             >系统人物为全局只读资产，所有用户均可使用，但不能编辑、重新生成或删除。</span
           >
@@ -528,7 +522,7 @@ const removeDh = async () => {
         <button
           v-if="!editing.readOnly"
           class="edit-regen"
-          :disabled="regenBusy || !editPrompt.trim()"
+          :disabled="regenBusy"
           @click="regenAvatar"
         >
           <span v-if="regenBusy" class="spinner" />

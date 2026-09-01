@@ -117,7 +117,13 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     async def fake_storyboard_line(**kwargs):
         assert kwargs["current"]["lyrics"] == "First line Second line"
         assert len(kwargs["full_context"]["timelineWindow"]) >= 1
-        assert "图片ID：020" in kwargs["allowed_humans"][0]["systemPrompt"]
+        assert kwargs["allowed_humans"][0] == {
+            "id": "dh-system-020",
+            "name": "系统人物 020",
+            "gender": "女",
+            "ageDescription": "约22岁，年轻女性",
+            "identityDescription": "约22岁，年轻女性，女",
+        }
         return {
             "scenePrompt": "sunlit room",
             "shotPrompt": "slow push in",

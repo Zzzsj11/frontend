@@ -41,10 +41,10 @@ async def upload_assets(assets: list[tuple[str, Path]]) -> None:
 
 def directory_assets(source: Path) -> list[tuple[str, Path]]:
     files = sorted(source.glob("*.png"))
-    expected = {f"{index:03d}" for index in range(1, 31)}
+    expected = {f"{index:03d}" for index in range(1, 33)}
     found = {path.stem for path in files}
     if found != expected:
-        raise SystemExit(f"Expected character sheets 001–030, got {sorted(found)}")
+        raise SystemExit(f"Expected character sheets 001–032, got {sorted(found)}")
     return [(path.stem, path) for path in files]
 
 
@@ -61,7 +61,7 @@ def explicit_assets(values: list[str]) -> list[tuple[str, Path]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("source", nargs="?", type=Path, help="Directory containing 001.png through 030.png")
+    parser.add_argument("source", nargs="?", type=Path, help="Directory containing 001.png through 032.png")
     parser.add_argument("--asset", action="append", default=[], help="Upload one asset as CODE=/path/to/image; repeat as needed")
     args = parser.parse_args()
     if bool(args.source) == bool(args.asset):

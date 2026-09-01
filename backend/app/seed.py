@@ -426,8 +426,16 @@ async def seed_system_data() -> None:
                 session.add(human)
             else:
                 human.style_id, human.deleted_at, human.status = style.id, None, "active"
-                human.avatar_url, human.avatar_thumbnail_url = avatar_url, thumbnail_url
-                human.asset_avatar_url = asset_avatar_url
+                # 已存在的系统人物可能已由受控迁移切换到版本化 TOS 对象；重启时
+                # 只补缺失值，不能把新造型回滚到安装包内置旧地址。
+                if not human.avatar_url:
+                    human.avatar_url = avatar_url
+                if not human.avatar_thumbnail_url:
+                    human.avatar_thumbnail_url = thumbnail_url
+                # 系统人物重制后会重新注册供应商资产；启动 seed 不得用代码中的历史
+                # asset:// 覆盖数据库里已经切换完成的新资产。仅为旧库缺失字段兜底。
+                if not human.asset_avatar_url:
+                    human.asset_avatar_url = asset_avatar_url
                 human.avatar_prompt, human.description = data["system_prompt"], data["appearance_style"]
                 for key, value in data.items():
                     if key == "category":

@@ -928,7 +928,7 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
         label = str(composition.get("label") or "人物镜")
         protagonists = composition.get("protagonists") or []
         if not protagonists:
-            protagonists = [str(item.get("systemPrompt") or item.get("appearanceStyle") or item.get("name") or "人物") for item in allowed_humans]
+            protagonists = [str(item.get("identityDescription") or item.get("name") or "人物") for item in allowed_humans]
         protagonist_text = "；".join(str(item) for item in protagonists if item) or "依据本镜人物设定"
         body = re.sub(r"^(?:【人物镜[^】]*】)?(?:【主角：[^】]*】)?", "", result["shotPrompt"]).lstrip()
         result["shotPrompt"] = f"【{label}】【主角：{protagonist_text}】{body}"
@@ -1104,7 +1104,7 @@ async def _generate_general_story_outline_v2(
             *(
                 [
                     f"必须额外输出 wardrobeGroups 共 {wardrobe_group_count} 组，每组按全局镜头序号连续覆盖 3 镜，最后一组可不足 3 镜",
-                    "每组 visualIntent 必须综合该组三镜的场景、季节、曲风、视觉风格、光线、主色和叙事情绪；wardrobeByCharacter 必须为每个已选人物设计与该意境协调的完整服装、鞋履和关键配饰",
+                    "服装决策优先级固定为：用户明确要求 > 歌曲曲风分类 > 歌词情绪与叙事 > 本组三镜场景和动作 > 季节、光线、主色与视觉风格；wardrobeByCharacter 必须为每个已选人物设计完整服装、鞋履和必要配饰",
                     "同组服装保持一致，相邻组必须明显更换整套服装；服装材质、色彩、层次和正式程度必须服务画面氛围，不得照抄人物参考图原服装",
                 ]
                 if role_ids

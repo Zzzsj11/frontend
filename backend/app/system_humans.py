@@ -42,15 +42,28 @@ def parse_system_human(code: str, markdown: str) -> dict[str, str]:
         if "：" in line:
             key, value = line.split("：", 1)
             fields[key] = value.strip()
+    gender = fields.get("性别", "")
+    age_description = fields.get("年龄估计", "")
+    name = fields.get("人物名称", f"系统人物 {code}")
+    identity_description = f"{age_description}，{gender}，仅参考人物五官、脸型、肤色、年龄感、发型和身体比例".strip("，")
+    neutral_prompt = "\n".join(
+        (
+            f"图片ID：{code}",
+            f"人物名称：{name}",
+            f"性别：{gender}",
+            f"年龄估计：{age_description}",
+            f"人物身份描述：{identity_description}",
+        )
+    )
     return {
         "asset_code": code,
-        "name": fields.get("人物名称", f"系统人物 {code}"),
-        "gender": fields.get("性别", ""),
-        "age_description": fields.get("年龄估计", ""),
-        "appearance_style": fields.get("人物形象风格", ""),
-        "clothing_description": fields.get("服装描述", ""),
-        "suitable_music_styles": fields.get("适配歌曲风格", ""),
-        "system_prompt": markdown,
+        "name": name,
+        "gender": gender,
+        "age_description": age_description,
+        "appearance_style": identity_description,
+        "clothing_description": "",
+        "suitable_music_styles": "",
+        "system_prompt": neutral_prompt,
         "category": "儿童" if "儿童" in fields.get("年龄估计", "") else fields.get("性别", ""),
     }
 

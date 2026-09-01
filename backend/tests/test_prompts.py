@@ -295,7 +295,10 @@ def test_portrait_prompt_preview_and_create_validation(client) -> None:
     preview = client.post("/api/generations/images/portrait-prompt", json={"description": "青衣少女", "style": "古风"})
     assert preview.status_code == 200
     prompt = preview.json()["prompt"]
-    assert "参照第一张参考图" in prompt
+    assert "第一张参考图只定义身份参考卡" in prompt
+    assert "第二张参考图只定义人物身份" in prompt
+    assert "禁止继承任一参考图中的原服装" in prompt
+    assert "保持一模一样的人物外貌、服装和配饰" not in prompt
     assert "角色描述：青衣少女" in prompt and "画面风格：古风" in prompt
 
     empty = client.post("/api/generations/images/portrait-prompt", json={})

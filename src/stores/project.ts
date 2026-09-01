@@ -413,7 +413,7 @@ export const useProjectStore = defineStore('project', {
         ])
         this.songProjects = projects
         this.digitalHumans = humans
-        // 以系统人物 001 的三视图为后续生成的模板参考
+        // 以系统人物 001 的中性身份参考卡作为统一版式模板；第二张图只提供人物身份。
         const template = humans.find((h) => h.id === 'dh-system-001')
         if (template) imageGen.setTemplateAvatar(template.avatar)
         this.dhStyles = styles.map((item) => item.name)
@@ -1664,32 +1664,31 @@ export const useProjectStore = defineStore('project', {
     },
 
     /** 用（可能已修改的）提示词重新生成数字人形象，成功后本地化存储并替换头像 */
-    async regenerateDigitalHumanAvatar(id: string, prompt?: string): Promise<void> {
+    async regenerateDigitalHumanAvatar(id: string): Promise<void> {
       const dh = this.digitalHumans.find((d) => d.id === id)
       if (!dh || this.dhRegeneratingId) return
       this.dhRegeneratingId = id
       try {
-        const finalPrompt = (
-          prompt ??
-          dh.avatarPrompt ??
-          (await imageGen.fetchPortraitPrompt(dh.description, dh.style))
-        ).trim()
+        // 重新生成也必须经过服务端中性参考卡模板，不能让历史自由提示词把旧服装、
+        // 职业或年代重新带回人物素材。编辑内容仅作为身份补充描述。
+        const identityDescription = (dh.description || dh.name).trim()
         const template = imageGen.getTemplateAvatar()
         const dhRef = dh.avatar
         const references = [template, dhRef].filter(Boolean) as string[]
-        const generated = await imageGen.generateImageAsset(finalPrompt, {
+        const generated = await imageGen.generateImageAsset('', {
           size: '1344x768',
           quality: 'medium',
+          portrait: { description: identityDescription, style: dh.style },
           ...(references.length ? { image: references } : {}),
         })
         dh.avatar = generated.thumbnailUrl || generated.url
         dh.originalAvatar = generated.url
-        dh.avatarPrompt = finalPrompt
+        dh.avatarPrompt = generated.prompt || ''
         if (!dh.readOnly)
           await api.updateDigitalHuman(id, {
             avatar_url: generated.url,
             avatar_thumbnail_url: generated.thumbnailUrl,
-            avatar_prompt: finalPrompt,
+            avatar_prompt: generated.prompt || '',
           })
       } finally {
         this.dhRegeneratingId = null

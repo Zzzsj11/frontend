@@ -47,6 +47,9 @@ def test_system_characters_are_visible_and_read_only_for_every_user(client) -> N
     assert luoli["scope"] == "system"
     assert luoli["readOnly"] is True
     assert luoli["assetCode"] == "020" and "图片ID：020" in luoli["systemPrompt"]
+    assert luoli["clothingDescription"] == ""
+    assert luoli["suitableMusicStyles"] == ""
+    assert "汉服" not in luoli["systemPrompt"]
     assert client.patch("/api/digital-humans/dh-system-020", headers=user, json={"name": "changed"}).status_code == 404
     assert client.delete("/api/digital-humans/dh-system-020", headers=user).status_code == 404
 
