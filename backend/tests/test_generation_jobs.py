@@ -1766,10 +1766,11 @@ def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) ->
 
     user = client.get("/api/auth/me").json()
     _fail_active_jobs()
-    captured: dict[str, list[str]] = {}
+    captured: dict[str, object] = {}
 
     async def fake_video(payload, job) -> dict:
         captured["image_urls"] = list(payload.image_urls)
+        captured["prompt"] = payload.prompt
         return {"videoUrl": "https://tos.test/videos/ok.mp4", "coverUrl": "https://tos.test/images/ok.png", "duration": 5}
 
     monkeypatch.setattr(main, "generate_video", fake_video)
@@ -1807,6 +1808,8 @@ def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) ->
             time.sleep(0.05)
         assert state["status"] == "succeeded"
         assert captured["image_urls"] == ["asset://video-human-1", "https://tos.test/scene.png"]
+        assert "人物身份参考硬约束" in str(captured["prompt"])
+        assert "纯白圆领T恤、浅灰棉质短裤" in str(captured["prompt"])
     finally:
         _fail_active_jobs()
         connection = sqlite3.connect(TEST_DB, timeout=10)

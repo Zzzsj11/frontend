@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from .schemas import VideoGenerationCreate
 
 COMPILER_NAME = "h3-prompt-writing"
-COMPILER_VERSION = "1.2.0"
+COMPILER_VERSION = "1.3.0"
 BASE_SECTIONS = ("integrated_multimodal_description:", "overall_soundscape:", "non_diegetic_music:")
 REFERENCE_SECTIONS = ("subject_definitions:", "summary:", "retention_analysis:", "detailed_description:", "overall_soundscape:", "non_diegetic_music:")
 NO_VISUAL_TEXT_CONSTRAINT = (
@@ -69,9 +69,10 @@ def _bindings(payload: VideoGenerationCreate) -> dict[str, dict[str, str]]:
     return bindings
 
 
-def compile_h3_prompt(payload: VideoGenerationCreate) -> H3PromptCompilation:
+def compile_h3_prompt(payload: VideoGenerationCreate, *, identity_reference_indices: set[int] | None = None) -> H3PromptCompilation:
     """Compile a safe default structure and preserve valid expert H3 prompts verbatim."""
     source = payload.prompt.strip()
+    identity_indices = identity_reference_indices or set()
     mode = detect_h3_mode(payload)
     bindings = _bindings(payload)
     sections = REFERENCE_SECTIONS if mode == "reference" else BASE_SECTIONS
@@ -108,8 +109,16 @@ def compile_h3_prompt(payload: VideoGenerationCreate) -> H3PromptCompilation:
     definitions: list[str] = []
     retention: list[str] = []
     for index in range(1, len(payload.image_urls) + 1):
-        definitions.append(f"<Subject {index}> is the visible identity, subject, scene, composition, and style supplied by <Picture {index}>.")
-        retention.append(f"<Subject {index}> (appears where required): fully_preserved - retain the defining visible attributes from <Picture {index}> consistently.")
+        if index in identity_indices:
+            definitions.append(
+                f"<Subject {index}> is an identity-only character card supplied by <Picture {index}>; its clothing, gray background, multi-view layout, era, and occupation are not target-video references."
+            )
+            retention.append(
+                f"<Subject {index}> (appears where required): identity_only - preserve facial features, face shape, skin tone, apparent age, hairstyle, and body proportions only; replace all card clothing with the wardrobe required by the creative direction."
+            )
+        else:
+            definitions.append(f"<Subject {index}> is the visible identity, subject, scene, composition, and style supplied by <Picture {index}>.")
+            retention.append(f"<Subject {index}> (appears where required): fully_preserved - retain the defining visible attributes from <Picture {index}> consistently.")
     offset = len(payload.image_urls)
     for index in range(1, len(payload.video_urls) + 1):
         subject = offset + index

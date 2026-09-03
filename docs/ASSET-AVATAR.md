@@ -19,7 +19,7 @@ The request failed because the input image 'content[1]' 'content[2]' may contain
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | TOS 路径      | 原始图片地址（火山引擎对象存储 `media-generate-chouka.tos-cn-beijing.volces.com`），用于前端展示、素材导出等，**永远保留不变**            |
 | asset:// 链接 | `asset://asset-xxxxxxxx`，AIGC 平台虚拟资产的引用形式；图片上传到平台后被平台托管（转移到平台自己的存储），生成视频时引用它不触发人脸检测 |
-| 字段映射      | `asset_avatar_url` 存英合链接，`ppio_asset_avatar_url` 存 PPIO 链接；`avatar_url` / `avatar_thumbnail_url` 始终保留 TOS 路径                 |
+| 字段映射      | `asset_avatar_url` 存英合链接，`ppio_asset_avatar_url` 存 PPIO 链接；`avatar_url` / `avatar_thumbnail_url` 始终保留 TOS 路径              |
 
 ## 3. 虚拟资产注册 API（AIGC 平台 V3）
 
@@ -69,10 +69,10 @@ PPIO 使用独立账号和原厂素材接口，资产不能复用英合 ID：`PO
 
 crontab 配置（**宿主机**上，每分钟）：
 
-| 环境           | 命令                                                                                                         | 日志                                              |
-| -------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
-| 本地（macOS）  | `/usr/local/bin/docker exec mv-agent-frontend-backend-1 python /srv/mvagent/scripts/ensure_asset_avatars.py` | `/tmp/mvagent-asset-sync.log`                     |
-| 线上（Ubuntu） | `PROJECT_DIR=/opt/mv-agent-frontend /opt/mv-agent-frontend/scripts/sync-digital-human-assets.sh`           | `/var/lib/docker/mv-agent-maintenance/logs/asset-sync-cron.log` |
+| 环境           | 命令                                                                                                         | 日志                                                            |
+| -------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| 本地（macOS）  | `/usr/local/bin/docker exec mv-agent-frontend-backend-1 python /srv/mvagent/scripts/ensure_asset_avatars.py` | `/tmp/mvagent-asset-sync.log`                                   |
+| 线上（Ubuntu） | `PROJECT_DIR=/opt/mv-agent-frontend /opt/mv-agent-frontend/scripts/sync-digital-human-assets.sh`             | `/var/lib/docker/mv-agent-maintenance/logs/asset-sync-cron.log` |
 
 容器内脚本路径：`/srv/mvagent/scripts/ensure_asset_avatars.py`（容器内无 scripts 目录时需要先 `mkdir -p`）。手动执行：`docker exec mv-agent-frontend-backend-1 python /srv/mvagent/scripts/ensure_asset_avatars.py`。
 
@@ -83,6 +83,8 @@ crontab 配置（**宿主机**上，每分钟）：
 - 遍历 `payload.image_urls`，数字人头像 URL 按所选模型渠道替换：英合 SD2.0 使用 `asset_avatar_url`，PPIO SD2.0 使用 `ppio_asset_avatar_url`
 - 场景图等其他 URL 查不到映射，**原样保留**
 - 前端照旧传 TOS URL，无需感知 asset 机制
+
+人物图片在替换为渠道资产前会先识别其参考位置，并由最终视频提示词策略追加“身份参考、不参考服装”硬约束：只保留五官、脸型、肤色、年龄感、发型和身体比例，明确忽略身份卡中的白色 T 恤、浅灰短裤、灰背景、多视图排版、职业与年代暗示。剧情服装来自分镜 `wardrobeByCharacter`，优先级为“用户明确要求 > 季节 > 曲风 > 歌词与叙事 > 场景和动作 > 光线、色彩与视觉风格”；H3 编译器还会把对应 Picture 标注为 `identity_only`，该规则对英合、PPIO 与 RunningHub 共用。
 
 ## 7. 相关文件清单
 
@@ -97,7 +99,7 @@ crontab 配置（**宿主机**上，每分钟）：
 | `backend/app/models.py`                         | `DigitalHumanModel.asset_avatar_url` 字段                                                               |
 | `backend/migrations/versions/d4f2b8e6a1c0_*.py` | 加列迁移（head：d4f2b8e6a1c0）                                                                          |
 | `backend/scripts/ensure_asset_avatars.py`       | cron 补扫脚本                                                                                           |
-| `scripts/sync-digital-human-assets.sh`          | 宿主机 Compose 包装入口，读取当前部署版本后在 backend 容器执行补扫                                    |
+| `scripts/sync-digital-human-assets.sh`          | 宿主机 Compose 包装入口，读取当前部署版本后在 backend 容器执行补扫                                      |
 | `backend/tests/test_generation_jobs.py`         | 全部相关自动化测试                                                                                      |
 
 ## 8. 自动化测试覆盖

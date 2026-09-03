@@ -567,6 +567,32 @@ def test_storyboard_output_schema_is_strict() -> None:
     assert _extract_json('{"scenePrompt":"x"} trailing') == {"scenePrompt": "x"}
 
 
+def test_storyboard_character_prompt_requires_exact_planned_wardrobe() -> None:
+    humans = [{"id": "a", "name": "A"}]
+    current = {
+        "plannedDigitalHumanIds": ["a"],
+        "outline": {"wardrobeByCharacter": {"a": "冬季深蓝羽绒服、羊毛长裤与防滑短靴"}},
+    }
+    with pytest.raises(ValueError, match="完整服装描写"):
+        _validate(
+            {"scenePrompt": "雪夜车站", "shotPrompt": "人物缓慢回头", "digitalHumanIds": ["a"]},
+            source="general",
+            current=current,
+            allowed_humans=humans,
+        )
+    result = _validate(
+        {
+            "scenePrompt": "雪夜车站",
+            "shotPrompt": "人物穿冬季深蓝羽绒服、羊毛长裤与防滑短靴缓慢回头",
+            "digitalHumanIds": ["a"],
+        },
+        source="general",
+        current=current,
+        allowed_humans=humans,
+    )
+    assert "冬季深蓝羽绒服" in result["shotPrompt"]
+
+
 def test_general_storyboard_rejects_character_shots_without_cast(client) -> None:
     project = client.post("/api/projects", json={"name": "General validation"}).json()
     response = client.post(

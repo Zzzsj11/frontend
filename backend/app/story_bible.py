@@ -100,7 +100,7 @@ async def build_general_story_bible(*, config: dict[str, Any], shots: list[dict[
     if wardrobe_groups:
         character_policy = (
             character_policy + " 已选人物的面部身份与发型跨镜一致；服装按每 3 镜一个 wardrobeGroupIndex 规划，同组严格一致、切换组时明显换整套。"
-            "每套服装的材质、色彩、层次和正式程度必须呼应 wardrobeIntent 所描述的场景、季节、曲风、光线、主色与叙事情绪，并忽略人物参考图原始服装。"
+            "每套服装按‘用户明确要求 > 季节 > 曲风 > 歌词与叙事 > 场景和动作 > 光线、色彩与视觉风格’决策；除非用户明确另有要求，必须严格符合季节的温度、天气与穿着逻辑，并忽略人物参考图原始服装。"
         )
     return {
         "version": STORY_BIBLE_VERSION,

@@ -24,6 +24,20 @@ def test_h3_mode_detection_and_reference_compilation():
     assert "fully_copy" in compiled.prompt
 
 
+def test_h3_identity_card_preserves_identity_but_not_card_clothing_or_layout():
+    payload = VideoGenerationCreate(
+        prompt="人物穿深蓝风衣走过雨夜街道",
+        image_urls=["scene.png", "identity-card.png"],
+        h3_mode="reference",
+    )
+
+    compiled = compile_h3_prompt(payload, identity_reference_indices={2})
+
+    assert "<Subject 1> is the visible identity, subject, scene, composition, and style" in compiled.prompt
+    assert "<Subject 2> is an identity-only character card" in compiled.prompt
+    assert "replace all card clothing" in compiled.prompt
+
+
 def test_h3_compiler_preserves_expert_structure_and_forces_no_subtitles():
     prompt = "\n\n".join(f"{section}\nvalue" for section in REFERENCE_SECTIONS)
     payload = VideoGenerationCreate(prompt=prompt, image_urls=["a.png", "b.png"], generate_audio=True)

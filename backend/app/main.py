@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from PIL import UnidentifiedImageError
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -83,6 +83,7 @@ from .schemas import (
 from .seed import recover_stale_storyboard_generation, seed_system_data
 from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
 from .usage_quota import consume_daily_quota
+from .video_prompt_policy import compile_identity_safe_video_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -725,7 +726,28 @@ async def create_image_generation(payload: ImageGenerationCreate, user: CurrentU
     return {**job.public(), "prompt": payload.prompt}
 
 
-async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str], *, provider_code: str = "yinghe") -> list[str]:
+async def _identity_reference_indices(db: AsyncSession, image_urls: list[str], *, user_id: str) -> set[int]:
+    """Return one-based positions that are system or current-user character identity cards."""
+    if not image_urls:
+        return set()
+    humans = (
+        (
+            await db.execute(
+                select(DigitalHumanModel).where(
+                    DigitalHumanModel.deleted_at.is_(None),
+                    or_(DigitalHumanModel.scope == "system", DigitalHumanModel.user_id == user_id),
+                    or_(DigitalHumanModel.avatar_url.in_(image_urls), DigitalHumanModel.avatar_thumbnail_url.in_(image_urls)),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    identity_urls = {url for human in humans for url in (human.avatar_url, human.avatar_thumbnail_url) if url}
+    return {index for index, url in enumerate(image_urls, 1) if url in identity_urls}
+
+
+async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str], *, provider_code: str = "yinghe", user_id: str | None = None) -> list[str]:
     """按视频模型渠道，把人物 TOS 原图替换为该供应商账号下的 asset://。"""
     if not image_urls:
         return image_urls
@@ -735,6 +757,7 @@ async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str], *,
             await db.execute(
                 select(DigitalHumanModel).where(
                     DigitalHumanModel.deleted_at.is_(None),
+                    or_(DigitalHumanModel.scope == "system", DigitalHumanModel.user_id == user_id) if user_id else True,
                     asset_field.isnot(None),
                     asset_field != "",
                 )
@@ -762,10 +785,18 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
         validate_h3_mode_inputs(payload)
     await _check_concurrency(db, user.id, "video", settings.video_generation_concurrency)
     await consume_daily_quota(db, user_id=user.id, category="video")
+    identity_indices = await _identity_reference_indices(db, payload.image_urls, user_id=user.id)
+    if identity_indices:
+        line = await db.get(StoryboardLineModel, line_id) if line_id else None
+        task = await db.get(ProjectTaskModel, task_id) if task_id else None
+        wardrobe = dict((line.shot_options or {}).get("wardrobeByCharacter") or {}) if line else {}
+        task_config = dict(task.storyboard_config or {}) if task else {}
+        season = str(task_config.get("season") or ((task_config.get("songEmotion") or {}).get("seasons")) or "").strip()
+        payload.prompt = compile_identity_safe_video_prompt(payload.prompt, wardrobe, season=season)
     # Seedance 按模型所属渠道选择同渠道 asset://；H3 不使用火山人物资产协议。
     if provider.code in {"yinghe", "ppio"} and model.provider_model_id != "MiniMax-H3":
-        payload.image_urls = await _resolve_asset_avatar_urls(db, payload.image_urls, provider_code=provider.code)
-    h3_compilation = compile_h3_prompt(payload) if is_h3 else None
+        payload.image_urls = await _resolve_asset_avatar_urls(db, payload.image_urls, provider_code=provider.code, user_id=user.id)
+    h3_compilation = compile_h3_prompt(payload, identity_reference_indices=identity_indices) if is_h3 else None
     if h3_compilation:
         payload.prompt = h3_compilation.prompt
     snapshot = generation_request_snapshot(payload, model, provider)
@@ -786,6 +817,7 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
                 "_promptWarnings": list(h3_compilation.warnings),
                 "_workflowVersion": (model.capabilities or {}).get("workflowVersion"),
                 "_referenceImageCount": len(payload.image_urls),
+                "_identityReferenceIndices": sorted(identity_indices),
                 "_referenceVideoCount": len(payload.video_urls),
                 "_referenceAudioCount": len(payload.audio_urls),
             }

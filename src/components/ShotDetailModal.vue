@@ -348,6 +348,10 @@ const cancel = () => store.closeEditor()
 
         <!-- 人物调整面板 -->
         <div v-if="showsCast && activeTab === 'cast'" class="tab-panel">
+          <p class="identity-reference-tip">
+            人物身份参考图（不参考服装）：仅锁定五官、年龄感、发型和身体比例；白色 T
+            恤与浅灰短裤不会带入剧情镜头。
+          </p>
           <div class="panel-head">
             <span class="panel-title">出演角色</span>
             <button class="btn-outline regen-btn" @click="store.openLibrary()">

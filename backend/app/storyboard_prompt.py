@@ -783,6 +783,10 @@ def _validate(body: dict[str, Any], *, source: str, current: dict[str, Any], all
     planned = current.get("plannedDigitalHumanIds") or []
     if role_ids != planned:
         raise ValueError("模型返回人物顺序或集合与本镜预分配人物不一致")
+    wardrobe = (current.get("outline") or {}).get("wardrobeByCharacter") or {}
+    missing_wardrobe = [value for human_id, value in wardrobe.items() if human_id in planned and isinstance(value, str) and value.strip() and value.strip() not in shot_prompt]
+    if planned and wardrobe and missing_wardrobe:
+        raise ValueError("人物镜 shotPrompt 必须逐字包含本镜 wardrobeByCharacter 的完整服装描写")
     return {"scenePrompt": scene_prompt.strip(), "shotPrompt": shot_prompt.strip(), "digitalHumanIds": role_ids}
 
 
@@ -859,7 +863,8 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
     outline = current.get("outline") or {}
     if source == "general" and planned and outline.get("wardrobeByCharacter"):
         requirements.append(
-            "本镜必须逐字执行 currentShot.outline.wardrobeByCharacter，并让服装材质、色彩、层次和正式程度呼应 wardrobeIntent、场景、光线、主色和情绪；"
+            "本镜人物服装必须逐字执行 currentShot.outline.wardrobeByCharacter；除非用户明确另有要求，必须严格符合 globalContext 中所选季节的温度、天气与穿着逻辑。"
+            "服装决策优先级为：用户明确要求 > 季节 > 曲风 > 歌词与叙事 > 场景和动作 > 光线、色彩和视觉风格；"
             "忽略人物参考图原始服装。同一 wardrobeGroupIndex 内不得换装，进入下一组后不得沿用上一组服装。"
         )
     payload = {
@@ -1104,7 +1109,7 @@ async def _generate_general_story_outline_v2(
             *(
                 [
                     f"必须额外输出 wardrobeGroups 共 {wardrobe_group_count} 组，每组按全局镜头序号连续覆盖 3 镜，最后一组可不足 3 镜",
-                    "服装决策优先级固定为：用户明确要求 > 歌曲曲风分类 > 歌词情绪与叙事 > 本组三镜场景和动作 > 季节、光线、主色与视觉风格；wardrobeByCharacter 必须为每个已选人物设计完整服装、鞋履和必要配饰",
+                    "服装决策优先级固定为：用户明确要求 > 季节 > 歌曲曲风分类 > 歌词情绪与叙事 > 本组三镜场景和动作 > 光线、主色与视觉风格；wardrobeByCharacter 必须为每个已选人物设计完整服装、鞋履和必要配饰，并严格符合所选季节的温度、天气与穿着逻辑",
                     "同组服装保持一致，相邻组必须明显更换整套服装；服装材质、色彩、层次和正式程度必须服务画面氛围，不得照抄人物参考图原服装",
                 ]
                 if role_ids
@@ -1204,8 +1209,9 @@ async def generate_general_story_outline(
         },
         "selectedCharacters": selected_humans,
         "wardrobeDirection": (
-            "每 3 个全局镜头形成一个服装组。先综合组内场景、季节、曲风、视觉风格、光线、色彩和叙事情绪形成 visualIntent，"
-            "再为全部已选人物设计与该意境协调的完整服装、鞋履和关键配饰；同组一致，相邻组明显换整套，忽略参考图原服装。"
+            "每 3 个全局镜头形成一个服装组。服装决策优先级固定为：用户明确要求 > 季节 > 歌曲曲风 > 歌词情绪与叙事 > 场景和动作 > 光线、色彩与视觉风格。"
+            "先以所选季节为硬约束，再综合组内场景、曲风、视觉风格、光线、色彩和叙事情绪形成 visualIntent；"
+            "为全部已选人物设计并明确写出严格符合季节的完整服装、鞋履和关键配饰；同组一致，相邻组明显换整套，忽略参考图原服装。"
             if role_ids
             else ""
         ),

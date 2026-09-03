@@ -85,6 +85,8 @@ describe('ShotDetailModal general MV character controls', () => {
     expect(document.body.textContent).toContain('出演角色')
     expect(document.body.textContent).toContain('定制人物')
     expect(document.body.textContent).toContain('管理阵容')
+    expect(document.body.textContent).toContain('人物身份参考图（不参考服装）')
+    expect(document.body.textContent).toContain('白色 T 恤与浅灰短裤不会带入剧情镜头')
   })
 
   it('shows server-based elapsed seconds while video is generating', async () => {
