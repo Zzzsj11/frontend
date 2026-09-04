@@ -593,6 +593,32 @@ def test_storyboard_character_prompt_requires_exact_planned_wardrobe() -> None:
     assert "冬季深蓝羽绒服" in result["shotPrompt"]
 
 
+def test_storyboard_character_prompt_allows_punctuation_variation_without_losing_wardrobe() -> None:
+    humans = [{"id": "a"}, {"id": "b"}]
+    current = {
+        "plannedDigitalHumanIds": ["a", "b"],
+        "outline": {
+            "wardrobeByCharacter": {
+                "a": "黑色连帽雨衣，深色工装裤，厚底马丁靴",
+                "b": "酒红长大衣，黑色高领毛衣，及踝靴，透明雨伞",
+            }
+        },
+    }
+
+    result = _validate(
+        {
+            "scenePrompt": "雨夜街道",
+            "shotPrompt": "男主穿黑色连帽雨衣、深色工装裤、厚底马丁靴；女主穿酒红长大衣、黑色高领毛衣、及踝靴、透明雨伞。",
+            "digitalHumanIds": ["a", "b"],
+        },
+        source="general",
+        current=current,
+        allowed_humans=humans,
+    )
+
+    assert result["digitalHumanIds"] == ["a", "b"]
+
+
 def test_general_storyboard_rejects_character_shots_without_cast(client) -> None:
     project = client.post("/api/projects", json={"name": "General validation"}).json()
     response = client.post(

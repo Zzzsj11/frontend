@@ -784,7 +784,14 @@ def _validate(body: dict[str, Any], *, source: str, current: dict[str, Any], all
     if role_ids != planned:
         raise ValueError("模型返回人物顺序或集合与本镜预分配人物不一致")
     wardrobe = (current.get("outline") or {}).get("wardrobeByCharacter") or {}
-    missing_wardrobe = [value for human_id, value in wardrobe.items() if human_id in planned and isinstance(value, str) and value.strip() and value.strip() not in shot_prompt]
+    # 模型经常在不改变服装语义时把中文逗号改为顿号，逐字比较会误判并浪费一次修复调用。
+    # 校验仍要求完整覆盖服装文本，只忽略标点与空白差异。
+    normalized_shot_prompt = re.sub(r"[\s，,、；;：:。.!！?？（）()【】\[\]]+", "", shot_prompt)
+    missing_wardrobe = [
+        value
+        for human_id, value in wardrobe.items()
+        if human_id in planned and isinstance(value, str) and value.strip() and re.sub(r"[\s，,、；;：:。.!！?？（）()【】\[\]]+", "", value.strip()) not in normalized_shot_prompt
+    ]
     if planned and wardrobe and missing_wardrobe:
         raise ValueError("人物镜 shotPrompt 必须逐字包含本镜 wardrobeByCharacter 的完整服装描写")
     return {"scenePrompt": scene_prompt.strip(), "shotPrompt": shot_prompt.strip(), "digitalHumanIds": role_ids}
@@ -906,6 +913,7 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
                         "invalidOutput": text,
                         "allowedCharacterIds": [item["id"] for item in allowed_humans],
                         "requiredCharacterIds": planned,
+                        "requiredWardrobeByCharacter": outline.get("wardrobeByCharacter") or {},
                         "schema": payload["outputSchema"],
                     },
                     ensure_ascii=False,
