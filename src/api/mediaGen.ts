@@ -18,6 +18,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return apiRequest<T>(path, init)
 }
 
+export const getJob = (id: string) =>
+  request<GenerationJob>(`/generations/${encodeURIComponent(id)}`)
+
 export interface WaitForJobOptions {
   /** 切换子项目时经统一注册表 abort，轮询立即停止（后端任务照跑，切回后恢复） */
   signal?: AbortSignal

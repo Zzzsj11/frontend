@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -43,6 +44,55 @@ def test_storyboard_line_failure_does_not_mark_outline_failed(monkeypatch) -> No
 
     with pytest.raises(RuntimeError, match="line failed"):
         asyncio.run(domain.run_storyboard_job(job))
+
+
+def test_storyboard_line_generation_has_twelve_minute_total_timeout(monkeypatch) -> None:
+    from app import domain
+    from app.jobs import Job
+
+    class Entity:
+        deleted_at = None
+        storyboard_type = "general_random"
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _model, _entity_id):
+            return Entity()
+
+    failure: dict[str, str] = {}
+
+    async def never_returns(**_kwargs):
+        await asyncio.Event().wait()
+
+    async def persist_failure(_job, line_id, task_id, exc):
+        failure.update(line_id=line_id, task_id=task_id, error=str(exc))
+
+    monkeypatch.setattr(domain, "session_factory", Session)
+    monkeypatch.setattr(domain, "generate_storyboard_line", never_returns)
+    monkeypatch.setattr(domain, "_persist_storyboard_line_failure", persist_failure)
+    monkeypatch.setattr(domain, "settings", dataclasses.replace(domain.settings, storyboard_line_timeout_seconds=0.01))
+    job = Job(
+        id="job-line-timeout",
+        kind="storyboard_line",
+        user_id="user-1",
+        project_id="project-1",
+        project_task_id="task-1",
+        storyboard_line_id="line-1",
+        request={"source": "general_random"},
+    )
+
+    with pytest.raises(TimeoutError, match="逐镜提示词生成超过1分钟"):
+        asyncio.run(domain.run_storyboard_job(job))
+    assert failure == {
+        "line_id": "line-1",
+        "task_id": "task-1",
+        "error": "逐镜提示词生成超过1分钟，已判定失败，请重新生成",
+    }
 
 
 def test_storyboard_status_refresh_retries_postgres_deadlock(monkeypatch) -> None:

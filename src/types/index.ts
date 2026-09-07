@@ -221,6 +221,8 @@ export interface ScriptLine {
   generationErrorSummary?: string
   /** 最近一次提示词生成工单，便于用户复制后排障。 */
   generationJobId?: string
+  /** 最近一次提示词工单创建时间，用于长任务状态刷新入口。 */
+  generationStartedAt?: string
   generationFailedAt?: string
   generationAttempt?: number
 }

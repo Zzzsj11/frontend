@@ -117,6 +117,7 @@ function mapScriptLine(item: Record<string, unknown>): ScriptLine {
     generationError: item.generationError as string | undefined,
     generationErrorSummary: item.generationErrorSummary as string | undefined,
     generationJobId: item.generationJobId as string | undefined,
+    generationStartedAt: item.generationStartedAt as string | undefined,
     generationFailedAt: item.generationFailedAt as string | undefined,
     generationAttempt: Number(item.generationAttempt || 0),
     manual: item.source === 'manual' || item.source === 'creative',
@@ -164,6 +165,7 @@ export const fetchActiveGenerations = (taskId: string) =>
 /** 按任务 ID 恢复媒体生成任务的轮询等待（页面刷新后续跑；成功时资产已由后端落库） */
 export const waitGenerationJob = (id: string, signal?: AbortSignal, timeoutMs = 660_000) =>
   mediaGen.waitForJob(id, timeoutMs, { signal })
+export const getGenerationJob = (id: string) => mediaGen.getJob(id)
 
 export const acknowledgeGenerationResults = (ids: string[]) =>
   ids.length

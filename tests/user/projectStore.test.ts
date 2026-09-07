@@ -904,6 +904,56 @@ describe('batch storyboard line generation', () => {
     vi.restoreAllMocks()
   })
 
+  it('refreshes an existing prompt job without submitting another generation', async () => {
+    const store = useProjectStore()
+    store.activeTaskId = 'task-1'
+    store.lines = [
+      {
+        ...batchLine('line-refresh', 'running'),
+        generationJobId: 'job-refresh-1',
+        generationStartedAt: '2026-09-07T00:00:00Z',
+      },
+    ]
+    const calls: string[] = []
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = String(input)
+      calls.push(url)
+      if (url === '/api/generations/job-refresh-1')
+        return json({
+          id: 'job-refresh-1',
+          status: 'succeeded',
+          progress: 100,
+          created_at: 1788740000,
+        })
+      if (url === '/api/tasks/task-1/storyboard-lines/line-refresh')
+        return json({
+          id: 'line-refresh',
+          source: 'general_random',
+          generationStatus: 'succeeded',
+          generationJobId: 'job-refresh-1',
+          generationStartedAt: '2026-09-07T00:00:00Z',
+          scenePrompt: '刷新后的场景提示词',
+          shotPrompt: '刷新后的视频提示词',
+          digitalHumanIds: [],
+          shotOptions: {},
+          sceneAssets: [],
+          shotAssets: [],
+          voiceAssets: [],
+        })
+      return json({}, 404)
+    })
+
+    const status = await store.refreshStoryboardLineGenerationStatus('line-refresh')
+
+    expect(status).toBe('succeeded')
+    expect(store.lines[0].shotPrompt).toBe('刷新后的视频提示词')
+    expect(calls).toEqual([
+      '/api/generations/job-refresh-1',
+      '/api/tasks/task-1/storyboard-lines/line-refresh',
+    ])
+    expect(calls.some((url) => url.endsWith('/generate'))).toBe(false)
+  })
+
   it('collects pending/failed outline-ready lines and skips the rest', async () => {
     const store = useProjectStore()
     store.activeTaskId = 'task-1'

@@ -101,4 +101,35 @@ describe('ScriptLine thumbnail playback', () => {
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining('DeadlockDetectedError'))
     wrapper.unmount()
   })
+
+  it('shows a no-cost status refresh after 60 seconds and throttles repeated clicks', async () => {
+    vi.useFakeTimers()
+    const store = useProjectStore()
+    store.refreshStoryboardLineGenerationStatus = vi.fn().mockResolvedValue('running')
+    const line = {
+      ...videoLine,
+      id: 'line-running',
+      generationStatus: 'running',
+      generationJobId: 'job-running-1',
+      generationStartedAt: new Date(Date.now() - 61_000).toISOString(),
+    } as ScriptLineType
+    store.lines = [line]
+    const wrapper = mount(ScriptLine, { props: { line, index: 0 } })
+
+    const button = wrapper.get('.refresh-generation-status')
+    expect(button.text()).toBe('刷新任务状态')
+    expect(button.attributes('title')).toContain('不会重新生成或产生额外费用')
+    await button.trigger('click')
+    await Promise.resolve()
+    expect(store.refreshStoryboardLineGenerationStatus).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('仍在生成')
+    expect(button.attributes('disabled')).toBeDefined()
+    await button.trigger('click')
+    expect(store.refreshStoryboardLineGenerationStatus).toHaveBeenCalledOnce()
+    vi.advanceTimersByTime(5_000)
+    await Promise.resolve()
+    expect(button.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
 })

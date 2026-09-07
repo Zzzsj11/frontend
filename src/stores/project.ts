@@ -26,7 +26,7 @@ import { generateVoice } from '../api/voice'
 import { nextId } from '../utils/id'
 import { ApiError, reportApiError } from '../errorBus'
 import { DEFAULT_H3_MODE, DEFAULT_VIDEO_DURATION, normalizeShotOptions } from '../mediaConstraints'
-import { OUTLINE_WATCH_TIMEOUT_MS } from '../generationConstraints'
+import { OUTLINE_WATCH_TIMEOUT_MS, STORYBOARD_LINE_WAIT_TIMEOUT_MS } from '../generationConstraints'
 import {
   DEFAULT_IMAGE_MODEL,
   DEFAULT_VIDEO_MODEL,
@@ -594,8 +594,14 @@ export const useProjectStore = defineStore('project', {
           try {
             let item = await api.generateStoryboardLine(taskId, lineId, force)
             if (local && item.id) local.generationJobId = String(item.id)
+            if (local && item.created_at)
+              local.generationStartedAt = new Date(Number(item.created_at) * 1000).toISOString()
             if (item.id && ['queued', 'running'].includes(String(item.status || ''))) {
-              await api.waitGenerationJob(String(item.id))
+              await api.waitGenerationJob(
+                String(item.id),
+                undefined,
+                STORYBOARD_LINE_WAIT_TIMEOUT_MS,
+              )
               item = (await api.fetchStoryboardLine(taskId, lineId)) as unknown as Record<
                 string,
                 unknown
@@ -657,11 +663,21 @@ export const useProjectStore = defineStore('project', {
       }
       try {
         const result = await api.generateStoryboardLinesBatch(taskId, uniqueIds, force)
+        for (const item of result.jobs) {
+          const lineId = String(item.storyboard_line_id || '')
+          const line = this.lines.find((candidate) => candidate.id === lineId)
+          if (!line) continue
+          line.generationJobId = String(item.id || '') || line.generationJobId
+          if (item.created_at)
+            line.generationStartedAt = new Date(Number(item.created_at) * 1000).toISOString()
+        }
         await Promise.allSettled(
           result.jobs
             .map((item) => String(item.id || ''))
             .filter(Boolean)
-            .map((jobId) => api.waitGenerationJob(jobId)),
+            .map((jobId) =>
+              api.waitGenerationJob(jobId, undefined, STORYBOARD_LINE_WAIT_TIMEOUT_MS),
+            ),
         )
         const script = await api.fetchSongScript(taskId)
         if (this.activeTaskId === taskId) {
@@ -685,6 +701,33 @@ export const useProjectStore = defineStore('project', {
     async retryStoryboardLine(lineId: string) {
       if (!this.activeTaskId) return
       await this._generateStoryboardQueue(this.activeTaskId, [lineId], true)
+    },
+
+    /** 只同步已有提示词工单，不创建新任务，也不会再次调用模型。 */
+    async refreshStoryboardLineGenerationStatus(
+      lineId: string,
+    ): Promise<'queued' | 'running' | 'succeeded' | 'failed'> {
+      if (!this.activeTaskId) throw new Error('当前没有打开的子项目')
+      const line = this.lines.find((item) => item.id === lineId)
+      if (!line?.generationJobId) throw new Error('该分镜没有可刷新的生成工单')
+      const taskId = this.activeTaskId
+      const job = await api.getGenerationJob(line.generationJobId)
+      const rawStatus = String(job.status || 'running')
+      const status: 'queued' | 'running' | 'succeeded' | 'failed' =
+        rawStatus === 'queued' ||
+        rawStatus === 'running' ||
+        rawStatus === 'succeeded' ||
+        rawStatus === 'failed'
+          ? rawStatus
+          : 'failed'
+      if (job.created_at)
+        line.generationStartedAt = new Date(Number(job.created_at) * 1000).toISOString()
+      if (status === 'queued' || status === 'running') return status
+      const fresh = await api.fetchStoryboardLine(taskId, lineId)
+      const index = this.lines.findIndex((item) => item.id === lineId)
+      if (this.activeTaskId === taskId && index >= 0) this.lines[index] = fresh
+      this._cacheCurrentTask()
+      return status
     },
 
     async retryFailedStoryboardLines() {
@@ -721,7 +764,7 @@ export const useProjectStore = defineStore('project', {
           resumedGenerationJobs.add(job.id)
           void (async () => {
             try {
-              await api.waitGenerationJob(job.id)
+              await api.waitGenerationJob(job.id, undefined, STORYBOARD_LINE_WAIT_TIMEOUT_MS)
               const fresh = await api.fetchStoryboardLine(taskId, job.storyboardLineId!)
               const index = this.lines.findIndex((item) => item.id === job.storyboardLineId)
               if (this.activeTaskId === taskId && index >= 0) this.lines[index] = fresh

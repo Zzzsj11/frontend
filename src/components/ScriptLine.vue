@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { ScriptLine } from '../types'
 import { DEFAULT_SHOT_OPTIONS, formatTime, useProjectStore } from '../stores/project'
 import { VIDEO_DURATION_CHOICES } from '../mediaConstraints'
@@ -9,6 +9,7 @@ import CharacterPortrait from './CharacterPortrait.vue'
 import GenerationErrorDetailModal from './GenerationErrorDetailModal.vue'
 import { confirmDialog } from '../composables/useConfirmDialog'
 import { shotTypeLabel } from '../utils/shotLabel'
+import { STORYBOARD_LINE_REFRESH_AFTER_MS } from '../generationConstraints'
 
 const props = defineProps<{
   line: ScriptLine
@@ -17,6 +18,12 @@ const props = defineProps<{
 
 const store = useProjectStore()
 const errorDetailOpen = ref(false)
+const refreshAvailable = ref(false)
+const refreshingStatus = ref(false)
+const refreshCooldown = ref(false)
+const refreshFeedback = ref('')
+let refreshTimer: number | undefined
+let cooldownTimer: number | undefined
 const selected = computed(() => store.selectedLineId === props.line.id)
 /** 出演角色（可空/可多个） */
 const humans = computed(() => store.lineHumans(props.line))
@@ -90,6 +97,58 @@ const retryPromptGeneration = () => {
   errorDetailOpen.value = false
   store.retryStoryboardLine(props.line.id)
 }
+
+function scheduleStatusRefreshButton() {
+  if (refreshTimer) window.clearTimeout(refreshTimer)
+  refreshTimer = undefined
+  refreshAvailable.value = false
+  if (!['pending', 'running'].includes(props.line.generationStatus || '')) return
+  const startedAt = props.line.generationStartedAt
+    ? new Date(props.line.generationStartedAt).getTime()
+    : Date.now()
+  const remaining = Math.max(0, STORYBOARD_LINE_REFRESH_AFTER_MS - (Date.now() - startedAt))
+  if (remaining === 0) refreshAvailable.value = true
+  else
+    refreshTimer = window.setTimeout(() => {
+      refreshAvailable.value = true
+    }, remaining)
+}
+
+async function refreshGenerationStatus() {
+  if (refreshingStatus.value || refreshCooldown.value) return
+  refreshingStatus.value = true
+  refreshFeedback.value = ''
+  try {
+    const status = await store.refreshStoryboardLineGenerationStatus(props.line.id)
+    refreshFeedback.value =
+      status === 'queued'
+        ? '仍在排队'
+        : status === 'running'
+          ? '仍在生成'
+          : status === 'succeeded'
+            ? '已完成'
+            : '已失败'
+  } catch {
+    refreshFeedback.value = '刷新失败，请稍后重试'
+  } finally {
+    refreshingStatus.value = false
+    refreshCooldown.value = true
+    if (cooldownTimer) window.clearTimeout(cooldownTimer)
+    cooldownTimer = window.setTimeout(() => {
+      refreshCooldown.value = false
+    }, 5_000)
+  }
+}
+
+watch(
+  () => [props.line.generationStatus, props.line.generationStartedAt],
+  scheduleStatusRefreshButton,
+  { immediate: true },
+)
+onBeforeUnmount(() => {
+  if (refreshTimer) window.clearTimeout(refreshTimer)
+  if (cooldownTimer) window.clearTimeout(cooldownTimer)
+})
 </script>
 
 <template>
@@ -146,6 +205,17 @@ const retryPromptGeneration = () => {
       >
         <span class="spinner" />
         {{ line.generationStatus === 'pending' ? '等待生成提示词' : '正在生成提示词' }}
+        <button
+          v-if="refreshAvailable && line.generationJobId"
+          type="button"
+          class="refresh-generation-status"
+          :disabled="refreshingStatus || refreshCooldown"
+          title="只查询原工单，不会重新生成或产生额外费用"
+          @click.stop="refreshGenerationStatus"
+        >
+          {{ refreshingStatus ? '刷新中…' : refreshCooldown ? '请稍后' : '刷新任务状态' }}
+        </button>
+        <small v-if="refreshFeedback" class="refresh-feedback">{{ refreshFeedback }}</small>
       </div>
       <div v-else-if="line.generationStatus === 'failed'" class="prompt-generation-state failed">
         <button
@@ -293,6 +363,17 @@ const retryPromptGeneration = () => {
   color: var(--primary);
   cursor: pointer;
   padding: 0;
+}
+.prompt-generation-state .refresh-generation-status {
+  margin-left: 8px;
+}
+.prompt-generation-state .refresh-generation-status:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.refresh-feedback {
+  margin-left: 6px;
+  color: var(--text-secondary);
 }
 .prompt-generation-state .error-detail-trigger {
   display: inline-flex;

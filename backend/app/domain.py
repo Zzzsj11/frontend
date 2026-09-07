@@ -1603,12 +1603,18 @@ async def _run_storyboard_line_generation(job: Job) -> dict[str, Any]:
         storyboard_type = task.storyboard_type
     try:
         async with storyboard_generation_slots:
-            result = await generate_storyboard_line(
-                source=str(request.get("source") or storyboard_type),
-                current=dict(request.get("current") or {}),
-                full_context=dict(request.get("full_context") or {}),
-                allowed_humans=list(request.get("allowed_humans") or []),
-            )
+            try:
+                result = await asyncio.wait_for(
+                    generate_storyboard_line(
+                        source=str(request.get("source") or storyboard_type),
+                        current=dict(request.get("current") or {}),
+                        full_context=dict(request.get("full_context") or {}),
+                        allowed_humans=list(request.get("allowed_humans") or []),
+                    ),
+                    timeout=settings.storyboard_line_timeout_seconds,
+                )
+            except TimeoutError as exc:
+                raise TimeoutError(f"逐镜提示词生成超过{max(1, settings.storyboard_line_timeout_seconds // 60)}分钟，已判定失败，请重新生成") from exc
         async with session_factory() as session:
             line = await session.get(StoryboardLineModel, line_id)
             task = await session.get(ProjectTaskModel, task_id)
@@ -2175,6 +2181,7 @@ def _line_json_from_assets(
         "generationError": line.generation_error,
         "generationErrorSummary": _storyboard_error_summary(line.generation_error),
         "generationJobId": prompt_job.id if prompt_job else None,
+        "generationStartedAt": prompt_job.created_at.isoformat() if prompt_job else None,
         "generationFailedAt": prompt_job.finished_at.isoformat() if prompt_job and prompt_job.finished_at else None,
         "generationAttempt": line.generation_attempt,
         "generatedAt": line.generated_at.isoformat() if line.generated_at else None,
@@ -2487,7 +2494,7 @@ async def generate_storyboard_lines_batch(
             user,
             db,
         )
-        jobs_output.append(result)
+        jobs_output.append({**result, "storyboard_line_id": line_id})
     return {"taskId": task_id, "jobs": jobs_output, "count": len(jobs_output)}
 
 
