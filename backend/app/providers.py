@@ -29,6 +29,7 @@ from .runninghub import submit_text_task as runninghub_submit_text_task
 from .runninghub import upload_media as runninghub_upload_media
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
 from .storage import download_public_url_to_path, import_remote, import_remote_image, put_image_with_thumbnail, safe_key
+from .video_prompt_policy import compile_content_safety_retry_prompt
 
 
 class ProviderError(RuntimeError):
@@ -39,6 +40,12 @@ class ProviderRejectedError(ProviderError):
     """The provider returned a definite rejection before creating a task."""
 
     submission_certain = True
+
+
+class ProviderSubmissionUncertainError(ProviderError):
+    """Both idempotent creation attempts ended before a definitive response arrived."""
+
+    submission_certain = False
 
 
 # AIGC 供应商错误码 → 用户友好提示
@@ -54,7 +61,7 @@ _PROVIDER_ERROR_TRANSLATIONS: list[tuple[re.Pattern[str], str]] = [
         "输入参考图疑似包含真实人物，受平台合规限制无法生成。请更换为系统角色或 AI 生成的人物素材",
     ),
     (
-        re.compile(r"content polic|sensitive content|unsafe content|violat", re.IGNORECASE),
+        re.compile(r"content polic|sensitive (?:content|information)|unsafe content|violat", re.IGNORECASE),
         "内容未通过平台安全合规校验，请调整画面内容或提示词后重试",
     ),
     (
@@ -594,6 +601,8 @@ async def _submit_seedance_video(request: VideoGenerationCreate, job: Job, image
     base, headers = _video_config()
     # 同一逻辑创建在网络重试时始终使用相同键；文本降级是另一份请求体，必须使用独立键。
     variant = "reference" if image_urls else "text"
+    if (job.request or {}).get("_contentSafetyRetry"):
+        variant += ":content-safety"
     job.idempotency_key = f"{job.id}:{variant}"
     headers["Idempotency-Key"] = job.idempotency_key
     content: list[dict[str, Any]] = [{"type": "text", "text": request.prompt}]
@@ -611,7 +620,14 @@ async def _submit_seedance_video(request: VideoGenerationCreate, job: Job, image
     }
     await jobs.mark_provider_submitting(job)
     async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.post(f"{base}/v3/video/tasks", headers=headers, json=payload)
+        response = await _post_idempotent_video_create(
+            client,
+            f"{base}/v3/video/tasks",
+            headers=headers,
+            payload=payload,
+            job=job,
+            provider="yinghe",
+        )
         _raise_for_status(response)
         created = _unwrap(response.json())
         # V3 Seedance 官方报文：任务 ID 字段为 id（旧版为 taskId）
@@ -625,6 +641,8 @@ async def _submit_seedance_video(request: VideoGenerationCreate, job: Job, image
 async def _submit_ppio_seedance_video(request: VideoGenerationCreate, job: Job, image_urls: list[str]) -> tuple[str, dict[str, Any], str, dict[str, str]]:
     base, headers = _ppio_config()
     variant = "reference" if image_urls else "text"
+    if (job.request or {}).get("_contentSafetyRetry"):
+        variant += ":content-safety"
     job.idempotency_key = f"{job.id}:ppio:{variant}"
     headers["Idempotency-Key"] = job.idempotency_key
     content: list[dict[str, Any]] = [{"type": "text", "text": request.prompt}]
@@ -640,7 +658,14 @@ async def _submit_ppio_seedance_video(request: VideoGenerationCreate, job: Job, 
     }
     await jobs.mark_provider_submitting(job)
     async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.post(f"{base}/v3/bytedance-cn/metered/contents/generations/tasks", headers=headers, json=payload)
+        response = await _post_idempotent_video_create(
+            client,
+            f"{base}/v3/bytedance-cn/metered/contents/generations/tasks",
+            headers=headers,
+            payload=payload,
+            job=job,
+            provider="ppio",
+        )
         _raise_for_status(response)
         created = _unwrap(response.json())
     task_id = str(created.get("id") or "")
@@ -648,6 +673,42 @@ async def _submit_ppio_seedance_video(request: VideoGenerationCreate, job: Job, 
         raise ProviderError("PPIO Seedance 提交成功但未返回任务 id")
     await jobs.set_provider_task(job, "ppio", task_id, idempotency_key=job.idempotency_key)
     return task_id, created, base, headers
+
+
+async def _post_idempotent_video_create(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+    job: Job,
+    provider: str,
+) -> httpx.Response:
+    """Retry one uncertain Seedance create with the exact same idempotency key and body."""
+    for submit_index in range(2):
+        try:
+            response = await client.post(url, headers=headers, json=payload)
+            if submit_index:
+                await jobs.record_provider_attempt(
+                    job,
+                    stage="create",
+                    outcome="idempotent_recovered",
+                    detail=f"{provider} 创建接口第二次返回确定结果",
+                )
+            return response
+        except httpx.RequestError as exc:
+            final = submit_index == 1
+            await jobs.record_provider_attempt(
+                job,
+                stage="create",
+                outcome="uncertain_failed" if final else "uncertain_retrying",
+                detail=f"{type(exc).__name__}: {exc}",
+                increment=not final,
+            )
+            if final:
+                raise ProviderSubmissionUncertainError(f"{provider} 创建接口连续两次未返回确定结果（{type(exc).__name__}）") from exc
+            await asyncio.sleep(1)
+    raise AssertionError("unreachable")
 
 
 def _direct_h3_content(request: VideoGenerationCreate, mode: str) -> list[dict[str, Any]]:
@@ -774,6 +835,63 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         )
     except ProviderError as exc:
         message = str(exc)
+        output_sensitive = bool(
+            re.search(
+                r"output video may contain sensitive information|内容未通过平台安全合规校验",
+                message,
+                re.IGNORECASE,
+            )
+        )
+        allow_safety_retry = bool((job.request or {}).get("_allowContentSafetyRetry"))
+        safety_retry_attempted = bool((job.request or {}).get("_contentSafetyRetry"))
+        if allow_safety_retry and not safety_retry_attempted and output_sensitive:
+            retry_prompt = compile_content_safety_retry_prompt(
+                request.prompt,
+                shot_type=str((job.request or {}).get("_shotType") or "character"),
+                shot_index=int((job.request or {}).get("_shotIndex") or 0),
+            )
+            job.request = {
+                **(job.request or {}),
+                "_contentSafetyRetry": True,
+                "_contentSafetyRetryPrompt": retry_prompt,
+            }
+            await jobs.record_provider_attempt(
+                job,
+                stage="result_moderation",
+                outcome="content_safety_retrying",
+                detail=message,
+                provider_task_id=task_id,
+                increment=True,
+            )
+            retry_request = request.model_copy(update={"prompt": retry_prompt})
+            task_id, created, base, headers = await submit(retry_request, job, retry_request.image_urls)
+            try:
+                data = await _poll_scheduled(
+                    f"{base}{f'/v3/bytedance-cn/metered/contents/generations/tasks/{task_id}' if is_ppio else f'/v3/video/tasks/{task_id}'}",
+                    headers,
+                    job,
+                    timeout_seconds=_remaining_video_job_timeout(job),
+                    timeout_error="视频生成超过20分钟，已判定失败，请重新生成",
+                )
+                result = await _store_video_result(job, task_id, data, created)
+            except Exception as retry_exc:
+                await jobs.record_provider_attempt(
+                    job,
+                    stage="result_moderation",
+                    outcome="content_safety_retry_failed",
+                    detail=str(retry_exc),
+                    provider_task_id=task_id,
+                )
+                raise
+            await jobs.record_provider_attempt(
+                job,
+                stage="result_moderation",
+                outcome="content_safety_recovered",
+                provider_task_id=task_id,
+            )
+            result["contentSafetyRetry"] = True
+            result["contentSafetyRetryReason"] = "provider-output-moderation"
+            return result
         allow_fallback = bool((job.request or {}).get("_generalCharacterTextFallback"))
         real_person_blocked = "疑似包含真实人物" in message or bool(re.search(r"may contain real person", message, re.IGNORECASE))
         if not (allow_fallback and request.image_urls and real_person_blocked):

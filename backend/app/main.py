@@ -83,7 +83,7 @@ from .schemas import (
 from .seed import recover_stale_storyboard_generation, seed_system_data
 from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
 from .usage_quota import consume_daily_quota
-from .video_prompt_policy import compile_identity_safe_video_prompt
+from .video_prompt_policy import compile_general_random_provider_prompt, compile_identity_safe_video_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -779,6 +779,8 @@ async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str], *,
 async def create_video_generation(payload: VideoGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
     model, provider = await require_active_model(db, payload.model or settings.video_model, "video")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
+    task = await db.get(ProjectTaskModel, task_id) if task_id else None
+    line = await db.get(StoryboardLineModel, line_id) if line_id else None
     validate_video_references(payload, dict(model.capabilities or {}))
     is_h3 = bool((model.capabilities or {}).get("h3Modes"))
     if is_h3:
@@ -787,8 +789,6 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
     await consume_daily_quota(db, user_id=user.id, category="video")
     identity_indices = await _identity_reference_indices(db, payload.image_urls, user_id=user.id)
     if identity_indices:
-        line = await db.get(StoryboardLineModel, line_id) if line_id else None
-        task = await db.get(ProjectTaskModel, task_id) if task_id else None
         wardrobe = dict((line.shot_options or {}).get("wardrobeByCharacter") or {}) if line else {}
         task_config = dict(task.storyboard_config or {}) if task else {}
         season = str(task_config.get("season") or ((task_config.get("songEmotion") or {}).get("seasons")) or "").strip()
@@ -799,10 +799,29 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
     h3_compilation = compile_h3_prompt(payload, identity_reference_indices=identity_indices) if is_h3 else None
     if h3_compilation:
         payload.prompt = h3_compilation.prompt
+    source_prompt = payload.prompt
+    general_random_safety = False
+    if task and task.storyboard_type == "general_random" and line and not is_h3:
+        payload.prompt, general_random_safety = compile_general_random_provider_prompt(
+            payload.prompt,
+            shot_type=line.shot_type,
+            shot_index=line.sort_order,
+        )
     snapshot = generation_request_snapshot(payload, model, provider)
+    if task and task.storyboard_type == "general_random" and line and not is_h3:
+        snapshot.update(
+            {
+                "_sourcePrompt": source_prompt,
+                "_compiledPrompt": payload.prompt,
+                "_promptCompiler": "general-random-provider-safety",
+                "_promptCompilerVersion": 1,
+                "_allowContentSafetyRetry": True,
+                "_generalRandomSafetyCompiled": general_random_safety,
+                "_shotType": line.shot_type,
+                "_shotIndex": line.sort_order,
+            }
+        )
     if task_id and line_id:
-        task = await db.get(ProjectTaskModel, task_id)
-        line = await db.get(StoryboardLineModel, line_id)
         if task and task.storyboard_type == "general" and (task.storyboard_config or {}).get("cast_selection_mode") == "none" and line and line.shot_type == "character":
             snapshot["_generalCharacterTextFallback"] = True
     if h3_compilation:

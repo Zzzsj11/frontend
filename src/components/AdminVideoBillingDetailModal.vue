@@ -77,11 +77,33 @@ const money = (value: number) => `¥${value.toFixed(6)}`
             <span>生成状态</span
             ><b :class="{ failed: detail.status !== 'succeeded' }">{{ detail.status }}</b>
           </div>
+          <div>
+            <span>供应商尝试次数</span><b>{{ detail.attempt || 1 }} 次</b>
+          </div>
         </section>
 
         <section v-if="detail.error" class="error-box">
           <h3>失败原因</h3>
           <p>{{ detail.error }}</p>
+        </section>
+
+        <section v-if="detail.providerAttempts?.length">
+          <h3>供应商尝试记录</h3>
+          <div class="attempt-list">
+            <article
+              v-for="(attempt, index) in detail.providerAttempts"
+              :key="`${attempt.recordedAt}-${index}`"
+            >
+              <b>第 {{ attempt.attempt }} 次 · {{ attempt.outcome }}</b>
+              <span
+                >{{ attempt.stage
+                }}<template v-if="attempt.providerTaskId">
+                  · {{ attempt.providerTaskId }}</template
+                ></span
+              >
+              <p v-if="attempt.detail">{{ attempt.detail }}</p>
+            </article>
+          </div>
         </section>
 
         <section>
@@ -187,6 +209,21 @@ section {
   background: var(--danger-light);
   color: var(--danger);
   border-radius: var(--radius-sm);
+}
+.attempt-list {
+  display: grid;
+  gap: 8px;
+}
+.attempt-list article {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.attempt-list span {
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
 }
 .prompt-block {
   border: 1px solid var(--border);

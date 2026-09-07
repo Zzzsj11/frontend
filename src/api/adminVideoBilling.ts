@@ -63,6 +63,15 @@ export interface VideoBillingDetail {
   rateLabel: string
   amount: number
   billingStatus: string
+  attempt: number
+  providerAttempts: {
+    attempt: number
+    stage: string
+    outcome: string
+    detail?: string
+    providerTaskId?: string
+    recordedAt?: string
+  }[]
   prompts: { label: string; content: string }[]
   references: { label: string; type: string; url: string; providerUrl?: string }[]
   rawUsage: Record<string, unknown>

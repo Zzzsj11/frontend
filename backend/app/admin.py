@@ -777,7 +777,12 @@ async def video_billing_detail(record_id: str, user: CurrentUser, db: AsyncSessi
             }
         )
     prompts = []
-    for label, key in (("最终提交提示词", "prompt"), ("H3 编译提示词", "_compiledPrompt"), ("原始业务提示词", "_sourcePrompt")):
+    for label, key in (
+        ("最终提交提示词", "prompt"),
+        ("合规重试提示词", "_contentSafetyRetryPrompt"),
+        ("供应商编译提示词", "_compiledPrompt"),
+        ("原始业务提示词", "_sourcePrompt"),
+    ):
         value = request_data.get(key)
         if isinstance(value, str) and value.strip() and value not in {item["content"] for item in prompts}:
             prompts.append({"label": label, "content": value})
@@ -811,6 +816,8 @@ async def video_billing_detail(record_id: str, user: CurrentUser, db: AsyncSessi
         **_video_rate_json(record),
         "amount": _money(record.amount),
         "billingStatus": record.billing_status,
+        "attempt": job.attempt,
+        "providerAttempts": request_data.get("_providerAttempts") or [],
         "prompts": prompts,
         "references": references,
         "rawUsage": record.raw_usage,

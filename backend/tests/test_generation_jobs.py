@@ -300,6 +300,33 @@ def test_uncertain_provider_submission_requires_manual_review(monkeypatch) -> No
     asyncio.run(scenario())
 
 
+def test_uncertain_idempotent_provider_submission_reports_recovery_exhausted(monkeypatch) -> None:
+    from app import jobs as jobs_module
+    from app.jobs import Job, JobManager
+
+    async def scenario() -> None:
+        manager = JobManager()
+
+        async def fake_persist(_job: Job) -> None:
+            return None
+
+        monkeypatch.setattr(manager, "_persist", fake_persist)
+        monkeypatch.setattr(jobs_module, "add_token_usage", lambda *_args, **_kwargs: None)
+
+        async def uncertain(job: Job) -> dict:
+            job.phase = "submitting_provider"
+            raise TimeoutError("response lost twice")
+
+        job = Job(id="uncertain-idempotent", kind="video", idempotency_key="stable-key")
+        await manager._run(job, uncertain)
+        assert job.status == "failed"
+        assert job.phase == "manual_review"
+        assert "经同一幂等键恢复后仍无法确认" in (job.error or "")
+        assert "不支持幂等重提" not in (job.error or "")
+
+    asyncio.run(scenario())
+
+
 def test_definite_provider_rejection_is_not_marked_for_manual_review(monkeypatch) -> None:
     from app import jobs as jobs_module
     from app.jobs import Job, JobManager
@@ -730,6 +757,155 @@ async def test_ppio_seedance_uses_standard_model_and_metered_routes(monkeypatch)
     assert submitted["url"] == "https://api.ppio.test/v3/bytedance-cn/metered/contents/generations/tasks"
     assert submitted["payload"]["model"] == "doubao-seedance-2-0-260128"
     assert result["usage"]["completion_tokens"] == 50638
+
+
+@pytest.mark.asyncio
+async def test_seedance_create_retries_once_with_identical_idempotent_request(monkeypatch) -> None:
+    import httpx
+
+    from app import providers
+    from app.jobs import Job
+
+    calls: list[tuple[str, dict, dict]] = []
+    attempts: list[dict] = []
+
+    class Client:
+        async def post(self, url, *, headers, json):
+            calls.append((url, dict(headers), dict(json)))
+            if len(calls) == 1:
+                raise httpx.ReadTimeout("response lost", request=httpx.Request("POST", url))
+            return httpx.Response(200, json={"id": "recovered"}, request=httpx.Request("POST", url))
+
+    async def record(job, **kwargs):
+        attempts.append(kwargs)
+        if kwargs.get("increment"):
+            job.attempt += 1
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(providers.jobs, "record_provider_attempt", record)
+    monkeypatch.setattr(providers.asyncio, "sleep", no_sleep)
+    job = Job(id="job-idempotent-recover", kind="video", idempotency_key="stable-key")
+    response = await providers._post_idempotent_video_create(
+        Client(),
+        "https://api.test/v3/video/tasks",
+        headers={"Idempotency-Key": "stable-key"},
+        payload={"model": "seedance", "content": [{"type": "text", "text": "safe"}]},
+        job=job,
+        provider="yinghe",
+    )
+
+    assert response.json()["id"] == "recovered"
+    assert calls[0] == calls[1]
+    assert [item["outcome"] for item in attempts] == ["uncertain_retrying", "idempotent_recovered"]
+    assert job.attempt == 2
+
+
+@pytest.mark.asyncio
+async def test_seedance_create_stops_after_two_uncertain_attempts(monkeypatch) -> None:
+    import httpx
+
+    from app import providers
+    from app.jobs import Job
+
+    calls = 0
+
+    class Client:
+        async def post(self, url, *, headers, json):
+            nonlocal calls
+            calls += 1
+            raise httpx.ReadTimeout("still lost", request=httpx.Request("POST", url))
+
+    async def no_op(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(providers.jobs, "record_provider_attempt", no_op)
+    monkeypatch.setattr(providers.asyncio, "sleep", no_op)
+    with pytest.raises(providers.ProviderSubmissionUncertainError, match="连续两次未返回确定结果"):
+        await providers._post_idempotent_video_create(
+            Client(),
+            "https://api.test/v3/video/tasks",
+            headers={"Idempotency-Key": "stable-key"},
+            payload={"model": "seedance"},
+            job=Job(id="job-idempotent-fail", kind="video"),
+            provider="yinghe",
+        )
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_general_random_seedance_retries_output_moderation_once(monkeypatch) -> None:
+    from app import providers
+    from app.jobs import Job
+    from app.schemas import VideoGenerationCreate
+
+    submitted: list[str] = []
+    polls = 0
+
+    async def submit(request, job, _image_urls):
+        submitted.append(request.prompt)
+        return f"provider-task-{len(submitted)}", {"id": f"provider-task-{len(submitted)}"}, "https://api.test", {}
+
+    async def poll(*_args, **_kwargs):
+        nonlocal polls
+        polls += 1
+        if polls == 1:
+            raise providers.ProviderError("内容未通过平台安全合规校验，请调整画面内容或提示词后重试")
+        return {"status": "succeeded", "content": {"video_url": "https://source.test/result.mp4"}}
+
+    async def store(_job, task_id, _data, _created):
+        return {"providerTaskId": task_id}
+
+    async def record(job, **kwargs):
+        if kwargs.get("increment"):
+            job.attempt += 1
+
+    monkeypatch.setattr(providers, "_submit_seedance_video", submit)
+    monkeypatch.setattr(providers, "_poll_scheduled", poll)
+    monkeypatch.setattr(providers, "_store_video_result", store)
+    monkeypatch.setattr(providers.jobs, "record_provider_attempt", record)
+    request = VideoGenerationCreate(prompt="庄重明亮的公共节庆场景", model="doubao-seedance-2.0")
+    job = Job(
+        id="job-content-retry",
+        kind="video",
+        request={"_allowContentSafetyRetry": True, "_shotType": "character", "_shotIndex": 2},
+    )
+
+    result = await providers.generate_video(request, job)
+
+    assert len(submitted) == 2
+    assert submitted[0] == request.prompt
+    assert "【合规重试】" in submitted[1]
+    assert result["contentSafetyRetry"] is True
+    assert result["providerTaskId"] == "provider-task-2"
+    assert job.attempt == 2
+
+
+@pytest.mark.asyncio
+async def test_seedance_does_not_retry_non_moderation_failure(monkeypatch) -> None:
+    from app import providers
+    from app.jobs import Job
+    from app.schemas import VideoGenerationCreate
+
+    submitted = 0
+
+    async def submit(_request, _job, _image_urls):
+        nonlocal submitted
+        submitted += 1
+        return "provider-task-1", {}, "https://api.test", {}
+
+    async def poll(*_args, **_kwargs):
+        raise providers.ProviderError("upstream internal error")
+
+    monkeypatch.setattr(providers, "_submit_seedance_video", submit)
+    monkeypatch.setattr(providers, "_poll_scheduled", poll)
+    request = VideoGenerationCreate(prompt="普通城市街景")
+    job = Job(id="job-no-content-retry", kind="video", request={"_allowContentSafetyRetry": True})
+
+    with pytest.raises(providers.ProviderError, match="internal error"):
+        await providers.generate_video(request, job)
+    assert submitted == 1
 
 
 @pytest.mark.asyncio

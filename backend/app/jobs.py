@@ -62,6 +62,7 @@ class Job:
     idempotency_key: str | None = None
     worker_id: str | None = None
     phase: str = "queued"
+    attempt: int = 1
 
     def public(self) -> dict[str, Any]:
         return {
@@ -77,6 +78,7 @@ class Job:
             "provider_task_id": self.provider_task_id,
             "idempotency_key": self.idempotency_key,
             "phase": self.phase,
+            "attempt": self.attempt,
         }
 
 
@@ -199,6 +201,7 @@ class JobManager:
                 model.status, model.progress, model.result, model.error = job.status, job.progress, job.result, job.error
                 model.provider, model.provider_task_id = job.provider, job.provider_task_id
                 model.phase = job.phase
+                model.attempt = job.attempt
                 if job.idempotency_key:
                     model.idempotency_key = job.idempotency_key
                 if job.status == "running" and job.phase != "claimed" and model.started_at is None:
@@ -302,7 +305,12 @@ class JobManager:
             uncertain_submission = job.phase == "submitting_provider" and not bool(getattr(exc, "submission_certain", False))
             job.status = "failed"
             job.phase = "manual_review" if uncertain_submission else "failed"
-            prefix = "供应商创建结果不确定且不支持幂等重提，请先人工核对供应商任务；" if uncertain_submission else ""
+            if uncertain_submission and job.idempotency_key:
+                prefix = "供应商创建接口经同一幂等键恢复后仍无法确认结果，请先人工核对供应商任务；"
+            elif uncertain_submission:
+                prefix = "供应商创建结果不确定且不支持幂等重提，请先人工核对供应商任务；"
+            else:
+                prefix = ""
             job.error = redact_error_text(f"{prefix}{exc}")
             async with session_factory() as session:
                 add_token_usage(
@@ -494,7 +502,43 @@ class JobManager:
             idempotency_key=model.idempotency_key,
             worker_id=model.worker_id,
             phase=model.phase or "queued",
+            attempt=model.attempt,
         )
+
+    async def record_provider_attempt(
+        self,
+        job: Job,
+        *,
+        stage: str,
+        outcome: str,
+        detail: str = "",
+        provider_task_id: str | None = None,
+        increment: bool = False,
+    ) -> None:
+        """Persist a bounded supplier-attempt audit trail without exposing credentials."""
+        if increment:
+            job.attempt += 1
+        request = dict(job.request or {})
+        attempts = list(request.get("_providerAttempts") or [])[-9:]
+        attempts.append(
+            {
+                "attempt": job.attempt,
+                "stage": stage,
+                "outcome": outcome,
+                "detail": redact_error_text(detail)[:500],
+                "providerTaskId": provider_task_id,
+                "recordedAt": utcnow().isoformat(),
+            }
+        )
+        request["_providerAttempts"] = attempts
+        job.request = request
+        async with session_factory() as session:
+            model = await session.get(GenerationJobModel, job.id)
+            if model and (not job.worker_id or model.worker_id == job.worker_id):
+                model.attempt = job.attempt
+                model.request = request
+                await session.commit()
+        await cache_job(job.id, job.public())
 
     async def mark_provider_submitting(self, job: Job) -> None:
         """标记供应商创建窗口，并在发请求前持久化已确定的幂等键。"""

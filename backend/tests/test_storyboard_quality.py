@@ -36,6 +36,34 @@ from app.storyboard_prompt import (
     generate_ass_story_outline,
     generate_general_story_outline,
 )
+from app.video_prompt_policy import compile_content_safety_retry_prompt, compile_general_random_provider_prompt
+
+
+def test_general_random_provider_prompt_neutralizes_sensitive_category_labels() -> None:
+    source = "音乐属性：红歌 / 歌颂祖国。额外要求：适合国庆期间播放的。【随机生成】"
+
+    compiled, changed = compile_general_random_provider_prompt(source, shot_type="character", shot_index=1)
+
+    assert changed is True
+    assert all(term not in compiled for term in ("红歌", "歌颂祖国", "国庆"))
+    assert "现实政治人物" in compiled
+    assert "普通" in compiled
+
+
+def test_general_random_provider_prompt_keeps_unrelated_prompt_unchanged() -> None:
+    source = "雨夜车站里，一个青年安静等待，镜头缓慢推进。"
+
+    assert compile_general_random_provider_prompt(source, shot_type="character", shot_index=0) == (source, False)
+
+
+def test_content_safety_retry_prompt_is_stricter_and_rotates_visual_motif() -> None:
+    source = "音乐属性：红歌 / 歌颂祖国，适合国庆期间播放。"
+
+    retried = compile_content_safety_retry_prompt(source, shot_type="empty", shot_index=0)
+
+    assert all(term not in retried for term in ("红歌", "歌颂祖国", "国庆"))
+    assert "【合规重试】" in retried
+    assert "不得出现旗帜" in retried
 
 
 def make_outline(segments, empty_indexes=(), role_ids=("a",)):
