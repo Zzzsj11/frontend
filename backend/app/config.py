@@ -138,6 +138,7 @@ class Settings:
     business_tokens_list_url: str = os.getenv("BUSINESS_TOKENS_LIST_URL", "https://api-aigc.fzyinghe.com/business/tokens/list")
     business_balance_timeout: float = float(os.getenv("BUSINESS_BALANCE_TIMEOUT", "10"))
     business_balance_cache_seconds: int = max(5, int(os.getenv("BUSINESS_BALANCE_CACHE_SECONDS", "30")))
+    business_key_quota_stale_seconds: int = max(30, int(os.getenv("BUSINESS_KEY_QUOTA_STALE_SECONDS", "300")))
     ppio_api_base_url: str = os.getenv("PPIO_API_BASE_URL", "https://api.ppio.com").rstrip("/")
     ppio_api_key: str = _read_provider_value("PPIO_API_KEY")
     ppio_balance_url: str = os.getenv("PPIO_BALANCE_URL", "https://api.ppio.com/openapi/v1/billing/balance/detail")

@@ -231,14 +231,21 @@ const submit = async () => {
       )
       const usableRemaining =
         providerBalance.available && Number.isFinite(keyRemaining) ? Number(keyRemaining) : null
-      if (!unlimited && (usableRemaining == null || usableRemaining + 1e-9 < estimatedCost)) {
-        const balanceDetail =
-          usableRemaining == null
-            ? `${keyLabel} 的剩余额度暂时无法获取。`
-            : `${keyLabel} 当前剩余额度 ¥${usableRemaining.toFixed(2)}，尚缺 ¥${(estimatedCost - usableRemaining).toFixed(2)}。`
+      if (!unlimited && usableRemaining == null) {
+        const balanceError = providerBalance.keyError || providerBalance.message
+        await confirmDialog({
+          title: '余额查询失败',
+          message: `本次预计费用 ¥${estimatedCost.toFixed(2)}，但 ${keyLabel} 的实时剩余额度暂时无法获取。${balanceError ? `\n查询原因：${balanceError}` : ''}\n\n请稍后重试，本次不会创建项目或提交视频任务。`,
+          confirmText: '知道了',
+          cancelText: '稍后处理',
+          danger: true,
+        })
+        return
+      }
+      if (!unlimited && usableRemaining !== null && usableRemaining + 1e-9 < estimatedCost) {
         await confirmDialog({
           title: '余额额度不足',
-          message: `本次预计费用 ¥${estimatedCost.toFixed(2)}，${balanceDetail}\n\n请先完成充值或提升子账号 Key 的余额上限后再试，本次不会创建项目或提交视频任务。`,
+          message: `本次预计费用 ¥${estimatedCost.toFixed(2)}，${keyLabel} 当前剩余额度 ¥${usableRemaining.toFixed(2)}，尚缺 ¥${(estimatedCost - usableRemaining).toFixed(2)}。\n\n请先完成充值或提升子账号 Key 的余额上限后再试，本次不会创建项目或提交视频任务。`,
           confirmText: '知道了',
           cancelText: '稍后处理',
           danger: true,
@@ -248,7 +255,7 @@ const submit = async () => {
       const remainingText =
         usableRemaining == null
           ? providerBalance.key?.remainingDisplay || '暂时无法获取，提交时将再次校验'
-          : `¥${usableRemaining.toFixed(2)}`
+          : `¥${usableRemaining.toFixed(2)}${providerBalance.key?.stale ? '（缓存）' : ''}`
       const confirmed = await confirmDialog({
         title: '确认批量生成视频',
         message: `将生成 ${request.groupCount ?? 1} 组随机通用分镜，共约 ${seconds} 秒视频。\n\n计费模型：${labelOf(request.videoModel, VIDEO_MODEL_OPTIONS)}\n预估单价：¥${formatVideoEstimateUnitPrice(unitPrice)}/秒\n本次预估费用：¥${estimatedCost.toFixed(2)}\n${keyLabel} 剩余额度：${remainingText}\n\n实际费用以供应商最终用量为准，确认后将立即创建子项目并提交视频任务。`,

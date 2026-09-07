@@ -254,4 +254,40 @@ describe('general storyboard defaults', () => {
     expect(run).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+
+  it('Key 额度查询失败时显示真实原因而不是余额不足', async () => {
+    const store = useProjectStore()
+    store.generalStoryboardOptions = {
+      genres: [{ value: 'pop', label: '流行歌曲' }],
+      seasons: ['秋'],
+      ageGroups: ['青年'],
+      visualStyles: ['电影写实'],
+      ratios: ['16:9'],
+    }
+    store.randomGeneralStoryboardOpen = true
+    const run = vi.spyOn(store, 'runRandomGeneralStoryboard').mockResolvedValue()
+    vi.spyOn(apiClient, 'apiRequest').mockResolvedValue({
+      available: true,
+      balance: '100',
+      balanceDisplay: '100.00',
+      currency: 'CNY',
+      updatedAt: '',
+      key: null,
+      keyError: 'Key 额度接口超时',
+    })
+    const confirm = vi.spyOn(confirmDialogModule, 'confirmDialog').mockResolvedValue(false)
+    const wrapper = mount(GeneralStoryboardModal, {
+      props: { random: true },
+      attachTo: document.body,
+    })
+
+    ;(document.body.querySelector('.modal-footer .btn-primary') as HTMLButtonElement).click()
+    await vi.waitFor(() => expect(confirm).toHaveBeenCalled())
+    const options = confirm.mock.calls[0][0] as { title: string; message: string }
+    expect(options.title).toBe('余额查询失败')
+    expect(options.message).toContain('查询原因：Key 额度接口超时')
+    expect(options.message).not.toContain('余额额度不足')
+    expect(run).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
 })

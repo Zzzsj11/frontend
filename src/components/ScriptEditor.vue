@@ -188,6 +188,7 @@ const confirmBatchGenerate = async () => {
     const balance = await apiRequest<AccountBalance>('/account/balance?force=true')
     const balanceLines: string[] = []
     let sufficient = true
+    let balanceUnavailable = false
     for (const [provider, estimate] of Object.entries(providerEstimates)) {
       const providerBalance = balance.providers?.[provider as 'yinghe' | 'ppio'] ?? balance
       const rawRemaining =
@@ -205,24 +206,33 @@ const confirmBatchGenerate = async () => {
         providerBalance.key.quotaAmt === null,
       )
       const label = provider === 'ppio' ? 'PPIO' : '英和'
+      const balanceError = providerBalance.keyError || providerBalance.message
+      const unavailableReason = remaining == null && balanceError ? `（${balanceError}）` : ''
       balanceLines.push(
-        `${label}预计 ¥${Number(estimate).toFixed(2)}，余额 ${unlimited ? '不限额' : remaining == null ? '暂时无法获取' : `¥${remaining.toFixed(2)}`}`,
+        `${label}预计 ¥${Number(estimate).toFixed(2)}，余额 ${unlimited ? '不限额' : remaining == null ? `暂时无法获取${unavailableReason}` : `¥${remaining.toFixed(2)}${providerBalance.key?.stale ? '（缓存）' : ''}`}`,
       )
-      if (!unlimited && (remaining == null || remaining + 1e-9 < Number(estimate)))
+      if (!unlimited && remaining == null) balanceUnavailable = true
+      else if (!unlimited && remaining !== null && remaining + 1e-9 < Number(estimate))
         sufficient = false
     }
-    const conclusion = sufficient
-      ? '【余额充足，可以开始批量生成任务】'
-      : '【余额不足，请联系负责人进行充值】'
+    const conclusion = balanceUnavailable
+      ? '【余额查询失败，请稍后重试；本次不会提交视频任务】'
+      : sufficient
+        ? '【余额充足，可以开始批量生成任务】'
+        : '【余额不足，请联系负责人进行充值】'
     const message = `本次将生成总计：${items.length} 条，共：${totalSeconds} 秒，${modelText || '视频模型'} 视频，预计总费用为：${estimatedCost.toFixed(2)} 元。\n${balanceLines.join('\n')}\n\n${conclusion}`
     const confirmed = await confirmDialog({
-      title: sufficient ? '确认批量生成视频' : '子账号余额不足',
+      title: balanceUnavailable
+        ? '余额查询失败'
+        : sufficient
+          ? '确认批量生成视频'
+          : '子账号余额不足',
       message,
-      confirmText: sufficient ? '确定生成' : '知道了',
-      cancelText: sufficient ? '取消' : '稍后处理',
-      danger: !sufficient,
+      confirmText: sufficient && !balanceUnavailable ? '确定生成' : '知道了',
+      cancelText: sufficient && !balanceUnavailable ? '取消' : '稍后处理',
+      danger: !sufficient || balanceUnavailable,
     })
-    if (sufficient && confirmed) void store.generateAllShots()
+    if (sufficient && !balanceUnavailable && confirmed) void store.generateAllShots()
   } catch (error) {
     await confirmDialog({
       title: '费用预估失败',

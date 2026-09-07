@@ -14,6 +14,9 @@ export interface KeyQuotaInfo {
   usedAmt: number | null
   remaining: number | null
   remainingDisplay: string
+  updatedAt?: string
+  stale?: boolean
+  warning?: string | null
 }
 export interface AccountBalance {
   available: boolean
@@ -26,6 +29,7 @@ export interface AccountBalance {
   updatedAt: string
   message?: string | null
   key?: KeyQuotaInfo | null
+  keyError?: string | null
   details?: {
     cashBalance: number | null
     creditLimit: number | null

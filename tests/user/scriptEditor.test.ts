@@ -82,6 +82,33 @@ describe('ScriptEditor batch generation confirmation', () => {
     wrapper.unmount()
   })
 
+  it('余额查询失败时不误报余额不足且不启动任务', async () => {
+    const store = useProjectStore()
+    store.lines = [pendingLine('line-1')]
+    const generate = vi.spyOn(store, 'generateAllShots').mockResolvedValue()
+    vi.spyOn(apiClient, 'apiRequest').mockResolvedValue({
+      available: true,
+      balance: '100',
+      balanceDisplay: '100.00',
+      currency: 'CNY',
+      updatedAt: '',
+      key: null,
+      keyError: 'Key 额度接口超时',
+    })
+    const confirm = vi.spyOn(confirmDialogModule, 'confirmDialog').mockResolvedValue(false)
+    const wrapper = mount(ScriptEditor)
+
+    await wrapper.get('.header-actions .btn-outline').trigger('click')
+    await vi.waitFor(() => expect(confirm).toHaveBeenCalled())
+    const options = confirm.mock.calls[0][0] as { title: string; message: string }
+    expect(options.title).toBe('余额查询失败')
+    expect(options.message).toContain('【余额查询失败，请稍后重试')
+    expect(options.message).toContain('Key 额度接口超时')
+    expect(options.message).not.toContain('【余额不足')
+    expect(generate).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('从底部新增单个视频后将已有滚动条的列表滚到底部', async () => {
     const store = useProjectStore()
     store.lines = Array.from({ length: 8 }, (_, index) => pendingLine(`line-${index}`))

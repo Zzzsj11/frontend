@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import time
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -14,7 +15,10 @@ from .video_estimation import video_estimate_policy
 
 _cache: dict[str, Any] | None = None
 _cache_expires_at = 0.0
+_key_quota_cache: dict[str, Any] | None = None
+_key_quota_cached_at = 0.0
 _lock = asyncio.Lock()
+logger = logging.getLogger(__name__)
 PPIO_BALANCE_UNIT_SCALE = Decimal("10000")
 PPIO_MODEL_CREDIT_UNIT_SCALE = Decimal("1000000")
 
@@ -90,41 +94,59 @@ async def _query_current_key_quota(client: httpx.AsyncClient) -> dict[str, Any] 
     current_key = _current_provider_key()
     if not current_key:
         return None
-    timestamp = int(time.time())
     user_id = settings.business_user_id
-    sign_params = {"userId": user_id, "timestamp": str(timestamp), "pageNum": "1", "pageSize": "100"}
-    payload = {
-        "userId": int(user_id) if user_id.isdigit() else user_id,
-        "timestamp": timestamp,
-        "pageNum": 1,
-        "pageSize": 100,
-        "sign": build_business_sign(sign_params, settings.business_api_key),
-    }
-    response = await client.post(settings.business_tokens_list_url, headers={"Content-Type": "application/json"}, json=payload)
-    response.raise_for_status()
-    body = response.json()
-    if body.get("code") != 200:
-        raise ValueError(body.get("msg") or "Key 额度服务返回错误")
-    items = (body.get("data") or {}).get("list") or []
-    for item in items:
-        if item.get("apiKey") != current_key:
-            continue
-        quota = _to_float(item.get("quotaAmt"))
-        used = _to_float(item.get("usedAmt")) or 0.0
-        remaining = quota - used if quota is not None else None
-        return {
-            "keyMasked": mask_api_key(current_key),
-            "keyName": item.get("name") or None,
-            "quotaAmt": quota,
-            "usedAmt": used,
-            "remaining": remaining,
-            "remainingDisplay": f"{remaining:.2f}" if remaining is not None else "不限额",
+    page_size = 100
+    for page_num in range(1, 21):
+        timestamp = int(time.time())
+        sign_params = {
+            "userId": user_id,
+            "timestamp": str(timestamp),
+            "pageNum": str(page_num),
+            "pageSize": str(page_size),
         }
-    return None
+        payload = {
+            "userId": int(user_id) if user_id.isdigit() else user_id,
+            "timestamp": timestamp,
+            "pageNum": page_num,
+            "pageSize": page_size,
+            "sign": build_business_sign(sign_params, settings.business_api_key),
+        }
+        response = await client.post(
+            settings.business_tokens_list_url,
+            headers={"Content-Type": "application/json"},
+            json=payload,
+        )
+        response.raise_for_status()
+        body = response.json()
+        if body.get("code") != 200:
+            raise ValueError(body.get("msg") or "Key 额度服务返回错误")
+        data = body.get("data") or {}
+        items = data.get("list") or []
+        for item in items:
+            if item.get("apiKey") != current_key:
+                continue
+            quota = _to_float(item.get("quotaAmt"))
+            used = _to_float(item.get("usedAmt")) or 0.0
+            remaining = quota - used if quota is not None else None
+            return {
+                "keyMasked": mask_api_key(current_key),
+                "keyName": item.get("name") or None,
+                "quotaAmt": quota,
+                "usedAmt": used,
+                "remaining": remaining,
+                "remainingDisplay": f"{remaining:.2f}" if remaining is not None else "不限额",
+                "updatedAt": datetime.now(UTC).isoformat(),
+                "stale": False,
+                "warning": None,
+            }
+        total = _to_float(data.get("total"))
+        if len(items) < page_size or (total is not None and page_num * page_size >= total):
+            break
+    raise ValueError("当前生成 Key 未在额度列表中找到")
 
 
 async def query_business_balance(*, force: bool = False) -> dict[str, Any]:
-    global _cache, _cache_expires_at
+    global _cache, _cache_expires_at, _key_quota_cache, _key_quota_cached_at
     if not settings.business_api_key or not settings.business_user_id:
         return unavailable_balance("未配置余额查询凭据")
     now = time.monotonic()
@@ -157,10 +179,27 @@ async def query_business_balance(*, force: bool = False) -> dict[str, Any]:
                     "key": None,
                 }
                 try:
-                    result["key"] = await _query_current_key_quota(client)
-                except (httpx.HTTPError, ValueError, TypeError):
-                    # Key 额度查询失败不影响商户总余额展示
-                    result["key"] = None
+                    key_quota = await _query_current_key_quota(client)
+                    result["key"] = key_quota
+                    result["keyError"] = None
+                    if key_quota is not None:
+                        _key_quota_cache = dict(key_quota)
+                        _key_quota_cached_at = time.monotonic()
+                except (httpx.HTTPError, ValueError, TypeError) as exc:
+                    error_message = str(exc) or "Key 额度服务请求失败"
+                    logger.warning("英和 Key 额度查询失败：%s", error_message)
+                    stale_age = time.monotonic() - _key_quota_cached_at
+                    stale_limit = settings.business_key_quota_stale_seconds
+                    if _key_quota_cache is not None and stale_age <= stale_limit:
+                        result["key"] = {
+                            **_key_quota_cache,
+                            "stale": True,
+                            "warning": f"实时额度查询失败，当前显示 {round(stale_age)} 秒前的缓存",
+                        }
+                        result["keyError"] = error_message
+                    else:
+                        result["key"] = None
+                        result["keyError"] = error_message
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             result = unavailable_balance(str(exc) or "余额服务请求失败")
         _cache = result
@@ -248,7 +287,9 @@ async def ensure_video_batch_balance(items: list[Any]) -> dict[str, Any]:
         available = _to_float(raw_available) if balance.get("available") else None
         if available is None:
             label = "PPIO" if provider == "ppio" else "英和子账号 Key"
-            raise ValueError(f"{label} 余额暂时无法获取，请稍后再试")
+            reason = balance.get("keyError") or balance.get("message")
+            detail = f"（{reason}）" if reason else ""
+            raise ValueError(f"{label} 余额查询失败{detail}，请稍后再试")
         if available + 1e-9 < estimated:
             label = "PPIO" if provider == "ppio" else "英和子账号 Key"
             raise ValueError(f"{label} 余额不足，请先完成充值或提升余额上限后再试")

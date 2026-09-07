@@ -16,6 +16,7 @@ FAKE_SETTINGS = SimpleNamespace(
     business_tokens_list_url="https://tokens.test",
     business_balance_timeout=10,
     business_balance_cache_seconds=30,
+    business_key_quota_stale_seconds=300,
     video_api_key="",
     image_api_key="",
 )
@@ -67,6 +68,8 @@ def make_client(calls, tokens_body=None):
 def reset_balance_cache(monkeypatch):
     monkeypatch.setattr(balance, "_cache", None)
     monkeypatch.setattr(balance, "_cache_expires_at", 0.0)
+    monkeypatch.setattr(balance, "_key_quota_cache", None)
+    monkeypatch.setattr(balance, "_key_quota_cached_at", 0.0)
 
 
 def test_balance_signature_matches_business_protocol() -> None:
@@ -151,6 +154,48 @@ async def test_key_quota_failure_does_not_break_total_balance(monkeypatch) -> No
     assert result["available"] is True
     assert result["balanceDisplay"] == "287.39"
     assert result["key"] is None
+    assert result["keyError"] == "tokens endpoint down"
+
+
+@pytest.mark.asyncio
+async def test_key_quota_uses_recent_successful_cache_when_refresh_fails(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(balance, "settings", FAKE_SETTINGS)
+    monkeypatch.setattr(FAKE_SETTINGS, "video_api_key", CURRENT_KEY)
+    monkeypatch.setattr(balance.httpx, "AsyncClient", make_client(calls, {"code": 200, "data": {"list": [KEY_ITEM]}}))
+    fresh = await balance.query_business_balance(force=True)
+
+    monkeypatch.setattr(balance.httpx, "AsyncClient", make_client(calls, None))
+    stale = await balance.query_business_balance(force=True)
+
+    assert fresh["key"]["stale"] is False
+    assert stale["key"]["remaining"] == pytest.approx(248.69256)
+    assert stale["key"]["stale"] is True
+    assert "实时额度查询失败" in stale["key"]["warning"]
+    assert stale["keyError"] == "tokens endpoint down"
+
+
+@pytest.mark.asyncio
+async def test_key_quota_searches_following_pages(monkeypatch) -> None:
+    class PaginatedClient(FakeClient):
+        async def post(self, url, **kwargs):
+            payload = kwargs["json"]
+            self._calls.append((url, payload))
+            if "tokens" not in url:
+                return FakeResponse({"code": 200, "data": {"userId": 123, "balance": "287.391936"}})
+            items = [{"apiKey": f"other-{index}"} for index in range(100)] if payload["pageNum"] == 1 else [KEY_ITEM]
+            return FakeResponse({"code": 200, "data": {"list": items, "total": 101}})
+
+    calls = []
+    monkeypatch.setattr(balance, "settings", FAKE_SETTINGS)
+    monkeypatch.setattr(FAKE_SETTINGS, "video_api_key", CURRENT_KEY)
+    monkeypatch.setattr(balance.httpx, "AsyncClient", lambda *args, **kwargs: PaginatedClient(calls, *args, **kwargs))
+
+    result = await balance.query_business_balance(force=True)
+
+    assert result["key"]["keyMasked"] == "yh-testk***"
+    token_pages = [payload["pageNum"] for url, payload in calls if "tokens" in url]
+    assert token_pages == [1, 2]
 
 
 @pytest.mark.asyncio
@@ -206,6 +251,22 @@ async def test_video_batch_cost_estimate_and_insufficient_key_balance(monkeypatc
 
     monkeypatch.setattr(balance, "query_provider_balances", insufficient_providers)
     with pytest.raises(ValueError, match="英和子账号 Key 余额不足，请先完成充值或提升余额上限后再试"):
+        await balance.ensure_video_batch_balance(items)
+
+    async def unavailable_providers(force=False):
+        return {
+            "providers": {
+                "yinghe": {
+                    "available": True,
+                    "key": None,
+                    "keyError": "tokens endpoint down",
+                },
+                "ppio": balance.unavailable_balance(),
+            }
+        }
+
+    monkeypatch.setattr(balance, "query_provider_balances", unavailable_providers)
+    with pytest.raises(ValueError, match="英和子账号 Key 余额查询失败.*tokens endpoint down"):
         await balance.ensure_video_batch_balance(items)
 
 

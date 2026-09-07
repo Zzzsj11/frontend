@@ -18,15 +18,16 @@ const hasAdminAccess = computed(
 const keyText = computed(() => {
   const key = yingheBalance.value?.key
   if (!key) return ''
-  return `${key.keyMasked} 余 ${key.remainingDisplay}`
+  return `${key.keyMasked} 余 ${key.remainingDisplay}${key.stale ? '（缓存）' : ''}`
 })
 const balanceTitle = computed(() => {
   if (yingheBalance.value?.message) return yingheBalance.value.message
   const key = yingheBalance.value?.key
-  if (!key) return '点击刷新余额'
+  if (!key) return yingheBalance.value?.keyError || '点击刷新余额'
   const name = key.keyName ? `（${key.keyName}）` : ''
   const quota = key.quotaAmt == null ? '不限额' : key.quotaAmt
-  return `当前 Key ${key.keyMasked}${name} · 月度已用 ${key.usedAmt ?? '--'} / 限额 ${quota} · 点击刷新余额`
+  const warning = key.warning ? ` · ${key.warning}` : ''
+  return `当前 Key ${key.keyMasked}${name} · 月度已用 ${key.usedAmt ?? '--'} / 限额 ${quota}${warning} · 点击刷新余额`
 })
 const ppioBalanceTitle = computed(() => {
   const balance = ppioBalance.value
