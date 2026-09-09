@@ -4,7 +4,7 @@ import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL } from './generationModels'
 export const MIN_VIDEO_DURATION = 4
 export const MAX_VIDEO_DURATION = 15
 export const DEFAULT_VIDEO_DURATION = 5
-export const DEFAULT_H3_MODE: NonNullable<ShotGenOptions['h3Mode']> = 'reference'
+export const DEFAULT_H3_MODE: NonNullable<ShotGenOptions['h3Mode']> = 'auto'
 export const VIDEO_DURATION_CHOICES = Array.from(
   { length: MAX_VIDEO_DURATION - MIN_VIDEO_DURATION + 1 },
   (_, index) => MIN_VIDEO_DURATION + index,

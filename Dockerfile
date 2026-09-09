@@ -3,6 +3,8 @@ ARG NGINX_BASE_IMAGE=nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208
 FROM ${NODE_BASE_IMAGE} AS build
 
 WORKDIR /app
+ARG RELEASE_VERSION=development
+ENV VITE_RELEASE_VERSION=${RELEASE_VERSION}
 COPY package.json package-lock.json ./
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 RUN npm config set registry "$NPM_REGISTRY" \

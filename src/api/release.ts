@@ -5,4 +5,8 @@ export interface ReleaseInfo {
   deployedAt: string | null
 }
 
-export const getReleaseInfo = () => apiRequest<ReleaseInfo>('/release')
+export const getReleaseInfo = (signal?: AbortSignal) =>
+  apiRequest<ReleaseInfo>(`/release?_=${Date.now()}`, {
+    headers: { 'X-Polling': '1' },
+    signal,
+  })

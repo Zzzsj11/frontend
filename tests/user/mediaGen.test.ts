@@ -103,7 +103,7 @@ describe('media generation API client', () => {
     expect(body.audio_urls).toEqual([])
   })
 
-  it('defaults H3 generation with available images to reference mode', async () => {
+  it('defaults H3 generation with available images to automatic mode', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(jsonResponse({ id: 'job-ref2va', status: 'queued', progress: 0 }))
       .mockResolvedValueOnce(
@@ -124,9 +124,40 @@ describe('media generation API client', () => {
     })
 
     const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
-    expect(body.h3_mode).toBe('reference')
+    expect(body.h3_mode).toBe('auto')
     expect(body.image_urls).toEqual(['/media/scene.jpg', '/media/human.jpg'])
   })
+
+  it.each(['minimax-h3', 'minimax-h3-ppio', 'minimax-h3-runninghub'])(
+    'submits %s without references in automatic text mode',
+    async (videoModel) => {
+      const fetchMock = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(jsonResponse({ id: 'job-t2va', status: 'queued', progress: 0 }))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: 'job-t2va',
+            status: 'succeeded',
+            progress: 100,
+            result: { videoUrl: '/media/videos/t2va.mp4', duration: 5 },
+          }),
+        )
+
+      await generateShotVideo('text generation', undefined, [], {
+        resolution: '720p',
+        duration: 5,
+        ratio: '16:9',
+        imageModel: DEFAULT_IMAGE_MODEL,
+        videoModel,
+        h3Mode: 'reference',
+      })
+
+      const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+      expect(body.h3_mode).toBe('auto')
+      expect(body.image_urls).toEqual([])
+      expect(body.video_urls).toEqual([])
+    },
+  )
 
   it('surfaces a failed generation reason', async () => {
     vi.spyOn(globalThis, 'fetch')

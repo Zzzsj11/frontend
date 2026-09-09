@@ -87,8 +87,18 @@ export async function generateShotVideo(
   signal?: AbortSignal,
   onSubmitted?: (submittedAt: string) => void,
 ): Promise<{ coverUrl: string; coverThumbnailUrl?: string; videoUrl: string; duration: number }> {
-  const mode = options.h3Mode ?? DEFAULT_H3_MODE
+  const requestedMode = options.h3Mode ?? DEFAULT_H3_MODE
   const automaticImages = [referenceImageUrl, ...characterImageUrls].filter(Boolean) as string[]
+  // 兼容曾以 Ref2VA 作为默认值保存的旧分镜：没有视觉参考时交给后端自动选择 T2VA。
+  const mode =
+    isH3VideoModel(options.videoModel) &&
+    requestedMode === 'reference' &&
+    automaticImages.length === 0 &&
+    !(options.referenceImageUrls ?? []).length &&
+    !(options.referenceVideoUrls ?? []).length &&
+    !(options.referenceAudioUrls ?? []).length
+      ? 'auto'
+      : requestedMode
   const explicitFirst = options.h3FirstFrameUrl || referenceImageUrl
   const imageUrls =
     !isH3VideoModel(options.videoModel) || mode === 'auto'

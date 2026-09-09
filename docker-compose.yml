@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        RELEASE_VERSION: ${RELEASE_VERSION:-development}
     restart: unless-stopped
     ports:
       - '${FRONTEND_PORT:-5173}:80'
