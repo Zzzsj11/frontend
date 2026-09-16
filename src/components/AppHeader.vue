@@ -48,21 +48,37 @@ const closeFromOutside = (event: MouseEvent) => {
 const closeFromEscape = (event: KeyboardEvent) => {
   if (event.key === 'Escape') menuOpen.value = false
 }
-const refreshBalance = () => {
-  if (!auth.user?.mustChangePassword) void auth.loadBalance(true)
+const BALANCE_AUTO_REFRESH_MS = 5 * 60_000
+const refreshBalance = (force = false) => {
+  if (!auth.user?.mustChangePassword && document.visibilityState === 'visible')
+    void auth.loadBalance(force)
+}
+const refreshBalanceIfStale = () => {
+  const updatedAt = Date.parse(auth.balance?.updatedAt || '')
+  if (
+    !auth.balance ||
+    !Number.isFinite(updatedAt) ||
+    Date.now() - updatedAt >= BALANCE_AUTO_REFRESH_MS
+  )
+    refreshBalance(false)
+}
+const refreshBalanceWhenVisible = () => {
+  if (document.visibilityState === 'visible') refreshBalanceIfStale()
 }
 let refreshTimer = 0
 onMounted(() => {
   document.addEventListener('click', closeFromOutside)
   document.addEventListener('keydown', closeFromEscape)
-  window.addEventListener('focus', refreshBalance)
-  refreshTimer = window.setInterval(refreshBalance, 60_000)
-  if (!auth.balance) refreshBalance()
+  window.addEventListener('focus', refreshBalanceIfStale)
+  document.addEventListener('visibilitychange', refreshBalanceWhenVisible)
+  refreshTimer = window.setInterval(refreshBalanceIfStale, BALANCE_AUTO_REFRESH_MS)
+  if (!auth.balance) refreshBalance(false)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('click', closeFromOutside)
   document.removeEventListener('keydown', closeFromEscape)
-  window.removeEventListener('focus', refreshBalance)
+  window.removeEventListener('focus', refreshBalanceIfStale)
+  document.removeEventListener('visibilitychange', refreshBalanceWhenVisible)
   window.clearInterval(refreshTimer)
 })
 </script>
@@ -80,7 +96,7 @@ onBeforeUnmount(() => {
         class="balance-pill yinghe"
         :class="{ loading: auth.balanceLoading }"
         :title="balanceTitle"
-        @click="refreshBalance"
+        @click="refreshBalance(true)"
       >
         <span class="balance-icon" aria-hidden="true">ϟ</span>
         <span class="balance-provider">英和</span>
@@ -92,7 +108,7 @@ onBeforeUnmount(() => {
         :class="{ loading: auth.balanceLoading }"
         :title="ppioBalanceTitle"
         data-test="ppio-balance"
-        @click="refreshBalance"
+        @click="refreshBalance(true)"
       >
         <span class="balance-icon" aria-hidden="true">P</span>
         <span class="balance-provider">PPIO</span>

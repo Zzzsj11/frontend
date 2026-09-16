@@ -66,7 +66,7 @@ export const useAuthStore = defineStore('auth', {
       this.loading = true
       try {
         this.user = (await loginRequest(username, password)).user
-        if (!this.user.mustChangePassword) void this.loadBalance(true)
+        if (!this.user.mustChangePassword) void this.loadBalance()
       } finally {
         this.loading = false
         this.ready = true

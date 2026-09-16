@@ -209,7 +209,7 @@ const submit = async () => {
         if (confirmed) void store.runRandomGeneralStoryboard(request)
         return
       }
-      const balance = await apiRequest<AccountBalance>('/account/balance?force=true')
+      const balance = await apiRequest<AccountBalance>('/account/balance')
       const providerCode = videoProviderForModel(request.videoModel)
       const providerBalance =
         providerCode === 'runninghub' ? balance : (balance.providers?.[providerCode] ?? balance)

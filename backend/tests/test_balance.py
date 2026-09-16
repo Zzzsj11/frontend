@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import httpx
@@ -16,6 +17,7 @@ FAKE_SETTINGS = SimpleNamespace(
     business_tokens_list_url="https://tokens.test",
     business_balance_timeout=10,
     business_balance_cache_seconds=30,
+    balance_force_coalesce_seconds=0,
     business_key_quota_stale_seconds=300,
     video_api_key="",
     image_api_key="",
@@ -68,8 +70,12 @@ def make_client(calls, tokens_body=None):
 def reset_balance_cache(monkeypatch):
     monkeypatch.setattr(balance, "_cache", None)
     monkeypatch.setattr(balance, "_cache_expires_at", 0.0)
+    monkeypatch.setattr(balance, "_cache_cached_at", 0.0)
     monkeypatch.setattr(balance, "_key_quota_cache", None)
     monkeypatch.setattr(balance, "_key_quota_cached_at", 0.0)
+    monkeypatch.setattr(balance, "_ppio_cache", None)
+    monkeypatch.setattr(balance, "_ppio_cache_expires_at", 0.0)
+    monkeypatch.setattr(balance, "_ppio_cache_cached_at", 0.0)
 
 
 def test_balance_signature_matches_business_protocol() -> None:
@@ -108,6 +114,23 @@ async def test_balance_query_formats_and_caches_response(monkeypatch) -> None:
     # 首次查询发余额 + key 列表两个请求，第二次命中缓存
     assert len(calls) == 2
     assert calls[0][1]["userId"] == 123
+
+
+@pytest.mark.asyncio
+async def test_forced_balance_queries_are_coalesced_for_five_seconds(monkeypatch) -> None:
+    calls = []
+    settings = SimpleNamespace(**vars(FAKE_SETTINGS))
+    settings.balance_force_coalesce_seconds = 5
+    monkeypatch.setattr(balance, "settings", settings)
+    monkeypatch.setattr(balance.httpx, "AsyncClient", make_client(calls, {"code": 200, "data": {"list": []}}))
+
+    first, second = await asyncio.gather(
+        balance.query_business_balance(force=True),
+        balance.query_business_balance(force=True),
+    )
+
+    assert first == second
+    assert len(calls) == 2
 
 
 @pytest.mark.asyncio
@@ -236,7 +259,8 @@ async def test_video_batch_cost_estimate_and_insufficient_key_balance(monkeypatc
     async def enough(force=False):
         return {"available": True, "key": {"remaining": 20}}
 
-    async def enough_providers(force=False):
+    async def enough_providers(force=False, providers=None):
+        assert providers == {"yinghe"}
         return {"providers": {"yinghe": await enough(force), "ppio": balance.unavailable_balance()}}
 
     monkeypatch.setattr(balance, "query_provider_balances", enough_providers)
@@ -246,14 +270,16 @@ async def test_video_batch_cost_estimate_and_insufficient_key_balance(monkeypatc
     async def insufficient(force=False):
         return {"available": True, "key": {"remaining": 8.29}}
 
-    async def insufficient_providers(force=False):
+    async def insufficient_providers(force=False, providers=None):
+        assert providers == {"yinghe"}
         return {"providers": {"yinghe": await insufficient(force), "ppio": balance.unavailable_balance()}}
 
     monkeypatch.setattr(balance, "query_provider_balances", insufficient_providers)
     with pytest.raises(ValueError, match="英和子账号 Key 余额不足，请先完成充值或提升余额上限后再试"):
         await balance.ensure_video_batch_balance(items)
 
-    async def unavailable_providers(force=False):
+    async def unavailable_providers(force=False, providers=None):
+        assert providers == {"yinghe"}
         return {
             "providers": {
                 "yinghe": {
@@ -272,6 +298,8 @@ async def test_video_batch_cost_estimate_and_insufficient_key_balance(monkeypatc
 
 @pytest.mark.asyncio
 async def test_ppio_balance_and_channel_cost_precheck(monkeypatch) -> None:
+    ppio_calls: list[str] = []
+
     class PpioClient:
         async def __aenter__(self):
             return self
@@ -280,6 +308,7 @@ async def test_ppio_balance_and_channel_cost_precheck(monkeypatch) -> None:
             return None
 
         async def get(self, url, headers):
+            ppio_calls.append(url)
             assert headers == {
                 "Authorization": "Bearer ppio-test-key",
                 "Content-Type": "application/json",
@@ -302,10 +331,15 @@ async def test_ppio_balance_and_channel_cost_precheck(monkeypatch) -> None:
         ppio_balance_url="https://api.ppio.com/openapi/v1/billing/balance/detail",
         ppio_model_balance_url="https://api.ppio.com/v3/user",
         ppio_balance_timeout=10,
+        business_balance_cache_seconds=30,
+        balance_force_coalesce_seconds=0,
     )
     monkeypatch.setattr(balance, "settings", ppio_settings)
     monkeypatch.setattr(balance.httpx, "AsyncClient", lambda **_kwargs: PpioClient())
     result = await balance.query_ppio_balance()
+    cached = await balance.query_ppio_balance()
+    assert cached == result
+    assert len(ppio_calls) == 2
     assert result["rawBalance"] == "1000000"
     assert result["balance"] == "125"
     assert result["balanceDisplay"] == "125.00"
@@ -317,7 +351,8 @@ async def test_ppio_balance_and_channel_cost_precheck(monkeypatch) -> None:
     assert result["rawModelCreditBalance"] == "25000000"
     assert result["rawDetails"]["cashBalance"] == "800000"
 
-    async def provider_balances(force=False):
+    async def provider_balances(force=False, providers=None):
+        assert providers == {"ppio"}
         return {"providers": {"yinghe": balance.unavailable_balance(), "ppio": result}}
 
     monkeypatch.setattr(balance, "query_provider_balances", provider_balances)
@@ -325,7 +360,8 @@ async def test_ppio_balance_and_channel_cost_precheck(monkeypatch) -> None:
     assert estimate["estimatedCost"] == 12.25
     assert estimate["providerEstimates"] == {"ppio": 12.25}
 
-    async def insufficient_provider_balances(force=False):
+    async def insufficient_provider_balances(force=False, providers=None):
+        assert providers == {"ppio"}
         return {"providers": {"yinghe": balance.unavailable_balance(), "ppio": {**result, "balance": "10", "balanceDisplay": "10.00"}}}
 
     monkeypatch.setattr(balance, "query_provider_balances", insufficient_provider_balances)
@@ -335,7 +371,7 @@ async def test_ppio_balance_and_channel_cost_precheck(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_runninghub_batch_is_excluded_from_cost_and_balance_check(monkeypatch):
-    async def should_not_query(*, force=False):
+    async def should_not_query(*, force=False, providers=None):
         raise AssertionError("RunningHub 暂不计费时不应查询英和或 PPIO 余额")
 
     monkeypatch.setattr(balance, "query_provider_balances", should_not_query)

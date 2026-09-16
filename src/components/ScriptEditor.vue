@@ -185,7 +185,7 @@ const confirmBatchGenerate = async () => {
           VIDEO_MODEL_OPTIONS.find((option) => option.value === code)?.label || code || 'SD2.0',
       )
       .join('、')
-    const balance = await apiRequest<AccountBalance>('/account/balance?force=true')
+    const balance = await apiRequest<AccountBalance>('/account/balance')
     const balanceLines: string[] = []
     let sufficient = true
     let balanceUnavailable = false

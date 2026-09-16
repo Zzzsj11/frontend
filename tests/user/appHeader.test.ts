@@ -1,12 +1,13 @@
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import AppHeader from '../../src/components/AppHeader.vue'
 import { useAuthStore } from '../../src/stores/auth'
 
 describe('AppHeader provider balances', () => {
   beforeEach(() => setActivePinia(createPinia()))
+  afterEach(() => vi.useRealTimers())
 
   it('同时展示英和与 PPIO 两个余额胶囊', () => {
     const auth = useAuthStore()
@@ -84,5 +85,41 @@ describe('AppHeader provider balances', () => {
     expect(wrapper.get('[data-test="ppio-balance"]').text()).toContain('125.00')
     expect(wrapper.get('[data-test="ppio-balance"]').attributes('title')).toContain('现金 ¥80')
     expect(wrapper.get('[data-test="ppio-balance"]').attributes('title')).toContain('模型额度 ¥25')
+    wrapper.unmount()
+  })
+
+  it('自动刷新每五分钟使用缓存，只有用户点击才强制查询', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-16T12:00:00Z'))
+    const auth = useAuthStore()
+    auth.user = {
+      id: 'u1',
+      username: 'dev01',
+      displayName: 'Dev 01',
+      role: 'user',
+      mustChangePassword: false,
+    }
+    auth.balance = {
+      available: true,
+      balance: '100',
+      balanceDisplay: '100.00',
+      currency: 'CNY',
+      updatedAt: new Date().toISOString(),
+    }
+    const loadBalance = vi.spyOn(auth, 'loadBalance').mockResolvedValue()
+    const wrapper = mount(AppHeader, {
+      global: {
+        stubs: { RouterLink: { template: '<a><slot /></a>' }, DeploymentBadge: true },
+      },
+    })
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(loadBalance).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(4 * 60_000)
+    expect(loadBalance).toHaveBeenCalledWith(false)
+
+    await wrapper.get('[data-test="ppio-balance"]').trigger('click')
+    expect(loadBalance).toHaveBeenLastCalledWith(true)
+    wrapper.unmount()
   })
 })
