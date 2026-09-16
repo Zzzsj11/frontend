@@ -9,6 +9,7 @@ import pytest
 from app import balance
 
 CURRENT_KEY = "yh-testkey1234567890"
+REAL_ACQUIRE_BUSINESS_API_PERMIT = balance._acquire_business_api_permit
 
 FAKE_SETTINGS = SimpleNamespace(
     business_api_key="secret",
@@ -18,7 +19,10 @@ FAKE_SETTINGS = SimpleNamespace(
     business_balance_timeout=10,
     business_balance_cache_seconds=30,
     balance_force_coalesce_seconds=0,
-    business_key_quota_stale_seconds=300,
+    business_key_quota_cache_seconds=300,
+    business_key_quota_stale_seconds=900,
+    business_rate_limit_cooldown_seconds=60,
+    business_api_rate_limit_per_minute=45,
     video_api_key="",
     image_api_key="",
 )
@@ -73,9 +77,20 @@ def reset_balance_cache(monkeypatch):
     monkeypatch.setattr(balance, "_cache_cached_at", 0.0)
     monkeypatch.setattr(balance, "_key_quota_cache", None)
     monkeypatch.setattr(balance, "_key_quota_cached_at", 0.0)
+    monkeypatch.setattr(balance, "_business_cooldown_until", 0.0)
+    balance._local_business_request_times.clear()
     monkeypatch.setattr(balance, "_ppio_cache", None)
     monkeypatch.setattr(balance, "_ppio_cache_expires_at", 0.0)
     monkeypatch.setattr(balance, "_ppio_cache_cached_at", 0.0)
+
+    async def permit():
+        return None
+
+    async def no_cooldown(_provider):
+        return 0
+
+    monkeypatch.setattr(balance, "_acquire_business_api_permit", permit)
+    monkeypatch.setattr(balance.redis_store, "provider_cooldown_remaining", no_cooldown)
 
 
 def test_balance_signature_matches_business_protocol() -> None:
@@ -117,10 +132,10 @@ async def test_balance_query_formats_and_caches_response(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_forced_balance_queries_are_coalesced_for_five_seconds(monkeypatch) -> None:
+async def test_forced_balance_queries_are_coalesced_for_ten_seconds(monkeypatch) -> None:
     calls = []
     settings = SimpleNamespace(**vars(FAKE_SETTINGS))
-    settings.balance_force_coalesce_seconds = 5
+    settings.balance_force_coalesce_seconds = 10
     monkeypatch.setattr(balance, "settings", settings)
     monkeypatch.setattr(balance.httpx, "AsyncClient", make_client(calls, {"code": 200, "data": {"list": []}}))
 
@@ -188,6 +203,7 @@ async def test_key_quota_uses_recent_successful_cache_when_refresh_fails(monkeyp
     monkeypatch.setattr(balance.httpx, "AsyncClient", make_client(calls, {"code": 200, "data": {"list": [KEY_ITEM]}}))
     fresh = await balance.query_business_balance(force=True)
 
+    monkeypatch.setattr(balance, "_key_quota_cached_at", balance._key_quota_cached_at - 301)
     monkeypatch.setattr(balance.httpx, "AsyncClient", make_client(calls, None))
     stale = await balance.query_business_balance(force=True)
 
@@ -196,6 +212,59 @@ async def test_key_quota_uses_recent_successful_cache_when_refresh_fails(monkeyp
     assert stale["key"]["stale"] is True
     assert "实时额度查询失败" in stale["key"]["warning"]
     assert stale["keyError"] == "tokens endpoint down"
+
+
+@pytest.mark.asyncio
+async def test_key_quota_success_is_reused_during_five_minute_cache(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(balance, "settings", FAKE_SETTINGS)
+    monkeypatch.setattr(FAKE_SETTINGS, "video_api_key", CURRENT_KEY)
+    monkeypatch.setattr(balance.httpx, "AsyncClient", make_client(calls, {"code": 200, "data": {"list": [KEY_ITEM]}}))
+
+    await balance.query_business_balance(force=True)
+    await balance.query_business_balance(force=True)
+
+    assert [url for url, _payload in calls].count("https://balance.test") == 2
+    assert [url for url, _payload in calls].count("https://tokens.test") == 1
+
+
+@pytest.mark.asyncio
+async def test_supplier_429_starts_shared_minimum_cooldown(monkeypatch) -> None:
+    class RateLimitedClient(FakeClient):
+        async def post(self, url, **kwargs):
+            self._calls.append((url, kwargs["json"]))
+            request = httpx.Request("POST", url)
+            return httpx.Response(429, headers={"Retry-After": "20"}, request=request)
+
+    shared_cooldowns = []
+
+    async def set_cooldown(provider, seconds):
+        shared_cooldowns.append((provider, seconds))
+
+    calls = []
+    monkeypatch.setattr(balance, "settings", FAKE_SETTINGS)
+    monkeypatch.setattr(balance.redis_store, "set_provider_cooldown", set_cooldown)
+    monkeypatch.setattr(balance.httpx, "AsyncClient", lambda *args, **kwargs: RateLimitedClient(calls, *args, **kwargs))
+
+    result = await balance.query_business_balance(force=True)
+
+    assert result["available"] is False
+    assert "供应商返回 429" in result["message"]
+    assert "60 秒后重试" in result["message"]
+    assert shared_cooldowns == [("yinghe-business", 60)]
+    assert balance._business_cooldown_until > balance.time.monotonic()
+
+
+@pytest.mark.asyncio
+async def test_application_budget_denial_has_explicit_error(monkeypatch) -> None:
+    async def denied(_provider, _limit, _window):
+        return False, 17, "budget"
+
+    monkeypatch.setattr(balance, "_acquire_business_api_permit", REAL_ACQUIRE_BUSINESS_API_PERMIT)
+    monkeypatch.setattr(balance.redis_store, "acquire_provider_request_permit", denied)
+
+    with pytest.raises(balance.BusinessApiRateLimitedError, match="应用已主动限流，请在 17 秒后重试"):
+        await balance._acquire_business_api_permit()
 
 
 @pytest.mark.asyncio

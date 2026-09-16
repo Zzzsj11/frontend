@@ -45,6 +45,80 @@ async def clear_login_attempts(key: str) -> None:
     await redis.delete(f"auth:login:{key}")
 
 
+_ACQUIRE_PROVIDER_REQUEST_PERMIT = """
+local requests_key, cooldown_key = KEYS[1], KEYS[2]
+local now, window, limit, token = tonumber(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3]), ARGV[4]
+local cooldown_ttl = redis.call('PTTL', cooldown_key)
+if cooldown_ttl > 0 then return {-1, cooldown_ttl} end
+redis.call('ZREMRANGEBYSCORE', requests_key, '-inf', now-window)
+local count = redis.call('ZCARD', requests_key)
+if count >= limit then
+  local oldest = redis.call('ZRANGE', requests_key, 0, 0, 'WITHSCORES')
+  local retry = window
+  if #oldest == 2 then retry = math.max(1, window-(now-tonumber(oldest[2]))) end
+  return {0, retry}
+end
+redis.call('ZADD', requests_key, now, token)
+redis.call('PEXPIRE', requests_key, window)
+return {1, 0}
+"""
+
+_SET_PROVIDER_COOLDOWN = """
+local current = redis.call('PTTL', KEYS[1])
+local requested = tonumber(ARGV[1])
+if current < requested then
+  redis.call('SET', KEYS[1], '1', 'PX', requested)
+  return requested
+end
+return current
+"""
+
+
+async def acquire_provider_request_permit(provider: str, limit: int, window_seconds: int = 60) -> tuple[bool, int, str] | None:
+    """Acquire a shared rolling-window supplier API permit.
+
+    ``None`` means Redis is unavailable and lets the caller use its local
+    safety fallback. A denied permit reports whether a supplier cooldown or
+    the application's own request budget caused the denial.
+    """
+    now_ms = int(time.time() * 1000)
+    window_ms = max(1, window_seconds) * 1000
+    try:
+        result = await redis.eval(
+            _ACQUIRE_PROVIDER_REQUEST_PERMIT,
+            2,
+            f"provider-rate:{provider}:requests",
+            f"provider-rate:{provider}:cooldown",
+            now_ms,
+            window_ms,
+            max(1, limit),
+            uuid.uuid4().hex,
+        )
+        status, retry_ms = int(result[0]), int(result[1])
+        if status == 1:
+            return True, 0, "ok"
+        return False, max(1, (retry_ms + 999) // 1000), "cooldown" if status == -1 else "budget"
+    except Exception:
+        return None
+
+
+async def set_provider_cooldown(provider: str, seconds: int) -> None:
+    """Share a real supplier 429 cooldown across all API processes."""
+    try:
+        await redis.eval(_SET_PROVIDER_COOLDOWN, 1, f"provider-rate:{provider}:cooldown", max(1, seconds) * 1000)
+    except Exception:
+        return
+
+
+async def provider_cooldown_remaining(provider: str) -> int | None:
+    """Return shared cooldown seconds, zero when clear, or None without Redis."""
+    try:
+        ttl_ms = int(await redis.pttl(f"provider-rate:{provider}:cooldown"))
+        return max(0, (ttl_ms + 999) // 1000)
+    except Exception:
+        return None
+
+
 async def cache_job(job_id: str, snapshot: dict[str, Any]) -> None:
     try:
         await redis.set(f"job:{job_id}", json.dumps(snapshot, ensure_ascii=False), ex=7 * 24 * 3600)
