@@ -284,6 +284,9 @@ def validate_video_references(payload: VideoGenerationCreate, capabilities: dict
         maximum = int(durations.get("max") or 0)
         if minimum and payload.duration < minimum or maximum and payload.duration > maximum:
             raise HTTPException(422, f"该视频模型仅支持 {minimum}–{maximum} 秒")
+    duration_options = capabilities.get("durationOptions")
+    if isinstance(duration_options, list) and duration_options and payload.duration not in duration_options:
+        raise HTTPException(422, f"该视频模型仅支持 {'、'.join(f'{value} 秒' for value in duration_options)}")
     for field, capability_key, label in (
         (payload.image_urls, "referenceImage", "图片"),
         (payload.video_urls, "referenceVideo", "视频"),

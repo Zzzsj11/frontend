@@ -21,7 +21,14 @@ TOKEN_BILLED_VIDEO_MODELS = {
     "doubao-seedance-2.0-fast",
     "doubao-seedance-2.0-ppio",
 }
-SECOND_BILLED_VIDEO_MODELS = {"wan3.0-video", "wan3.0-video-prime", "kling-v3"}
+SECOND_BILLED_VIDEO_MODELS = {
+    "wan3.0-video",
+    "wan3.0-video-prime",
+    "kling-v3",
+    "veo-3.1-generate-preview",
+    "veo-3.1-fast-generate-preview",
+    "gemini-omni-flash-preview",
+}
 
 
 def video_discount_rate(*, model: str, provider: str) -> Decimal:

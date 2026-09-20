@@ -183,6 +183,16 @@ async def seed_system_data() -> None:
         if not ppio_provider:
             ppio_provider = AiProviderModel(id="provider-ppio", code="ppio", name="PPIO", base_url="https://api.ppio.com", status="active")
             session.add(ppio_provider)
+        yseeai_provider = await session.get(AiProviderModel, "provider-yseeai")
+        if not yseeai_provider:
+            yseeai_provider = AiProviderModel(
+                id="provider-yseeai",
+                code="yseeai",
+                name="英和海外",
+                base_url="https://api-aigc.yseeai.com",
+                status="active",
+            )
+            session.add(yseeai_provider)
         defaults = [
             ("model-chat-default", provider.id, "chat-default", "默认 Chat 模型", "chat", "", {"structuredOutput": True}, True),
             ("model-img2", provider.id, "gpt-image-2", "Img2", "image", "gpt-image-2", {"ratios": ["16:9", "9:16", "4:3", "1:1"], "imageToImage": True}, True),
@@ -412,6 +422,82 @@ async def seed_system_data() -> None:
                 False,
             ),
             (
+                "model-veo31-yseeai",
+                yseeai_provider.id,
+                "veo-3.1-generate-preview",
+                "Veo 3.1（英和海外）",
+                "video",
+                "veo-3.1-generate-preview",
+                {
+                    "durations": {"min": 4, "max": 15},
+                    "ratios": ["16:9", "9:16"],
+                    "resolutions": ["720p", "1080p", "4k"],
+                    "referenceImage": {"min": 0, "max": 1},
+                    "referenceVideo": {"min": 0, "max": 0},
+                    "referenceAudio": {"min": 0, "max": 0},
+                    "providerOmitFields": ["generate_audio", "watermark", "return_last_frame"],
+                    "providerProtocol": "veo-unified",
+                    "nativeAudio": False,
+                    "executionPool": "yseeai-generation",
+                    "executionConcurrency": 20,
+                    "providerCode": "yseeai",
+                    "billing": video_estimate_policy("veo-3.1-generate-preview").capability(),
+                    "sortOrder": 24,
+                },
+                False,
+            ),
+            (
+                "model-veo31-fast-yseeai",
+                yseeai_provider.id,
+                "veo-3.1-fast-generate-preview",
+                "Veo 3.1 Fast（英和海外）",
+                "video",
+                "veo-3.1-fast-generate-preview",
+                {
+                    "durations": {"min": 4, "max": 15},
+                    "ratios": ["16:9", "9:16"],
+                    "resolutions": ["720p", "1080p", "4k"],
+                    "referenceImage": {"min": 0, "max": 1},
+                    "referenceVideo": {"min": 0, "max": 0},
+                    "referenceAudio": {"min": 0, "max": 0},
+                    "providerOmitFields": ["generate_audio", "watermark", "return_last_frame"],
+                    "providerProtocol": "veo-unified",
+                    "nativeAudio": False,
+                    "executionPool": "yseeai-generation",
+                    "executionConcurrency": 20,
+                    "providerCode": "yseeai",
+                    "billing": video_estimate_policy("veo-3.1-fast-generate-preview").capability(),
+                    "sortOrder": 25,
+                },
+                False,
+            ),
+            (
+                "model-gemini-omni-flash-yseeai",
+                yseeai_provider.id,
+                "gemini-omni-flash-preview",
+                "Gemini Omni Flash（英和海外）",
+                "video",
+                "gemini-omni-flash-preview",
+                {
+                    "durations": {"min": 4, "max": 10},
+                    "ratios": ["16:9", "9:16"],
+                    "resolutions": ["720p"],
+                    "referenceImage": {"min": 0, "max": 6},
+                    "referenceVideo": {"min": 0, "max": 0},
+                    "referenceAudio": {"min": 0, "max": 0},
+                    "referenceTotalMax": 6,
+                    "providerOmitFields": ["generate_audio", "watermark", "return_last_frame"],
+                    "providerProtocol": "gemini-omni-unified",
+                    "nativeAudio": True,
+                    "executionPool": "yseeai-generation",
+                    "executionConcurrency": 20,
+                    "providerCode": "yseeai",
+                    "billing": video_estimate_policy("gemini-omni-flash-preview").capability(),
+                    "sortOrder": 26,
+                },
+                False,
+            ),
+            (
                 "model-h3-ppio",
                 ppio_provider.id,
                 "minimax-h3-ppio",
@@ -451,13 +537,16 @@ async def seed_system_data() -> None:
                 "wan3.0-video",
                 "wan3.0-video-prime",
                 "kling-v3",
+                "veo-3.1-generate-preview",
+                "veo-3.1-fast-generate-preview",
+                "gemini-omni-flash-preview",
                 "minimax-h3-runninghub",
                 "minimax-h3",
                 "doubao-seedance-2.0-ppio",
                 "minimax-h3-ppio",
             }:
                 capabilities = {**capabilities, "systemManaged": True}
-            ppio_model_enabled = not code.endswith("-ppio") or bool(settings.ppio_api_key) or settings.app_env != "production"
+            provider_configured = bool(settings.ppio_api_key) if code.endswith("-ppio") else bool(settings.yseeai_api_key) if model_provider_id == yseeai_provider.id else True
             model = await session.get(AiModelModel, mid)
             if not model:
                 session.add(
@@ -469,7 +558,7 @@ async def seed_system_data() -> None:
                         modality=modality,
                         provider_model_id=provider_id or code,
                         capabilities=capabilities,
-                        status="active" if ppio_model_enabled else "inactive",
+                        status="active" if provider_configured or settings.app_env != "production" else "inactive",
                         user_visible=True,
                         is_default=is_default,
                     )
@@ -480,7 +569,7 @@ async def seed_system_data() -> None:
                 model.provider_model_id = provider_id or code
                 model.capabilities = capabilities
                 # 系统维护协议与能力；管理员维护启停和可见性，重启不得撤销人工操作。
-                if not ppio_model_enabled:
+                if not provider_configured and settings.app_env == "production":
                     model.status = "inactive"
         system_style_specs = [
             ("style-system-male", "男", 0),

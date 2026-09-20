@@ -134,6 +134,8 @@ class Settings:
     video_api_base_url: str = os.getenv("VIDEO_API_BASE_URL", "https://api-aigc.fzyinghe.com")
     video_api_key: str = os.getenv("VIDEO_API_KEY") or SHARED_PROVIDER_KEY
     video_model: str = os.getenv("VIDEO_MODEL", "doubao-seedance-2.0")
+    yseeai_api_base_url: str = os.getenv("YSEEAI_API_BASE_URL", "https://api-aigc.yseeai.com").rstrip("/")
+    yseeai_api_key: str = _read_provider_value("YSEEAI_API_KEY")
     # 虚拟资产（真人人脸素材）注册用的分组；资产创建后返回 asset:// 链接，生成视频时
     # 传 asset:// 引用可绕过上游对真实人物的直接检测（原始 TOS 路径保留用于展示）
     # V3 素材组（POST /v3/asset-groups 创建，按 API Key 所属账户隔离）

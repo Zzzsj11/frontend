@@ -13,6 +13,7 @@ export interface GenerationModelCapabilities {
   }
   executionConcurrency?: number
   executionPool?: string
+  durationOptions?: number[]
   nativeAudio?: boolean
   providerCode?: string
   sortOrder?: number
@@ -41,6 +42,12 @@ export const videoResolutionChoices = (modelId?: string): string[] => {
   return Array.isArray(configured) && configured.length
     ? configured.filter((item): item is string => typeof item === 'string')
     : [...DEFAULT_VIDEO_RESOLUTIONS]
+}
+export const videoDurationChoices = (modelId?: string): number[] => {
+  const configured = videoModelCapabilities(modelId).durationOptions
+  return Array.isArray(configured) && configured.length
+    ? configured.filter((item): item is number => Number.isInteger(item) && item > 0)
+    : []
 }
 export const videoResolutionLabel = (modelId: string | undefined, resolution: string): string => {
   const labels = videoModelCapabilities(modelId).resolutionLabels

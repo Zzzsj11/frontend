@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { ScriptLine } from '../types'
 import { DEFAULT_SHOT_OPTIONS, formatTime, useProjectStore } from '../stores/project'
 import { VIDEO_DURATION_CHOICES } from '../mediaConstraints'
+import { videoDurationChoices } from '../generationModels'
 import AppIcon from './AppIcon.vue'
 import BaseIconButton from './base/BaseIconButton.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
@@ -37,6 +38,10 @@ const isGeneral = computed(
   () => props.line.source === 'general' || props.line.source === 'general_random',
 )
 const isCreative = computed(() => props.line.source === 'creative')
+const durationChoices = computed(() => {
+  const configured = videoDurationChoices(props.line.shotOptions?.videoModel)
+  return configured.length ? configured : VIDEO_DURATION_CHOICES
+})
 
 /** ASS 大纲状态：pending=待生成 / failed=所在场景段生成失败 */
 const outlineStatus = computed(() => props.line.shotOptions?.outlineStatus)
@@ -245,7 +250,7 @@ onBeforeUnmount(() => {
             :value="line.shotOptions?.duration ?? DEFAULT_SHOT_OPTIONS.duration"
             @change="onDurationChange"
           >
-            <option v-for="d in VIDEO_DURATION_CHOICES" :key="d" :value="d">{{ d }} 秒</option>
+            <option v-for="d in durationChoices" :key="d" :value="d">{{ d }} 秒</option>
           </select>
         </label>
       </div>

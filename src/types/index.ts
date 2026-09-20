@@ -130,7 +130,7 @@ export interface ShotInfo {
 
 /** 分镜视频生成参数（清晰度 / 时长 / 画幅） */
 export interface ShotGenOptions {
-  resolution: '480p' | '720p' | '1080p'
+  resolution: '480p' | '720p' | '1080p' | '4k'
   /** 时长（秒） */
   duration: number
   ratio: '16:9' | '9:16' | '4:3' | '1:1'

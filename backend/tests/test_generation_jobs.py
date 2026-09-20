@@ -2451,3 +2451,137 @@ def test_create_human_asset_failure_degrades_gracefully(client, monkeypatch) -> 
     assert response.json()["assetAvatarUrl"] is None
     assert response.json()["providerAssetAvatarUrls"] == {"yinghe": None, "ppio": None}
     assert response.json()["originalAvatar"].startswith("https://")
+
+
+@pytest.mark.asyncio
+async def test_veo_uses_yseeai_unified_video_contract(monkeypatch) -> None:
+    import httpx
+
+    from app import providers
+    from app.jobs import Job
+    from app.schemas import VideoGenerationCreate
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            captured.update(url=url, headers=headers, payload=json)
+            return httpx.Response(200, json={"code": 200, "data": {"id": "veo-task-1"}}, request=httpx.Request("POST", url))
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    async def set_task(job, provider, task_id, **_kwargs):
+        job.provider = provider
+        job.provider_task_id = task_id
+
+    async def poll(*_args, **_kwargs):
+        return {"status": "succeeded", "video_url": "https://cdn.test/veo.mp4"}
+
+    async def store(job, task):
+        return {"provider": "yseeai", "providerTaskId": job.provider_task_id, "sourceUrl": task["video_url"]}
+
+    monkeypatch.setattr(providers, "_yseeai_config", lambda: ("https://api-aigc.yseeai.test", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(providers.jobs, "mark_provider_submitting", noop)
+    monkeypatch.setattr(providers.jobs, "set_provider_task", set_task)
+    monkeypatch.setattr(providers, "_poll_gemini_omni", poll)
+    monkeypatch.setattr(providers, "_store_gemini_omni_result", store)
+    job = Job(id="job-veo", kind="video", user_id="u1", request={"_providerModelId": "veo-3.1-generate-preview"})
+    request = VideoGenerationCreate(
+        prompt="测试",
+        model="veo-3.1-generate-preview",
+        image_urls=["https://cdn.test/ref.jpg"],
+        ratio="9:16",
+        resolution="4k",
+        duration=8,
+    )
+
+    result = await providers.generate_veo_video(request, job)
+
+    assert captured["url"] == "https://api-aigc.yseeai.test/video/generation/tasks"
+    assert captured["payload"] == {
+        "model": "veo-3.1-generate-preview",
+        "prompt": "测试",
+        "images": ["https://cdn.test/ref.jpg"],
+        "duration": 8,
+        "size": "2160x3840",
+        "resolution": "4k",
+        "metadata": {"aspectRatio": "9:16", "resolution": "4k"},
+    }
+    assert job.provider == "yseeai-unified"
+    assert result["providerTaskId"] == "veo-task-1"
+
+
+@pytest.mark.asyncio
+async def test_gemini_omni_uses_top_level_prompt_and_reference_task(monkeypatch) -> None:
+    import httpx
+
+    from app import providers
+    from app.jobs import Job
+    from app.schemas import VideoGenerationCreate
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            captured.update(url=url, payload=json)
+            return httpx.Response(200, json={"code": 0, "data": {"task_id": "omni-task-1"}}, request=httpx.Request("POST", url))
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    async def set_task(job, provider, task_id, **_kwargs):
+        job.provider = provider
+        job.provider_task_id = task_id
+
+    async def poll(*_args, **_kwargs):
+        return {"status": "completed", "output": {"video_url": "https://cdn.test/omni.mp4"}}
+
+    async def store(job, task):
+        return {"provider": "yseeai", "providerTaskId": job.provider_task_id, "sourceUrl": task["output"]["video_url"]}
+
+    monkeypatch.setattr(providers, "_yseeai_config", lambda: ("https://api-aigc.yseeai.test", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(providers.jobs, "mark_provider_submitting", noop)
+    monkeypatch.setattr(providers.jobs, "set_provider_task", set_task)
+    monkeypatch.setattr(providers, "_poll_gemini_omni", poll)
+    monkeypatch.setattr(providers, "_store_gemini_omni_result", store)
+    job = Job(id="job-omni", kind="video", user_id="u1", request={"_providerModelId": "gemini-omni-flash-preview"})
+    request = VideoGenerationCreate(
+        prompt="测试",
+        model="gemini-omni-flash-preview",
+        image_urls=["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"],
+        ratio="16:9",
+        resolution="720p",
+        duration=8,
+    )
+
+    await providers.generate_gemini_omni_video(request, job)
+
+    assert captured["payload"] == {
+        "model": "gemini-omni-flash-preview",
+        "prompt": "测试",
+        "images": ["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"],
+        "duration": 8,
+        "metadata": {"aspect_ratio": "16:9", "task": "reference_to_video"},
+    }
+    assert job.provider == "yseeai-omni"

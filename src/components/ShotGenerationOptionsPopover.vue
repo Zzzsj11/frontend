@@ -7,6 +7,7 @@ import {
   VIDEO_MODEL_OPTIONS,
   generationModelLabel,
   isH3VideoModel,
+  videoDurationChoices,
   videoResolutionChoices,
   videoResolutionLabel,
 } from '../generationModels'
@@ -32,7 +33,10 @@ const resolutionChoices = computed<ShotGenOptions['resolution'][]>(() => {
   return videoResolutionChoices(props.modelValue.videoModel) as ShotGenOptions['resolution'][]
 })
 const ratioChoices: ShotGenOptions['ratio'][] = ['16:9', '9:16', '4:3', '1:1']
-const durationChoices = VIDEO_DURATION_CHOICES
+const durationChoices = computed(() => {
+  const configured = videoDurationChoices(props.modelValue.videoModel)
+  return configured.length ? configured : VIDEO_DURATION_CHOICES
+})
 const isH3 = computed(() => props.mode === 'shot' && isH3VideoModel(props.modelValue.videoModel))
 
 const summary = computed(() => {
@@ -53,12 +57,17 @@ const updateOption = <K extends keyof ShotGenOptions>(key: K, value: ShotGenOpti
 }
 const updateVideoModel = (model: string) => {
   const allowed = videoResolutionChoices(model) as ShotGenOptions['resolution'][]
+  const durations = videoDurationChoices(model)
   emit('update:modelValue', {
     ...props.modelValue,
     videoModel: model,
     resolution: allowed.includes(props.modelValue.resolution)
       ? props.modelValue.resolution
       : (allowed[0] ?? '720p'),
+    duration:
+      durations.length && !durations.includes(props.modelValue.duration)
+        ? (durations[0] ?? DEFAULT_VIDEO_DURATION)
+        : props.modelValue.duration,
   })
 }
 const restoreDefaults = () => {

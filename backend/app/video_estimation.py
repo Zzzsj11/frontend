@@ -27,6 +27,11 @@ VIDEO_ESTIMATE_POLICIES = {
     "wan3.0-video": VideoEstimatePolicy("yinghe", 0.60),
     "wan3.0-video-prime": VideoEstimatePolicy("yinghe", 0.90),
     "kling-v3": VideoEstimatePolicy("yinghe", 0.80),
+    # 海外站尚未提供人民币结算表。这里按 Google 公布的美元标价、以 7.2 CNY/USD
+    # 做生成前保守预估；不查询国内英和余额，最终对账保持 unpriced，等待供应商报价。
+    "veo-3.1-generate-preview": VideoEstimatePolicy("yseeai", 2.88, balance_check=False, billing_mode="official_usd_estimate"),
+    "veo-3.1-fast-generate-preview": VideoEstimatePolicy("yseeai", 0.72, balance_check=False, billing_mode="official_usd_estimate"),
+    "gemini-omni-flash-preview": VideoEstimatePolicy("yseeai", 0.72, balance_check=False, billing_mode="official_usd_estimate"),
     "minimax-h3": VideoEstimatePolicy("yinghe", 0.425),
     "doubao-seedance-2.0-ppio": VideoEstimatePolicy("ppio", 0.8),
     "minimax-h3-ppio": VideoEstimatePolicy("ppio", 0.425),
