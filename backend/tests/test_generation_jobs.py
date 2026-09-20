@@ -2585,3 +2585,73 @@ async def test_gemini_omni_uses_top_level_prompt_and_reference_task(monkeypatch)
         "metadata": {"aspect_ratio": "16:9", "task": "reference_to_video"},
     }
     assert job.provider == "yseeai-omni"
+
+
+@pytest.mark.asyncio
+async def test_grok_video_uses_toapis_reference_contract(monkeypatch) -> None:
+    import httpx
+
+    from app import providers
+    from app.jobs import Job
+    from app.schemas import VideoGenerationCreate
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            captured.update(url=url, headers=headers, payload=json)
+            return httpx.Response(200, json={"id": "grok-task-1", "status": "queued"}, request=httpx.Request("POST", url))
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    async def set_task(job, provider, task_id, **_kwargs):
+        job.provider = provider
+        job.provider_task_id = task_id
+
+    async def poll(*_args, **_kwargs):
+        return {"status": "completed", "result": {"data": [{"url": "https://files.test/grok.mp4"}]}}
+
+    async def store(job, task):
+        return {"provider": "toapis", "providerTaskId": job.provider_task_id, "sourceUrl": task["result"]["data"][0]["url"]}
+
+    monkeypatch.setattr(providers, "_toapis_config", lambda: ("https://toapis.test", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(providers.jobs, "mark_provider_submitting", noop)
+    monkeypatch.setattr(providers.jobs, "set_provider_task", set_task)
+    monkeypatch.setattr(providers, "_poll_toapis_video", poll)
+    monkeypatch.setattr(providers, "_store_toapis_video_result", store)
+    job = Job(id="job-grok", kind="video", user_id="u1", request={"model": "grok-video-1.5"})
+    request = VideoGenerationCreate(
+        prompt="测试",
+        model="grok-video-1.5",
+        image_urls=["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"],
+        ratio="16:9",
+        resolution="720p",
+        duration=8,
+    )
+
+    result = await providers.generate_toapis_grok_video(request, job)
+
+    assert captured["url"] == "https://toapis.test/v1/videos/generations"
+    assert captured["payload"] == {
+        "model": "grok-video-1.5",
+        "prompt": "测试",
+        "video_generation_mode": "reference_images_to_video",
+        "reference_images": ["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"],
+        "duration": 8,
+        "resolution": "720p",
+        "aspect_ratio": "16:9",
+        "client_business_id": "job-grok",
+    }
+    assert job.provider == "toapis-grok"
+    assert result["providerTaskId"] == "grok-task-1"

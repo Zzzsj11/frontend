@@ -95,5 +95,5 @@ def test_h3_product_mode_validation_excludes_tail_only_and_checks_inputs():
     validate_h3_mode_inputs(VideoGenerationCreate(prompt="x", h3_mode="first_last", image_urls=["first.png", "last.png"]))
     with pytest.raises(HTTPException, match="首尾帧"):
         validate_h3_mode_inputs(VideoGenerationCreate(prompt="x", h3_mode="first_last", image_urls=["first.png"]))
-    with pytest.raises(ValueError):
-        VideoGenerationCreate(prompt="x", h3_mode="reference", image_urls=[f"{index}.png" for index in range(7)])
+    with pytest.raises(HTTPException, match="最多支持 6 张"):
+        validate_h3_mode_inputs(VideoGenerationCreate(prompt="x", h3_mode="reference", image_urls=[f"{index}.png" for index in range(7)]))

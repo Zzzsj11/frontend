@@ -193,6 +193,16 @@ async def seed_system_data() -> None:
                 status="active",
             )
             session.add(yseeai_provider)
+        toapis_provider = await session.get(AiProviderModel, "provider-toapis")
+        if not toapis_provider:
+            toapis_provider = AiProviderModel(
+                id="provider-toapis",
+                code="toapis",
+                name="ToAPIs",
+                base_url="https://toapis.cn",
+                status="active",
+            )
+            session.add(toapis_provider)
         defaults = [
             ("model-chat-default", provider.id, "chat-default", "默认 Chat 模型", "chat", "", {"structuredOutput": True}, True),
             ("model-img2", provider.id, "gpt-image-2", "Img2", "image", "gpt-image-2", {"ratios": ["16:9", "9:16", "4:3", "1:1"], "imageToImage": True}, True),
@@ -498,6 +508,32 @@ async def seed_system_data() -> None:
                 False,
             ),
             (
+                "model-grok-video-15-toapis",
+                toapis_provider.id,
+                "grok-video-1.5",
+                "Grok Video 1.5（ToAPIs，测试专用，1000积分）",
+                "video",
+                "grok-video-1.5",
+                {
+                    "durations": {"min": 6, "max": 10},
+                    "ratios": ["16:9", "9:16", "1:1"],
+                    "resolutions": ["480p", "720p", "1080p"],
+                    "referenceImage": {"min": 0, "max": 7},
+                    "referenceVideo": {"min": 0, "max": 0},
+                    "referenceAudio": {"min": 0, "max": 0},
+                    "providerProtocol": "grok-toapis",
+                    "nativeAudio": False,
+                    "executionPool": "toapis-grok-test",
+                    "executionConcurrency": 1,
+                    "providerCode": "toapis",
+                    "testOnly": True,
+                    "creditLimitLabel": "1000积分",
+                    "billing": video_estimate_policy("grok-video-1.5").capability(),
+                    "sortOrder": 27,
+                },
+                False,
+            ),
+            (
                 "model-h3-ppio",
                 ppio_provider.id,
                 "minimax-h3-ppio",
@@ -540,13 +576,22 @@ async def seed_system_data() -> None:
                 "veo-3.1-generate-preview",
                 "veo-3.1-fast-generate-preview",
                 "gemini-omni-flash-preview",
+                "grok-video-1.5",
                 "minimax-h3-runninghub",
                 "minimax-h3",
                 "doubao-seedance-2.0-ppio",
                 "minimax-h3-ppio",
             }:
                 capabilities = {**capabilities, "systemManaged": True}
-            provider_configured = bool(settings.ppio_api_key) if code.endswith("-ppio") else bool(settings.yseeai_api_key) if model_provider_id == yseeai_provider.id else True
+            provider_configured = (
+                bool(settings.ppio_api_key)
+                if code.endswith("-ppio")
+                else bool(settings.yseeai_api_key)
+                if model_provider_id == yseeai_provider.id
+                else bool(settings.toapis_api_key)
+                if model_provider_id == toapis_provider.id
+                else True
+            )
             model = await session.get(AiModelModel, mid)
             if not model:
                 session.add(

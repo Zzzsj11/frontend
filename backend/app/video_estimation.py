@@ -32,6 +32,8 @@ VIDEO_ESTIMATE_POLICIES = {
     "veo-3.1-generate-preview": VideoEstimatePolicy("yseeai", 2.88, balance_check=False, billing_mode="official_usd_estimate"),
     "veo-3.1-fast-generate-preview": VideoEstimatePolicy("yseeai", 0.72, balance_check=False, billing_mode="official_usd_estimate"),
     "gemini-omni-flash-preview": VideoEstimatePolicy("yseeai", 0.72, balance_check=False, billing_mode="official_usd_estimate"),
+    # ToAPIs 当前 Key 的 720p 目录价为 $0.01912/秒，按 7.2 CNY/USD 粗估。
+    "grok-video-1.5": VideoEstimatePolicy("toapis", 0.137664, balance_check=False, billing_mode="supplier_usd_estimate"),
     "minimax-h3": VideoEstimatePolicy("yinghe", 0.425),
     "doubao-seedance-2.0-ppio": VideoEstimatePolicy("ppio", 0.8),
     "minimax-h3-ppio": VideoEstimatePolicy("ppio", 0.425),

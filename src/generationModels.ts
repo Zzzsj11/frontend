@@ -14,6 +14,7 @@ export interface GenerationModelCapabilities {
   executionConcurrency?: number
   executionPool?: string
   durationOptions?: number[]
+  durations?: { min?: number; max?: number }
   nativeAudio?: boolean
   providerCode?: string
   sortOrder?: number
@@ -44,10 +45,18 @@ export const videoResolutionChoices = (modelId?: string): string[] => {
     : [...DEFAULT_VIDEO_RESOLUTIONS]
 }
 export const videoDurationChoices = (modelId?: string): number[] => {
-  const configured = videoModelCapabilities(modelId).durationOptions
+  const capabilities = videoModelCapabilities(modelId)
+  const configured = capabilities.durationOptions
   return Array.isArray(configured) && configured.length
     ? configured.filter((item): item is number => Number.isInteger(item) && item > 0)
-    : []
+    : Number.isInteger(capabilities.durations?.min) && Number.isInteger(capabilities.durations?.max)
+      ? Array.from(
+          {
+            length: Number(capabilities.durations?.max) - Number(capabilities.durations?.min) + 1,
+          },
+          (_, index) => Number(capabilities.durations?.min) + index,
+        )
+      : []
 }
 export const videoResolutionLabel = (modelId: string | undefined, resolution: string): string => {
   const labels = videoModelCapabilities(modelId).resolutionLabels
