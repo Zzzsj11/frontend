@@ -517,7 +517,8 @@ async def seed_system_data() -> None:
                 {
                     "durations": {"min": 6, "max": 10},
                     "ratios": ["16:9", "9:16", "1:1"],
-                    "resolutions": ["480p", "720p", "1080p"],
+                    # 参考图模式只保证 480p/720p；产品侧取各模式公共交集，避免多参考图误选 1080p。
+                    "resolutions": ["480p", "720p"],
                     "referenceImage": {"min": 0, "max": 7},
                     "referenceVideo": {"min": 0, "max": 0},
                     "referenceAudio": {"min": 0, "max": 0},
