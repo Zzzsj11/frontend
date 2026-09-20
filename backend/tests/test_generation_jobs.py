@@ -1879,6 +1879,82 @@ async def test_model_capabilities_can_omit_unsupported_provider_fields(client, m
     assert captured["resolution"] == "768P"
 
 
+async def test_kling_model_uses_native_provider_protocol(monkeypatch) -> None:
+    import httpx
+
+    from app import providers
+    from app.jobs import jobs as job_manager
+    from app.schemas import VideoGenerationCreate
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            captured.update({"url": url, "headers": headers, "payload": json})
+            return httpx.Response(
+                200,
+                json={"code": 0, "message": "success", "data": {"task_id": "kling-task-1", "task_status": "submitted"}},
+                request=httpx.Request("POST", url),
+            )
+
+    async def fake_poll(_base, _headers, job):
+        assert job.provider == "yinghe-kling"
+        return {
+            "task_id": "kling-task-1",
+            "task_status": "succeed",
+            "task_result": {"videos": [{"url": "https://cdn.test/kling.mp4", "duration": "4"}]},
+        }
+
+    async def fake_store(job, task):
+        return {"provider": job.provider, "providerTaskId": task["task_id"]}
+
+    monkeypatch.setattr(providers, "_video_config", lambda: ("https://api-aigc.test", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(providers, "_poll_kling", fake_poll)
+    monkeypatch.setattr(providers, "_store_kling_result", fake_store)
+
+    _insert_job("job-kling-native", kind="video")
+    job = await job_manager.get("job-kling-native")
+    assert job is not None
+    job.user_id = "u1"
+    job.request = {
+        "model": "kling-v3",
+        "_providerModelId": "kling-v3",
+        "_capabilities": {"providerProtocol": "kling-native"},
+    }
+    request = VideoGenerationCreate(
+        prompt="春日公园",
+        model="kling-v3",
+        duration=4,
+        resolution="720p",
+        ratio="16:9",
+        generate_audio=False,
+    )
+
+    result = await providers.generate_video(request, job)
+
+    assert result == {"provider": "yinghe-kling", "providerTaskId": "kling-task-1"}
+    assert captured["url"] == "https://api-aigc.test/video/generation/tasks"
+    assert captured["payload"] == {
+        "model_name": "kling-v3",
+        "prompt": "春日公园",
+        "duration": 4.0,
+        "mode": "std",
+        "aspect_ratio": "16:9",
+        "sound": "off",
+        "cfg_scale": 0.5,
+    }
+
+
 async def test_general_character_video_retries_without_reference_on_real_person_block(monkeypatch) -> None:
     from app import providers
     from app.jobs import Job

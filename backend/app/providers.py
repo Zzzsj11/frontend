@@ -641,6 +641,102 @@ async def _submit_seedance_video(request: VideoGenerationCreate, job: Job, image
     return task_id, created, base, headers
 
 
+def _unwrap_kling(body: Any) -> dict[str, Any]:
+    if not isinstance(body, dict):
+        raise ProviderRejectedError("Kling 返回了无法解析的响应")
+    if body.get("code") != 0 or not isinstance(body.get("data"), dict):
+        message = str(body.get("message") or body.get("msg") or "Kling 返回错误")
+        request_id = str(body.get("request_id") or "")
+        suffix = f"（请求ID：{request_id}）" if request_id else ""
+        raise ProviderRejectedError(f"{translate_provider_error(message)}{suffix}；供应商响应：{_provider_error_body(body)}")
+    return body["data"]
+
+
+async def _query_kling_task(base: str, headers: dict[str, str], task_id: str) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.get(f"{base}/video/generation/tasks/{task_id}", headers=headers)
+        _raise_for_status(response)
+        return _unwrap_kling(response.json())
+
+
+async def _poll_kling(base: str, headers: dict[str, str], job: Job) -> dict[str, Any]:
+    deadline = time.monotonic() + _remaining_video_job_timeout(job)
+    consecutive_errors = 0
+    while time.monotonic() < deadline:
+        await asyncio.sleep(H3_POLL_INTERVAL_SECONDS)
+        try:
+            task = await _query_kling_task(base, headers, job.provider_task_id or "")
+        except (httpx.HTTPError, ValueError, ProviderError) as exc:
+            consecutive_errors += 1
+            if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS:
+                raise ProviderError(f"Kling 状态查询连续失败：{exc}") from exc
+            continue
+        consecutive_errors = 0
+        status = str(task.get("task_status") or task.get("status") or "").lower()
+        await jobs.update_progress(job, job.progress + 3)
+        if status in {"succeed", "succeeded", "success"}:
+            return task
+        if status in {"failed", "fail", "cancelled", "canceled"}:
+            reason = task.get("task_status_msg") or task.get("message") or f"Kling 生成任务状态：{status}"
+            raise ProviderError(f"Kling 生成失败：{reason}")
+    raise ProviderError("视频生成超过20分钟，已判定失败，请重新生成")
+
+
+async def _store_kling_result(job: Job, task: dict[str, Any]) -> dict[str, Any]:
+    task_result = task.get("task_result") if isinstance(task.get("task_result"), dict) else {}
+    videos = task_result.get("videos") if isinstance(task_result.get("videos"), list) else []
+    output = next((item for item in videos if isinstance(item, dict) and item.get("url")), None)
+    if not output:
+        raise ProviderError("Kling 生成成功但未返回视频地址")
+    task_id = job.provider_task_id or str(task.get("task_id") or "")
+    source_url = str(output["url"])
+    owner_prefix = f"users/{job.user_id}/generated"
+    stored_url = await import_remote(source_url, f"{owner_prefix}/videos", f"kling-{task_id}.mp4")
+    stored_cover, stored_cover_thumbnail = await _video_first_frame(source_url, f"kling-{task_id}", job.user_id)
+    request = job.request or {}
+    return {
+        "provider": "yinghe",
+        "providerTaskId": task_id,
+        "model": request.get("model") or "kling-v3",
+        "usage": task.get("usage") or {},
+        "videoUrl": stored_url,
+        "coverUrl": stored_cover,
+        "coverThumbnailUrl": stored_cover_thumbnail,
+        "sourceUrl": source_url,
+        "duration": output.get("duration") or request.get("duration"),
+        "ratio": request.get("ratio"),
+    }
+
+
+async def generate_kling_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
+    base, headers = _video_config()
+    job.idempotency_key = f"{job.id}:kling-native"
+    headers["Idempotency-Key"] = job.idempotency_key
+    mode = "pro" if request.resolution == "1080p" else "std"
+    images = [url.strip() for url in request.image_urls if url.strip()]
+    payload: dict[str, Any] = {
+        "model_name": str((job.request or {}).get("_providerModelId") or "kling-v3"),
+        "prompt": request.prompt,
+        "duration": request.duration,
+        "mode": mode,
+        "aspect_ratio": request.ratio,
+        "sound": "on" if request.generate_audio else "off",
+        "cfg_scale": 0.5,
+    }
+    if images:
+        payload["image_list"] = [{"image_url": url, "type": "first_frame" if index == 0 else "reference"} for index, url in enumerate(images)]
+    await jobs.mark_provider_submitting(job)
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(f"{base}/video/generation/tasks", headers=headers, json=payload)
+        _raise_for_status(response)
+        created = _unwrap_kling(response.json())
+    task_id = str(created.get("task_id") or "")
+    if not task_id:
+        raise ProviderError("Kling 提交成功但未返回 task_id")
+    await jobs.set_provider_task(job, "yinghe-kling", task_id, idempotency_key=job.idempotency_key)
+    return await _store_kling_result(job, await _poll_kling(base, headers, job))
+
+
 async def _submit_ppio_seedance_video(request: VideoGenerationCreate, job: Job, image_urls: list[str]) -> tuple[str, dict[str, Any], str, dict[str, str]]:
     base, headers = _ppio_config()
     variant = "reference" if image_urls else "text"
@@ -825,6 +921,8 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         return await generate_h3_video(request, job)
     if (job.request or {}).get("_providerModelId") == "MiniMax-H3":
         return await generate_direct_h3_video(request, job)
+    if ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "kling-native":
+        return await generate_kling_video(request, job)
     is_ppio = (job.request or {}).get("_provider") == "ppio"
     submit = _submit_ppio_seedance_video if is_ppio else _submit_seedance_video
     task_id, created, base, headers = await submit(request, job, request.image_urls)
@@ -1167,6 +1265,9 @@ async def resume_generation(job: Job) -> dict[str, Any]:
         provider = str((job.request or {}).get("_provider") or "yinghe")
         base, headers = _ppio_config() if provider == "ppio" else _video_config()
         return await _store_direct_h3_result(job, await _poll_direct_h3(base, headers, job, provider=provider))
+    if job.provider == "yinghe-kling" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "kling-native":
+        base, headers = _video_config()
+        return await _store_kling_result(job, await _poll_kling(base, headers, job))
     if job.kind == "image":
         base, headers = _image_config()
         url, timeout = f"{base}/image/generation/tasks/{job.provider_task_id}", IMAGE_POLL_TIMEOUT_SECONDS
@@ -1198,6 +1299,9 @@ async def query_provider_task(kind: str, task_id: str, provider: str | None = No
             _raise_for_status(response)
             body = _unwrap(response.json())
         return body.get("task") if isinstance(body.get("task"), dict) else body
+    if provider == "yinghe-kling":
+        base, headers = _video_config()
+        return await _query_kling_task(base, headers, task_id)
     if provider == "ppio":
         base, headers = _ppio_config()
         async with httpx.AsyncClient(timeout=60) as client:
@@ -1227,6 +1331,8 @@ async def store_provider_result(job: Job, data: dict[str, Any]) -> dict[str, Any
         return await _store_h3_video_result(job, data)
     if job.provider == "yinghe-h3" or (job.request or {}).get("_providerModelId") == "MiniMax-H3":
         return await _store_direct_h3_result(job, data)
+    if job.provider == "yinghe-kling" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "kling-native":
+        return await _store_kling_result(job, data)
     task_id = job.provider_task_id or ""
     if job.kind == "image":
         return await _store_image_result(job, task_id, data, {})

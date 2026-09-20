@@ -378,6 +378,7 @@ async def seed_system_data() -> None:
                     "resolutions": ["720p", "1080p"],
                     "resolutionLabels": {"720p": "768P", "1080p": "1080P"},
                     "providerResolutionMap": {"720p": "768P", "1080p": "1080P"},
+                    "providerProtocol": "kling-native",
                     "providerOmitFields": ["generate_audio", "watermark", "return_last_frame"],
                     "nativeAudio": True,
                     "executionPool": "yinghe-generation",
