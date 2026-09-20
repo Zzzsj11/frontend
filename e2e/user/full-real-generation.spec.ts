@@ -73,7 +73,7 @@ async function waitForPrompts(page: Page, expected: number, prefix: string) {
 async function generateAllMedia(page: Page, count: number, prefix: string) {
   for (let index = 0; index < count; index++) {
     const line = page.locator('.line-wrapper').nth(index)
-    await line.locator('.shot-thumb').click({ position: { x: 6, y: 6 } })
+    await line.locator('.scene-summary').click()
     const dialog = page.locator('.modal').filter({ hasText: '编辑视频内容' })
     await expect(dialog).toBeVisible()
     await dialog.getByRole('button', { name: '生成场景', exact: true }).click()

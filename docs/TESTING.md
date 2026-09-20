@@ -43,7 +43,7 @@ npm run test:admin        # 管理后台 e2e（API 契约 + 控制台 UI）
 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5173 make smoke-real
 ```
 
-真实冒烟会明确检查目标地址，未设置 `PLAYWRIGHT_BASE_URL` 或 `REMOTE_API_BASE_URL` 时拒绝启动。它执行真实 ASS 文本链路，再用一条 5 秒通用空镜验证 GPT Image 2.5 快速模型、视频、播放器与素材导出；相比完整真实 E2E 不为 ASS 每条分镜生成图片和视频。所有请求仍自动携带本次唯一的 `X-Test-Run-Id`、`X-Agent-Name: code-agent`、`X-Agent-Run-Id`，会产生真实费用。
+真实冒烟会明确检查目标地址，未设置 `PLAYWRIGHT_BASE_URL` 或 `REMOTE_API_BASE_URL` 时拒绝启动。它用一条 5 秒通用空镜验证真实文本提示词、GPT Image 2.5 快速模型、视频、播放器与素材导出；ASS 主流程由无费用集成冒烟覆盖，完整真实 E2E 仍可单独执行 ASS 阶段。所有请求自动携带本次唯一的 `X-Test-Run-Id`、`X-Agent-Name: code-agent`、`X-Agent-Run-Id`，会产生真实费用。
 
 ## 耗时与针对性验证（本机实测）
 
@@ -142,7 +142,7 @@ npx playwright install chromium   # 首次
 docker compose up -d --build      # 四个服务 healthy/running
 export REAL_E2E_PROJECT_SUFFIX="$(date +%Y%m%d-%H%M%S)"
 npm run test:e2e:real             # 完整模式，上限 90 分钟
-npm run test:e2e:smoke-real       # 最小真实模式：ASS 文本 + 1 图 + 1 个 5 秒视频 + 导出
+npm run test:e2e:smoke-real       # 最小真实模式：通用文本 + 1 图 + 1 个 5 秒视频 + 导出
 npm run test:e2e:real:general     # 仅通用分镜（ASS 已成功时）
 npm run test:e2e:real:export      # 复用已有通用视频，仅验播放器与导出（不调模型）
 ```
