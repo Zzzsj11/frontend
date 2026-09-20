@@ -1955,6 +1955,110 @@ async def test_kling_model_uses_native_provider_protocol(monkeypatch) -> None:
     }
 
 
+async def test_wan_model_uses_nested_native_provider_protocol(client, monkeypatch) -> None:
+    import httpx
+
+    from app import providers
+    from app.jobs import jobs as job_manager
+    from app.schemas import VideoGenerationCreate
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            captured.update({"url": url, "headers": headers, "payload": json})
+            return httpx.Response(
+                200,
+                json={"code": 200, "msg": "操作成功", "data": {"taskId": "wan-task-1", "status": "PENDING"}},
+                request=httpx.Request("POST", url),
+            )
+
+    async def fake_poll(_base, _headers, job):
+        assert job.provider == "yinghe-wan"
+        return {"taskId": "wan-task-1", "status": "SUCCESS", "resultUrl": "https://cdn.test/wan.mp4"}
+
+    async def fake_store(job, task):
+        return {"provider": job.provider, "providerTaskId": task["taskId"]}
+
+    monkeypatch.setattr(providers, "_video_config", lambda: ("https://api-aigc.test", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(providers, "_poll_wan", fake_poll)
+    monkeypatch.setattr(providers, "_store_wan_result", fake_store)
+
+    _insert_job("job-wan-native", kind="video")
+    job = await job_manager.get("job-wan-native")
+    assert job is not None
+    job.user_id = "u1"
+    job.request = {
+        "model": "wan3.0-video-prime",
+        "_providerModelId": "wan3.0-video-prime",
+        "_capabilities": {
+            "providerProtocol": "wan-native",
+            "providerResolutionMap": {"720p": "720P"},
+        },
+    }
+    request = VideoGenerationCreate(
+        prompt="人物自然转身",
+        model="wan3.0-video-prime",
+        duration=5,
+        resolution="720p",
+        ratio="16:9",
+        image_urls=["https://cdn.test/person.png"],
+        video_urls=["https://cdn.test/motion.mp4"],
+        audio_urls=["https://cdn.test/music.mp3"],
+        generate_audio=True,
+    )
+
+    result = await providers.generate_video(request, job)
+
+    assert result == {"provider": "yinghe-wan", "providerTaskId": "wan-task-1"}
+    assert captured["url"] == "https://api-aigc.test/video/generation/tasks"
+    assert captured["payload"] == {
+        "model": "wan3.0-video-prime",
+        "input": {
+            "prompt": "人物自然转身",
+            "media": [
+                {"type": "reference_image", "url": "https://cdn.test/person.png"},
+                {"type": "reference_video", "url": "https://cdn.test/motion.mp4"},
+                {"type": "reference_audio", "url": "https://cdn.test/music.mp3"},
+            ],
+        },
+        "parameters": {
+            "resolution": "720P",
+            "ratio": "16:9",
+            "duration": 5,
+            "audio": True,
+            "watermark": False,
+        },
+    }
+
+
+def test_wan_first_last_frames_do_not_mix_reference_media() -> None:
+    from app import providers
+    from app.schemas import VideoGenerationCreate
+
+    request = VideoGenerationCreate(
+        prompt="从首帧过渡到尾帧",
+        image_urls=["https://cdn.test/first.png", "https://cdn.test/last.png"],
+        video_urls=["https://cdn.test/ignored.mp4"],
+        h3_mode="first_last",
+    )
+
+    assert providers._wan_media(request) == [
+        {"type": "first_frame", "url": "https://cdn.test/first.png"},
+        {"type": "last_frame", "url": "https://cdn.test/last.png"},
+    ]
+
+
 async def test_general_character_video_retries_without_reference_on_real_person_block(monkeypatch) -> None:
     from app import providers
     from app.jobs import Job

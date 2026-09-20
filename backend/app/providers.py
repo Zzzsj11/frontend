@@ -737,6 +737,98 @@ async def generate_kling_video(request: VideoGenerationCreate, job: Job) -> dict
     return await _store_kling_result(job, await _poll_kling(base, headers, job))
 
 
+def _wan_media(request: VideoGenerationCreate) -> list[dict[str, str]]:
+    images = [url.strip() for url in request.image_urls if url.strip()]
+    videos = [url.strip() for url in request.video_urls if url.strip()]
+    audios = [url.strip() for url in request.audio_urls if url.strip()]
+    if request.h3_mode == "first_frame":
+        return [{"type": "first_frame", "url": images[0]}] if images else []
+    if request.h3_mode == "first_last":
+        return [{"type": "first_frame" if index == 0 else "last_frame", "url": url} for index, url in enumerate(images[:2])]
+    return [
+        *({"type": "reference_image", "url": url} for url in images),
+        *({"type": "reference_video", "url": url} for url in videos),
+        *({"type": "reference_audio", "url": url} for url in audios),
+    ]
+
+
+async def _query_wan_task(base: str, headers: dict[str, str], task_id: str) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.get(f"{base}/video/generation/tasks/{task_id}", headers=headers)
+        _raise_for_status(response)
+        return _unwrap(response.json())
+
+
+async def _poll_wan(base: str, headers: dict[str, str], job: Job) -> dict[str, Any]:
+    return await _poll_scheduled(
+        f"{base}/video/generation/tasks/{job.provider_task_id}",
+        headers,
+        job,
+        timeout_seconds=_remaining_video_job_timeout(job),
+        timeout_error="视频生成超过20分钟，已判定失败，请重新生成",
+    )
+
+
+async def _store_wan_result(job: Job, task: dict[str, Any]) -> dict[str, Any]:
+    source_url = str(task.get("resultUrl") or "")
+    if not source_url:
+        raise ProviderError("Wan 生成成功但未返回视频地址")
+    task_id = job.provider_task_id or str(task.get("taskId") or "")
+    owner_prefix = f"users/{job.user_id}/generated"
+    stored_url = await import_remote(source_url, f"{owner_prefix}/videos", f"wan-{task_id}.mp4")
+    thumbnail_url = str(task.get("thumbnailUrl") or "")
+    stored_cover, stored_cover_thumbnail = (
+        await import_remote_image(thumbnail_url, f"{owner_prefix}/covers") if thumbnail_url else await _video_first_frame(source_url, f"wan-{task_id}", job.user_id)
+    )
+    request = job.request or {}
+    usage = dict(task.get("tokenUsage") or {})
+    usage["output_seconds"] = request.get("duration") or 0
+    return {
+        "provider": "yinghe",
+        "providerTaskId": task_id,
+        "model": request.get("model") or "wan3.0-video",
+        "usage": usage,
+        "videoUrl": stored_url,
+        "coverUrl": stored_cover,
+        "coverThumbnailUrl": stored_cover_thumbnail,
+        "sourceUrl": source_url,
+        "duration": request.get("duration"),
+        "ratio": request.get("ratio"),
+    }
+
+
+async def generate_wan_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
+    base, headers = _video_config()
+    job.idempotency_key = f"{job.id}:wan-native"
+    headers["Idempotency-Key"] = job.idempotency_key
+    resolution_map = ((job.request or {}).get("_capabilities") or {}).get("providerResolutionMap") or {}
+    media = _wan_media(request)
+    input_data: dict[str, Any] = {"prompt": request.prompt}
+    if media:
+        input_data["media"] = media
+    payload = {
+        "model": str((job.request or {}).get("_providerModelId") or request.model or "wan3.0-video"),
+        "input": input_data,
+        "parameters": {
+            "resolution": str(resolution_map.get(request.resolution) or request.resolution.upper()),
+            "ratio": request.ratio,
+            "duration": request.duration,
+            "audio": request.generate_audio,
+            "watermark": request.watermark,
+        },
+    }
+    await jobs.mark_provider_submitting(job)
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(f"{base}/video/generation/tasks", headers=headers, json=payload)
+        _raise_for_status(response)
+        created = _unwrap(response.json())
+    task_id = str(created.get("taskId") or "")
+    if not task_id:
+        raise ProviderError("Wan 提交成功但未返回 taskId")
+    await jobs.set_provider_task(job, "yinghe-wan", task_id, idempotency_key=job.idempotency_key)
+    return await _store_wan_result(job, await _poll_wan(base, headers, job))
+
+
 async def _submit_ppio_seedance_video(request: VideoGenerationCreate, job: Job, image_urls: list[str]) -> tuple[str, dict[str, Any], str, dict[str, str]]:
     base, headers = _ppio_config()
     variant = "reference" if image_urls else "text"
@@ -921,6 +1013,8 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         return await generate_h3_video(request, job)
     if (job.request or {}).get("_providerModelId") == "MiniMax-H3":
         return await generate_direct_h3_video(request, job)
+    if ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "wan-native":
+        return await generate_wan_video(request, job)
     if ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "kling-native":
         return await generate_kling_video(request, job)
     is_ppio = (job.request or {}).get("_provider") == "ppio"
@@ -1265,6 +1359,9 @@ async def resume_generation(job: Job) -> dict[str, Any]:
         provider = str((job.request or {}).get("_provider") or "yinghe")
         base, headers = _ppio_config() if provider == "ppio" else _video_config()
         return await _store_direct_h3_result(job, await _poll_direct_h3(base, headers, job, provider=provider))
+    if job.provider == "yinghe-wan" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "wan-native":
+        base, headers = _video_config()
+        return await _store_wan_result(job, await _poll_wan(base, headers, job))
     if job.provider == "yinghe-kling" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "kling-native":
         base, headers = _video_config()
         return await _store_kling_result(job, await _poll_kling(base, headers, job))
@@ -1299,6 +1396,9 @@ async def query_provider_task(kind: str, task_id: str, provider: str | None = No
             _raise_for_status(response)
             body = _unwrap(response.json())
         return body.get("task") if isinstance(body.get("task"), dict) else body
+    if provider == "yinghe-wan":
+        base, headers = _video_config()
+        return await _query_wan_task(base, headers, task_id)
     if provider == "yinghe-kling":
         base, headers = _video_config()
         return await _query_kling_task(base, headers, task_id)
@@ -1331,6 +1431,8 @@ async def store_provider_result(job: Job, data: dict[str, Any]) -> dict[str, Any
         return await _store_h3_video_result(job, data)
     if job.provider == "yinghe-h3" or (job.request or {}).get("_providerModelId") == "MiniMax-H3":
         return await _store_direct_h3_result(job, data)
+    if job.provider == "yinghe-wan" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "wan-native":
+        return await _store_wan_result(job, data)
     if job.provider == "yinghe-kling" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "kling-native":
         return await _store_kling_result(job, data)
     task_id = job.provider_task_id or ""
