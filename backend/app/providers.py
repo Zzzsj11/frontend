@@ -619,6 +619,8 @@ async def _submit_seedance_video(request: VideoGenerationCreate, job: Job, image
         # 让上游返回尾帧图做封面，免去本地 ffmpeg 抽帧
         "return_last_frame": True,
     }
+    for field in ((job.request or {}).get("_capabilities") or {}).get("providerOmitFields") or []:
+        payload.pop(str(field), None)
     await jobs.mark_provider_submitting(job)
     async with httpx.AsyncClient(timeout=60) as client:
         response = await _post_idempotent_video_create(

@@ -1829,6 +1829,52 @@ async def test_generate_video_v3_seedance_flow(client, monkeypatch) -> None:
     assert result["usage"]["total_tokens"] == 60682
 
 
+async def test_model_capabilities_can_omit_unsupported_provider_fields(client, monkeypatch) -> None:
+    import httpx
+
+    from app import providers
+    from app.jobs import jobs as job_manager
+    from app.schemas import VideoGenerationCreate
+
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+    async def fake_post(_client, url, *, headers, payload, job, provider):
+        captured.update(payload)
+        return httpx.Response(200, json={"id": "cgt-kling-1"}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(providers, "_video_config", lambda: ("https://api-aigc.test", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(providers, "_post_idempotent_video_create", fake_post)
+
+    _insert_job("job-kling-submit", kind="video")
+    job = await job_manager.get("job-kling-submit")
+    assert job is not None
+    job.user_id = "u1"
+    job.request = {
+        "model": "kling-v3",
+        "_capabilities": {"providerOmitFields": ["generate_audio", "return_last_frame"]},
+    }
+    request = VideoGenerationCreate(prompt="测试", model="kling-v3", generate_audio=False)
+
+    task_id, _, _, _ = await providers._submit_seedance_video(request, job, [])
+
+    assert task_id == "cgt-kling-1"
+    assert "generate_audio" not in captured
+    assert "return_last_frame" not in captured
+    assert captured["model"] == "kling-v3"
+    assert captured["watermark"] is False
+
+
 async def test_general_character_video_retries_without_reference_on_real_person_block(monkeypatch) -> None:
     from app import providers
     from app.jobs import Job
