@@ -5,6 +5,7 @@
 ```bash
 make test        # 后端 pytest + 前端 vitest
 make test-e2e    # 本地 Playwright（mock 链路）
+make smoke       # 重大调整后的无费用主流程冒烟
 make preflight   # 发布前全流程校验
 ```
 
@@ -27,6 +28,22 @@ npm run test:admin        # 管理后台 e2e（API 契约 + 控制台 UI）
 ```
 
 新增测试按归属放入对应子目录；`npm test` / `npm run test:e2e` 仍跑全量，`make preflight` 行为不变。
+
+## 最小冒烟（重大调整后必跑）
+
+`make smoke` 是不调用真实模型、可反复执行的主流程卡口，组合以下三层：
+
+- 后端完整用户旅程：建项目 → 上传 → ASS 大纲/逐镜提示词 → 场景图/视频工单 → 用量 → 素材导出 → 对话；供应商与存储使用测试替身。
+- 后端关键边界：用户私有数据隔离、无人物通用分镜、普通用户管理权限与模型选项。
+- 浏览器旅程：登录 → ASS 上传 → 分镜可编辑 → 通用/随机/创意入口，并验证 GPT Image 2.5「精细 / 快速」均可选择。
+
+它不替代 `make preflight-lite` 或发布前 `make preflight`，也不验证 PostgreSQL、Redis、Worker、TOS 和真实供应商。涉及供应商、模型请求格式、异步任务或部署的大调整，在 `make smoke` 通过后再运行低成本真实冒烟：
+
+```bash
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:5173 make smoke-real
+```
+
+真实冒烟会明确检查目标地址，未设置 `PLAYWRIGHT_BASE_URL` 或 `REMOTE_API_BASE_URL` 时拒绝启动。它执行真实 ASS 文本链路，再用一条 5 秒通用空镜验证 GPT Image 2.5 快速模型、视频、播放器与素材导出；相比完整真实 E2E 不为 ASS 每条分镜生成图片和视频。所有请求仍自动携带本次唯一的 `X-Test-Run-Id`、`X-Agent-Name: code-agent`、`X-Agent-Run-Id`，会产生真实费用。
 
 ## 耗时与针对性验证（本机实测）
 
@@ -56,6 +73,7 @@ e2e 不在 preflight 内，按需触发：`test:e2e:user`（本地 mock 链路�
 | 日常提交前              | `make preflight-lite`（跳过 docker-build）            | ~85s       |
 | 发布前                  | `make preflight` 全量 + 相关 e2e                      | ~3min      |
 | 用户旅程关键链路        | 追加 `npm run test:e2e:user`                          | ~6s        |
+| 重大调整后的主流程      | `make smoke`（无真实模型费用）                        | 分钟内     |
 | 管理后台 UI/契约        | 追加 `npm run test:admin`                             | ~10s       |
 | 供应商/提示词/生成链路  | 按需 `npm run test:e2e:real`（有成本）                | 上限 90min |
 
@@ -124,6 +142,7 @@ npx playwright install chromium   # 首次
 docker compose up -d --build      # 四个服务 healthy/running
 export REAL_E2E_PROJECT_SUFFIX="$(date +%Y%m%d-%H%M%S)"
 npm run test:e2e:real             # 完整模式，上限 90 分钟
+npm run test:e2e:smoke-real       # 最小真实模式：ASS 文本 + 1 图 + 1 个 5 秒视频 + 导出
 npm run test:e2e:real:general     # 仅通用分镜（ASS 已成功时）
 npm run test:e2e:real:export      # 复用已有通用视频，仅验播放器与导出（不调模型）
 ```

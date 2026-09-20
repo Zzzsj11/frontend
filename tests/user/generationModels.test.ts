@@ -36,14 +36,30 @@ describe('generation model labels', () => {
     expect(isH3VideoModel('doubao-seedance-2.0')).toBe(false)
   })
 
-  it('keeps the temporary RunningHub H3 option at the end', () => {
+  it('sorts video models by Yinghe, PPIO, ToAPIs, RunningHub, then other providers', () => {
     expect(
       sortVideoModelOptions([
-        { value: 'minimax-h3-runninghub', label: 'H3' },
-        { value: 'doubao-seedance-2.0', label: 'SD2.0' },
-        { value: 'minimax-h3', label: 'H3' },
+        { value: 'flux-3-video', label: 'FLUX 3', capabilities: { providerCode: 'bfl' } },
+        {
+          value: 'minimax-h3-runninghub',
+          label: 'H3',
+          capabilities: { providerCode: 'runninghub' },
+        },
+        { value: 'viduq3-pro', label: 'Vidu Q3 Pro', capabilities: { providerCode: 'toapis' } },
+        { value: 'minimax-h3-ppio', label: 'H3', capabilities: { providerCode: 'ppio' } },
+        {
+          value: 'doubao-seedance-2.0',
+          label: 'SD2.0',
+          capabilities: { providerCode: 'yinghe' },
+        },
       ]).map((option) => option.value),
-    ).toEqual(['doubao-seedance-2.0', 'minimax-h3', 'minimax-h3-runninghub'])
+    ).toEqual([
+      'doubao-seedance-2.0',
+      'minimax-h3-ppio',
+      'viduq3-pro',
+      'minimax-h3-runninghub',
+      'flux-3-video',
+    ])
   })
 
   it('uses each provider real H3 output tier as the resolution label', () => {

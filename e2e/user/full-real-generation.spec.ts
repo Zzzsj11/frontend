@@ -25,6 +25,12 @@ mkdirSync(output, { recursive: true })
 const generalOnly = process.env.REAL_E2E_PHASE === 'general'
 const exportOnly = process.env.REAL_E2E_PHASE === 'general-export'
 const assOnly = process.env.REAL_E2E_PHASE === 'ass'
+const smokeMode = process.env.REAL_E2E_SMOKE === '1'
+if (smokeMode && !process.env.PLAYWRIGHT_BASE_URL && !process.env.REMOTE_API_BASE_URL) {
+  throw new Error(
+    '[e2e] 真实冒烟必须显式设置 PLAYWRIGHT_BASE_URL 或 REMOTE_API_BASE_URL，避免误打未知环境。',
+  )
+}
 const assExpectedLines = Number(process.env.REAL_E2E_ASS_EXPECTED_LINES || '3')
 const resumeAssProject = process.env.REAL_E2E_RESUME_ASS_PROJECT
 const resumeAssTaskTitle = process.env.REAL_E2E_RESUME_ASS_TASK_TITLE
@@ -159,7 +165,7 @@ test('ASS and general storyboard complete real frontend journeys through generat
     await expect(page.locator('.line-wrapper').first()).toBeVisible({ timeout: 5 * 60_000 })
     await capture(page, 'ass-storyboard-outline-generating')
     await waitForPrompts(page, assExpectedLines, 'ass')
-    await generateAllMedia(page, assExpectedLines, 'ass')
+    if (!smokeMode) await generateAllMedia(page, assExpectedLines, 'ass')
   }
 
   if (assOnly) {
@@ -174,16 +180,18 @@ test('ASS and general storyboard complete real frontend journeys through generat
     .getByRole('button', { name: '定制通用分镜', exact: true })
     .click()
   const general = page.locator('.modal').filter({ hasText: '定制通用分镜' })
-  await general.locator('.cast-item').nth(17).click()
+  if (!smokeMode) await general.locator('.cast-item').nth(17).click()
   await general.getByLabel('空镜数量').fill('1')
-  await general.getByLabel('人物镜数量').fill('1')
-  await general.getByLabel('总时长（秒）').fill('10')
+  await general.getByLabel('人物镜数量').fill(smokeMode ? '0' : '1')
+  await general.getByLabel('总时长（秒）').fill(smokeMode ? '5' : '10')
   await general.getByLabel('画幅').selectOption('9:16')
+  if (smokeMode) await general.getByLabel('图片模型').selectOption('gpt-image-2.5-flare')
   await general.getByLabel('额外要求（可选）').fill('同一秋夜城市街区，从孤独到相遇，电影写实')
   await capture(page, 'general-parameters-and-cast-selected')
   await general.getByRole('button', { name: '批量生成' }).click()
-  await waitForPrompts(page, 2, 'general')
-  await generateAllMedia(page, 2, 'general')
+  const generalLineCount = smokeMode ? 1 : 2
+  await waitForPrompts(page, generalLineCount, 'general')
+  await generateAllMedia(page, generalLineCount, 'general')
 
   await expect(page.locator('[role="alertdialog"]')).toHaveCount(0)
   await capture(page, 'both-journeys-final-state')

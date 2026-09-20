@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import ShotGenerationOptionsPopover from '../../src/components/ShotGenerationOptionsPopover.vue'
+import { IMAGE_MODEL_OPTIONS } from '../../src/generationModels'
 import type { ShotGenOptions } from '../../src/types'
 
 const options: ShotGenOptions = {
@@ -12,6 +13,12 @@ const options: ShotGenOptions = {
 }
 
 describe('ShotGenerationOptionsPopover', () => {
+  afterEach(() => {
+    IMAGE_MODEL_OPTIONS.splice(0, IMAGE_MODEL_OPTIONS.length, {
+      value: 'gpt-image-2',
+      label: 'Img2',
+    })
+  })
   it('summarizes video options and emits changed segmented choices', async () => {
     const wrapper = mount(ShotGenerationOptionsPopover, {
       props: { modelValue: options, mode: 'shot' },
@@ -53,6 +60,29 @@ describe('ShotGenerationOptionsPopover', () => {
     expect(document.querySelector('[aria-label="图片模型"]')).not.toBeNull()
     expect(document.body.textContent).not.toContain('生成背景音')
     expect(document.body.textContent).not.toContain('添加水印')
+    wrapper.unmount()
+  })
+
+  it('shows both GPT Image 2.5 choices with product-facing names', async () => {
+    IMAGE_MODEL_OPTIONS.splice(
+      0,
+      IMAGE_MODEL_OPTIONS.length,
+      { value: 'gpt-image-2.5-sunburst', label: '精细' },
+      { value: 'gpt-image-2.5-flare', label: '快速' },
+    )
+    const wrapper = mount(ShotGenerationOptionsPopover, {
+      props: {
+        modelValue: { ...options, imageModel: 'gpt-image-2.5-sunburst' },
+        mode: 'scene',
+      },
+    })
+
+    await wrapper.get('[aria-label="调整生成参数"]').trigger('click')
+    const select = document.querySelector('[aria-label="图片模型"]') as HTMLSelectElement
+    expect(Array.from(select.options).map((option) => [option.value, option.text])).toEqual([
+      ['gpt-image-2.5-sunburst', '精细'],
+      ['gpt-image-2.5-flare', '快速'],
+    ])
     wrapper.unmount()
   })
 

@@ -90,16 +90,29 @@ export const generationModelLabel = (option: GenerationModelOption): string => {
     ? `${option.label}（并发上限 ${Number(concurrency)}）`
     : option.label
 }
+const VIDEO_PROVIDER_SORT_ORDER: Record<string, number> = {
+  yinghe: 0,
+  ppio: 1,
+  toapis: 2,
+  runninghub: 3,
+}
+const videoProviderSortOrder = (option: GenerationModelOption): number => {
+  const provider =
+    option.value === 'minimax-h3-runninghub'
+      ? 'runninghub'
+      : String(option.capabilities?.providerCode ?? '').toLowerCase()
+  return VIDEO_PROVIDER_SORT_ORDER[provider] ?? 4
+}
 export const sortVideoModelOptions = (
   options: Array<GenerationModelOption>,
 ): Array<GenerationModelOption> =>
-  [...options].sort(
-    (left, right) =>
-      Number(left.capabilities?.sortOrder ?? (left.value === 'minimax-h3-runninghub' ? 999 : 100)) -
-      Number(
-        right.capabilities?.sortOrder ?? (right.value === 'minimax-h3-runninghub' ? 999 : 100),
-      ),
-  )
+  [...options].sort((left, right) => {
+    const providerOrder = videoProviderSortOrder(left) - videoProviderSortOrder(right)
+    if (providerOrder !== 0) return providerOrder
+    return (
+      Number(left.capabilities?.sortOrder ?? 100) - Number(right.capabilities?.sortOrder ?? 100)
+    )
+  })
 let loaded = false
 export async function loadGenerationModels(force = false): Promise<void> {
   if (loaded && !force) return
@@ -115,6 +128,11 @@ export async function loadGenerationModels(force = false): Promise<void> {
     const images = items
       .filter((x) => x.modality === 'image')
       .map((x) => ({ value: x.id, label: x.name, capabilities: x.capabilities }))
+      .sort(
+        (left, right) =>
+          Number(left.capabilities?.sortOrder ?? 100) -
+          Number(right.capabilities?.sortOrder ?? 100),
+      )
     const videos = sortVideoModelOptions(
       items
         .filter((x) => x.modality === 'video')

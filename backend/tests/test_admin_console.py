@@ -26,6 +26,18 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     assert client.get("/api/admin/dashboard", headers=headers).status_code == 403
     options = client.get("/api/model-options", headers=headers).json()
     assert any(x["id"] == "gpt-image-2" for x in options)
+    image_models = {x["id"]: x for x in options if x["modality"] == "image"}
+    assert image_models["gpt-image-2.5-sunburst"]["name"] == "精细"
+    assert image_models["gpt-image-2.5-flare"]["name"] == "快速"
+    assert image_models["gpt-image-2.5-sunburst"]["capabilities"]["qualities"] == [
+        "auto",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+    ]
+    assert image_models["gpt-image-2.5-flare"]["capabilities"]["referenceImage"] == {"min": 0, "max": 15}
     h3 = next(x for x in options if x["id"] == "minimax-h3-runninghub")
     direct_h3 = next(x for x in options if x["id"] == "minimax-h3")
     ppio_sd = next(x for x in options if x["id"] == "doubao-seedance-2.0-ppio")

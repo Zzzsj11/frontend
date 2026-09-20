@@ -227,9 +227,9 @@ class ImageGenerationCreate(BaseModel):
     # prompt 允许为空：portrait 模式下由后端用注册中心模板拼装（二者至少其一，端点内校验）
     prompt: str = Field(default="", max_length=20_000)
     size: str = "1024x1024"
-    quality: Literal["auto", "low", "medium", "high"] = "auto"
+    quality: Literal["auto", "low", "medium", "high", "xhigh", "max"] = "auto"
     n: int = Field(default=1, ge=1, le=4)
-    images: list[str] = Field(default_factory=list)
+    images: list[str] = Field(default_factory=list, max_length=15)
     model: str | None = Field(default=None, max_length=160)
     purpose: Literal["scene", "digital_human", "other"] = "other"
     portrait: PortraitPromptParams | None = None

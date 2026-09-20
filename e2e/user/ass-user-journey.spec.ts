@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test'
 
 test('user generates an editable storyboard from ASS', async ({ page }) => {
+  await page.route(/\/api\/release(?:\?|$)/, (route) =>
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify({ version: 'test' }) }),
+  )
   await page.route('**/api/auth/refresh', (route) =>
     route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }),
   )
@@ -37,7 +40,19 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
     route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify([
-        { id: 'gpt-image-2', name: 'Img2', modality: 'image' },
+        {
+          id: 'gpt-image-2.5-sunburst',
+          name: '精细',
+          modality: 'image',
+          sortOrder: 10,
+        },
+        {
+          id: 'gpt-image-2.5-flare',
+          name: '快速',
+          modality: 'image',
+          sortOrder: 20,
+        },
+        { id: 'gpt-image-2', name: 'Img2', modality: 'image', sortOrder: 100 },
         { id: 'doubao-seedance-2.0', name: 'SD2.0', modality: 'video' },
         {
           id: 'minimax-h3-runninghub',
@@ -275,8 +290,10 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await page.getByLabel('视频模型').selectOption('minimax-h3-runninghub')
   await expect(page.getByLabel('视频模型')).toHaveValue('minimax-h3-runninghub')
   await expect(page.getByLabel('视频模型')).toBeEnabled()
-  await expect(page.getByLabel('图片模型 *')).toHaveValue('gpt-image-2')
-  await expect(page.getByLabel('图片模型 *')).toBeDisabled()
+  await expect(page.getByLabel('图片模型')).toHaveValue('gpt-image-2')
+  await expect(page.getByLabel('图片模型')).toBeEnabled()
+  await page.getByLabel('图片模型').selectOption('gpt-image-2.5-sunburst')
+  await expect(page.getByLabel('图片模型')).toHaveValue('gpt-image-2.5-sunburst')
   await page.getByRole('button', { name: '生成', exact: true }).click()
 
   await expect(page.getByText('自动化测试歌词').first()).toBeVisible()
@@ -295,8 +312,10 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await expect(scaleInputs.nth(2)).toHaveValue('210')
   await expect(general.getByLabel('视频模型')).toHaveValue('doubao-seedance-2.0')
   await expect(general.getByLabel('视频模型')).toBeEnabled()
-  await expect(general.getByLabel('图片模型 *')).toHaveValue('gpt-image-2')
-  await expect(general.getByLabel('图片模型 *')).toBeDisabled()
+  await expect(general.getByLabel('图片模型')).toHaveValue('gpt-image-2')
+  await expect(general.getByLabel('图片模型')).toBeEnabled()
+  await general.getByLabel('图片模型').selectOption('gpt-image-2.5-flare')
+  await expect(general.getByLabel('图片模型')).toHaveValue('gpt-image-2.5-flare')
   const generate = general.getByRole('button', { name: '批量生成', exact: true })
   await expect(generate).toBeDisabled()
   await general.getByLabel('二级分类 *').selectOption('通用积极')

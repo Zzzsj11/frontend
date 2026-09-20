@@ -44,6 +44,11 @@ describe('general storyboard defaults', () => {
     ) as HTMLSelectElement
     expect(videoModelSelect).toBeTruthy()
     expect(videoModelSelect.disabled).toBe(false)
+    const imageModelSelect = document.body.querySelector(
+      'select[aria-label="图片模型"]',
+    ) as HTMLSelectElement
+    expect(imageModelSelect).toBeTruthy()
+    expect(imageModelSelect.disabled).toBe(false)
     wrapper.unmount()
   })
 

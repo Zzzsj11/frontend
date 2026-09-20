@@ -56,7 +56,7 @@ def _read_provider_value(name: str) -> str:
 
 SHARED_PROVIDER_KEY = _read_provider_value("AIGC_TOKEN")
 SHARED_LLM_BASE_URL = _read_provider_value("CHAT_COMPLETIONS_BASE_URL") or "https://ai-aigc.fzyinghe.com/v1"
-SHARED_LLM_MODEL = _read_provider_value("CHAT_DEFAULT_MODEL") or os.getenv("AIGC_CHAT_MODEL", "gpt-5.5")
+SHARED_LLM_MODEL = _read_provider_value("CHAT_DEFAULT_MODEL") or os.getenv("AIGC_CHAT_MODEL", "gpt-5.6-sol")
 
 
 def _resolve_llm_settings(shared_key: str, shared_base_url: str, shared_model: str) -> tuple[str, str, str]:

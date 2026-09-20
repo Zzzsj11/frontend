@@ -6,7 +6,7 @@ import { watchGenerationJob, type GenerationJobSnapshot } from '../utils/generat
 export interface ImageTaskOptions {
   /** WIDTHxHEIGHT，宽 × 高必须小于 8,294,400，默认 1024x1024 */
   size?: string
-  quality?: 'auto' | 'low' | 'medium' | 'high'
+  quality?: 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   /** 生成图片数量 1-4 */
   n?: number
   /** 图片 URL（或数组）：传入即按图生图处理，不传为文生图 */

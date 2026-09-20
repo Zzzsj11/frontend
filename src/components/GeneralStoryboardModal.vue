@@ -486,7 +486,7 @@ const submit = async () => {
             >
             <label v-if="!random"
               ><span>图片模型 *</span
-              ><select v-model="imageModel" disabled>
+              ><select v-model="imageModel" aria-label="图片模型">
                 <option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">
                   {{ item.label }}
                 </option>

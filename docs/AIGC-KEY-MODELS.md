@@ -6,7 +6,7 @@
 
 - 拿到新 key 后，确认它开通了哪些模型、能否替换项目现有 key
 - 排查「当前key未启用该模型」「模型未授权」类报错
-- 换 key 前评估对项目功能的影响（项目默认模型：图像 `gpt-image-2`、视频 `doubao-seedance-2.0`、LLM `gpt-5.5`，见 `backend/app/config.py`）
+- 换 key 前评估对项目功能的影响（项目默认模型：图像 `gpt-image-2`、视频 `doubao-seedance-2.0`、LLM `gpt-5.6-sol`，见 `backend/app/config.py`）
 
 ## 等价 curl
 

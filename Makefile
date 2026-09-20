@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: setup dev stop lint lint-frontend lint-backend test test-backend test-frontend test-e2e migration-check build docker-build preflight preflight-lite remote-test
+.PHONY: setup dev stop lint lint-frontend lint-backend test test-backend test-frontend test-e2e smoke smoke-backend smoke-frontend smoke-real migration-check build docker-build preflight preflight-lite remote-test
 setup:
 	npm ci
 	cd backend && .venv/bin/pip install -r requirements-dev.txt
@@ -21,6 +21,15 @@ test-frontend:
 	npm test
 test-e2e:
 	npm run test:e2e
+# 重大调整后的无费用主流程冒烟：API 完整旅程/隔离 + 浏览器 ASS/模型配置旅程。
+smoke: smoke-backend smoke-frontend
+smoke-backend:
+	cd backend && .venv/bin/pytest -q tests/test_user_journey.py::test_complete_api_user_journey tests/test_multi_user.py::test_projects_and_private_resources_are_isolated tests/test_multi_user.py::test_general_storyboard_all_empty_outline_needs_no_cast tests/test_admin_console.py::test_non_admin_cannot_access_admin_but_can_read_model_options
+smoke-frontend:
+	npm run test:e2e:smoke
+# 有真实费用；调用方必须显式指定 PLAYWRIGHT_BASE_URL（或 REMOTE_API_BASE_URL）。
+smoke-real:
+	npm run test:e2e:smoke-real
 migration-check:
 	./scripts/check-migrations.sh
 build:

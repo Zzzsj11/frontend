@@ -67,6 +67,14 @@ describe('createImageTask', () => {
     expect(body.prompt).toBe('')
     expect(body.portrait).toEqual({ description: '青衣少女', style: '古风' })
   })
+
+  it('passes GPT Image 2.5 quality values through unchanged', async () => {
+    const fetchMock = mockJsonResponse({ id: 'job-25', status: 'queued', progress: 0 })
+
+    await createImageTask('精细生成', { quality: 'max' })
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).quality).toBe('max')
+  })
 })
 
 describe('fetchPortraitPrompt', () => {
