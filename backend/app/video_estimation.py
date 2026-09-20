@@ -39,6 +39,10 @@ VIDEO_ESTIMATE_POLICIES = {
     "gemini-omni-flash-preview": VideoEstimatePolicy("yseeai", 0.72, balance_check=False, billing_mode="official_usd_estimate"),
     # ToAPIs 当前 Key 的 720p 目录价为 $0.01912/秒，按 7.2 CNY/USD 粗估。
     "grok-video-1.5": VideoEstimatePolicy("toapis", 0.137664, balance_check=False, billing_mode="supplier_usd_estimate"),
+    # ToAPIs 当前 Key 的 720p 生效价（USD/秒），按 7.2 CNY/USD 粗估。
+    "viduq3-turbo": VideoEstimatePolicy("toapis", 0.3085704, balance_check=False, billing_mode="supplier_usd_estimate"),
+    "viduq3-pro": VideoEstimatePolicy("toapis", 0.5142888, balance_check=False, billing_mode="supplier_usd_estimate"),
+    "viduq3": VideoEstimatePolicy("toapis", 0.3085704, balance_check=False, billing_mode="supplier_usd_estimate"),
     # BFL FLUX 3 HD 文生/图生官方价 $0.17/秒，按 7.2 CNY/USD 粗估。
     "flux-3-video": VideoEstimatePolicy("bfl", 1.224, balance_check=False, billing_mode="official_usd_estimate"),
     "minimax-h3": VideoEstimatePolicy("yinghe", 0.425),

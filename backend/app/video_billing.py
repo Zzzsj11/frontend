@@ -32,6 +32,9 @@ SECOND_BILLED_VIDEO_MODELS = {
     "veo-3.1-fast-generate-preview",
     "gemini-omni-flash-preview",
     "grok-video-1.5",
+    "viduq3-turbo",
+    "viduq3-pro",
+    "viduq3",
     "flux-3-video",
 }
 

@@ -1131,6 +1131,8 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         return await generate_gemini_omni_video(request, job)
     if ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "grok-toapis":
         return await generate_toapis_grok_video(request, job)
+    if ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "viduq3-toapis":
+        return await generate_toapis_viduq3_video(request, job)
     if ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "flux3-bfl":
         return await generate_bfl_flux3_video(request, job)
     is_ppio = (job.request or {}).get("_provider") == "ppio"
@@ -1406,11 +1408,19 @@ async def _poll_toapis_video(base: str, headers: dict[str, str], job: Job) -> di
         status = str(task.get("status") or "").lower()
         await jobs.update_progress(job, int(task.get("progress") or job.progress + 3))
         if status == "completed":
+            # ToAPIs 的成片与费用结算可能相差数秒；短暂补查，确保对账保留已确认费用。
+            for _ in range(3):
+                billing = task.get("billing") if isinstance(task.get("billing"), dict) else {}
+                if billing.get("status") in {"settled", "refunded"}:
+                    break
+                await asyncio.sleep(2)
+                task = await _query_toapis_video_task(base, headers, job.provider_task_id or "")
             return task
         if status == "failed":
             error = task.get("error") if isinstance(task.get("error"), dict) else {}
             reason = error.get("message") or task.get("message") or "供应商未返回失败原因"
-            raise ProviderError(f"Grok Video 1.5 生成失败：{translate_provider_error(str(reason))}；供应商响应：{_provider_error_body(task)}")
+            model = str((job.request or {}).get("model") or "ToAPIs 视频")
+            raise ProviderError(f"{model} 生成失败：{translate_provider_error(str(reason))}；供应商响应：{_provider_error_body(task)}")
     raise ProviderError("视频生成超过20分钟，已判定失败，请重新生成")
 
 
@@ -1419,13 +1429,16 @@ async def _store_toapis_video_result(job: Job, task: dict[str, Any]) -> dict[str
     data = result.get("data") if isinstance(result.get("data"), list) else []
     output = next((item for item in data if isinstance(item, dict) and item.get("url")), None)
     if not output:
-        raise ProviderError("Grok Video 1.5 生成成功但未返回视频地址")
+        model = str((job.request or {}).get("model") or "ToAPIs 视频")
+        raise ProviderError(f"{model} 生成成功但未返回视频地址")
     task_id = job.provider_task_id or str(task.get("id") or "")
     source_url = str(output["url"])
     owner_prefix = f"users/{job.user_id}/generated"
-    stored_url = await import_remote(source_url, f"{owner_prefix}/videos", f"grok-video-1.5-{task_id}.mp4")
-    stored_cover, stored_cover_thumbnail = await _video_first_frame(source_url, f"grok-video-1.5-{task_id}", job.user_id)
     request = job.request or {}
+    model = str(request.get("model") or "toapis-video")
+    safe_model = re.sub(r"[^a-zA-Z0-9._-]+", "-", model)
+    stored_url = await import_remote(source_url, f"{owner_prefix}/videos", f"{safe_model}-{task_id}.mp4")
+    stored_cover, stored_cover_thumbnail = await _video_first_frame(source_url, f"{safe_model}-{task_id}", job.user_id)
     billing = task.get("billing") if isinstance(task.get("billing"), dict) else {}
     usage = dict(task.get("usage") or {})
     usage.setdefault("output_seconds", request.get("duration") or 0)
@@ -1474,6 +1487,45 @@ async def generate_toapis_grok_video(request: VideoGenerationCreate, job: Job) -
     if not task_id:
         raise ProviderError(f"Grok Video 1.5 提交成功但未返回任务 ID；供应商响应：{_provider_error_body(created)}")
     await jobs.set_provider_task(job, "toapis-grok", task_id, idempotency_key=job.idempotency_key)
+    return await _store_toapis_video_result(job, await _poll_toapis_video(base, headers, job))
+
+
+async def generate_toapis_viduq3_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
+    base, headers = _toapis_config()
+    model = str((job.request or {}).get("_providerModelId") or request.model)
+    if model not in {"viduq3-pro", "viduq3-turbo", "viduq3"}:
+        raise ProviderError(f"不支持的 Vidu Q3 模型：{model}")
+    images = [url.strip() for url in request.image_urls if url.strip()]
+    max_images = 7 if model == "viduq3" else 2
+    if model == "viduq3" and not images:
+        raise ProviderError("Vidu Q3 参考生视频至少需要 1 张参考图")
+    if len(images) > max_images:
+        raise ProviderError(f"{model} 最多支持 {max_images} 张参考图")
+    if model == "viduq3" and request.resolution == "540p":
+        raise ProviderError("Vidu Q3 参考生视频仅支持 720p 或 1080p")
+    job.idempotency_key = f"{job.id}:viduq3:{model}"
+    headers["Idempotency-Key"] = job.idempotency_key
+    payload: dict[str, Any] = {
+        "model": model,
+        "prompt": request.prompt,
+        "duration": request.duration,
+        "resolution": request.resolution,
+        "audio": request.generate_audio,
+        "client_business_id": job.id,
+    }
+    if images:
+        payload["image_urls"] = images
+    else:
+        payload["aspect_ratio"] = request.ratio
+    await jobs.mark_provider_submitting(job)
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(f"{base}/v1/videos/generations", headers=headers, json=payload)
+        _raise_for_status(response)
+        created = response.json()
+    task_id = str(created.get("id") or created.get("task_id") or "") if isinstance(created, dict) else ""
+    if not task_id:
+        raise ProviderError(f"{model} 提交成功但未返回任务 ID；供应商响应：{_provider_error_body(created)}")
+    await jobs.set_provider_task(job, "toapis-viduq3", task_id, idempotency_key=job.idempotency_key)
     return await _store_toapis_video_result(job, await _poll_toapis_video(base, headers, job))
 
 
@@ -1843,7 +1895,7 @@ async def resume_generation(job: Job) -> dict[str, Any]:
     if job.provider in {"yseeai-omni", "yseeai-unified"} or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") in {"gemini-omni-unified", "veo-unified"}:
         base, headers = _yseeai_config()
         return await _store_gemini_omni_result(job, await _poll_gemini_omni(base, headers, job))
-    if job.provider == "toapis-grok" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "grok-toapis":
+    if job.provider in {"toapis-grok", "toapis-viduq3"} or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") in {"grok-toapis", "viduq3-toapis"}:
         base, headers = _toapis_config()
         return await _store_toapis_video_result(job, await _poll_toapis_video(base, headers, job))
     if job.provider == "bfl-flux3" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "flux3-bfl":
@@ -1892,7 +1944,7 @@ async def query_provider_task(kind: str, task_id: str, provider: str | None = No
     if provider in {"yseeai-omni", "yseeai-unified"}:
         base, headers = _yseeai_config()
         return await _query_gemini_omni_task(base, headers, task_id)
-    if provider == "toapis-grok":
+    if provider in {"toapis-grok", "toapis-viduq3"}:
         base, headers = _toapis_config()
         return await _query_toapis_video_task(base, headers, task_id)
     if provider == "bfl-flux3":
@@ -1935,7 +1987,7 @@ async def store_provider_result(job: Job, data: dict[str, Any]) -> dict[str, Any
         return await _store_happyhorse_result(job, data)
     if job.provider in {"yseeai-omni", "yseeai-unified"} or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") in {"gemini-omni-unified", "veo-unified"}:
         return await _store_gemini_omni_result(job, data)
-    if job.provider == "toapis-grok" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "grok-toapis":
+    if job.provider in {"toapis-grok", "toapis-viduq3"} or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") in {"grok-toapis", "viduq3-toapis"}:
         return await _store_toapis_video_result(job, data)
     if job.provider == "bfl-flux3" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "flux3-bfl":
         return await _store_bfl_flux3_result(job, data)

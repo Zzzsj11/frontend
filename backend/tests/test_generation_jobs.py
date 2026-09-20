@@ -2679,6 +2679,84 @@ async def test_grok_video_uses_toapis_reference_contract(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model", "images", "resolution", "expected_extra"),
+    [
+        ("viduq3-turbo", [], "540p", {"aspect_ratio": "16:9"}),
+        ("viduq3-pro", ["https://cdn.test/a.jpg"], "720p", {"image_urls": ["https://cdn.test/a.jpg"]}),
+        ("viduq3", ["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"], "720p", {"image_urls": ["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"]}),
+    ],
+)
+async def test_viduq3_uses_toapis_contract(monkeypatch, model, images, resolution, expected_extra) -> None:
+    import httpx
+
+    from app import providers
+    from app.jobs import Job
+    from app.schemas import VideoGenerationCreate
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            captured.update(url=url, headers=headers, payload=json)
+            return httpx.Response(200, json={"id": "vidu-task-1", "status": "queued"}, request=httpx.Request("POST", url))
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    async def set_task(job, provider, task_id, **_kwargs):
+        job.provider = provider
+        job.provider_task_id = task_id
+
+    async def poll(*_args, **_kwargs):
+        return {"status": "completed", "result": {"data": [{"url": "https://files.test/vidu.mp4"}]}}
+
+    async def store(job, task):
+        return {"provider": "toapis", "providerTaskId": job.provider_task_id, "sourceUrl": task["result"]["data"][0]["url"]}
+
+    monkeypatch.setattr(providers, "_toapis_config", lambda: ("https://toapis.test", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(providers.jobs, "mark_provider_submitting", noop)
+    monkeypatch.setattr(providers.jobs, "set_provider_task", set_task)
+    monkeypatch.setattr(providers, "_poll_toapis_video", poll)
+    monkeypatch.setattr(providers, "_store_toapis_video_result", store)
+    job = Job(id=f"job-{model}", kind="video", user_id="u1", request={"model": model, "_providerModelId": model})
+    request = VideoGenerationCreate(
+        prompt="测试",
+        model=model,
+        image_urls=images,
+        ratio="16:9",
+        resolution=resolution,
+        duration=4,
+        generate_audio=False,
+    )
+
+    result = await providers.generate_toapis_viduq3_video(request, job)
+
+    assert captured["url"] == "https://toapis.test/v1/videos/generations"
+    assert captured["payload"] == {
+        "model": model,
+        "prompt": "测试",
+        "duration": 4,
+        "resolution": resolution,
+        "audio": False,
+        "client_business_id": f"job-{model}",
+        **expected_extra,
+    }
+    assert job.provider == "toapis-viduq3"
+    assert result["providerTaskId"] == "vidu-task-1"
+
+
+@pytest.mark.asyncio
 async def test_flux3_uses_bfl_keyframe_contract(monkeypatch) -> None:
     import httpx
 

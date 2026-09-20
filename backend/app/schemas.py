@@ -159,7 +159,7 @@ class GeneralStoryboardCreate(BaseModel):
     age_group: str
     visual_style: str
     ratio: Literal["16:9", "9:16", "1:1", "4:3"] = "16:9"
-    resolution: Literal["480p", "720p", "1080p", "4k"] = "720p"
+    resolution: Literal["480p", "540p", "720p", "1080p", "4k"] = "720p"
     image_model: str = Field(default="gpt-image-2", min_length=1, max_length=160)
     video_model: str = Field(default="doubao-seedance-2.0", min_length=1, max_length=160)
     empty_shot_count: int = Field(ge=0, le=GENERAL_STORYBOARD_MAX_SHOTS)
@@ -182,7 +182,7 @@ class RandomGeneralStoryboardCreate(BaseModel):
     secondary_category: str | None = None
     tertiary_category: str | None = None
     ratio: Literal["16:9", "9:16", "1:1", "4:3"] = "16:9"
-    resolution: Literal["480p", "720p", "1080p", "4k"] = "720p"
+    resolution: Literal["480p", "540p", "720p", "1080p", "4k"] = "720p"
     video_model: str = Field(default="doubao-seedance-2.0", min_length=1, max_length=160)
     empty_shot_count: int = Field(default=3, ge=0, le=GENERAL_STORYBOARD_MAX_SHOTS)
     character_shot_count: int = Field(default=14, ge=0, le=GENERAL_STORYBOARD_MAX_SHOTS)
@@ -241,7 +241,7 @@ class VideoGenerationCreate(BaseModel):
     prompt: str = Field(min_length=1, max_length=30_000)
     duration: int = Field(default=DEFAULT_VIDEO_DURATION, ge=MIN_VIDEO_DURATION, le=MAX_VIDEO_DURATION)
     ratio: Literal["16:9", "9:16", "1:1", "4:3"] = "16:9"
-    resolution: Literal["480p", "720p", "1080p", "4k"] = "720p"
+    resolution: Literal["480p", "540p", "720p", "1080p", "4k"] = "720p"
     image_urls: list[str] = Field(default_factory=list, max_length=10)
     video_urls: list[str] = Field(default_factory=list, max_length=1)
     audio_urls: list[str] = Field(default_factory=list, max_length=3)
