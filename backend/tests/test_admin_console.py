@@ -30,6 +30,18 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     direct_h3 = next(x for x in options if x["id"] == "minimax-h3")
     ppio_sd = next(x for x in options if x["id"] == "doubao-seedance-2.0-ppio")
     ppio_h3 = next(x for x in options if x["id"] == "minimax-h3-ppio")
+    new_models = {
+        x["id"]: x
+        for x in options
+        if x["id"]
+        in {
+            "doubao-seedance-2.0-mini",
+            "doubao-seedance-2.0-fast",
+            "wan3.0-video",
+            "wan3.0-video-prime",
+            "kling-v3",
+        }
+    }
     assert h3["name"] == "H3（RunningHub，2并发，仅测试时用）"
     assert h3["capabilities"]["executionConcurrency"] == 2
     assert h3["capabilities"]["resolutionLabels"]["720p"] == "736P"
@@ -57,6 +69,17 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     assert ppio_h3["name"] == "H3（PPIO）"
     assert ppio_h3["capabilities"]["providerCode"] == "ppio"
     assert ppio_h3["capabilities"]["resolutionLabels"]["720p"] == "768P"
+    assert {model_id: model["name"] for model_id, model in new_models.items()} == {
+        "doubao-seedance-2.0-mini": "SD2.0 Mini（英和）",
+        "doubao-seedance-2.0-fast": "SD2.0 Fast（英和）",
+        "wan3.0-video": "Wan3.0（英和）",
+        "wan3.0-video-prime": "Wan3.0 Prime（英和）",
+        "kling-v3": "Kling V3（英和）",
+    }
+    assert new_models["doubao-seedance-2.0-mini"]["capabilities"]["resolutions"] == ["480p", "720p"]
+    assert new_models["wan3.0-video"]["capabilities"]["resolutions"] == ["480p", "720p", "1080p"]
+    assert new_models["wan3.0-video"]["capabilities"]["providerResolutionMap"]["720p"] == "720P"
+    assert new_models["kling-v3"]["capabilities"]["resolutions"] == ["720p", "1080p"]
     client.delete(f"/api/admin/users/{created['id']}")
     # Restore the shared TestClient's refresh cookie for subsequent auth tests.
     restored = client.post("/api/auth/login", json={"username": "admin", "password": "secure-admin-123"})

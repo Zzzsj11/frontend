@@ -15,6 +15,12 @@ def test_provider_resolution_uses_model_capability_mapping_and_legacy_fallback()
     assert video_metadata.provider_resolution("doubao-seedance-2.0-ppio", "1080p") == "1080P"
 
 
+def test_wan_resolution_mapping_keeps_ui_values_out_of_provider_payload():
+    capabilities = {"providerResolutionMap": {"480p": "480P", "720p": "720P", "1080p": "1080P"}}
+    assert video_metadata.provider_resolution("wan3.0-video", "480p", capabilities) == "480P"
+    assert video_metadata.provider_resolution("wan3.0-video-prime", "1080p", capabilities) == "1080P"
+
+
 @pytest.mark.asyncio
 async def test_probe_video_url_reads_actual_encoded_dimensions(tmp_path, monkeypatch):
     source = tmp_path / "source.mp4"

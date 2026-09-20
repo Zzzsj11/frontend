@@ -282,6 +282,108 @@ async def seed_system_data() -> None:
                 False,
             ),
             (
+                "model-sd20-mini",
+                provider.id,
+                "doubao-seedance-2.0-mini",
+                "SD2.0 Mini（英和）",
+                "video",
+                "doubao-seedance-2.0-mini",
+                {
+                    "durations": {"min": 4, "max": 15},
+                    "ratios": ["16:9", "9:16", "4:3", "1:1"],
+                    "resolutions": ["480p", "720p"],
+                    "nativeAudio": True,
+                    "executionPool": "yinghe-generation",
+                    "executionConcurrency": 200,
+                    "providerCode": "yinghe",
+                    "billing": video_estimate_policy("doubao-seedance-2.0-mini").capability(),
+                    "sortOrder": 11,
+                },
+                False,
+            ),
+            (
+                "model-sd20-fast",
+                provider.id,
+                "doubao-seedance-2.0-fast",
+                "SD2.0 Fast（英和）",
+                "video",
+                "doubao-seedance-2.0-fast",
+                {
+                    "durations": {"min": 4, "max": 15},
+                    "ratios": ["16:9", "9:16", "4:3", "1:1"],
+                    "resolutions": ["480p", "720p"],
+                    "nativeAudio": True,
+                    "executionPool": "yinghe-generation",
+                    "executionConcurrency": 200,
+                    "providerCode": "yinghe",
+                    "billing": video_estimate_policy("doubao-seedance-2.0-fast").capability(),
+                    "sortOrder": 12,
+                },
+                False,
+            ),
+            (
+                "model-wan30",
+                provider.id,
+                "wan3.0-video",
+                "Wan3.0（英和）",
+                "video",
+                "wan3.0-video",
+                {
+                    "durations": {"min": 4, "max": 15},
+                    "ratios": ["16:9", "9:16", "4:3", "1:1"],
+                    "resolutions": ["480p", "720p", "1080p"],
+                    "providerResolutionMap": {"480p": "480P", "720p": "720P", "1080p": "1080P"},
+                    "nativeAudio": True,
+                    "executionPool": "yinghe-generation",
+                    "executionConcurrency": 200,
+                    "providerCode": "yinghe",
+                    "billing": video_estimate_policy("wan3.0-video").capability(),
+                    "sortOrder": 21,
+                },
+                False,
+            ),
+            (
+                "model-wan30-prime",
+                provider.id,
+                "wan3.0-video-prime",
+                "Wan3.0 Prime（英和）",
+                "video",
+                "wan3.0-video-prime",
+                {
+                    "durations": {"min": 4, "max": 15},
+                    "ratios": ["16:9", "9:16", "4:3", "1:1"],
+                    "resolutions": ["480p", "720p", "1080p"],
+                    "providerResolutionMap": {"480p": "480P", "720p": "720P", "1080p": "1080P"},
+                    "nativeAudio": True,
+                    "executionPool": "yinghe-generation",
+                    "executionConcurrency": 200,
+                    "providerCode": "yinghe",
+                    "billing": video_estimate_policy("wan3.0-video-prime").capability(),
+                    "sortOrder": 22,
+                },
+                False,
+            ),
+            (
+                "model-kling-v3",
+                provider.id,
+                "kling-v3",
+                "Kling V3（英和）",
+                "video",
+                "kling-v3",
+                {
+                    "durations": {"min": 4, "max": 15},
+                    "ratios": ["16:9", "9:16", "1:1"],
+                    "resolutions": ["720p", "1080p"],
+                    "nativeAudio": True,
+                    "executionPool": "yinghe-generation",
+                    "executionConcurrency": 200,
+                    "providerCode": "yinghe",
+                    "billing": video_estimate_policy("kling-v3").capability(),
+                    "sortOrder": 23,
+                },
+                False,
+            ),
+            (
                 "model-sd20-ppio",
                 ppio_provider.id,
                 "doubao-seedance-2.0-ppio",
@@ -334,7 +436,18 @@ async def seed_system_data() -> None:
             ),
         ]
         for mid, model_provider_id, code, name, modality, provider_id, capabilities, is_default in defaults:
-            if code in {"doubao-seedance-2.0", "minimax-h3-runninghub", "minimax-h3", "doubao-seedance-2.0-ppio", "minimax-h3-ppio"}:
+            if code in {
+                "doubao-seedance-2.0",
+                "doubao-seedance-2.0-mini",
+                "doubao-seedance-2.0-fast",
+                "wan3.0-video",
+                "wan3.0-video-prime",
+                "kling-v3",
+                "minimax-h3-runninghub",
+                "minimax-h3",
+                "doubao-seedance-2.0-ppio",
+                "minimax-h3-ppio",
+            }:
                 capabilities = {**capabilities, "systemManaged": True}
             ppio_model_enabled = not code.endswith("-ppio") or bool(settings.ppio_api_key) or settings.app_env != "production"
             model = await session.get(AiModelModel, mid)
@@ -353,7 +466,7 @@ async def seed_system_data() -> None:
                         is_default=is_default,
                     )
                 )
-            elif code in {"doubao-seedance-2.0", "minimax-h3-runninghub", "minimax-h3", "doubao-seedance-2.0-ppio", "minimax-h3-ppio"}:
+            elif (capabilities or {}).get("systemManaged"):
                 # 模型能力属于系统种子配置；启动时同步升级已有环境，避免仅新库生效。
                 model.name = name
                 model.provider_model_id = provider_id or code

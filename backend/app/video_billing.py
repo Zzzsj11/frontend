@@ -15,6 +15,13 @@ ZERO = Decimal("0")
 YINGHE_SD20_DISCOUNT_RATE = Decimal("0.83")
 PPIO_SD20_DISCOUNT_RATE = Decimal("0.80")
 PPIO_H3_DISCOUNT_RATE = Decimal("0.85")
+TOKEN_BILLED_VIDEO_MODELS = {
+    "doubao-seedance-2.0",
+    "doubao-seedance-2.0-mini",
+    "doubao-seedance-2.0-fast",
+    "doubao-seedance-2.0-ppio",
+}
+SECOND_BILLED_VIDEO_MODELS = {"wan3.0-video", "wan3.0-video-prime", "kling-v3"}
 
 
 def video_discount_rate(*, model: str, provider: str) -> Decimal:
@@ -136,7 +143,7 @@ async def reconcile_video_job(
         usage_type = "runninghub_coins"
         usage_unit = "RH币"
         quantity = _decimal(metrics.get("consumeCoins"))
-    elif model in {"doubao-seedance-2.0", "doubao-seedance-2.0-ppio"}:
+    elif model in TOKEN_BILLED_VIDEO_MODELS:
         usage_type = "completion_tokens"
         usage_unit = "Token"
         quantity = _decimal((usage.output_tokens if usage else 0) or metrics.get("completion_tokens") or metrics.get("completionTokens"))
@@ -147,10 +154,11 @@ async def reconcile_video_job(
                 else await _price_rule(db, model=model, provider=provider, resolution=resolution, at=completed_at)
             )
             billing_status = "priced" if rule else "unpriced"
-    elif (model == "minimax-h3" and provider == "yinghe-h3") or (model == "minimax-h3-ppio" and provider == "ppio"):
+    elif model in SECOND_BILLED_VIDEO_MODELS or (model == "minimax-h3" and provider == "yinghe-h3") or (model == "minimax-h3-ppio" and provider == "ppio"):
         usage_type = "output_seconds"
         usage_unit = "秒"
-        quantity = _decimal(metrics.get("output_seconds") or metrics.get("outputSeconds"))
+        reported_seconds = metrics.get("output_seconds") or metrics.get("outputSeconds")
+        quantity = _decimal(reported_seconds or ((job.result or {}).get("duration") if not failed else 0) or ((job.request or {}).get("duration") if not failed else 0))
         if quantity > 0:
             rule = (
                 _preloaded_price_rule(pricing_rules, model=model, provider=provider, resolution=resolution, at=completed_at)

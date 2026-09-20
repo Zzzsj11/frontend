@@ -607,12 +607,13 @@ async def _submit_seedance_video(request: VideoGenerationCreate, job: Job, image
     headers["Idempotency-Key"] = job.idempotency_key
     content: list[dict[str, Any]] = [{"type": "text", "text": request.prompt}]
     content.extend({"type": "image_url", "image_url": {"url": url}, "role": "reference_image"} for url in image_urls)
+    resolution_map = ((job.request or {}).get("_capabilities") or {}).get("providerResolutionMap") or {}
     payload = {
         "model": request.model or settings.video_model,
         "content": content,
         "generate_audio": request.generate_audio,
         "ratio": request.ratio,
-        "resolution": request.resolution,
+        "resolution": str(resolution_map.get(request.resolution) or request.resolution),
         "duration": request.duration,
         "watermark": request.watermark,
         # 让上游返回尾帧图做封面，免去本地 ffmpeg 抽帧

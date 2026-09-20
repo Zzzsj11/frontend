@@ -79,6 +79,32 @@ async def _seed_billing_fixtures() -> None:
                 status="active",
                 notes="test",
             ),
+            VideoPricingRuleModel(
+                id="test-price-sd-mini-720",
+                model="doubao-seedance-2.0-mini",
+                provider="yinghe",
+                resolution="720p",
+                usage_type="completion_tokens",
+                unit_size=1_000_000,
+                unit_price=23,
+                currency="CNY",
+                effective_at=datetime(1970, 1, 1, tzinfo=timezone.utc),
+                status="active",
+                notes="test",
+            ),
+            VideoPricingRuleModel(
+                id="test-price-wan-prime-720",
+                model="wan3.0-video-prime",
+                provider="yinghe",
+                resolution="720p",
+                usage_type="output_seconds",
+                unit_size=1,
+                unit_price=Decimal("0.9"),
+                currency="CNY",
+                effective_at=datetime(1970, 1, 1, tzinfo=timezone.utc),
+                status="active",
+                notes="test",
+            ),
         ):
             db.add(rule)
         jobs = (
@@ -141,6 +167,24 @@ async def _seed_billing_fixtures() -> None:
                 provider="ppio",
                 finished_at=now,
             ),
+            GenerationJobModel(
+                id="billing-sd-mini-ok",
+                user_id="user-admin",
+                kind="video",
+                status="succeeded",
+                request={"model": "doubao-seedance-2.0-mini", "resolution": "720p"},
+                provider="yinghe",
+                finished_at=now,
+            ),
+            GenerationJobModel(
+                id="billing-wan-prime-ok",
+                user_id="user-admin",
+                kind="video",
+                status="succeeded",
+                request={"model": "wan3.0-video-prime", "resolution": "720p", "duration": 4},
+                provider="yinghe",
+                finished_at=now,
+            ),
         )
         db.add_all(jobs)
         db.add_all(
@@ -197,6 +241,26 @@ async def _seed_billing_fixtures() -> None:
                     total_tokens=162_745,
                     raw_usage={"output_seconds": 5, "completion_tokens": 162_745},
                 ),
+                TokenUsageModel(
+                    id="billing-usage-sd-mini",
+                    user_id="user-admin",
+                    generation_job_id="billing-sd-mini-ok",
+                    operation="generation_video",
+                    provider="yinghe",
+                    model="doubao-seedance-2.0-mini",
+                    output_tokens=100_000,
+                    total_tokens=100_000,
+                    raw_usage={"completion_tokens": 100_000},
+                ),
+                TokenUsageModel(
+                    id="billing-usage-wan-prime",
+                    user_id="user-admin",
+                    generation_job_id="billing-wan-prime-ok",
+                    operation="generation_video",
+                    provider="yinghe",
+                    model="wan3.0-video-prime",
+                    raw_usage={"output_seconds": 4},
+                ),
             )
         )
         await db.commit()
@@ -236,6 +300,10 @@ async def test_video_billing_reconciles_success_failed_and_excluded(client):
     assert items["billing-ppio-sd-ok"]["discountLabel"] == "PPIO 8 折"
     assert items["billing-ppio-h3-ok"]["amount"] == pytest.approx(2.125)
     assert items["billing-ppio-h3-ok"]["discountLabel"] == "PPIO 85 折"
+    assert items["billing-sd-mini-ok"]["amount"] == pytest.approx(2.3)
+    assert items["billing-sd-mini-ok"]["rateLabel"] == "¥23 / 100万 Token"
+    assert items["billing-wan-prime-ok"]["amount"] == pytest.approx(3.6)
+    assert items["billing-wan-prime-ok"]["rateLabel"] == "¥0.9 / 秒"
 
     failed = client.get("/api/admin/video-billing", params={"status": "failed", "q": "billing-"}).json()
     assert {item["generationJobId"] for item in failed["items"]} == {"billing-h3-failed", "billing-rh-failed"}
@@ -264,14 +332,14 @@ async def test_video_billing_reconciles_success_failed_and_excluded(client):
 
     first_page = client.get("/api/admin/video-billing", params={"q": "billing-", "limit": 1, "offset": 0}).json()
     second_page = client.get("/api/admin/video-billing", params={"q": "billing-", "limit": 1, "offset": 1}).json()
-    assert first_page["total"] == second_page["total"] == 5
+    assert first_page["total"] == second_page["total"] == 7
     assert len(first_page["items"]) == len(second_page["items"]) == 1
     assert first_page["items"][0]["id"] != second_page["items"][0]["id"]
     assert first_page["summary"] == second_page["summary"]
 
     # 重复核算必须更新同一工单账单，不得重复入账。
     assert client.post("/api/admin/video-billing/reconcile").status_code == 200
-    assert client.get("/api/admin/video-billing", params={"q": "billing-"}).json()["total"] == 5
+    assert client.get("/api/admin/video-billing", params={"q": "billing-"}).json()["total"] == 7
 
 
 def test_video_billing_requires_admin(client):
