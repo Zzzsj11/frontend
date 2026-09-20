@@ -203,6 +203,16 @@ async def seed_system_data() -> None:
                 status="active",
             )
             session.add(toapis_provider)
+        bfl_provider = await session.get(AiProviderModel, "provider-bfl")
+        if not bfl_provider:
+            bfl_provider = AiProviderModel(
+                id="provider-bfl",
+                code="bfl",
+                name="Black Forest Labs",
+                base_url="https://api.bfl.ai",
+                status="active",
+            )
+            session.add(bfl_provider)
         defaults = [
             ("model-chat-default", provider.id, "chat-default", "默认 Chat 模型", "chat", "", {"structuredOutput": True}, True),
             ("model-img2", provider.id, "gpt-image-2", "Img2", "image", "gpt-image-2", {"ratios": ["16:9", "9:16", "4:3", "1:1"], "imageToImage": True}, True),
@@ -535,6 +545,34 @@ async def seed_system_data() -> None:
                 False,
             ),
             (
+                "model-flux-3-video-bfl",
+                bfl_provider.id,
+                "flux-3-video",
+                "FLUX 3（BFL，仅测试10刀额度）",
+                "video",
+                "flux-3-video",
+                {
+                    "durations": {"min": 5, "max": 20},
+                    "ratios": ["16:9", "9:16", "4:3", "1:1"],
+                    "resolutions": ["720p", "1080p", "4k"],
+                    "resolutionLabels": {"720p": "HD", "1080p": "FHD", "4k": "UHD"},
+                    "providerResolutionMap": {"720p": "hd", "1080p": "fhd", "4k": "uhd"},
+                    "referenceImage": {"min": 0, "max": 10},
+                    "referenceVideo": {"min": 0, "max": 1},
+                    "referenceAudio": {"min": 0, "max": 0},
+                    "providerProtocol": "flux3-bfl",
+                    "nativeAudio": True,
+                    "executionPool": "bfl-flux3-test",
+                    "executionConcurrency": 1,
+                    "providerCode": "bfl",
+                    "testOnly": True,
+                    "creditLimitLabel": "仅测试10刀额度",
+                    "billing": video_estimate_policy("flux-3-video").capability(),
+                    "sortOrder": 28,
+                },
+                False,
+            ),
+            (
                 "model-h3-ppio",
                 ppio_provider.id,
                 "minimax-h3-ppio",
@@ -578,6 +616,7 @@ async def seed_system_data() -> None:
                 "veo-3.1-fast-generate-preview",
                 "gemini-omni-flash-preview",
                 "grok-video-1.5",
+                "flux-3-video",
                 "minimax-h3-runninghub",
                 "minimax-h3",
                 "doubao-seedance-2.0-ppio",
@@ -591,6 +630,8 @@ async def seed_system_data() -> None:
                 if model_provider_id == yseeai_provider.id
                 else bool(settings.toapis_api_key)
                 if model_provider_id == toapis_provider.id
+                else bool(settings.bfl_api_key)
+                if model_provider_id == bfl_provider.id
                 else True
             )
             model = await session.get(AiModelModel, mid)

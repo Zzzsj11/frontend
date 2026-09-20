@@ -307,6 +307,12 @@ def _toapis_config() -> tuple[str, dict[str, str]]:
     return settings.toapis_api_base_url, _headers(settings.toapis_api_key)
 
 
+def _bfl_config() -> tuple[str, dict[str, str]]:
+    if not settings.bfl_api_key:
+        raise ProviderError("BFL_API_KEY 未配置")
+    return settings.bfl_api_base_url, {"x-key": settings.bfl_api_key, "Content-Type": "application/json"}
+
+
 async def _query_task(client: httpx.AsyncClient, url: str, headers: dict[str, str]) -> dict[str, Any]:
     response = await client.get(url, headers=headers)
     _raise_for_status(response)
@@ -1035,6 +1041,8 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         return await generate_gemini_omni_video(request, job)
     if ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "grok-toapis":
         return await generate_toapis_grok_video(request, job)
+    if ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "flux3-bfl":
+        return await generate_bfl_flux3_video(request, job)
     is_ppio = (job.request or {}).get("_provider") == "ppio"
     submit = _submit_ppio_seedance_video if is_ppio else _submit_seedance_video
     task_id, created, base, headers = await submit(request, job, request.image_urls)
@@ -1379,6 +1387,108 @@ async def generate_toapis_grok_video(request: VideoGenerationCreate, job: Job) -
     return await _store_toapis_video_result(job, await _poll_toapis_video(base, headers, job))
 
 
+async def _query_bfl_flux3_task(base: str, headers: dict[str, str], task_id: str) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.get(f"{base}/v1/get_result", headers=headers, params={"id": task_id})
+        _raise_for_status(response)
+        body = response.json()
+    if not isinstance(body, dict):
+        raise ProviderError("BFL 返回了无法解析的任务状态")
+    return body
+
+
+async def _poll_bfl_flux3(base: str, headers: dict[str, str], job: Job) -> dict[str, Any]:
+    deadline = time.monotonic() + _remaining_video_job_timeout(job)
+    consecutive_errors = 0
+    while time.monotonic() < deadline:
+        await asyncio.sleep(H3_POLL_INTERVAL_SECONDS)
+        try:
+            task = await _query_bfl_flux3_task(base, headers, job.provider_task_id or "")
+        except (httpx.HTTPError, ValueError, ProviderError) as exc:
+            consecutive_errors += 1
+            if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS:
+                raise ProviderError(f"BFL 状态查询连续失败：{exc}") from exc
+            continue
+        consecutive_errors = 0
+        status = str(task.get("status") or "")
+        progress = task.get("progress")
+        await jobs.update_progress(job, int(progress if isinstance(progress, (int, float)) else job.progress + 3))
+        if status == "Ready":
+            return task
+        if status in {"Error", "Request Moderated", "Content Moderated", "Task not found"}:
+            reason = task.get("details") or task.get("result") or status
+            raise ProviderError(f"FLUX 3 生成失败：{reason}；供应商响应：{_provider_error_body(task)}")
+    raise ProviderError("视频生成超过20分钟，已判定失败，请重新生成")
+
+
+async def _store_bfl_flux3_result(job: Job, task: dict[str, Any]) -> dict[str, Any]:
+    result = task.get("result") if isinstance(task.get("result"), dict) else {}
+    source_url = str(result.get("sample") or result.get("url") or "")
+    if not source_url:
+        raise ProviderError("FLUX 3 生成成功但未返回视频地址")
+    task_id = job.provider_task_id or str(task.get("id") or "")
+    owner_prefix = f"users/{job.user_id}/generated"
+    stored_url = await import_remote(source_url, f"{owner_prefix}/videos", f"flux-3-{task_id}.mp4")
+    stored_cover, stored_cover_thumbnail = await _video_first_frame(source_url, f"flux-3-{task_id}", job.user_id)
+    request = job.request or {}
+    cost = task.get("cost")
+    usage = dict(task.get("usage") or {})
+    usage.setdefault("output_seconds", request.get("duration") or 0)
+    if isinstance(cost, (int, float)):
+        usage["credits"] = cost
+        usage["cost_usd"] = float(cost) * 0.01
+    return {
+        "provider": "bfl",
+        "providerTaskId": task_id,
+        "model": request.get("model") or "flux-3-video",
+        "usage": usage,
+        "videoUrl": stored_url,
+        "coverUrl": stored_cover,
+        "coverThumbnailUrl": stored_cover_thumbnail,
+        "sourceUrl": source_url,
+        "duration": request.get("duration"),
+        "ratio": request.get("ratio"),
+    }
+
+
+async def generate_bfl_flux3_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
+    base, headers = _bfl_config()
+    images = [url.strip() for url in request.image_urls if url.strip()]
+    videos = [url.strip() for url in request.video_urls if url.strip()]
+    if images and videos:
+        raise ProviderRejectedError("FLUX 3 图片关键帧和视频续编不能同时使用")
+    mode = "v2v" if videos else "i2v" if images else "t2v"
+    resolution_map = ((job.request or {}).get("_capabilities") or {}).get("providerResolutionMap") or {}
+    job.idempotency_key = f"{job.id}:flux3:{mode}"
+    headers["Idempotency-Key"] = job.idempotency_key
+    payload: dict[str, Any] = {
+        "mode": mode,
+        "prompt": request.prompt,
+        "aspect_ratio": request.ratio,
+        "duration": request.duration,
+        "resolution": str(resolution_map.get(request.resolution) or "hd"),
+        "version": "latest",
+        "generate_audio": request.generate_audio,
+        "safety_tolerance": 2,
+        "draft": False,
+        "user": job.user_id,
+    }
+    if images:
+        payload["keyframes"] = images
+    elif videos:
+        payload["start_video"] = videos[0]
+    await jobs.mark_provider_submitting(job)
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(f"{base}/v1/flux-3-video", headers=headers, json=payload)
+        _raise_for_status(response)
+        created = response.json()
+    task_id = str(created.get("id") or "") if isinstance(created, dict) else ""
+    if not task_id:
+        raise ProviderError(f"FLUX 3 提交成功但未返回任务 ID；供应商响应：{_provider_error_body(created)}")
+    await jobs.set_provider_task(job, "bfl-flux3", task_id, idempotency_key=job.idempotency_key)
+    return await _store_bfl_flux3_result(job, await _poll_bfl_flux3(base, headers, job))
+
+
 def _h3_aspect_ratio(ratio: str) -> str:
     return {
         "16:9": "16:9 (Widescreen)",
@@ -1643,6 +1753,9 @@ async def resume_generation(job: Job) -> dict[str, Any]:
     if job.provider == "toapis-grok" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "grok-toapis":
         base, headers = _toapis_config()
         return await _store_toapis_video_result(job, await _poll_toapis_video(base, headers, job))
+    if job.provider == "bfl-flux3" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "flux3-bfl":
+        base, headers = _bfl_config()
+        return await _store_bfl_flux3_result(job, await _poll_bfl_flux3(base, headers, job))
     if job.kind == "image":
         base, headers = _image_config()
         url, timeout = f"{base}/image/generation/tasks/{job.provider_task_id}", IMAGE_POLL_TIMEOUT_SECONDS
@@ -1686,6 +1799,9 @@ async def query_provider_task(kind: str, task_id: str, provider: str | None = No
     if provider == "toapis-grok":
         base, headers = _toapis_config()
         return await _query_toapis_video_task(base, headers, task_id)
+    if provider == "bfl-flux3":
+        base, headers = _bfl_config()
+        return await _query_bfl_flux3_task(base, headers, task_id)
     if provider == "ppio":
         base, headers = _ppio_config()
         async with httpx.AsyncClient(timeout=60) as client:
@@ -1723,6 +1839,8 @@ async def store_provider_result(job: Job, data: dict[str, Any]) -> dict[str, Any
         return await _store_gemini_omni_result(job, data)
     if job.provider == "toapis-grok" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "grok-toapis":
         return await _store_toapis_video_result(job, data)
+    if job.provider == "bfl-flux3" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "flux3-bfl":
+        return await _store_bfl_flux3_result(job, data)
     task_id = job.provider_task_id or ""
     if job.kind == "image":
         return await _store_image_result(job, task_id, data, {})

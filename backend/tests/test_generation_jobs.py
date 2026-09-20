@@ -2655,3 +2655,82 @@ async def test_grok_video_uses_toapis_reference_contract(monkeypatch) -> None:
     }
     assert job.provider == "toapis-grok"
     assert result["providerTaskId"] == "grok-task-1"
+
+
+@pytest.mark.asyncio
+async def test_flux3_uses_bfl_keyframe_contract(monkeypatch) -> None:
+    import httpx
+
+    from app import providers
+    from app.jobs import Job
+    from app.schemas import VideoGenerationCreate
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            captured.update(url=url, headers=headers, payload=json)
+            return httpx.Response(200, json={"id": "flux-task-1", "polling_url": "https://poll.test/result"}, request=httpx.Request("POST", url))
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    async def set_task(job, provider, task_id, **_kwargs):
+        job.provider = provider
+        job.provider_task_id = task_id
+
+    async def poll(*_args, **_kwargs):
+        return {"id": "flux-task-1", "status": "Ready", "result": {"sample": "https://files.test/flux.mp4"}, "cost": 85}
+
+    async def store(job, task):
+        return {"provider": "bfl", "providerTaskId": job.provider_task_id, "sourceUrl": task["result"]["sample"]}
+
+    monkeypatch.setattr(providers, "_bfl_config", lambda: ("https://api.bfl.test", {"x-key": "test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(providers.jobs, "mark_provider_submitting", noop)
+    monkeypatch.setattr(providers.jobs, "set_provider_task", set_task)
+    monkeypatch.setattr(providers, "_poll_bfl_flux3", poll)
+    monkeypatch.setattr(providers, "_store_bfl_flux3_result", store)
+    job = Job(
+        id="job-flux3",
+        kind="video",
+        user_id="u1",
+        request={"model": "flux-3-video", "_capabilities": {"providerResolutionMap": {"1080p": "fhd"}}},
+    )
+    request = VideoGenerationCreate(
+        prompt="测试",
+        model="flux-3-video",
+        image_urls=["https://cdn.test/start.jpg", "https://cdn.test/end.jpg"],
+        ratio="16:9",
+        resolution="1080p",
+        duration=8,
+        generate_audio=False,
+    )
+
+    result = await providers.generate_bfl_flux3_video(request, job)
+
+    assert captured["url"] == "https://api.bfl.test/v1/flux-3-video"
+    assert captured["payload"] == {
+        "mode": "i2v",
+        "prompt": "测试",
+        "aspect_ratio": "16:9",
+        "duration": 8,
+        "resolution": "fhd",
+        "version": "latest",
+        "generate_audio": False,
+        "safety_tolerance": 2,
+        "draft": False,
+        "user": "u1",
+        "keyframes": ["https://cdn.test/start.jpg", "https://cdn.test/end.jpg"],
+    }
+    assert job.provider == "bfl-flux3"
+    assert result["providerTaskId"] == "flux-task-1"
