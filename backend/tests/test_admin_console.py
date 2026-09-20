@@ -40,6 +40,9 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
             "wan3.0-video",
             "wan3.0-video-prime",
             "kling-v3",
+            "happyhorse-1.1-t2v",
+            "happyhorse-1.1-i2v",
+            "happyhorse-1.1-r2v",
         }
     }
     assert h3["name"] == "H3（RunningHub，2并发，仅测试时用）"
@@ -75,6 +78,9 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
         "wan3.0-video": "Wan3.0（英和）",
         "wan3.0-video-prime": "Wan3.0 Prime（英和）",
         "kling-v3": "Kling V3（英和）",
+        "happyhorse-1.1-t2v": "HappyHorse 1.1 文生（英和）",
+        "happyhorse-1.1-i2v": "HappyHorse 1.1 图生（英和）",
+        "happyhorse-1.1-r2v": "HappyHorse 1.1 参考生（英和）",
     }
     assert new_models["doubao-seedance-2.0-mini"]["capabilities"]["resolutions"] == ["480p", "720p"]
     assert new_models["wan3.0-video"]["capabilities"]["resolutions"] == ["480p", "720p", "1080p"]
@@ -84,6 +90,9 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     assert new_models["kling-v3"]["capabilities"]["resolutionLabels"]["720p"] == "720P"
     assert new_models["kling-v3"]["capabilities"]["providerResolutionMap"]["720p"] == "720P"
     assert new_models["kling-v3"]["capabilities"]["providerOmitFields"] == ["generate_audio", "watermark", "return_last_frame"]
+    assert new_models["happyhorse-1.1-t2v"]["capabilities"]["referenceImage"] == {"min": 0, "max": 0}
+    assert new_models["happyhorse-1.1-i2v"]["capabilities"]["referenceImage"] == {"min": 1, "max": 1}
+    assert new_models["happyhorse-1.1-r2v"]["capabilities"]["referenceImage"] == {"min": 1, "max": 9}
     client.delete(f"/api/admin/users/{created['id']}")
     # Restore the shared TestClient's refresh cookie for subsequent auth tests.
     restored = client.post("/api/auth/login", json={"username": "admin", "password": "secure-admin-123"})

@@ -20,6 +20,9 @@ TOKEN_BILLED_VIDEO_MODELS = {
     "doubao-seedance-2.0-mini",
     "doubao-seedance-2.0-fast",
     "doubao-seedance-2.0-ppio",
+    "happyhorse-1.1-t2v",
+    "happyhorse-1.1-i2v",
+    "happyhorse-1.1-r2v",
 }
 SECOND_BILLED_VIDEO_MODELS = {
     "wan3.0-video",

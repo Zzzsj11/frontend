@@ -27,6 +27,11 @@ VIDEO_ESTIMATE_POLICIES = {
     "wan3.0-video": VideoEstimatePolicy("yinghe", 0.60),
     "wan3.0-video-prime": VideoEstimatePolicy("yinghe", 0.90),
     "kling-v3": VideoEstimatePolicy("yinghe", 0.80),
+    # HappyHorse 暂未拿到英和人民币报价表；先沿用英和视频的保守粗估价，
+    # 实际对账按供应商返回的 outputTokens 记录，价格规则补齐后可历史重算。
+    "happyhorse-1.1-t2v": VideoEstimatePolicy("yinghe", 0.83, billing_mode="token_unpriced"),
+    "happyhorse-1.1-i2v": VideoEstimatePolicy("yinghe", 0.83, billing_mode="token_unpriced"),
+    "happyhorse-1.1-r2v": VideoEstimatePolicy("yinghe", 0.83, billing_mode="token_unpriced"),
     # 海外站尚未提供人民币结算表。这里按 Google 公布的美元标价、以 7.2 CNY/USD
     # 做生成前保守预估；不查询国内英和余额，最终对账保持 unpriced，等待供应商报价。
     "veo-3.1-generate-preview": VideoEstimatePolicy("yseeai", 2.88, balance_check=False, billing_mode="official_usd_estimate"),

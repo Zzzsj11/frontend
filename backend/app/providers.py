@@ -847,6 +847,94 @@ async def generate_wan_video(request: VideoGenerationCreate, job: Job) -> dict[s
     return await _store_wan_result(job, await _poll_wan(base, headers, job))
 
 
+async def _query_happyhorse_task(base: str, headers: dict[str, str], task_id: str) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.get(f"{base}/video/generation/tasks/{task_id}", headers=headers)
+        _raise_for_status(response)
+        return _unwrap(response.json())
+
+
+async def _poll_happyhorse(base: str, headers: dict[str, str], job: Job) -> dict[str, Any]:
+    return await _poll_scheduled(
+        f"{base}/video/generation/tasks/{job.provider_task_id}",
+        headers,
+        job,
+        timeout_seconds=_remaining_video_job_timeout(job),
+        timeout_error="HappyHorse 视频生成超过20分钟，已判定失败，请重新生成",
+    )
+
+
+async def _store_happyhorse_result(job: Job, task: dict[str, Any]) -> dict[str, Any]:
+    source_url = str(task.get("resultUrl") or "")
+    if not source_url:
+        raise ProviderError("HappyHorse 生成成功但未返回视频地址")
+    task_id = job.provider_task_id or str(task.get("taskId") or "")
+    owner_prefix = f"users/{job.user_id}/generated"
+    stored_url = await import_remote(source_url, f"{owner_prefix}/videos", f"happyhorse-{task_id}.mp4")
+    thumbnail_url = str(task.get("thumbnailUrl") or "")
+    stored_cover, stored_cover_thumbnail = (
+        await import_remote_image(thumbnail_url, f"{owner_prefix}/covers") if thumbnail_url else await _video_first_frame(source_url, f"happyhorse-{task_id}", job.user_id)
+    )
+    request = job.request or {}
+    usage = dict(task.get("tokenUsage") or {})
+    return {
+        "provider": "yinghe",
+        "providerTaskId": task_id,
+        "model": request.get("model") or request.get("_providerModelId") or "happyhorse-1.1-t2v",
+        "usage": usage,
+        "videoUrl": stored_url,
+        "coverUrl": stored_cover,
+        "coverThumbnailUrl": stored_cover_thumbnail,
+        "sourceUrl": source_url,
+        "duration": request.get("duration"),
+        "ratio": request.get("ratio"),
+        "generationMode": str(request.get("_providerModelId") or "").rsplit("-", 1)[-1],
+    }
+
+
+async def generate_happyhorse_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
+    base, headers = _video_config()
+    model = str((job.request or {}).get("_providerModelId") or request.model or "")
+    images = [url.strip() for url in request.image_urls if url.strip()]
+    input_data: dict[str, Any] = {"prompt": request.prompt}
+    if model.endswith("-t2v"):
+        if images:
+            raise ProviderRejectedError("HappyHorse 文生视频不支持参考图片")
+    elif model.endswith("-i2v"):
+        if len(images) != 1:
+            raise ProviderRejectedError("HappyHorse 图生视频必须且只能提供 1 张首帧图片")
+        input_data["media"] = [{"type": "first_frame", "url": images[0]}]
+    elif model.endswith("-r2v"):
+        if not 1 <= len(images) <= 9:
+            raise ProviderRejectedError("HappyHorse 参考生视频必须提供 1–9 张参考图片")
+        input_data["media"] = [{"type": "reference_image", "url": url} for url in images]
+    else:
+        raise ProviderRejectedError(f"不支持的 HappyHorse 模型：{model}")
+
+    resolution_map = ((job.request or {}).get("_capabilities") or {}).get("providerResolutionMap") or {}
+    parameters: dict[str, Any] = {
+        "resolution": str(resolution_map.get(request.resolution) or request.resolution.upper()),
+        "duration": int(request.duration),
+        "watermark": request.watermark,
+    }
+    # 首帧图生的画幅由输入图片决定，供应商明确不接受 ratio。
+    if not model.endswith("-i2v"):
+        parameters["ratio"] = request.ratio
+    payload = {"model": model, "input": input_data, "parameters": parameters}
+    job.idempotency_key = f"{job.id}:happyhorse:{model.rsplit('-', 1)[-1]}"
+    headers.update({"Idempotency-Key": job.idempotency_key, "X-DashScope-Async": "enable"})
+    await jobs.mark_provider_submitting(job)
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(f"{base}/video/generation/tasks", headers=headers, json=payload)
+        _raise_for_status(response)
+        created = _unwrap(response.json())
+    task_id = str(created.get("taskId") or "")
+    if not task_id:
+        raise ProviderError("HappyHorse 提交成功但未返回 taskId")
+    await jobs.set_provider_task(job, "yinghe-happyhorse", task_id, idempotency_key=job.idempotency_key)
+    return await _store_happyhorse_result(job, await _poll_happyhorse(base, headers, job))
+
+
 async def _submit_ppio_seedance_video(request: VideoGenerationCreate, job: Job, image_urls: list[str]) -> tuple[str, dict[str, Any], str, dict[str, str]]:
     base, headers = _ppio_config()
     variant = "reference" if image_urls else "text"
@@ -1035,6 +1123,8 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         return await generate_wan_video(request, job)
     if ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "kling-native":
         return await generate_kling_video(request, job)
+    if ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "happyhorse-native":
+        return await generate_happyhorse_video(request, job)
     if ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "veo-unified":
         return await generate_veo_video(request, job)
     if ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "gemini-omni-unified":
@@ -1747,6 +1837,9 @@ async def resume_generation(job: Job) -> dict[str, Any]:
     if job.provider == "yinghe-kling" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "kling-native":
         base, headers = _video_config()
         return await _store_kling_result(job, await _poll_kling(base, headers, job))
+    if job.provider == "yinghe-happyhorse" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "happyhorse-native":
+        base, headers = _video_config()
+        return await _store_happyhorse_result(job, await _poll_happyhorse(base, headers, job))
     if job.provider in {"yseeai-omni", "yseeai-unified"} or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") in {"gemini-omni-unified", "veo-unified"}:
         base, headers = _yseeai_config()
         return await _store_gemini_omni_result(job, await _poll_gemini_omni(base, headers, job))
@@ -1793,6 +1886,9 @@ async def query_provider_task(kind: str, task_id: str, provider: str | None = No
     if provider == "yinghe-kling":
         base, headers = _video_config()
         return await _query_kling_task(base, headers, task_id)
+    if provider == "yinghe-happyhorse":
+        base, headers = _video_config()
+        return await _query_happyhorse_task(base, headers, task_id)
     if provider in {"yseeai-omni", "yseeai-unified"}:
         base, headers = _yseeai_config()
         return await _query_gemini_omni_task(base, headers, task_id)
@@ -1835,6 +1931,8 @@ async def store_provider_result(job: Job, data: dict[str, Any]) -> dict[str, Any
         return await _store_wan_result(job, data)
     if job.provider == "yinghe-kling" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "kling-native":
         return await _store_kling_result(job, data)
+    if job.provider == "yinghe-happyhorse" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "happyhorse-native":
+        return await _store_happyhorse_result(job, data)
     if job.provider in {"yseeai-omni", "yseeai-unified"} or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") in {"gemini-omni-unified", "veo-unified"}:
         return await _store_gemini_omni_result(job, data)
     if job.provider == "toapis-grok" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "grok-toapis":

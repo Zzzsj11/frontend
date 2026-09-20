@@ -2734,3 +2734,110 @@ async def test_flux3_uses_bfl_keyframe_contract(monkeypatch) -> None:
     }
     assert job.provider == "bfl-flux3"
     assert result["providerTaskId"] == "flux-task-1"
+
+
+@pytest.mark.parametrize(
+    ("model", "images", "expected_input", "expect_ratio"),
+    [
+        ("happyhorse-1.1-t2v", [], {"prompt": "测试"}, True),
+        (
+            "happyhorse-1.1-i2v",
+            ["https://cdn.test/first.jpg"],
+            {"prompt": "测试", "media": [{"type": "first_frame", "url": "https://cdn.test/first.jpg"}]},
+            False,
+        ),
+        (
+            "happyhorse-1.1-r2v",
+            ["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"],
+            {
+                "prompt": "测试",
+                "media": [
+                    {"type": "reference_image", "url": "https://cdn.test/a.jpg"},
+                    {"type": "reference_image", "url": "https://cdn.test/b.jpg"},
+                ],
+            },
+            True,
+        ),
+    ],
+)
+async def test_happyhorse_11_models_use_native_contract(monkeypatch, model, images, expected_input, expect_ratio) -> None:
+    import httpx
+
+    from app import providers
+    from app.jobs import Job
+    from app.schemas import VideoGenerationCreate
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            captured.update(url=url, headers=headers, payload=json)
+            return httpx.Response(
+                200,
+                json={"code": 200, "msg": "操作成功", "data": {"taskId": "happyhorse-task-1", "status": "PENDING"}},
+                request=httpx.Request("POST", url),
+            )
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    async def set_task(job, provider, task_id, **_kwargs):
+        job.provider = provider
+        job.provider_task_id = task_id
+
+    async def poll(*_args, **_kwargs):
+        return {"taskId": "happyhorse-task-1", "status": "SUCCESS", "resultUrl": "https://cdn.test/result.mp4"}
+
+    async def store(job, task):
+        return {"provider": "yinghe", "providerTaskId": job.provider_task_id, "sourceUrl": task["resultUrl"]}
+
+    monkeypatch.setattr(providers, "_video_config", lambda: ("https://api-aigc.test", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(providers.jobs, "mark_provider_submitting", noop)
+    monkeypatch.setattr(providers.jobs, "set_provider_task", set_task)
+    monkeypatch.setattr(providers, "_poll_happyhorse", poll)
+    monkeypatch.setattr(providers, "_store_happyhorse_result", store)
+    job = Job(
+        id="job-happyhorse",
+        kind="video",
+        user_id="u1",
+        request={
+            "model": model,
+            "_providerModelId": model,
+            "_capabilities": {"providerProtocol": "happyhorse-native", "providerResolutionMap": {"720p": "720P"}},
+        },
+    )
+    request = VideoGenerationCreate(
+        prompt="测试",
+        model=model,
+        image_urls=images,
+        ratio="16:9",
+        resolution="720p",
+        duration=4,
+        watermark=False,
+        generate_audio=False,
+    )
+
+    result = await providers.generate_video(request, job)
+
+    assert captured["url"] == "https://api-aigc.test/video/generation/tasks"
+    assert captured["headers"]["X-DashScope-Async"] == "enable"
+    assert captured["payload"]["model"] == model
+    assert captured["payload"]["input"] == expected_input
+    assert captured["payload"]["parameters"] == {
+        "resolution": "720P",
+        "duration": 4,
+        "watermark": False,
+        **({"ratio": "16:9"} if expect_ratio else {}),
+    }
+    assert job.provider == "yinghe-happyhorse"
+    assert result["providerTaskId"] == "happyhorse-task-1"
