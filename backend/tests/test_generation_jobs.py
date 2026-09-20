@@ -2266,6 +2266,27 @@ def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) ->
         assert captured["image_urls"] == ["asset://video-human-1", "https://tos.test/scene.png"]
         assert "人物身份参考硬约束" in str(captured["prompt"])
         assert "纯白圆领T恤、浅灰棉质短裤" in str(captured["prompt"])
+
+        captured.clear()
+        response = client.post(
+            "/api/generations/videos",
+            json={
+                "prompt": "test HappyHorse video",
+                "model": "happyhorse-1.1-i2v",
+                "image_urls": ["https://tos.test/video-human.jpg"],
+                "resolution": "720p",
+                "duration": 5,
+            },
+        )
+        assert response.status_code == 202
+        job_id = response.json()["id"]
+        for _ in range(50):
+            state = client.get(f"/api/generations/{job_id}").json()
+            if state["status"] in {"succeeded", "failed"}:
+                break
+            time.sleep(0.05)
+        assert state["status"] == "succeeded"
+        assert captured["image_urls"] == ["https://tos.test/video-human.jpg"]
     finally:
         _fail_active_jobs()
         connection = sqlite3.connect(TEST_DB, timeout=10)

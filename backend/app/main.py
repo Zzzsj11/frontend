@@ -796,8 +796,10 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
         task_config = dict(task.storyboard_config or {}) if task else {}
         season = str(task_config.get("season") or ((task_config.get("songEmotion") or {}).get("seasons")) or "").strip()
         payload.prompt = compile_identity_safe_video_prompt(payload.prompt, wardrobe, season=season)
-    # Seedance 按模型所属渠道选择同渠道 asset://；H3 不使用火山人物资产协议。
-    if provider.code in {"yinghe", "ppio"} and model.provider_model_id != "MiniMax-H3":
+    # 仅 Seedance 使用火山人物 asset:// 协议。HappyHorse/Wan/Kling 等英和模型
+    # 仍须收到公网图片 URL，不能因为共用 provider.code 而误替换成私有资产链接。
+    provider_protocol = str((model.capabilities or {}).get("providerProtocol") or "")
+    if provider.code in {"yinghe", "ppio"} and model.provider_model_id != "MiniMax-H3" and not provider_protocol:
         payload.image_urls = await _resolve_asset_avatar_urls(db, payload.image_urls, provider_code=provider.code, user_id=user.id)
     h3_compilation = compile_h3_prompt(payload, identity_reference_indices=identity_indices) if is_h3 else None
     if h3_compilation:
