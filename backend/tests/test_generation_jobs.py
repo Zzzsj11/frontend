@@ -1862,7 +1862,10 @@ async def test_model_capabilities_can_omit_unsupported_provider_fields(client, m
     job.user_id = "u1"
     job.request = {
         "model": "kling-v3",
-        "_capabilities": {"providerOmitFields": ["generate_audio", "watermark", "return_last_frame"]},
+        "_capabilities": {
+            "providerResolutionMap": {"720p": "768P"},
+            "providerOmitFields": ["generate_audio", "watermark", "return_last_frame"],
+        },
     }
     request = VideoGenerationCreate(prompt="测试", model="kling-v3", generate_audio=False)
 
@@ -1873,6 +1876,7 @@ async def test_model_capabilities_can_omit_unsupported_provider_fields(client, m
     assert "watermark" not in captured
     assert "return_last_frame" not in captured
     assert captured["model"] == "kling-v3"
+    assert captured["resolution"] == "768P"
 
 
 async def test_general_character_video_retries_without_reference_on_real_person_block(monkeypatch) -> None:

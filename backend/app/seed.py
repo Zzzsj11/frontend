@@ -376,6 +376,8 @@ async def seed_system_data() -> None:
                     "durations": {"min": 4, "max": 15},
                     "ratios": ["16:9", "9:16", "1:1"],
                     "resolutions": ["720p", "1080p"],
+                    "resolutionLabels": {"720p": "768P", "1080p": "1080P"},
+                    "providerResolutionMap": {"720p": "768P", "1080p": "1080P"},
                     "providerOmitFields": ["generate_audio", "watermark", "return_last_frame"],
                     "nativeAudio": True,
                     "executionPool": "yinghe-generation",
