@@ -81,8 +81,8 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     assert new_models["wan3.0-video"]["capabilities"]["providerResolutionMap"]["720p"] == "720P"
     assert new_models["wan3.0-video"]["capabilities"]["providerOmitFields"] == ["generate_audio", "watermark", "return_last_frame"]
     assert new_models["kling-v3"]["capabilities"]["resolutions"] == ["720p", "1080p"]
-    assert new_models["kling-v3"]["capabilities"]["resolutionLabels"]["720p"] == "768P"
-    assert new_models["kling-v3"]["capabilities"]["providerResolutionMap"]["720p"] == "768P"
+    assert new_models["kling-v3"]["capabilities"]["resolutionLabels"]["720p"] == "720P"
+    assert new_models["kling-v3"]["capabilities"]["providerResolutionMap"]["720p"] == "720P"
     assert new_models["kling-v3"]["capabilities"]["providerOmitFields"] == ["generate_audio", "watermark", "return_last_frame"]
     client.delete(f"/api/admin/users/{created['id']}")
     # Restore the shared TestClient's refresh cookie for subsequent auth tests.

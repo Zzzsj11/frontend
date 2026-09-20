@@ -1863,7 +1863,7 @@ async def test_model_capabilities_can_omit_unsupported_provider_fields(client, m
     job.request = {
         "model": "kling-v3",
         "_capabilities": {
-            "providerResolutionMap": {"720p": "768P"},
+            "providerResolutionMap": {"720p": "720P"},
             "providerOmitFields": ["generate_audio", "watermark", "return_last_frame"],
         },
     }
@@ -1876,7 +1876,7 @@ async def test_model_capabilities_can_omit_unsupported_provider_fields(client, m
     assert "watermark" not in captured
     assert "return_last_frame" not in captured
     assert captured["model"] == "kling-v3"
-    assert captured["resolution"] == "768P"
+    assert captured["resolution"] == "720P"
 
 
 async def test_kling_model_uses_native_provider_protocol(monkeypatch) -> None:
