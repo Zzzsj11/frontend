@@ -3,6 +3,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useAuthStore } from '../../src/stores/auth'
 import { useProjectStore } from '../../src/stores/project'
 import { VIDEO_MODEL_OPTIONS } from '../../src/generationModels'
+import * as domainApi from '../../src/api/domain'
+import { taskStatusLabel } from '../../src/taskStatus'
 import type {
   DigitalHuman,
   MaterialExport,
@@ -584,6 +586,61 @@ describe('digital human generation with template reference', () => {
     setTemplateAvatar('')
   })
 
+  it('loads the original public image as the system template, never the thumbnail', async () => {
+    const { getTemplateAvatar } = await import('../../src/api/imageGen')
+    const store = useProjectStore()
+    vi.spyOn(domainApi, 'fetchSongProjects').mockResolvedValue([])
+    vi.spyOn(domainApi, 'fetchDigitalHumanStyles').mockResolvedValue([])
+    vi.spyOn(domainApi, 'fetchDigitalHumans').mockResolvedValue([
+      {
+        id: 'dh-system-001',
+        name: '系统人物',
+        style: '女',
+        description: '',
+        avatar: 'https://tos.test/thumbnails/001.jpg',
+        originalAvatar: 'https://tos.test/001.jpg',
+        readOnly: true,
+      },
+    ])
+    await store.loadSongProjects()
+    expect(getTemplateAvatar()).toBe('https://tos.test/001.jpg')
+  })
+
+  it('keeps an uploaded character name out of the identity description', async () => {
+    const imageApi = await import('../../src/api/imageGen')
+    imageApi.setTemplateAvatar('https://tos.test/001.jpg')
+    const store = useProjectStore()
+    store.dhStyleIds = { 女: 'style-female' }
+    vi.spyOn(domainApi, 'uploadDataUrl').mockResolvedValue({ url: 'https://tos.test/upload.jpg' })
+    const generate = vi
+      .spyOn(imageApi, 'generateImageAsset')
+      .mockResolvedValue({ url: 'https://tos.test/generated.png' })
+    vi.spyOn(domainApi, 'createDigitalHuman').mockResolvedValue({
+      id: 'dh-uploaded',
+      name: '女10',
+      style: '女',
+      description: '',
+      avatar: 'https://tos.test/generated.png',
+    })
+    vi.spyOn(store, 'ensureDhStyle').mockImplementation(() => {})
+    await store.addCustomDigitalHuman({
+      name: '女10',
+      style: '女',
+      avatar: 'data:image/png;base64,AA==',
+    })
+    expect(generate).toHaveBeenCalledWith(
+      '',
+      expect.objectContaining({
+        portrait: { description: '', style: '女' },
+        image: ['https://tos.test/001.jpg', 'https://tos.test/upload.jpg'],
+      }),
+      expect.any(Function),
+    )
+    expect(domainApi.createDigitalHuman).toHaveBeenCalledWith(
+      expect.objectContaining({ name: '女10', description: '' }),
+    )
+  })
+
   it('sends the system template sheet as the first reference image', async () => {
     const { setTemplateAvatar } = await import('../../src/api/imageGen')
     setTemplateAvatar('https://tos.test/system/template.png')
@@ -745,7 +802,9 @@ describe('digital human avatar regeneration with template reference', () => {
     setTemplateAvatar('https://tos.test/system/template.png')
 
     const store = useProjectStore()
-    store.digitalHumans = [dhFixture({})]
+    store.digitalHumans = [
+      dhFixture({ name: '女10', description: '', originalAvatar: 'https://tos.test/original.png' }),
+    ]
     const calls: { url: string; method?: string; body?: Record<string, unknown> }[] = []
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input)
@@ -787,8 +846,9 @@ describe('digital human avatar regeneration with template reference', () => {
     // 模板三视图在前（prompt 中的「第一张参考图」），当前头像在后
     expect(creation!.body?.images).toEqual([
       'https://tos.test/system/template.png',
-      'https://tos.test/old.png',
+      'https://tos.test/original.png',
     ])
+    expect(creation!.body?.portrait).toEqual({ description: '', style: '古风' })
     const patch = calls.find((call) => call.url === '/api/digital-humans/dh-1')
     expect(patch?.method).toBe('PATCH')
     expect(patch?.body?.avatar_url).toBe('https://tos.test/new.png')
@@ -902,6 +962,77 @@ describe('batch storyboard line generation', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it.each([
+    ['ready', true],
+    ['partial', true],
+    ['failed', true],
+    ['ready', false],
+    ['partial', false],
+    ['failed', false],
+  ] as const)('syncs batch result %s to the sidebar (active=%s)', async (status, active) => {
+    const store = useProjectStore()
+    store.activeTaskId = active ? 'task-1' : 'task-other'
+    store.activeTaskStatus = 'generating'
+    store.songProjects = [
+      {
+        id: 'song-1',
+        name: '项目',
+        tasks: [{ id: 'task-1', title: '子项目', status: 'generating' }],
+      },
+    ]
+    store.lines = [batchLine('other-line', 'running')]
+    vi.spyOn(domainApi, 'generateStoryboardLinesBatch').mockResolvedValue({
+      taskId: 'task-1',
+      count: 0,
+      jobs: [],
+    })
+    vi.spyOn(domainApi, 'fetchSongScript').mockResolvedValue({
+      cast: [],
+      lines: [],
+      storyboardType: 'general',
+      status,
+    })
+
+    await store._generateStoryboardBatch('task-1', ['line-1'])
+
+    expect(store.songProjects[0].tasks[0].status).toBe(status)
+    expect(taskStatusLabel(store.songProjects[0].tasks[0].status)).toBe(
+      status === 'ready' ? '' : status === 'partial' ? '部分失败' : '生成失败',
+    )
+    expect(store.activeTaskStatus).toBe(active ? status : 'generating')
+    if (!active) expect(store.lines[0].id).toBe('other-line')
+  })
+
+  it('clears the stale sidebar badge when restored running prompts finish', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = useProjectStore()
+      store.activeTaskId = 'task-restored'
+      store.activeTaskStatus = 'generating'
+      store.songProjects = [
+        {
+          id: 'song-1',
+          name: '项目',
+          tasks: [{ id: 'task-restored', title: '子项目', status: 'generating' }],
+        },
+      ]
+      store.lines = [batchLine('line-restored', 'running')]
+      vi.spyOn(domainApi, 'fetchSongScript').mockResolvedValue({
+        cast: [],
+        lines: [batchLine('line-restored', 'succeeded')],
+        storyboardType: 'general',
+        status: 'ready',
+      })
+      const watching = store._watchRunningStoryboardLines('task-restored')
+      await vi.advanceTimersByTimeAsync(5000)
+      await watching
+      expect(store.songProjects[0].tasks[0].status).toBe('ready')
+      expect(store.activeTaskStatus).toBe('ready')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('refreshes an existing prompt job without submitting another generation', async () => {

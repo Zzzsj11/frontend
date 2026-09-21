@@ -290,8 +290,14 @@ async def test_story_bible_policies_come_from_registry(client) -> None:
     assert general["characterPolicy"] == DEFAULT_PROMPTS["story_bible.general.character_policy"]["content"]
 
 
-def test_portrait_prompt_preview_and_create_validation(client) -> None:
+def test_portrait_prompt_preview_and_create_validation(client, monkeypatch) -> None:
     """定妆照提示词由后端注册中心拼装：preview 不调模型，create 空 prompt+无 portrait 拒绝。"""
+    from app import main
+
+    async def generate_image(payload, job):
+        return {"urls": ["https://example.test/portrait.png"]}
+
+    monkeypatch.setattr(main, "generate_image", generate_image)
     preview = client.post("/api/generations/images/portrait-prompt", json={"description": "青衣少女", "style": "古风"})
     assert preview.status_code == 200
     prompt = preview.json()["prompt"]
@@ -299,7 +305,11 @@ def test_portrait_prompt_preview_and_create_validation(client) -> None:
     assert "第二张参考图只定义人物身份" in prompt
     assert "禁止继承任一参考图中的原服装" in prompt
     assert "保持一模一样的人物外貌、服装和配饰" not in prompt
-    assert "角色描述：青衣少女" in prompt and "画面风格：古风" in prompt
+    assert "角色描述：青衣少女" in prompt
+    assert "画面风格：古风" not in prompt
+    category_only = client.post("/api/generations/images/portrait-prompt", json={"description": "", "style": "女"})
+    assert "画面风格" not in category_only.json()["prompt"]
+    assert "角色描述" not in category_only.json()["prompt"]
 
     empty = client.post("/api/generations/images/portrait-prompt", json={})
     assert "角色描述" not in empty.json()["prompt"] and "画面风格" not in empty.json()["prompt"]
@@ -311,6 +321,33 @@ def test_portrait_prompt_preview_and_create_validation(client) -> None:
     created = client.post("/api/generations/images", json={"portrait": {"description": "青衣少女", "style": "古风"}})
     assert created.status_code == 202
     assert "角色描述：青衣少女" in created.json()["prompt"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_model"),
+    [
+        ({"portrait": {"description": "", "style": "女"}}, "gpt-image-2.5-sunburst"),
+        ({"prompt": "身份参考卡", "purpose": "digital_human"}, "gpt-image-2.5-sunburst"),
+        ({"portrait": {}, "model": "gpt-image-2"}, "gpt-image-2"),
+        ({"prompt": "清晨空镜", "purpose": "scene", "model": "gpt-image-2"}, "gpt-image-2"),
+    ],
+)
+def test_portrait_default_model_is_persisted_without_overriding_explicit_models(client, monkeypatch, payload, expected_model) -> None:
+    from app import main
+
+    captured = []
+
+    async def create_job(kind, request, runner, **kwargs):
+        captured.append(request)
+        return SimpleNamespace(public=lambda: {"id": "job-portrait-model-test", "status": "queued"})
+
+    monkeypatch.setattr(main.jobs, "create", create_job)
+    response = client.post("/api/generations/images", json=payload)
+    assert response.status_code == 202
+    assert captured[0]["model"] == expected_model
+    assert captured[0]["_providerModelId"] == expected_model
+    assert captured[0]["_provider"] == "yinghe"
+    assert "画面风格" not in captured[0]["prompt"]
 
 
 def test_chat_session_default_system_prompt_from_registry(client) -> None:

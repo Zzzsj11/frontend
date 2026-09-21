@@ -694,8 +694,7 @@ async def _portrait_prompt(description: str, style: str) -> str:
     parts = []
     if description.strip():
         parts.append(f"角色描述：{description.strip()}")
-    if style.strip():
-        parts.append(f"画面风格：{style.strip()}")
+    # style 是资产分类（如“男/女/古风”），仅为兼容旧客户端保留参数，不能作为画面要求。
     extra = "。".join(parts) + "。" if parts else ""
     return (await get_prompt("portrait.digital_human_ref")).render(extra=extra)
 
@@ -712,6 +711,9 @@ async def create_image_generation(payload: ImageGenerationCreate, user: CurrentU
         payload.prompt = await _portrait_prompt(payload.portrait.description, payload.portrait.style)
     if not payload.prompt.strip():
         raise HTTPException(422, "prompt 与 portrait 至少提供其一")
+    # 人物身份卡默认使用已验收的英和 2.5 精细版，并固化实际模型供 Worker 和用量对账。
+    if not payload.model and (payload.portrait is not None or payload.purpose == "digital_human"):
+        payload.model = settings.digital_human_image_model
     model, provider = await require_active_model(db, payload.model or settings.image_model, "image")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
     await _check_concurrency(db, user.id, "image", settings.image_generation_concurrency)

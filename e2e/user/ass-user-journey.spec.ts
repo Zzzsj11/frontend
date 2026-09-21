@@ -204,7 +204,7 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
       body: JSON.stringify({
         id: 'task-e2e',
         title: '10012204',
-        status: 'generating',
+        status: lineGenerated ? 'ready' : 'generating',
         storyboardType: 'ass',
         cast: ['dh-luoli'],
         storyboardConfig: {
@@ -299,6 +299,10 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await expect(page.getByText('自动化测试歌词').first()).toBeVisible()
   await expect(page.getByText('镜头缓慢推进').first()).toBeVisible()
   await expect(page.getByText('10012204').last()).toBeVisible()
+  await expect(page.locator('.task-item').filter({ hasText: '10012204' })).toBeVisible()
+  await expect(
+    page.locator('.task-item').filter({ hasText: '10012204' }).locator('.task-status'),
+  ).toHaveCount(0)
 
   await page
     .locator('.script-editor .header-actions')

@@ -415,7 +415,7 @@ export const useProjectStore = defineStore('project', {
         this.digitalHumans = humans
         // 以系统人物 001 的中性身份参考卡作为统一版式模板；第二张图只提供人物身份。
         const template = humans.find((h) => h.id === 'dh-system-001')
-        if (template) imageGen.setTemplateAvatar(template.avatar)
+        imageGen.setTemplateAvatar(template?.originalAvatar || '')
         this.dhStyles = styles.map((item) => item.name)
         this.dhStyleIds = Object.fromEntries(styles.map((item) => [item.name, item.id]))
         this.systemDhStyles = styles.filter((item) => item.readOnly).map((item) => item.name)
@@ -517,6 +517,7 @@ export const useProjectStore = defineStore('project', {
       this.activeStoryBible = script.storyBible ?? null
       this.activeStoryboardType = script.storyboardType || null
       this.activeTaskStatus = script.status || null
+      if (taskId && script.status) this._setTaskStatus(taskId, script.status)
       this.activeStoryboardConfig = script.storyboardConfig ?? {}
       this.projectAudio = script.projectAudio ?? null
       this.audioTrackVisible = Boolean(
@@ -680,10 +681,11 @@ export const useProjectStore = defineStore('project', {
             ),
         )
         const script = await api.fetchSongScript(taskId)
+        // 侧栏也消费任务状态；切走后完成的批次同样要同步，避免一直显示生成中。
+        if (script.status) this._setTaskStatus(taskId, script.status)
         if (this.activeTaskId === taskId) {
           this.taskScripts[taskId] = script
           this.lines = script.lines
-          this.activeTaskStatus = script.status || this.activeTaskStatus
           this._cacheCurrentTask()
         }
       } catch (error) {
@@ -864,6 +866,7 @@ export const useProjectStore = defineStore('project', {
           if (watcher.signal.aborted || this.activeTaskId !== taskId) return
           const fresh = await api.fetchSongScript(taskId, true).catch(() => null)
           if (!fresh || this.activeTaskId !== taskId) return
+          if (fresh.status) this._setTaskStatus(taskId, fresh.status)
           for (const freshLine of fresh.lines) {
             const current = this.lines.find((item) => item.id === freshLine.id)
             if (
@@ -1048,6 +1051,7 @@ export const useProjectStore = defineStore('project', {
           window.clearTimeout(timeout)
         }
         const fresh = await api.fetchSongScript(taskId)
+        if (fresh.status) this._setTaskStatus(taskId, fresh.status)
         if (fresh.status === 'outline_failed' || fresh.status === 'outlining') return
         this.taskScripts[taskId] = { cast: [...fresh.cast], lines: fresh.lines }
         const readyIds = fresh.lines
@@ -1490,10 +1494,7 @@ export const useProjectStore = defineStore('project', {
           description: draft.description,
           avatar: generated.url,
           thumbnail: generated.thumbnailUrl,
-          avatarPrompt: await imageGen.fetchPortraitPrompt(
-            draft.description || draft.name,
-            draft.style,
-          ),
+          avatarPrompt: await imageGen.fetchPortraitPrompt(draft.description, draft.style),
           source: draft.mode,
           styleId: draft.styleId,
         })
@@ -1517,7 +1518,7 @@ export const useProjectStore = defineStore('project', {
         const id = nextId('dh')
         const template = imageGen.getTemplateAvatar()
         const userRef =
-          input.referenceImage || this.digitalHumans.find((human) => human.readOnly)?.avatar
+          input.referenceImage || this.digitalHumans.find((human) => human.readOnly)?.originalAvatar
         const references = [template, userRef].filter(Boolean) as string[]
         const generated = await imageGen.generateImageAsset(
           '',
@@ -1578,7 +1579,7 @@ export const useProjectStore = defineStore('project', {
           {
             size: '1344x768',
             quality: 'medium',
-            portrait: { description: input.description || input.name, style: input.style },
+            portrait: { description: input.description?.trim() || '', style: input.style },
             image: template ? [template, reference.url] : reference.url,
           },
           (jobId) =>
@@ -1714,9 +1715,9 @@ export const useProjectStore = defineStore('project', {
       try {
         // 重新生成也必须经过服务端中性参考卡模板，不能让历史自由提示词把旧服装、
         // 职业或年代重新带回人物素材。编辑内容仅作为身份补充描述。
-        const identityDescription = (dh.description || dh.name).trim()
+        const identityDescription = (dh.description || '').trim()
         const template = imageGen.getTemplateAvatar()
-        const dhRef = dh.avatar
+        const dhRef = dh.originalAvatar || dh.avatar
         const references = [template, dhRef].filter(Boolean) as string[]
         const generated = await imageGen.generateImageAsset('', {
           size: '1344x768',
