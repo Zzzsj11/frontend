@@ -1,5 +1,6 @@
 import { ApiError, reportApiError } from '../errorBus'
 import { isPollingHeaders, recordApiTiming } from '../perf'
+import { agentTestHeaders } from './agentTestContext'
 
 let accessToken = ''
 let refreshPromise: Promise<boolean> | null = null
@@ -41,7 +42,11 @@ export function resetAuthState() {
 }
 const refreshAccess = async () => {
   if (!refreshPromise)
-    refreshPromise = fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' })
+    refreshPromise = fetch('/api/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+      headers: agentTestHeaders(),
+    })
       .then(async (response) => {
         if (!response.ok) return false
         setAccessToken(((await response.json()) as { accessToken: string }).accessToken)
@@ -67,6 +72,7 @@ export async function apiRequest<T>(
   silentStatuses: readonly number[] = [],
 ): Promise<T> {
   const headers = new Headers(init.headers)
+  for (const [name, value] of Object.entries(agentTestHeaders())) headers.set(name, value)
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type'))
     headers.set('Content-Type', 'application/json')
@@ -101,7 +107,9 @@ export async function apiRequest<T>(
     if (!response) throw reportApiError(error, '网络连接失败')
   }
   // 撞上部署重启窗口：按预算重试等待新 backend 就绪，用户无感
-  if (response.status === 502 || response.status === 503) {
+  const agentMutation =
+    headers.has('X-Agent-Run-Id') && (init.method ?? 'GET').toUpperCase() !== 'GET'
+  if ((response.status === 502 || response.status === 503) && !agentMutation) {
     for (const delayMs of GATEWAY_RETRY_DELAYS_MS) {
       await wait(delayMs, init.signal ?? undefined)
       if (init.signal?.aborted) throw abortError()
@@ -159,6 +167,7 @@ export async function openApiStream(
   extraHeaders: Record<string, string> = {},
 ): Promise<Response> {
   const headers = new Headers(extraHeaders)
+  for (const [name, value] of Object.entries(agentTestHeaders())) headers.set(name, value)
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
   const tracked = !isPollingHeaders(headers)
   const t0 = tracked ? performance.now() : 0
@@ -220,7 +229,7 @@ export async function loginRequest(username: string, password: string) {
     response = await fetch('/api/auth/login', {
       method: 'POST',
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...agentTestHeaders() },
       body: JSON.stringify({ username, password }),
     })
   } catch (error) {

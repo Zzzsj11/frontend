@@ -2151,7 +2151,10 @@ export const useProjectStore = defineStore('project', {
       const variant = line.shot.assetCount ?? line.shot.assets.length
       // 通用 MV 的人物镜由视频模型逐镜自由生成，不发送数字人参考图；ASS 仍用头像保护面部身份。
       const characterUrls = line.digitalHumanIds
-        .map((id) => this.digitalHumans.find((h) => h.id === id)?.avatar)
+        .map((id) => {
+          const human = this.digitalHumans.find((h) => h.id === id)
+          return human?.originalAvatar || human?.avatar
+        })
         .filter(Boolean) as string[]
       // P1：轮询挂到任务 watcher 上，切换子项目即被取消（后端任务照跑，切回后恢复）
       const watcher = this.activeTaskId ? registerTaskWatcher(this.activeTaskId) : null
@@ -2163,7 +2166,7 @@ export const useProjectStore = defineStore('project', {
           idx,
           variant,
           genOptions,
-          line.scene.imageUrl,
+          line.scene.originalImageUrl || line.scene.imageUrl,
           this.activeTaskId ?? undefined,
           lineId,
           watcher?.signal ?? undefined,

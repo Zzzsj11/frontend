@@ -1225,6 +1225,7 @@ describe('batch shot video generation', () => {
         id: 'dh-1',
         name: '人物一',
         avatar: '/media/human.png',
+        originalAvatar: '/media/human-original.png',
         source: 'system',
         scope: 'system',
       },
@@ -1249,7 +1250,7 @@ describe('batch shot video generation', () => {
 
     await store.generateShotFor(line.id)
 
-    expect(submittedImages).toEqual(['/media/scene.png', '/media/human.png'])
+    expect(submittedImages).toEqual(['/media/scene-original.png', '/media/human-original.png'])
   })
 
   it('does not submit a character reference when a customized general shot has no selected human', async () => {

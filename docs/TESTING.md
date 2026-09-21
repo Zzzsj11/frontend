@@ -2,6 +2,8 @@
 
 测试分层：后端 pytest 验证权限、隔离、软删除、模型、资产和业务旅程；Vitest 验证前端 Store/约束/错误处理；Playwright 验证 API 契约与真实浏览器旅程。
 
+浏览器 Agent 验收可在入口链接添加 `?agent_test_run_id=<本次唯一批次>`。前端将批次保存在当前页签的 sessionStorage，并为 API 请求携带 `X-Agent-Name: code-agent`、`X-Agent-Run-Id`、`X-Test-Run-Id`；导航和刷新后仍保留。结束后访问 `?agent_test_run_id=off` 清除该页签标记。批次只允许 1–160 位字母、数字、点、下划线和连字符；它不改变登录身份或权限。测试页签的写请求遇到 502/503 不自动重放，须核对工单后再处理，避免一次性生成验收产生重复请求。真实生成前必须确认部署版本已支持此入口，并在工单及费用记录中核对归因。
+
 ```bash
 make test        # 后端 pytest + 前端 vitest
 make test-e2e    # 本地 Playwright（mock 链路）

@@ -142,6 +142,10 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
     }),
   )
   await page.route('**/api/storyboards/ass', async (route) => {
+    const headers = route.request().headers()
+    expect(headers['x-agent-name']).toBe('code-agent')
+    expect(headers['x-agent-run-id']).toBe('browser-attribution-smoke')
+    expect(headers['x-test-run-id']).toBe('browser-attribution-smoke')
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -266,7 +270,7 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
     }),
   )
 
-  await page.goto('/')
+  await page.goto('/login?agent_test_run_id=browser-attribution-smoke')
   await page.getByLabel('用户名').fill('admin')
   await page.getByLabel('密码').fill('123456')
   await page.getByRole('button', { name: '登录' }).click()
