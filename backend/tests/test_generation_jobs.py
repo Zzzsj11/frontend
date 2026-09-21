@@ -1352,7 +1352,7 @@ def test_admin_job_sync_marks_failed_from_provider(client, monkeypatch) -> None:
 
     _insert_job("job-sync-fail", status="running", provider_task_id="pt-fail")
 
-    async def fake_query(kind: str, task_id: str, provider: str | None = None) -> dict:
+    async def fake_query(kind: str, task_id: str, provider: str | None = None, *, request=None) -> dict:
         return {"status": "FAILED", "failReason": "内容审核未通过"}
 
     monkeypatch.setattr(admin, "query_provider_task", fake_query)
@@ -1364,23 +1364,25 @@ def test_admin_job_sync_marks_failed_from_provider(client, monkeypatch) -> None:
     assert "内容审核未通过" in row["error"]
 
 
-def test_admin_job_sync_recovers_success_result(client, monkeypatch) -> None:
+@pytest.mark.parametrize("provider_result", [{"status": "SUCCESS"}, {"status": "Ready"}, {"task_status": "succeed"}, {"status": "completed"}])
+def test_admin_job_sync_recovers_success_result(client, monkeypatch, provider_result) -> None:
     from app import admin
 
-    _insert_job("job-sync-recover", status="running", provider_task_id="pt-success")
+    job_id = "job-sync-recover-" + next(iter(provider_result.values()))
+    _insert_job(job_id, status="failed", provider_task_id="pt-success")
 
-    async def fake_query(kind: str, task_id: str, provider: str | None = None) -> dict:
-        return {"status": "SUCCESS", "progress": 100}
+    async def fake_query(kind: str, task_id: str, provider: str | None = None, *, request=None) -> dict:
+        return {**provider_result, "progress": 100}
 
     async def fake_store(job, data: dict) -> dict:
         return {"provider": "yinghe", "providerTaskId": job.provider_task_id, "urls": ["https://cdn.example.com/a.png"], "usage": {}}
 
     monkeypatch.setattr(admin, "query_provider_task", fake_query)
     monkeypatch.setattr(admin, "store_provider_result", fake_store)
-    response = client.post("/api/admin/jobs/job-sync-recover/sync")
+    response = client.post(f"/api/admin/jobs/{job_id}/sync")
     assert response.status_code == 200
     assert response.json()["action"] == "recovered"
-    row = _job_row("job-sync-recover")
+    row = _job_row(job_id)
     assert row["status"] == "succeeded"
     assert row["progress"] == 100
 
@@ -1392,7 +1394,7 @@ def test_admin_job_sync_resumes_orphan_running_at_provider(client, monkeypatch) 
 
     _insert_job("job-sync-resume", status="running", provider_task_id="pt-running")
 
-    async def fake_query(kind: str, task_id: str, provider: str | None = None) -> dict:
+    async def fake_query(kind: str, task_id: str, provider: str | None = None, *, request=None) -> dict:
         return {"status": "RUNNING", "progress": 40}
 
     class FakeManager:
@@ -1879,7 +1881,7 @@ async def test_model_capabilities_can_omit_unsupported_provider_fields(client, m
     assert captured["resolution"] == "720P"
 
 
-async def test_kling_model_uses_native_provider_protocol(monkeypatch) -> None:
+async def test_kling_model_uses_native_provider_protocol(client, monkeypatch) -> None:
     import httpx
 
     from app import providers
@@ -2544,7 +2546,16 @@ async def test_veo_uses_yseeai_unified_video_contract(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_gemini_omni_uses_top_level_prompt_and_reference_task(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("images", "identity_indices", "task"),
+    [
+        ([], [], "text_to_video"),
+        (["https://cdn.test/a.jpg"], [], "image_to_video"),
+        (["https://cdn.test/a.jpg"], [1], "reference_to_video"),
+        (["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"], [1, 2], "reference_to_video"),
+    ],
+)
+async def test_gemini_omni_uses_top_level_prompt_and_reference_task(client, monkeypatch, images, identity_indices, task) -> None:
     import httpx
 
     from app import providers
@@ -2586,11 +2597,11 @@ async def test_gemini_omni_uses_top_level_prompt_and_reference_task(monkeypatch)
     monkeypatch.setattr(providers.jobs, "set_provider_task", set_task)
     monkeypatch.setattr(providers, "_poll_gemini_omni", poll)
     monkeypatch.setattr(providers, "_store_gemini_omni_result", store)
-    job = Job(id="job-omni", kind="video", user_id="u1", request={"_providerModelId": "gemini-omni-flash-preview"})
+    job = Job(id="job-omni", kind="video", user_id="u1", request={"_providerModelId": "gemini-omni-flash-preview", "_identityReferenceIndices": identity_indices})
     request = VideoGenerationCreate(
         prompt="测试",
         model="gemini-omni-flash-preview",
-        image_urls=["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"],
+        image_urls=images,
         ratio="16:9",
         resolution="720p",
         duration=8,
@@ -2601,11 +2612,13 @@ async def test_gemini_omni_uses_top_level_prompt_and_reference_task(monkeypatch)
     assert captured["payload"] == {
         "model": "gemini-omni-flash-preview",
         "prompt": "测试",
-        "images": ["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"],
+        **({"images": images} if images else {}),
         "duration": 8,
-        "metadata": {"aspect_ratio": "16:9", "task": "reference_to_video"},
+        "metadata": {"aspect_ratio": "16:9", "task": task},
     }
     assert job.provider == "yseeai-omni"
+
+    assert job.request["_providerRequest"] == captured["payload"]
 
 
 @pytest.mark.asyncio
@@ -2757,7 +2770,7 @@ async def test_viduq3_uses_toapis_contract(monkeypatch, model, images, resolutio
 
 
 @pytest.mark.asyncio
-async def test_flux3_uses_bfl_keyframe_contract(monkeypatch) -> None:
+async def test_flux3_uses_bfl_keyframe_contract(client, monkeypatch) -> None:
     import httpx
 
     from app import providers
@@ -2778,7 +2791,7 @@ async def test_flux3_uses_bfl_keyframe_contract(monkeypatch) -> None:
 
         async def post(self, url, *, headers, json):
             captured.update(url=url, headers=headers, payload=json)
-            return httpx.Response(200, json={"id": "flux-task-1", "polling_url": "https://poll.test/result"}, request=httpx.Request("POST", url))
+            return httpx.Response(200, json={"id": "flux-task-1", "polling_url": "https://api.eu.bfl.ai/v1/get_result?id=flux-task-1"}, request=httpx.Request("POST", url))
 
     async def noop(*_args, **_kwargs):
         return None
@@ -2786,6 +2799,8 @@ async def test_flux3_uses_bfl_keyframe_contract(monkeypatch) -> None:
     async def set_task(job, provider, task_id, **_kwargs):
         job.provider = provider
         job.provider_task_id = task_id
+        if _kwargs.get("polling_url"):
+            job.request["_providerPollingUrl"] = _kwargs["polling_url"]
 
     async def poll(*_args, **_kwargs):
         return {"id": "flux-task-1", "status": "Ready", "result": {"sample": "https://files.test/flux.mp4"}, "cost": 85}
@@ -2831,6 +2846,7 @@ async def test_flux3_uses_bfl_keyframe_contract(monkeypatch) -> None:
         "user": "u1",
         "keyframes": ["https://cdn.test/start.jpg", "https://cdn.test/end.jpg"],
     }
+    assert job.request["_providerPollingUrl"] == "https://api.eu.bfl.ai/v1/get_result?id=flux-task-1"
     assert job.provider == "bfl-flux3"
     assert result["providerTaskId"] == "flux-task-1"
 
@@ -2940,3 +2956,132 @@ async def test_happyhorse_11_models_use_native_contract(monkeypatch, model, imag
     }
     assert job.provider == "yinghe-happyhorse"
     assert result["providerTaskId"] == "happyhorse-task-1"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://evil.test/v1/get_result?id=task-1",
+        "https://api.bfl.ai.evil.test/v1/get_result?id=task-1",
+        "http://api.bfl.ai/v1/get_result?id=task-1",
+        "https://api.bfl.ai/v1/get_result?id=other",
+        "https://api.bfl.ai:invalid/v1/get_result?id=task-1",
+        "https://user:secret@api.bfl.ai/v1/get_result?id=task-1",
+        "https://api.bfl.ai/redirect?id=task-1",
+    ],
+)
+def test_bfl_polling_rejects_untrusted_urls(url):
+    from app.providers import ProviderError, _bfl_polling_url
+
+    with pytest.raises(ProviderError):
+        _bfl_polling_url("https://api.bfl.ai", "task-1", url)
+
+
+@pytest.mark.asyncio
+async def test_bfl_admin_query_uses_persisted_regional_polling_url(monkeypatch):
+    import httpx
+
+    from app import providers
+
+    polling_url = "https://api.eu.bfl.ai/v1/get_result?id=task-1"
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, *, headers):
+            captured.update(url=url, headers=headers)
+            return httpx.Response(200, json={"status": "Ready"}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(providers, "_bfl_config", lambda: ("https://api.bfl.ai", {"x-key": "test-only"}))
+    result = await providers.query_provider_task("video", "task-1", "bfl-flux3", request={"_providerPollingUrl": polling_url})
+    assert result["status"] == "Ready"
+    assert captured == {"url": polling_url, "headers": {"x-key": "test-only"}}
+
+
+def test_provider_polling_url_and_redacted_wire_request_survive_reload(client):
+    from app.jobs import JobManager
+
+    job_id = "job-bfl-polling-durable"
+    _insert_job(job_id, kind="video", status="running")
+    polling_url = "https://api.eu.bfl.ai/v1/get_result?id=task-1"
+
+    async def exercise():
+        manager = JobManager()
+        job = await manager.get(job_id)
+        await manager.record_provider_request(job, {"prompt": "subject", "images": ["https://cdn.test/original.jpg?token=secret"]})
+        await manager.set_provider_task(job, "bfl-flux3", "task-1", polling_url=polling_url)
+        restored = await JobManager().get(job_id)
+        assert restored.provider_task_id == "task-1"
+        assert restored.request["_providerPollingUrl"] == polling_url
+        assert restored.request["_providerRequest"]["images"] == ["https://cdn.test/original.jpg?token=***"]
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    ("mode", "images", "identity", "expected"),
+    [
+        ("auto", [], False, {}),
+        ("auto", ["https://cdn.test/scene.jpg"], False, {"image": "https://cdn.test/scene.jpg"}),
+        ("first_frame", ["https://cdn.test/scene.jpg"], False, {"image": "https://cdn.test/scene.jpg"}),
+        ("first_last", ["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"], False, {"image": "https://cdn.test/a.jpg", "image_tail": "https://cdn.test/b.jpg"}),
+    ],
+)
+def test_kling_explicit_frame_contract(mode, images, identity, expected):
+    from app.providers import kling_image_inputs
+    from app.schemas import VideoGenerationCreate
+
+    request = VideoGenerationCreate(prompt="test", image_urls=images, h3_mode=mode)
+    assert kling_image_inputs(request, identity_reference=identity) == expected
+
+
+@pytest.mark.parametrize(
+    ("mode", "images", "identity"),
+    [
+        ("auto", ["https://cdn.test/identity-card.jpg"], True),
+        ("reference", ["https://cdn.test/person.jpg"], False),
+        ("auto", ["https://cdn.test/a.jpg", "https://cdn.test/b.jpg"], False),
+        ("first_last", ["https://cdn.test/a.jpg"], False),
+    ],
+)
+def test_kling_does_not_silently_turn_identity_or_reference_images_into_frames(mode, images, identity):
+    from app.providers import ProviderError, kling_image_inputs
+    from app.schemas import VideoGenerationCreate
+
+    with pytest.raises(ProviderError):
+        kling_image_inputs(VideoGenerationCreate(prompt="test", image_urls=images, h3_mode=mode), identity_reference=identity)
+
+
+def test_confirmed_recovery_updates_usage_without_counting_the_same_call_twice(client):
+    from sqlalchemy import select
+
+    from app.database import session_factory
+    from app.jobs import JobManager
+    from app.models import TokenUsageModel
+
+    job_id = "job-recover-existing-usage"
+    _insert_job(job_id, kind="video", status="failed", provider_task_id="pt-existing-usage")
+
+    async def exercise():
+        manager = JobManager()
+        job = await manager.get(job_id)
+        job.result = {"provider": "bfl", "providerTaskId": "pt-existing-usage", "usage": {"total_tokens": 12}}
+        await manager._persist_asset(job)
+        await manager.finalize_success(job, {**job.result, "usage": {"total_tokens": 24}})
+        await manager.finalize_success(job, job.result)
+        async with session_factory() as session:
+            rows = (await session.scalars(select(TokenUsageModel).where(TokenUsageModel.generation_job_id == job_id))).all()
+            assert len(rows) == 1
+            assert rows[0].total_tokens == 24
+        assert (await manager.get(job_id)).status == "succeeded"
+
+    asyncio.run(exercise())

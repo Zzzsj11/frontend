@@ -13,7 +13,7 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 
@@ -726,12 +726,25 @@ async def _store_kling_result(job: Job, task: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def kling_image_inputs(request: VideoGenerationCreate, *, identity_reference: bool = False) -> dict[str, str]:
+    images = [url.strip() for url in request.image_urls if url.strip()]
+    if not images:
+        return {}
+    if request.h3_mode == "reference" or (identity_reference and request.h3_mode == "auto"):
+        raise ProviderError("Kling 人物参考需要主体 element_list；当前渠道尚未配置主体创建协议，不能将人物参考卡当作视频首帧。请先补齐渠道主体接口。")
+    if len(images) > 2 or (len(images) == 2 and request.h3_mode != "first_last"):
+        raise ProviderError("Kling V3 多图参考不能作为首尾帧自动提交；首尾帧生成需明确选择 first_last 模式。")
+    if request.h3_mode == "first_last" and len(images) != 2:
+        raise ProviderError("Kling 首尾帧生成需要两张图片。")
+    return {"image": images[0], **({"image_tail": images[1]} if len(images) == 2 else {})}
+
+
 async def generate_kling_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
     base, headers = _video_config()
     job.idempotency_key = f"{job.id}:kling-native"
     headers["Idempotency-Key"] = job.idempotency_key
     mode = "pro" if request.resolution == "1080p" else "std"
-    images = [url.strip() for url in request.image_urls if url.strip()]
+    image_inputs = kling_image_inputs(request, identity_reference=bool((job.request or {}).get("_identityReferenceIndices")))
     payload: dict[str, Any] = {
         "model_name": str((job.request or {}).get("_providerModelId") or "kling-v3"),
         "prompt": request.prompt,
@@ -741,8 +754,10 @@ async def generate_kling_video(request: VideoGenerationCreate, job: Job) -> dict
         "sound": "on" if request.generate_audio else "off",
         "cfg_scale": 0.5,
     }
-    if images:
-        payload["image_list"] = [{"image_url": url, "type": "first_frame" if index == 0 else "reference"} for index, url in enumerate(images)]
+    if image_inputs:
+        payload.update(image_inputs)
+        payload.pop("aspect_ratio")
+    await jobs.record_provider_request(job, payload)
     await jobs.mark_provider_submitting(job)
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(f"{base}/video/generation/tasks", headers=headers, json=payload)
@@ -1319,7 +1334,8 @@ async def _store_gemini_omni_result(job: Job, task: dict[str, Any]) -> dict[str,
 async def generate_gemini_omni_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
     base, headers = _yseeai_config()
     images = [url.strip() for url in request.image_urls if url.strip()]
-    task = "text_to_video" if not images else "image_to_video" if len(images) == 1 else "reference_to_video"
+    identity_reference = bool((job.request or {}).get("_identityReferenceIndices"))
+    task = "text_to_video" if not images else "image_to_video" if len(images) == 1 and not identity_reference else "reference_to_video"
     job.idempotency_key = f"{job.id}:gemini-omni:{task}"
     headers["Idempotency-Key"] = job.idempotency_key
     payload: dict[str, Any] = {
@@ -1330,6 +1346,7 @@ async def generate_gemini_omni_video(request: VideoGenerationCreate, job: Job) -
     }
     if images:
         payload["images"] = images
+    await jobs.record_provider_request(job, payload)
     await jobs.mark_provider_submitting(job)
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(f"{base}/video/generation/tasks", headers=headers, json=payload)
@@ -1529,9 +1546,35 @@ async def generate_toapis_viduq3_video(request: VideoGenerationCreate, job: Job)
     return await _store_toapis_video_result(job, await _poll_toapis_video(base, headers, job))
 
 
-async def _query_bfl_flux3_task(base: str, headers: dict[str, str], task_id: str) -> dict[str, Any]:
+def _bfl_polling_url(base: str, task_id: str, polling_url: str | None) -> str:
+    if not polling_url:
+        # Only old jobs predate persisted polling URLs.
+        return f"{base}/v1/get_result?id={task_id}"
+    try:
+        parsed = urlparse(polling_url)
+        port = parsed.port
+    except ValueError as exc:
+        raise ProviderError("BFL 返回了无效的 polling_url") from exc
+    host = parsed.hostname or ""
+    allowed_host = host == urlparse(base).hostname or host == "api.bfl.ai" or host.endswith(".bfl.ai")
+    if (
+        parsed.scheme != "https"
+        or not allowed_host
+        or parsed.username
+        or parsed.password
+        or port not in (None, 443)
+        or parsed.path != "/v1/get_result"
+        or parse_qs(parsed.query).get("id") != [task_id]
+        or parsed.fragment
+    ):
+        raise ProviderError("BFL 返回了不可信或不匹配的 polling_url，已停止查询以保护凭据")
+    return polling_url
+
+
+async def _query_bfl_flux3_task(base: str, headers: dict[str, str], task_id: str, polling_url: str | None = None) -> dict[str, Any]:
+    url = _bfl_polling_url(base, task_id, polling_url)
     async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.get(f"{base}/v1/get_result", headers=headers, params={"id": task_id})
+        response = await client.get(url, headers=headers)
         _raise_for_status(response)
         body = response.json()
     if not isinstance(body, dict):
@@ -1545,7 +1588,7 @@ async def _poll_bfl_flux3(base: str, headers: dict[str, str], job: Job) -> dict[
     while time.monotonic() < deadline:
         await asyncio.sleep(H3_POLL_INTERVAL_SECONDS)
         try:
-            task = await _query_bfl_flux3_task(base, headers, job.provider_task_id or "")
+            task = await _query_bfl_flux3_task(base, headers, job.provider_task_id or "", (job.request or {}).get("_providerPollingUrl"))
         except (httpx.HTTPError, ValueError, ProviderError) as exc:
             consecutive_errors += 1
             if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS:
@@ -1619,6 +1662,7 @@ async def generate_bfl_flux3_video(request: VideoGenerationCreate, job: Job) -> 
         payload["keyframes"] = images
     elif videos:
         payload["start_video"] = videos[0]
+    await jobs.record_provider_request(job, payload)
     await jobs.mark_provider_submitting(job)
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(f"{base}/v1/flux-3-video", headers=headers, json=payload)
@@ -1627,7 +1671,14 @@ async def generate_bfl_flux3_video(request: VideoGenerationCreate, job: Job) -> 
     task_id = str(created.get("id") or "") if isinstance(created, dict) else ""
     if not task_id:
         raise ProviderError(f"FLUX 3 提交成功但未返回任务 ID；供应商响应：{_provider_error_body(created)}")
+    polling_url = str(created.get("polling_url") or "")
+    # Persist the task ID even if the provider omitted/returned an unsafe URL;
+    # the submission must remain recoverable without creating another task.
     await jobs.set_provider_task(job, "bfl-flux3", task_id, idempotency_key=job.idempotency_key)
+    if not polling_url:
+        raise ProviderError("BFL 已接收任务但未返回 polling_url，请按原任务核对，勿重复提交")
+    polling_url = _bfl_polling_url(base, task_id, polling_url)
+    await jobs.set_provider_task(job, "bfl-flux3", task_id, idempotency_key=job.idempotency_key, polling_url=polling_url)
     return await _store_bfl_flux3_result(job, await _poll_bfl_flux3(base, headers, job))
 
 
@@ -1918,7 +1969,7 @@ async def resume_generation(job: Job) -> dict[str, Any]:
     return await store_provider_result(job, data)
 
 
-async def query_provider_task(kind: str, task_id: str, provider: str | None = None) -> dict[str, Any]:
+async def query_provider_task(kind: str, task_id: str, provider: str | None = None, *, request: dict[str, Any] | None = None) -> dict[str, Any]:
     """单次查询供应商任务状态（管理后台对账用）"""
     if provider == "runninghub":
         try:
@@ -1949,7 +2000,7 @@ async def query_provider_task(kind: str, task_id: str, provider: str | None = No
         return await _query_toapis_video_task(base, headers, task_id)
     if provider == "bfl-flux3":
         base, headers = _bfl_config()
-        return await _query_bfl_flux3_task(base, headers, task_id)
+        return await _query_bfl_flux3_task(base, headers, task_id, (request or {}).get("_providerPollingUrl"))
     if provider == "ppio":
         base, headers = _ppio_config()
         async with httpx.AsyncClient(timeout=60) as client:

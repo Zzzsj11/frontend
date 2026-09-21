@@ -64,7 +64,7 @@ from .models import (
     utcnow,
 )
 from .prompts import get_prompt
-from .providers import generate_image, generate_video, resume_generation
+from .providers import ProviderError, generate_image, generate_video, kling_image_inputs, resume_generation
 from .redis_store import clear_login_attempts, close_redis, login_attempt_count, record_login_failure, redis_ok
 from .request_logging import api_request_log_middleware
 from .schemas import (
@@ -791,8 +791,13 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
     if is_h3:
         validate_h3_mode_inputs(payload)
     await _check_concurrency(db, user.id, "video", settings.video_generation_concurrency)
-    await consume_daily_quota(db, user_id=user.id, category="video")
     identity_indices = await _identity_reference_indices(db, payload.image_urls, user_id=user.id)
+    if (model.capabilities or {}).get("providerProtocol") == "kling-native":
+        try:
+            kling_image_inputs(payload, identity_reference=bool(identity_indices))
+        except ProviderError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    await consume_daily_quota(db, user_id=user.id, category="video")
     if identity_indices:
         wardrobe = dict((line.shot_options or {}).get("wardrobeByCharacter") or {}) if line else {}
         task_config = dict(task.storyboard_config or {}) if task else {}
@@ -815,6 +820,7 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
             shot_index=line.sort_order,
         )
     snapshot = generation_request_snapshot(payload, model, provider)
+    snapshot["_identityReferenceIndices"] = sorted(identity_indices)
     if task and task.storyboard_type == "general_random" and line and not is_h3:
         snapshot.update(
             {

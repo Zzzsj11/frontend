@@ -476,23 +476,25 @@ async def sync_generation_job(job_id: str, request: Request, user: CurrentUser, 
     if job_manager.is_active(job_id):
         return {"providerStatus": None, "action": "skipped", "detail": "任务正在本机执行中，无需同步"}
     try:
-        data = await query_provider_task(model.kind, model.provider_task_id, model.provider)
+        data = await query_provider_task(model.kind, model.provider_task_id, model.provider, request=model.request)
     except Exception as exc:
         raise HTTPException(502, f"查询供应商失败：{str(exc)[:300]}") from exc
-    provider_status = str(data.get("status", "")).upper()
+    provider_status = str(data.get("status") or data.get("task_status") or "").upper()
+    succeeded = provider_status in {"SUCCESS", "SUCCEEDED", "SUCCEED", "COMPLETED", "READY"}
+    failed = provider_status in {"FAILED", "CANCELLED", "CANCELED", "ERROR", "REQUEST MODERATED", "CONTENT MODERATED"} or "FAIL" in provider_status
     action = "unchanged"
-    if provider_status == "SUCCESS" and model.status != "succeeded":
+    if succeeded and model.status != "succeeded":
         job = await job_manager.get(job_id)
         if job:
             result = await store_provider_result(job, data)
             await job_manager.finalize_success(job, result)
             action = "recovered"
-    elif (provider_status in {"FAILED", "CANCELLED"} or "FAIL" in provider_status) and model.status != "failed":
+    elif failed and model.status != "failed":
         job = await job_manager.get(job_id)
         if job:
             await job_manager.finalize_failure(job, str(data.get("failReason") or f"供应商任务状态：{provider_status}"))
             action = "failed"
-    elif "FAIL" not in provider_status and provider_status != "CANCELLED" and model.status in {"queued", "running"}:
+    elif not succeeded and not failed and model.status in {"queued", "running"}:
         if await job_manager.resume_one(job_id, resume_generation):
             action = "resumed"
     await audit(db, request, user, "job.sync", "generation_job", job_id, after={"providerStatus": provider_status, "action": action})
@@ -818,6 +820,7 @@ async def video_billing_detail(record_id: str, user: CurrentUser, db: AsyncSessi
         "billingStatus": record.billing_status,
         "attempt": job.attempt,
         "providerAttempts": request_data.get("_providerAttempts") or [],
+        "providerRequest": request_data.get("_providerRequest"),
         "prompts": prompts,
         "references": references,
         "rawUsage": record.raw_usage,

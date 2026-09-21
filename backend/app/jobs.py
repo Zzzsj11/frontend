@@ -14,10 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .agent_attribution import current_agent_attribution
 from .config import settings
 from .database import session_factory
-from .error_logging import redact_error_text
-from .models import GenerationJobModel, SceneAssetModel, ShotAssetModel, utcnow
+from .error_logging import _redact, redact_error_text
+from .models import GenerationJobModel, SceneAssetModel, ShotAssetModel, TokenUsageModel, utcnow
 from .redis_store import acquire_execution_lease, cache_job, get_cached_job, notify_worker, release_execution_lease, renew_execution_lease
-from .token_usage import add_token_usage
+from .token_usage import add_token_usage, normalize_usage
 
 JobRunner = Callable[["Job"], Awaitable[dict[str, Any]]]
 logger = logging.getLogger(__name__)
@@ -184,14 +184,14 @@ class JobManager:
         """Execute a job atomically claimed by an external worker."""
         await self._run(job, runner)
 
-    async def _persist(self, job: Job) -> None:
+    async def _persist(self, job: Job, *, provider_confirmed_recovery: bool = False) -> None:
         job.updated_at = time.time()
         async with session_factory() as session:
             model = await session.get(GenerationJobModel, job.id)
             if model:
                 # The deadline reaper may fail a task while this worker is
                 # awaiting the provider. Never let stale in-memory state revive it.
-                if model.status in {"failed", "cancelled"} and job.status not in {"failed", "cancelled"}:
+                if not provider_confirmed_recovery and model.status in {"failed", "cancelled"} and job.status not in {"failed", "cancelled"}:
                     job.status, job.phase = model.status, model.phase
                     job.error = model.error
                     await cache_job(job.id, job.public())
@@ -328,7 +328,7 @@ class JobManager:
                 )
                 await session.commit()
 
-    async def _persist_asset(self, job: Job) -> None:
+    async def _persist_asset(self, job: Job, *, provider_confirmed_recovery: bool = False) -> None:
         if not job.result:
             return
         if job.kind == "video" and job.result.get("videoUrl"):
@@ -348,21 +348,41 @@ class JobManager:
                 logger.exception("video metadata probe failed: job_id=%s", job.id)
         async with session_factory() as session:
             model = await session.get(GenerationJobModel, job.id)
-            terminal = bool(model and model.status in {"failed", "cancelled"})
+            terminal = bool(not provider_confirmed_recovery and model and model.status in {"failed", "cancelled"})
             if job.kind in {"image", "video"}:
-                add_token_usage(
-                    session,
-                    operation=f"generation_{job.kind}",
-                    provider=str(job.result.get("provider") or ""),
-                    model=str(job.result.get("model") or (job.request or {}).get("model") or ""),
-                    usage=job.result.get("usage"),
-                    user_id=job.user_id,
-                    project_id=job.project_id,
-                    project_task_id=job.project_task_id,
-                    storyboard_line_id=job.storyboard_line_id,
-                    generation_job_id=job.id,
-                    request_id=job.result.get("providerTaskId"),
-                )
+                existing_usage = None
+                if provider_confirmed_recovery:
+                    existing_usage = await session.scalar(
+                        select(TokenUsageModel)
+                        .where(
+                            TokenUsageModel.generation_job_id == job.id,
+                            TokenUsageModel.request_id == job.result.get("providerTaskId"),
+                            TokenUsageModel.deleted_at.is_(None),
+                        )
+                        .order_by(TokenUsageModel.created_at.desc())
+                        .limit(1)
+                    )
+                if existing_usage and job.result.get("usage") is not None:
+                    normalized = normalize_usage(job.result.get("usage"))
+                    existing_usage.input_tokens = normalized["inputTokens"]
+                    existing_usage.output_tokens = normalized["outputTokens"]
+                    existing_usage.cached_input_tokens = normalized["cachedInputTokens"]
+                    existing_usage.total_tokens = normalized["totalTokens"]
+                    existing_usage.raw_usage = normalized["raw"]
+                elif not existing_usage:
+                    add_token_usage(
+                        session,
+                        operation=f"generation_{job.kind}",
+                        provider=str(job.result.get("provider") or ""),
+                        model=str(job.result.get("model") or (job.request or {}).get("model") or ""),
+                        usage=job.result.get("usage"),
+                        user_id=job.user_id,
+                        project_id=job.project_id,
+                        project_task_id=job.project_task_id,
+                        storyboard_line_id=job.storyboard_line_id,
+                        generation_job_id=job.id,
+                        request_id=job.result.get("providerTaskId"),
+                    )
             if terminal:
                 job.status, job.phase = model.status, model.phase
                 job.error = model.error if model else job.error
@@ -461,17 +481,30 @@ class JobManager:
             await cache_job(job.id, job.public())
         return len(expired)
 
-    async def set_provider_task(self, job: Job, provider: str, task_id: str, *, idempotency_key: str | None = None) -> None:
+    async def record_provider_request(self, job: Job, payload: dict[str, Any]) -> None:
+        """Save the wire payload (never authentication headers) for contract diagnosis."""
+        job.request = {**(job.request or {}), "_providerRequest": _redact(payload)}
+        async with session_factory() as session:
+            model = await session.get(GenerationJobModel, job.id)
+            if model and (not job.worker_id or model.worker_id == job.worker_id):
+                model.request = job.request
+                await session.commit()
+
+    async def set_provider_task(self, job: Job, provider: str, task_id: str, *, idempotency_key: str | None = None, polling_url: str | None = None) -> None:
         """供应商 taskId 即时落库：重启恢复与后台对账都依赖它，成功失败都要保留"""
         job.provider, job.provider_task_id, job.phase = provider, task_id, "provider_running"
         if idempotency_key:
             job.idempotency_key = idempotency_key
+        if polling_url:
+            job.request = {**(job.request or {}), "_providerPollingUrl": polling_url}
         job.updated_at = time.time()
         job.provider_submitted_at = job.updated_at
         async with session_factory() as session:
             model = await session.get(GenerationJobModel, job.id)
             if model:
                 model.provider, model.provider_task_id = job.provider, job.provider_task_id
+                if polling_url:
+                    model.request = job.request
                 model.idempotency_key = job.idempotency_key
                 model.phase = job.phase
                 model.provider_submitted_at = utcnow()
@@ -604,9 +637,15 @@ class JobManager:
         """对账确认供应商已成功：补写资产与终态"""
         if job.status != "succeeded":
             job.result = result
-            job.progress, job.status = 100, "succeeded"
-            await self._persist_asset(job)
-            await self._persist(job)
+            job.progress, job.status, job.phase, job.error = 100, "succeeded", "succeeded", None
+            await self._persist_asset(job, provider_confirmed_recovery=True)
+            await self._persist(job, provider_confirmed_recovery=True)
+            if job.kind == "video":
+                from .video_billing import reconcile_video_billing
+
+                async with session_factory() as session:
+                    await reconcile_video_billing(session, [job.id])
+                    await session.commit()
         return job
 
     async def finalize_failure(self, job: Job, error: str) -> Job:
