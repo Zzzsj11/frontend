@@ -2556,13 +2556,30 @@ async def test_veo_uses_yseeai_unified_video_contract(monkeypatch) -> None:
     ],
 )
 async def test_gemini_omni_uses_top_level_prompt_and_reference_task(client, monkeypatch, images, identity_indices, task) -> None:
+    import base64
+    import io
+
     import httpx
+    from PIL import Image
 
     from app import providers
     from app.jobs import Job
     from app.schemas import VideoGenerationCreate
 
     captured: dict = {}
+    downloaded = []
+    image_bytes = {}
+    for index, url in enumerate(images):
+        buffer = io.BytesIO()
+        Image.new("RGB", (2, 2), (index * 100, 0, 0)).save(buffer, format="PNG")
+        image_bytes[url] = buffer.getvalue()
+
+    async def download(url, *, max_bytes):
+        assert max_bytes == 20 * 1024 * 1024
+        downloaded.append(url)
+        return url, image_bytes[url], "application/octet-stream"
+
+    monkeypatch.setattr(providers, "download_public_url", download)
 
     class FakeClient:
         def __init__(self, *args, **kwargs):
@@ -2612,10 +2629,12 @@ async def test_gemini_omni_uses_top_level_prompt_and_reference_task(client, monk
     assert captured["payload"] == {
         "model": "gemini-omni-flash-preview",
         "prompt": "测试",
-        **({"images": images} if images else {}),
+        **({"images": ["data:image/png;base64," + base64.b64encode(image_bytes[url]).decode("ascii") for url in images]} if images else {}),
         "duration": 8,
         "metadata": {"aspect_ratio": "16:9", "task": task},
     }
+    assert downloaded == images
+    assert request.image_urls == images
     assert job.provider == "yseeai-omni"
 
     assert job.request["_providerRequest"] == captured["payload"]
@@ -3085,3 +3104,40 @@ def test_confirmed_recovery_updates_usage_without_counting_the_same_call_twice(c
         assert (await manager.get(job_id)).status == "succeeded"
 
     asyncio.run(exercise())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["download", "invalid_image"])
+async def test_gemini_image_conversion_fails_before_provider_submission(monkeypatch, failure):
+    from app import providers
+    from app.jobs import Job
+    from app.schemas import VideoGenerationCreate
+
+    async def download(*args, **kwargs):
+        if failure == "download":
+            raise ValueError("远程文件超过允许大小")
+        return args[0], b"not an image", "image/jpeg"
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Must not submit a generation when image conversion fails")
+
+    monkeypatch.setattr(providers, "_yseeai_config", lambda: ("https://provider.test", {}))
+    monkeypatch.setattr(providers, "download_public_url", download)
+    monkeypatch.setattr(providers.jobs, "mark_provider_submitting", forbidden)
+    job = Job(id="conversion-failure", kind="video", user_id="u1", request={})
+    request = VideoGenerationCreate(prompt="test", model="gemini-omni-flash-preview", image_urls=["https://cdn.test/a.jpg"])
+    with pytest.raises((ValueError, providers.ProviderError)):
+        await providers.generate_gemini_omni_video(request, job)
+    assert job.provider_task_id is None
+
+
+@pytest.mark.asyncio
+async def test_gemini_existing_image_data_url_is_preserved(monkeypatch):
+    from app import providers
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Existing data URLs must not be downloaded")
+
+    monkeypatch.setattr(providers, "download_public_url", forbidden)
+    value = "data:image/jpeg;base64,aGVsbG8="
+    assert await providers._gemini_omni_image_data_url(value) == value

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
+import io
 import json
 import math
 import re
@@ -16,6 +18,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import httpx
+from PIL import Image, UnidentifiedImageError
 
 from .config import settings
 from .error_logging import _redact
@@ -28,7 +31,7 @@ from .runninghub import submit_reference_task as runninghub_submit_reference_tas
 from .runninghub import submit_text_task as runninghub_submit_text_task
 from .runninghub import upload_media as runninghub_upload_media
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
-from .storage import download_public_url_to_path, import_remote, import_remote_image, put_image_with_thumbnail, safe_key
+from .storage import download_public_url, download_public_url_to_path, import_remote, import_remote_image, put_image_with_thumbnail, safe_key
 from .video_prompt_policy import compile_content_safety_retry_prompt
 
 
@@ -1331,6 +1334,22 @@ async def _store_gemini_omni_result(job: Job, task: dict[str, Any]) -> dict[str,
     }
 
 
+async def _gemini_omni_image_data_url(url: str) -> str:
+    if url.startswith("data:image/"):
+        return url
+    # Use the shared downloader's public-IP and redirect checks, with a bounded image size.
+    _resolved_url, content, _content_type = await download_public_url(url, max_bytes=20 * 1024 * 1024)
+    try:
+        with Image.open(io.BytesIO(content)) as image:
+            mime = Image.MIME.get(image.format or "")
+            image.verify()
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        raise ProviderError("Gemini Omni 参考图片无法解析，请检查原图") from exc
+    if not mime or not mime.startswith("image/"):
+        raise ProviderError("Gemini Omni 参考素材必须是图片")
+    return f"data:{mime};base64,{base64.b64encode(content).decode('ascii')}"
+
+
 async def generate_gemini_omni_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
     base, headers = _yseeai_config()
     images = [url.strip() for url in request.image_urls if url.strip()]
@@ -1345,7 +1364,7 @@ async def generate_gemini_omni_video(request: VideoGenerationCreate, job: Job) -
         "metadata": {"aspect_ratio": request.ratio, "task": task},
     }
     if images:
-        payload["images"] = images
+        payload["images"] = [await _gemini_omni_image_data_url(url) for url in images]
     await jobs.record_provider_request(job, payload)
     await jobs.mark_provider_submitting(job)
     async with httpx.AsyncClient(timeout=60) as client:
