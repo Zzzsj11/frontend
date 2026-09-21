@@ -602,9 +602,10 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
     config["cast_selection_mode"] = cast_selection_mode
     title_base = f"定制通用分镜-{utcnow().astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d-%H-%M-%S')}"
     try:
-        durations = exact_durations(payload.total_duration, total)
+        durations = exact_durations(payload.total_duration, total, model.capabilities or {})
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    config["total_duration"] = sum(durations)
     results = []
     for group_index in range(payload.group_count):
         title = title_base if payload.group_count == 1 else f"{title_base}-{group_index + 1:02d}"
@@ -662,7 +663,7 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
                 "title": title,
                 "status": "parsed",
                 "cast": cast_ids,
-                "totalDuration": payload.total_duration,
+                "totalDuration": sum(durations),
                 "storyboardConfig": group_config,
                 "lines": output,
             }
@@ -691,7 +692,7 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
     if total < 1:
         raise HTTPException(422, "至少需要一个分镜")
     try:
-        durations = exact_durations(payload.total_duration, total)
+        durations = exact_durations(payload.total_duration, total, model.capabilities or {})
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     music_path = " / ".join(value for value in (payload.genre, payload.secondary_category, payload.tertiary_category) if value)
@@ -708,6 +709,7 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
     title_base = f"随机通用分镜-{utcnow().astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d-%H-%M-%S')}"
     config = {
         **payload.model_dump(mode="json"),
+        "total_duration": sum(durations),
         "empty_prompt": empty_prompt,
         "character_prompt": character_prompt,
         "character_prompt_policy": "video_model_random_v3",
@@ -777,7 +779,7 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
                 "title": title,
                 "status": "ready",
                 "cast": [],
-                "totalDuration": payload.total_duration,
+                "totalDuration": sum(durations),
                 "storyboardConfig": group_config,
                 "lines": output,
             }
@@ -1217,13 +1219,21 @@ async def _run_general_outline_generation(
         character_count = int(config.get("character_shot_count", 0))
         total = empty_count + character_count
         try:
-            durations = exact_durations(config.get("total_duration", 0), total)
-        except ValueError:
-            if total:
-                durations = [float(config.get("total_duration", 0)) / total] * total
-            else:
-                durations = []
-        try:
+            video_model = (
+                await session.execute(
+                    select(AiModelModel).where(
+                        AiModelModel.code == config.get("video_model"),
+                        AiModelModel.modality == "video",
+                        AiModelModel.status == "active",
+                        AiModelModel.deleted_at.is_(None),
+                    )
+                )
+            ).scalar_one_or_none()
+            if video_model is None:
+                raise ValueError("视频模型不可用，请重新选择模型")
+            durations = exact_durations(config.get("total_duration", 0), total, video_model.capabilities or {})
+            config["total_duration"] = sum(durations)
+            task.storyboard_config = config
             outline = await generate_general_story_outline(config=config, selected_humans=selected_humans, on_progress=on_progress)
         except Exception as exc:
             _persist_llm_calls(
@@ -1315,6 +1325,25 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
     config_for_cast = dict(task.storyboard_config or {})
     if not selected_humans and (task.storyboard_type != "general" or int(config_for_cast.get("character_shot_count", 0)) > 0):
         raise HTTPException(422, "该任务还未选择人物，请先在人物栏选择人物后再生成分镜大纲")
+    if task.storyboard_type == "general":
+        video_model = (
+            await db.execute(
+                select(AiModelModel).where(
+                    AiModelModel.code == config_for_cast.get("video_model"),
+                    AiModelModel.modality == "video",
+                    AiModelModel.status == "active",
+                    AiModelModel.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if video_model is None:
+            raise HTTPException(422, "视频模型不可用，请重新选择模型")
+        count = int(config_for_cast.get("empty_shot_count", 0)) + int(config_for_cast.get("character_shot_count", 0))
+        try:
+            durations = exact_durations(config_for_cast.get("total_duration", 0), count, video_model.capabilities or {})
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        task.storyboard_config = {**config_for_cast, "total_duration": sum(durations)}
     await consume_daily_quota(db, user_id=user.id, category="chat")
 
     if task.storyboard_type == "general":

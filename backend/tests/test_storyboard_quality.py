@@ -156,6 +156,47 @@ def test_exact_durations_preserve_total_and_provider_limits() -> None:
     assert all(4 <= value <= 15 for value in durations)
 
 
+def test_model_durations_preserve_count_and_adjust_only_time() -> None:
+    assert exact_durations(60, 5, {"durations": {"min": 6, "max": 10}}) == [10] * 5
+    assert exact_durations(20, 5, {"durations": {"min": 6, "max": 10}}) == [6] * 5
+    assert exact_durations(60, 5, {"durations": {"min": 4, "max": 15}}) == [12] * 5
+    caps = {"durationOptions": [4, 8]}
+    values = exact_durations(31, 5, caps)
+    assert len(values) == 5 and set(values) <= {4, 8} and sum(values) == 32
+    assert exact_durations(sum(values), 5, caps) == values
+    with pytest.raises(ValueError, match="没有可用"):
+        exact_durations(60, 5, {"durationOptions": [20]})
+
+
+@pytest.mark.parametrize("kind", ["general", "general/random"])
+def test_general_creation_applies_model_duration_before_outline(client, kind) -> None:
+    project = client.post("/api/projects", json={"name": "Model duration planning"}).json()
+    response = client.post(
+        f"/api/projects/{project['id']}/storyboards/{kind}",
+        json={
+            "genre": "流行歌曲",
+            "season": "summer",
+            "gender": "女",
+            "age_group": "young",
+            "visual_style": "cinematic",
+            "empty_shot_count": 5,
+            "character_shot_count": 0,
+            "total_duration": 60,
+            "video_model": "grok-video-1.5",
+            "resolution": "720p",
+            "extra_requirement": "保留场景内容",
+            "digital_human_ids": [],
+        },
+    )
+    assert response.status_code == 201, response.text
+    result = response.json()
+    assert result["totalDuration"] == 50
+    assert result["storyboardConfig"]["total_duration"] == 50
+    assert result["storyboardConfig"]["extra_requirement"] == "保留场景内容"
+    assert len(result["lines"]) == 5
+    assert all(line["plannedDuration"] == 10 and line["shotOptions"]["duration"] == 10 for line in result["lines"])
+
+
 def test_general_outline_rejects_changed_shot_type_quota() -> None:
     def shot(index: int, shot_type: str) -> dict:
         return {

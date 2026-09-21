@@ -138,10 +138,35 @@ async def build_general_story_bible(*, config: dict[str, Any], shots: list[dict[
     }
 
 
-def exact_durations(total_duration: float, count: int) -> list[float]:
+def exact_durations(total_duration: float, count: int, capabilities: dict | None = None) -> list[float]:
     if count < 1 or total_duration < count * MIN_VIDEO_DURATION or total_duration > count * MAX_VIDEO_DURATION:
         raise ValueError(f"总时长必须在 {count * MIN_VIDEO_DURATION}–{count * MAX_VIDEO_DURATION} 秒之间，才能保证每镜 {MIN_VIDEO_DURATION}–{MAX_VIDEO_DURATION} 秒")
     units = round(total_duration * 10)
     base, remainder = divmod(units, count)
     values = [base + (1 if index < remainder else 0) for index in range(count)]
-    return [value / 10 for value in values]
+    durations = [value / 10 for value in values]
+    if capabilities is None:
+        return durations
+    limits = capabilities.get("durations") or {}
+    minimum = max(MIN_VIDEO_DURATION, int(limits.get("min") or MIN_VIDEO_DURATION))
+    maximum = min(MAX_VIDEO_DURATION, int(limits.get("max") or MAX_VIDEO_DURATION))
+    allowed = list(range(minimum, maximum + 1))
+    options = capabilities.get("durationOptions")
+    if isinstance(options, list) and options:
+        allowed = [value for value in allowed if value in options]
+    if not allowed:
+        raise ValueError("该视频模型没有可用的生成时长，请检查模型能力配置")
+    # Find the closest feasible total, then the most even allocation. Replanning
+    # the adjusted total is stable even for discrete options such as [4, 8].
+    target = total_duration / count
+    plans: dict[int, tuple[float, list[int]]] = {0: (0.0, [])}
+    for _ in range(count):
+        next_plans: dict[int, tuple[float, list[int]]] = {}
+        for subtotal, (cost, plan) in plans.items():
+            for value in allowed:
+                candidate = (cost + (value - target) ** 2, [*plan, value])
+                if subtotal + value not in next_plans or candidate[0] < next_plans[subtotal + value][0]:
+                    next_plans[subtotal + value] = candidate
+        plans = next_plans
+    actual_total = min(plans, key=lambda value: (abs(value - total_duration), value))
+    return sorted(plans[actual_total][1], reverse=True)
