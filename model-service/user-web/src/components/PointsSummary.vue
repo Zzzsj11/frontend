@@ -21,9 +21,7 @@ const store = usePortal()
         <span>预占积分</span><strong>{{ prettyPoints(store.user.quota.reserved_points) }}</strong>
       </div>
     </div>
-    <p class="summary-note">
-      {{ store.user.quota.billing_month }} · 北京时间每月 1 日更新 · 额度由管理员设置
-    </p>
+    <p class="summary-note">积分每月1日更新</p>
   </section>
 </template>
 <style scoped>
