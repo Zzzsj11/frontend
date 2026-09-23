@@ -57,8 +57,7 @@ onMounted(() => store.execute(load))
           maxlength="68"
           pattern="[A-Za-z0-9_\-]+(\.[A-Za-z0-9_\-]+)*"
           placeholder="star-net"
-        /><span>@star-net.cn</span></label
-      >
+      /></label>
       <label
         >账号月总额度<FinancialInput
           v-model="initialQuota"
@@ -126,15 +125,30 @@ input[type='number'] {
   margin-bottom: 20px;
 }
 .fields {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) minmax(180px, 260px) auto;
   align-items: end;
   gap: 16px;
-  flex-wrap: wrap;
   margin: 20px 0;
 }
 .fields label {
-  flex: 1;
-  min-width: 200px;
+  min-width: 0;
+}
+.fields input {
+  height: 42px;
+}
+.fields button {
+  min-height: 42px;
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .fields {
+    grid-template-columns: 1fr;
+  }
+  .fields input[type='number'] {
+    max-width: none;
+    min-width: 0;
+  }
 }
 .revealed {
   padding: 20px;
