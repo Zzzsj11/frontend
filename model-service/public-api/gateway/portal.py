@@ -204,6 +204,20 @@ async def create_key(body: KeyCreate, user=Depends(current_user)):
         return {**await account(db, c), "api_key": key}
 
 
+@router.post("/keys/{cid}/revoke", status_code=204)
+async def revoke_key(cid: str, user=Depends(current_user)):
+    async with Session.begin() as db:
+        await lock(db)
+        c = await db.get(Client, cid)
+        if not c or c.deleted_at or c.user_id != user.id:
+            raise HTTPException(404, "Key 不存在")
+        if c.enabled:
+            c.enabled = False
+            # Discard the credential permanently; keep identity, history and reservations.
+            c.key_hash = token_hash(secrets.token_urlsafe(48))
+            db.add(Audit(id=uuid.uuid4().hex, actor=user.id, action="client.revoke", target=cid, detail={}))
+
+
 @router.delete("/keys/{cid}", status_code=204)
 async def delete_key(cid: str, user=Depends(current_user)):
     async with Session.begin() as db:
@@ -211,6 +225,8 @@ async def delete_key(cid: str, user=Depends(current_user)):
         c = await db.get(Client, cid)
         if not c or c.deleted_at or c.user_id != user.id:
             raise HTTPException(404, "Key 不存在")
+        if c.enabled:
+            raise HTTPException(409, "请先撤销 Key，再删除")
         c.deleted_at, c.enabled = now(), False
         db.add(Audit(id=uuid.uuid4().hex, actor=user.id, action="client.delete", target=cid, detail={}))
 
@@ -226,6 +242,8 @@ async def key_quota(cid: str, body: KeyQuota, user=Depends(current_user)):
         c = await db.get(Client, cid)
         if not c or c.deleted_at or c.user_id != user.id:
             raise HTTPException(404, "Key 不存在")
+        if not c.enabled:
+            raise HTTPException(409, "已撤销的 Key 不能修改月上限")
         await configure_quota(db, c, body.points, user.id)
         db.add(
             Audit(

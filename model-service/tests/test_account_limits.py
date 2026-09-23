@@ -26,6 +26,7 @@ async def test_user_key_ownership_and_atomic_ten_key_limit(service):
     for path, method, data in (
         (f"/portal/keys/{other['id']}/quota", "POST", {"points": 999}),
         (f"/portal/keys/{other['id']}", "DELETE", None),
+        (f"/portal/keys/{other['id']}/revoke", "POST", None),
     ):
         assert (await api.request(method, path, headers=auth, json=data)).status_code == 404
     assert (await api.post("/portal/keys", headers=auth, json={"name": "spoof", "monthly_points": 1, "user_id": uid2})).status_code == 422
@@ -34,6 +35,12 @@ async def test_user_key_ownership_and_atomic_ten_key_limit(service):
     assert (await ctl.post("/admin/users", headers=auth, json={"username": "intruder@star-net.cn"})).status_code == 401
     assert (await ctl.post("/admin/clients", json={"name": "bound", "user_id": uid})).status_code == 403
     assert (await ctl.post(f"/admin/clients/{first['id']}/quota", json={"points": 100})).status_code == 403
+    assert (await api.delete(f"/portal/keys/{first['id']}", headers=auth)).status_code == 409
+    assert (await api.post(f"/portal/keys/{first['id']}/revoke", headers=auth)).status_code == 204
+    assert (await api.get("/v1/models", headers=headers(uid, first))).status_code == 401
+    assert (await api.post(f"/portal/keys/{first['id']}/quota", headers=auth, json={"points": 99})).status_code == 409
+    assert (await api.post(f"/portal/keys/{first['id']}/revoke", headers=auth)).status_code == 204
+    assert any(k["id"] == first["id"] and not k["enabled"] for k in (await api.get("/portal/me", headers=auth)).json()["keys"])
     assert (await api.delete(f"/portal/keys/{first['id']}", headers=auth)).status_code == 204
     assert (await api.get("/v1/models", headers=headers(uid, first))).status_code == 401
     assert (await api.post("/portal/keys", headers=auth, json={"name": "replacement", "monthly_points": 500})).status_code == 201
@@ -54,6 +61,7 @@ async def test_aggregate_reservations_spending_reallocation_and_retired_keys(ser
     me = (await api.get("/portal/me", headers=auth)).json()
     assert me["quota"]["reserved_points"] == "20.000000"
     # Removing an in-flight key must not release its reservation or future charge.
+    assert (await api.post(f"/portal/keys/{first['id']}/revoke", headers=auth)).status_code == 204
     assert (await api.delete(f"/portal/keys/{first['id']}", headers=auth)).status_code == 204
     assert (await api.get("/portal/me", headers=auth)).json()["quota"]["reserved_points"] == "20.000000"
     queue = importlib.import_module("gateway.queue")

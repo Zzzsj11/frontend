@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import KeyReveal from './KeyReveal.vue'
+import KeyLifecycleModal from './KeyLifecycleModal.vue'
 import FinancialInput from './FinancialInput.vue'
 import BaseModal from './base/BaseModal.vue'
 import { usePortal, type Key } from '../stores/portal'
@@ -8,7 +9,7 @@ import { prettyPoints } from '../utils/financial'
 const store = usePortal()
 const creating = ref(false)
 const editing = ref<Key | null>(null)
-const deleting = ref<Key | null>(null)
+const lifecycleKey = ref<Key | null>(null)
 const name = ref('')
 const quota = ref('0')
 function openCreate() {
@@ -31,10 +32,9 @@ async function save() {
   await store.setKeyQuota(editing.value.id, quota.value)
   if (!store.error) editing.value = null
 }
-async function remove() {
-  if (!deleting.value) return
-  await store.deleteKey(deleting.value.id)
-  if (!store.error) deleting.value = null
+function openLifecycle(key: Key) {
+  store.error = ''
+  lifecycleKey.value = key
 }
 </script>
 <template>
@@ -73,7 +73,7 @@ async function remove() {
         <div class="key-identity">
           <strong>{{ key.name }}</strong
           ><code>{{ key.key_prefix }}…</code
-          ><span class="pill">{{ key.enabled ? '已启用' : '已停用' }}</span>
+          ><span class="pill">{{ key.enabled ? '已启用' : '已撤销' }}</span>
         </div>
         <dl>
           <div>
@@ -95,6 +95,7 @@ async function remove() {
         </dl>
         <div class="key-actions">
           <button
+            v-if="key.enabled"
             class="secondary"
             :aria-label="'修改 ' + key.name + ' 月上限'"
             :disabled="store.loading"
@@ -102,12 +103,12 @@ async function remove() {
           >
             修改月上限</button
           ><button
-            class="link-button danger"
-            :aria-label="'删除 ' + key.name"
+            class="secondary danger"
+            :aria-label="(key.enabled ? '撤销 ' : '删除 ') + key.name"
             :disabled="store.loading"
-            @click="deleting = key"
+            @click="openLifecycle(key)"
           >
-            删除
+            {{ key.enabled ? '撤销' : '删除' }}
           </button>
         </div>
       </article>
@@ -161,22 +162,7 @@ async function remove() {
       <button :disabled="store.loading">保存月上限</button>
     </form>
   </BaseModal>
-  <BaseModal
-    :open="!!deleting"
-    title="删除 API Key"
-    :loading="store.loading"
-    @close="deleting = null"
-    ><p>
-      确认删除「{{ deleting?.name }}」？该 Key 将无法再调用模型，历史消费和在途任务仍计入账号额度。
-    </p>
-    <p v-if="store.error" role="alert" class="error">{{ store.error }}</p>
-    <template #footer
-      ><button class="secondary" :disabled="store.loading" @click="deleting = null">取消</button
-      ><button class="delete-confirm" :disabled="store.loading" @click="remove">
-        确认删除
-      </button></template
-    ></BaseModal
-  >
+  <KeyLifecycleModal :target="lifecycleKey" @close="lifecycleKey = null" />
 </template>
 <style scoped>
 h2 {
@@ -243,9 +229,7 @@ dd {
 }
 .danger {
   color: var(--danger);
-}
-.delete-confirm {
-  background: var(--danger);
+  border-color: var(--danger);
 }
 .key-form {
   display: grid;

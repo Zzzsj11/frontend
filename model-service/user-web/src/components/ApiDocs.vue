@@ -20,14 +20,6 @@ const {
 } = useApiDocs()
 </script>
 <template>
-  <section class="card docs-intro">
-    <p class="eyebrow">API REFERENCE</p>
-    <h2>一次接入，多种模型</h2>
-    <p class="muted">选择模型，复制示例即可开始接入。Key 在服务端保存，不要放入前端代码。</p>
-    <p class="base-note">
-      API 基础地址：<code>$MODEL_API_BASE</code> · 请向管理员获取地址，不包含 <code>/v1</code>。
-    </p>
-  </section>
   <section class="card model-browser" aria-label="API 模型目录">
     <div class="heading">
       <div class="category-tabs" role="group" aria-label="模型类型">
@@ -154,13 +146,6 @@ const {
 h2 {
   font-size: 23px;
   overflow-wrap: anywhere;
-}
-.base-note {
-  background: var(--bg);
-  padding: 14px 16px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  line-height: 1.8;
 }
 .category-tabs {
   display: flex;

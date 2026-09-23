@@ -62,6 +62,7 @@ async def test_history_filters_pagination_and_private_job_details(service):
     detail = await api.get("/portal/jobs/mine", headers=auth)
     assert detail.status_code == 200 and detail.json()["billing"]["points"] == "3.000000"
     assert (await api.get(f"/portal/jobs?client_id={other['id']}", headers=auth)).json()["total"] == 0
+    assert (await api.post(f"/portal/keys/{key['id']}/revoke", headers=auth)).status_code == 204
     assert (await api.delete(f"/portal/keys/{key['id']}", headers=auth)).status_code == 204
     keys = (await api.get("/portal/history-keys", headers=auth)).json()
     assert any(k["id"] == key["id"] and k["deleted"] for k in keys)

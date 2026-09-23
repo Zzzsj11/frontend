@@ -204,6 +204,13 @@ export const usePortal = defineStore('portal', {
         this.message = 'Key 月上限已更新，本月消费记录保留。'
       })
     },
+    async revokeKey(id: string) {
+      await this.execute(async () => {
+        await api(`/keys/${id}/revoke`, 'POST')
+        this.revealedKey = ''
+        await this.refresh()
+      })
+    },
     async deleteKey(id: string) {
       await this.execute(async () => {
         await api(`/keys/${id}`, 'DELETE')

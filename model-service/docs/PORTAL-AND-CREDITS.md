@@ -91,7 +91,8 @@
 - `POST /portal/login`、`POST /portal/logout`；`POST /portal/register` 已关闭
 - `POST /portal/keys`：创建自己的 Key（name、monthly_points），返回一次明文
 - `POST /portal/keys/{id}/quota`：设置自己的 Key 月上限（points）
-- `DELETE /portal/keys/{id}`：软删除自己的 Key，不抹掉消费与在途预占
+- `POST /portal/keys/{id}/revoke`：撤销自己的 Key，立即禁用并作废原凭据；保留记录、消费与在途预占，重复撤销幂等
+- `DELETE /portal/keys/{id}`：仅允许删除已撤销（停用）的 Key，启用中返回 409；软删除，不抹掉消费与在途预占
 - `POST /portal/change-password`：原密码、新密码、确认密码，成功后重新登录
 - `GET /portal/me`：首次改密标记、所属 Key 及月额度、临时余额、预占、可用积分
 - `GET /portal/models`：公开模型能力、分生成方式费率
@@ -143,3 +144,5 @@ API 页面使用紧凑 Key 列表，创建、修改月上限与删除采用弹�
 `GET /portal/activity` 为用户端统一列表，支持 `page / limit / client_id / kind`；每个任务仅一行，任务消费和核账差额汇总为净积分变化。排队、处理中、失败和待核账任务也保留，无账单时显示待结算而非零费用。月度重置、额度调整等非任务流水独立显示。列表余额取该任务最近一笔流水对应的 Key 余额，不代表账号总余额；底层原始流水不合并、不修改。
 
 `GET /portal/jobs/{id}` 额外返回 `kind / request_content / result_content`。以白名单解析文本提示词、对话消息及参考素材，图片和视频结果来自已归档素材；不返回原始渠道请求、鉴权字段或渠道原始响应。弹窗根据文本、图片、视频分别显示文本、图片预览和视频播放器，并提供原文件链接。历史任务未留存的内容明确提示缺失，不回溯调用模型。权限继续按用户及 Key 所有权隔离，软删除 Key 的历史仍可查看。
+
+用户 Key 列表的启用项提供「撤销」确认，撤销后显示「已撤销」和「删除」确认，不再允许修改月上限。撤销不释放 10 个未删除 Key 的名额，删除后释放；用户仍可通过积分明细查看其历史任务。API 页移除介绍卡片，直接显示 Key 管理与模型文档。
