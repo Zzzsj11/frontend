@@ -40,7 +40,7 @@ def test_h3_identity_card_preserves_identity_but_not_card_clothing_or_layout():
     retention = compiled.prompt.split("retention_analysis:\n", 1)[1].split("\n\ndetailed_description:", 1)[0]
     assert "<Subject 1> (appears where required): fully_preserved" in retention
     assert "<Subject 2> (appears where required): identity_only" in retention
-    assert "preserve facial features, face shape, skin tone, apparent age, and hairstyle only from the head-and-shoulders portrait" in retention
+    assert "preserve facial features, face shape, skin tone, and apparent age only from the head-and-shoulders portrait" in retention
     assert "do not infer full-body proportions" in retention
     assert "never adultify children" in retention
     assert "preserve cartoon style for cartoon characters" in retention

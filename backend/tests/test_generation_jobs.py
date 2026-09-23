@@ -2100,7 +2100,7 @@ def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) ->
         assert state["status"] == "succeeded"
         assert captured["image_urls"] == ["asset://video-human-1", "https://tos.test/scene.png"]
         assert "人物身份参考硬约束" in str(captured["prompt"])
-        assert "五官、脸型、肤色、年龄感和发型" in str(captured["prompt"])
+        assert "五官、脸型、肤色和年龄感" in str(captured["prompt"])
         assert "不得从头肩照推断或锁定全身身体比例" in str(captured["prompt"])
         assert "纯白圆领T恤、中性灰背景" in str(captured["prompt"])
         assert "历史身份卡中的浅灰棉质短裤" in str(captured["prompt"])
@@ -2880,3 +2880,55 @@ def test_admin_sync_rejects_unavailable_source_before_query(client, monkeypatch,
     assert response.status_code == status
     assert message in response.json()["detail"]
     assert _job_row(job_id)["status"] == "failed"
+
+
+@pytest.mark.parametrize("model", ["doubao-seedance-2.0", "minimax-h3-runninghub"])
+def test_video_submission_appends_quality_by_line_type_without_repeating(client, monkeypatch, model):
+    import time
+
+    from app import main, video_metadata
+
+    _fail_active_jobs()
+    captured = []
+
+    async def fake_video(payload, job):
+        captured.append(payload.prompt)
+        return {"videoUrl": "https://tos.test/quality.mp4", "coverUrl": "https://tos.test/quality.png", "duration": 5}
+
+    async def fake_quota(*args, **kwargs):
+        return 1
+
+    async def fake_metadata(url):
+        return {}
+
+    monkeypatch.setattr(main, "consume_daily_quota", fake_quota)
+    monkeypatch.setattr(video_metadata, "probe_video_url", fake_metadata)
+    monkeypatch.setattr(main, "generate_video", fake_video)
+    project = client.post("/api/projects", json={"name": "Shot quality"}).json()
+    response = client.post(
+        f"/api/projects/{project['id']}/storyboards/general/random",
+        json={"genre": "流行歌曲", "empty_shot_count": 1, "character_shot_count": 1, "total_duration": 10, "video_model": "doubao-seedance-2.0"},
+    )
+    assert response.status_code == 201, response.text
+    task = response.json()
+    for line in task["lines"]:
+        for prompt in ("用户手动编辑的镜头", line["shotPrompt"]):
+            response = client.post(
+                "/api/generations/videos",
+                json={"model": model, "prompt": prompt, "project_task_id": task["taskId"], "storyboard_line_id": line["id"], "duration": 5},
+            )
+            assert response.status_code == 202, response.text
+            for _ in range(100):
+                state = client.get(f"/api/generations/{response.json()['id']}").json()
+                if state["status"] in {"succeeded", "failed"}:
+                    break
+                time.sleep(0.01)
+            assert state["status"] == "succeeded", state
+            with sqlite3.connect(TEST_DB) as conn:
+                request = json.loads(conn.execute("SELECT request FROM generation_jobs WHERE id=?", (response.json()["id"],)).fetchone()[0])
+            if "_compiledPrompt" in request:
+                assert request["_compiledPrompt"] == request["prompt"]
+            assert request["prompt"].count("视频整体画质类似实拍视频") == 1
+            assert ("人物表情自然不僵硬" in request["prompt"]) == (line["shotType"] == "character")
+    assert len(captured) == 4
+    assert all(prompt.count("视频整体画质类似实拍视频") == 1 for prompt in captured)

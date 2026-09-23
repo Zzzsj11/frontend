@@ -83,7 +83,7 @@ from .schemas import (
 from .seed import recover_stale_storyboard_generation, seed_system_data
 from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
 from .usage_quota import consume_daily_quota
-from .video_prompt_policy import compile_general_random_provider_prompt, compile_identity_safe_video_prompt
+from .video_prompt_policy import append_shot_quality_requirements, compile_general_random_provider_prompt, compile_identity_safe_video_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -807,9 +807,13 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
     provider_protocol = str((model.capabilities or {}).get("providerProtocol") or "")
     if provider.code == "yinghe" and model.provider_model_id != "MiniMax-H3" and not provider_protocol:
         payload.image_urls = await _resolve_asset_avatar_urls(db, payload.image_urls, user_id=user.id)
+    if line:
+        payload.prompt = append_shot_quality_requirements(payload.prompt, shot_type=line.shot_type)
     h3_compilation = compile_h3_prompt(payload, identity_reference_indices=identity_indices) if is_h3 else None
     if h3_compilation:
         payload.prompt = h3_compilation.prompt
+        if line:
+            payload.prompt = append_shot_quality_requirements(payload.prompt, shot_type=line.shot_type)
     source_prompt = payload.prompt
     general_random_safety = False
     if task and task.storyboard_type == "general_random" and line and not is_h3:
@@ -840,7 +844,7 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
         snapshot.update(
             {
                 "_sourcePrompt": h3_compilation.source_prompt,
-                "_compiledPrompt": h3_compilation.prompt,
+                "_compiledPrompt": payload.prompt,
                 "_h3Mode": h3_compilation.mode,
                 "_promptCompiler": h3_compilation.compiler,
                 "_promptCompilerVersion": h3_compilation.version,

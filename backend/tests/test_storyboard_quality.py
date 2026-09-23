@@ -766,7 +766,7 @@ def test_random_general_storyboard_skips_outline_and_builds_shot_type_prompts(cl
     assert "480p" not in empty_prompt
     assert "夏日公路旅行" in empty_prompt
     assert "不得出现人物" in empty_prompt
-    assert character_prompts == ["音乐属性：流行歌曲 / 通用积极 / 生活。额外要求：夏日公路旅行。【随机生成】"] * 2
+    assert character_prompts == ["音乐属性：流行歌曲 / 通用积极 / 生活。额外要求：夏日公路旅行。【随机生成】\n人物表情自然不僵硬，视频整体画质类似实拍视频。"] * 2
     assert all("【人物镜*" not in prompt and "【主角：" not in prompt for prompt in character_prompts)
     assert all("发型" not in prompt and "服装" not in prompt and "演员" not in prompt for prompt in character_prompts)
     character_lines = [line for line in result["lines"] if line["shotType"] == "character"]

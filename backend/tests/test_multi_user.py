@@ -64,7 +64,7 @@ def test_system_human_runtime_identity_is_headshot_only() -> None:
         assert parse_system_human(code, SYSTEM_HUMAN_MARKDOWN[code]) == human
         identity = human["appearance_style"]
         assert identity.startswith(f"{human['age_description']}，{human['gender']}，")
-        assert "仅参考头肩大头照中的五官、脸型、肤色、年龄感和发型" in identity
+        assert "仅参考头肩大头照中的五官、脸型、肤色和年龄感" in identity
         assert "不得从头肩图推断全身比例" in identity
         assert "儿童保持儿童年龄，不得成人化" in identity
         assert "卡通人物保持卡通风格" in identity

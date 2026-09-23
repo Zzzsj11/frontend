@@ -114,7 +114,7 @@ def _snapshot(connection, table):
 
 
 def test_revision_lineage_and_frozen_metadata(migration):
-    assert _scripts().get_heads() == ["e7a3b9c2f104"]
+    assert _scripts().get_revision("e7a3b9c2f104").down_revision == REVISION
     assert migration.down_revision == PREVIOUS
     assert migration.LEGACY_METADATA == LEGACY_METADATA
     assert migration.HEADSHOT_METADATA == {field: DEFAULT_PROMPTS[KEY][field] for field in LEGACY_METADATA}

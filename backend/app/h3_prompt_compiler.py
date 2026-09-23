@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from .schemas import VideoGenerationCreate
 
 COMPILER_NAME = "h3-prompt-writing"
-COMPILER_VERSION = "1.3.0"
+COMPILER_VERSION = "1.4.0"
 BASE_SECTIONS = ("integrated_multimodal_description:", "overall_soundscape:", "non_diegetic_music:")
 REFERENCE_SECTIONS = ("subject_definitions:", "summary:", "retention_analysis:", "detailed_description:", "overall_soundscape:", "non_diegetic_music:")
 NO_VISUAL_TEXT_CONSTRAINT = (
@@ -114,7 +114,7 @@ def compile_h3_prompt(payload: VideoGenerationCreate, *, identity_reference_indi
                 f"<Subject {index}> is an identity-only character card supplied by <Picture {index}>; its clothing, gray background, historical multi-view layout, era, and occupation are not target-video references."
             )
             retention.append(
-                f"<Subject {index}> (appears where required): identity_only - preserve facial features, face shape, skin tone, apparent age, and hairstyle only from the head-and-shoulders portrait; do not infer full-body proportions; never adultify children; preserve cartoon style for cartoon characters; replace all card clothing with the wardrobe required by the creative direction."
+                f"<Subject {index}> (appears where required): identity_only - preserve facial features, face shape, skin tone, and apparent age only from the head-and-shoulders portrait; hairstyle may adapt naturally to the scene and action unless the user explicitly requires otherwise; do not infer full-body proportions; never adultify children; preserve cartoon style for cartoon characters; replace all card clothing with the wardrobe required by the creative direction."
             )
         else:
             definitions.append(f"<Subject {index}> is the visible identity, subject, scene, composition, and style supplied by <Picture {index}>.")

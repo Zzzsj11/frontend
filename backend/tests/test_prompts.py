@@ -287,7 +287,7 @@ async def test_general_character_prompt_gets_canonical_composition_prefix(client
         full_context={},
         allowed_humans=[],
     )
-    assert result["shotPrompt"].startswith("【人物镜*双人*青年男性/青年女性】【主角：青年男性，短发；青年女性，长发】")
+    assert result["shotPrompt"].startswith("【人物镜*主角2人*青年男性/青年女性】【主角：青年男性，短发；青年女性，长发】")
     assert "本镜独立选角编号" not in result["shotPrompt"]
 
 
@@ -344,7 +344,7 @@ async def test_general_prompt_keeps_headshot_identity_and_legacy_card_safety(cli
     payload, _ = json.JSONDecoder().raw_decode(messages[1]["content"])
     reference_rule = next(rule for rule in payload["requirements"] if rule.startswith("当 source 为 general 且 plannedDigitalHumanIds 非空时"))
     for text in (reference_rule, payload["globalContext"]["storyBible"]["characterPolicy"]):
-        assert "五官、脸型、肤色、年龄感和发型" in text
+        assert "五官、脸型、肤色和年龄感" in text
         assert "不得从头肩照推断或锁定全身身体比例" in text
         assert "儿童与卡通人物不得成人化" in text
         assert "必须忽略卡片" in text
@@ -541,3 +541,24 @@ def test_non_admin_cannot_manage_prompts(client) -> None:
     # 恢复共享 TestClient 的管理员会话
     restored = client.post("/api/auth/login", json={"username": "admin", "password": "secure-admin-123"})
     client.headers["Authorization"] = f"Bearer {restored.json()['accessToken']}"
+
+
+@pytest.mark.parametrize("source,shot_type,ids", [("ass", "character", ["hero"]), ("general", "character", []), ("ass", "empty", []), ("general", "empty", [])])
+async def test_generated_shot_quality_is_automatic_even_when_model_omits_it(client, monkeypatch, source, shot_type, ids):
+    from app import storyboard_prompt
+
+    text = "仅此一人出镜，发型不变，无其他人物。" if shot_type == "character" else "无人出镜，日出山川。"
+    valid = json.dumps({"scenePrompt": "日出山川", "shotPrompt": text, "digitalHumanIds": ids})
+    monkeypatch.setattr(storyboard_prompt, "settings", replace(storyboard_prompt.settings, llm_api_key="fake-key"))
+    monkeypatch.setattr(storyboard_prompt, "AsyncOpenAI", lambda **kwargs: _FakeOpenAI([valid]))
+    result = await storyboard_prompt.generate_storyboard_line(
+        source=source,
+        current={"shotType": shot_type, "plannedDigitalHumanIds": ids},
+        full_context={},
+        allowed_humans=[{"id": ident, "name": "主角"} for ident in ids],
+    )
+    assert result["shotPrompt"].count("视频整体画质类似实拍视频") == 1
+    assert ("人物表情自然不僵硬" in result["shotPrompt"]) == (shot_type == "character")
+    assert "发型不变" not in result["shotPrompt"]
+    assert "无其他人物" not in result["shotPrompt"]
+    assert "仅此一人出镜" not in result["shotPrompt"]

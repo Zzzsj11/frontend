@@ -14,6 +14,7 @@ from .media_constraints import normalize_video_duration
 from .model_gateway import AsyncOpenAI
 from .model_gateway import enabled as gateway_enabled
 from .prompts import get_prompt
+from .video_prompt_policy import CHARACTER_DIRECTION_RULE, append_shot_quality_requirements, relax_generated_character_direction
 
 PROMPT_VERSION = "storyboard-v7"
 SCHEMA_VERSION = "storyboard-line-v2"
@@ -233,7 +234,7 @@ async def _plan_ass_scenes(
         "overallRequirement": extra_requirement,
         "wardrobeDirection": (
             "每个大场景先结合 globalVisual 与本场 locationName、mood、emotion、visualTone、narrativePurpose，确定服装在色彩、材质、层次、年代感和正式程度上的设计意图；"
-            "再为每位已选人物设计完整服装、鞋履和关键配饰。服装必须融入画面氛围而不是孤立好看，同场一致，相邻大场景明显换整套，人物面部与发型保持不变。"
+            "再为每位已选人物设计完整服装、鞋履和关键配饰。服装必须融入画面氛围而不是孤立好看，同场一致，相邻大场景明显换整套，人物面部身份保持不变，发型可随场景自然调整。"
         ),
         "rules": rules_prompt.render_json(),
         "conciseLimits": {
@@ -867,6 +868,8 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
     role_constraint = role_constraint_prompt.render(planned_ids=json.dumps(planned, ensure_ascii=False))
     system = system_prompt.render(prompt_version=version_label, schema_version=SCHEMA_VERSION)
     requirements = requirements_prompt.render_json()
+    if CHARACTER_DIRECTION_RULE not in requirements:
+        requirements.append(CHARACTER_DIRECTION_RULE)
     outline = current.get("outline") or {}
     if source == "general" and planned and outline.get("wardrobeByCharacter"):
         requirements.append(
@@ -938,13 +941,16 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
             raise StoryboardPromptError(str(exc), usage_records=usage_records) from exc
     if source == "general" and current.get("shotType") == "character":
         composition = (current.get("outline") or {}).get("characterComposition") or {}
-        label = str(composition.get("label") or "人物镜")
+        label = str(composition.get("label") or "人物镜").replace("单人", "主角1人").replace("双人", "主角2人")
         protagonists = composition.get("protagonists") or []
         if not protagonists:
             protagonists = [str(item.get("identityDescription") or item.get("name") or "人物") for item in allowed_humans]
         protagonist_text = "；".join(str(item) for item in protagonists if item) or "依据本镜人物设定"
         body = re.sub(r"^(?:【人物镜[^】]*】)?(?:【主角：[^】]*】)?", "", result["shotPrompt"]).lstrip()
         result["shotPrompt"] = f"【{label}】【主角：{protagonist_text}】{body}"
+    if current.get("shotType") == "character":
+        result["shotPrompt"] = relax_generated_character_direction(result["shotPrompt"], user_requirement=str(full_context.get("overallRequirement") or ""))
+    result["shotPrompt"] = append_shot_quality_requirements(result["shotPrompt"], shot_type=current.get("shotType", "empty"))
     return {**result, "usage": _sum_usage(usage_records), "usageRecords": usage_records, "requestId": usage_records[-1].get("requestId")}
 
 

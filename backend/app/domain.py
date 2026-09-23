@@ -90,6 +90,7 @@ from .storyboard_prompt import (
 )
 from .token_usage import add_llm_call_log, add_token_usage, normalize_usage
 from .usage_quota import consume_daily_quota
+from .video_prompt_policy import append_shot_quality_requirements
 
 router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
@@ -705,7 +706,8 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
     empty_prompt = common_prompt + "【空镜】画面中不得出现人物、人影或可识别的人体主体；请自由设计环境、景物、光影与镜头运动。"
     # 随机通用分镜不在应用层预设人物身份、外貌或服装；视频模型仅依据用户输入
     # 自行生成内容。标记只用于让用户明确看到该镜没有代码拼装的人物设定。
-    character_prompt = common_prompt + "【随机生成】"
+    character_prompt = append_shot_quality_requirements(common_prompt + "【随机生成】", shot_type="character")
+    empty_prompt = append_shot_quality_requirements(empty_prompt, shot_type="empty")
     title_base = f"随机通用分镜-{utcnow().astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y%m%d-%H-%M-%S')}"
     config = {
         **payload.model_dump(mode="json"),

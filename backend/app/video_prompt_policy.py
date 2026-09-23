@@ -56,7 +56,7 @@ def compile_identity_safe_video_prompt(
         else f"本镜必须明确描写服装，并按‘用户明确要求 > 季节 > 曲风 > 歌词与叙事 > 场景和动作 > 光线、色彩和视觉风格’重新设计。{season_rule}"
     )
     contract = (
-        f"【{IDENTITY_REFERENCE_MARKER}】人物参考图只用于锁定五官、脸型、肤色、年龄感和发型；"
+        f"【{IDENTITY_REFERENCE_MARKER}】人物参考图只用于锁定五官、脸型、肤色和年龄感；除非用户明确要求固定发型，发型可按场景、动作和造型自然调整，同一连续场景合理衔接；"
         "不得从头肩照推断或锁定全身身体比例，儿童不得成人化，卡通人物保持卡通风格。"
         "纯白圆领T恤、中性灰背景，以及历史身份卡中的浅灰棉质短裤、赤脚或基础鞋履、多视图排版均为身份采集占位信息，"
         "绝对不得继承到剧情画面，也不得从参考图推断人物职业、年代或剧情。"
@@ -89,3 +89,42 @@ def compile_content_safety_retry_prompt(prompt: str, *, shot_type: str = "charac
     motifs = _SAFE_RANDOM_EMPTY_MOTIFS if shot_type == "empty" else _SAFE_RANDOM_CHARACTER_MOTIFS
     motif = motifs[(max(0, shot_index) + 1) % len(motifs)]
     return f"{neutral}\n【合规重试】{motif}。画面写实、温暖、克制，只呈现虚构的普通生活场景。{_PUBLIC_CELEBRATION_SAFETY_RULE}"
+
+
+CHARACTER_DIRECTION_RULE = (
+    "人物镜保持主角面部身份与叙事重点，发型可按场景、动作和造型自然调整，同一连续场景合理衔接；"
+    "允许合理的路人、观众或陪衬人物，不替换指定主角。除非用户明确要求，不得默认写入“发型不变”“无其他人物”“仅此一人出镜”等限制；"
+    "人数标签仅描述主角人数，不限制背景人物。空镜仍不得出现人物。"
+)
+EXPRESSION_REQUIREMENT = "人物表情自然不僵硬"
+LIVE_ACTION_REQUIREMENT = "视频整体画质类似实拍视频"
+
+
+def append_shot_quality_requirements(prompt: str, *, shot_type: str) -> str:
+    """Append deterministic user-visible requirements without duplicating them on submission."""
+    source = prompt.strip()
+    requirements = [EXPRESSION_REQUIREMENT, LIVE_ACTION_REQUIREMENT] if shot_type == "character" else [LIVE_ACTION_REQUIREMENT]
+    missing = [requirement for requirement in requirements if requirement not in source]
+    if not missing:
+        return source
+    suffix = "，".join(missing) + "。"
+    # Keep visual instructions out of H3 audio sections, which silent mode replaces.
+    if "overall_soundscape:" in source:
+        visual, audio = source.split("overall_soundscape:", 1)
+        return visual.rstrip() + "\n" + suffix + "\n\noverall_soundscape:" + audio
+    return source + ("\n" if source else "") + suffix
+
+
+def relax_generated_character_direction(prompt: str, *, user_requirement: str = "") -> str:
+    """Remove legacy boilerplate from model output, respecting explicit user direction.
+
+    Never apply this to manually edited prompts on video submission.
+    """
+    prompt = re.sub(r"(【人物镜\*)(单人|双人|三人)(\*)", lambda match: match[1] + {"单人": "主角1人", "双人": "主角2人", "三人": "主角3人"}[match[2]] + match[3], prompt)
+    if not re.search(r"发型|头发|短发|长发|光头", user_requirement):
+        prompt = prompt.replace("年龄感和发型不变", "年龄感不变")
+        prompt = prompt.replace("年龄感和发型", "年龄感")
+        prompt = re.sub(r"(?:保持)?发型(?:保持)?(?:不变|一致)[，,；;。]?", "", prompt)
+    if not re.search(r"单人|独处|独自|只有|仅.*人|无人|其他人|路人|观众|人群|陪衬|人数|人出镜", user_requirement):
+        prompt = re.sub(r"(?:无其他人物|仅此一人出镜|严禁出现未列入本镜的其他人物)[，,；;。]?", "", prompt)
+    return prompt

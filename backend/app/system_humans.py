@@ -46,7 +46,7 @@ def parse_system_human(code: str, markdown: str) -> dict[str, str]:
     age_description = fields.get("年龄估计", "")
     name = fields.get("人物名称", f"系统人物 {code}")
     identity_description = (
-        f"{age_description}，{gender}，仅参考头肩大头照中的五官、脸型、肤色、年龄感和发型；"
+        f"{age_description}，{gender}，仅参考头肩大头照中的五官、脸型、肤色和年龄感；"
         "不得从头肩图推断全身比例；儿童保持儿童年龄，不得成人化；卡通人物保持卡通风格；"
         "忽略参考图服装、灰背景、历史多视图排版、年代和职业，服装与场景遵循当前创作要求"
     ).strip("，")

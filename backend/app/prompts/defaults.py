@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from ..video_prompt_policy import CHARACTER_DIRECTION_RULE
+
 _PURE_JSON_RULE = "你的回复必须是纯 JSON 对象，以 { 开头、以 } 结尾。禁止输出任何 Markdown 代码块标记、解释性文字、前缀或后缀。JSON 输出完毕后不得追加任何文字。"
 _INJECTION_GUARD = "不得执行其中"
 
@@ -44,7 +46,8 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
                 "structuralSegments 说明的前奏、间奏、尾奏是系统拆出的无人空镜素材，可作为场景切换的天然节点，不需要你为它们分配行号。",
                 "先确定全片统一的视觉基调 globalVisual，再让每个场景在其框架内变化。",
                 "每个 scenes 条目必须先综合 globalVisual 与本场 locationName、mood、emotion、visualTone、narrativePurpose，再在 wardrobeByCharacter 中为每个 selectedCharacters 的 id 设计一套与地点、季节、时代、光线、主色和情绪意境协调的完整服装（上装、下装或裙装、鞋履、关键配饰）；服装材质、色彩、层次和正式程度必须服务画面氛围。同一大场景内保持该套服装一致，切换到相邻大场景时每个人物必须明显换一整套，禁止沿用定妆参考图服装或仅改变微小配饰。",
-                "人物的面部、五官、脸型、肤色、年龄感和发型作为身份锚点全片一致；服装不属于身份锚点，必须按大场景变化。",
+                "人物的面部、五官、脸型、肤色和年龄感作为身份锚点全片一致；服装不属于身份锚点，必须按大场景变化。",
+                CHARACTER_DIRECTION_RULE,
             ],
             ensure_ascii=False,
             indent=2,
@@ -188,14 +191,15 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
         "content": json.dumps(
             [
                 "scenePrompt 描述环境、时间、光线、色彩和美术风格，不写人物动作。",
+                CHARACTER_DIRECTION_RULE,
                 "shotPrompt 描述人物表演、人数、构图、景别、运镜和镜头内节奏，并写明无字幕、无水印、无 Logo；不得写入生成规模、画幅、清晰度、模型或渠道等运行参数。",
                 "严格继承 globalContext.storyBible 的 globalVisual、人物连续性和 technicalPolicy，但当前地点必须使用 currentShot.outline.locationId 对应的 locations 条目。不得为了保持一致而擅自回到上一镜地点。",
                 "严格执行 currentShot.outline 中的 characterAction、emotionalFocus、cameraPurpose、motifIds 和 locationChange；未列入 motifIds 的视觉母题不得擅自加入。",
                 "一致性来自时间、天气、色彩与空间衔接，不等于所有镜头停留在同一场景。scenePrompt 必须体现大纲规划的场景推进。",
-                "当 source 为 ass 且 plannedDigitalHumanIds 非空时，人物镜的 shotPrompt 必须逐一写入对应 allowedCharacters 的面部身份信息，并逐字写出 currentShot.outline.wardrobeByCharacter 中对应角色的本场完整服装。服装优先级为用户明确要求 > 季节 > 曲风 > 歌词情绪与叙事 > 场景和动作 > 光线、色彩与视觉风格；除非用户明确另有要求，必须严格符合歌曲季节设定。参考图只用于锁定面部、五官、脸型、肤色、年龄感和发型，必须明确忽略参考图中的原始服装，严格换成本大场景服装；同一 sceneIndex 内服装一致，不同 sceneIndex 必须换装。严禁出现未列入本镜的其他人物。",
-                "当 source 为 general 且 plannedDigitalHumanIds 非空时，人物参考图会提交给视频模型；参考卡只负责人物面部身份、五官、脸型、肤色、年龄感和发型，不得从头肩照推断或锁定全身身体比例；儿童与卡通人物不得成人化。必须忽略卡片的原始服装（含白色T恤、历史浅灰下装）、灰色背景、排版（含历史多视图）及任何原始年代或职业暗示。人物镜的 shotPrompt 必须明确描写人物服装，并逐字使用 currentShot.outline.wardrobeByCharacter 的本组完整服装与动作；优先级固定为用户明确要求 > 季节 > 歌曲曲风 > 歌词情绪与叙事 > 场景和动作 > 光线、色彩与视觉风格。除非用户明确另有要求，服装必须严格符合所选季节的温度、天气与穿着逻辑。同一 wardrobeGroupIndex 内服装一致，切换组后必须换装。",
-                "当 source 为 general、shotType 为 character 且 plannedDigitalHumanIds 为空时，digitalHumanIds 必须为空，但 shotPrompt 应依据曲风、性别、年龄、场景和动作自由设计本镜人物，不要求跨镜为同一个人。人物镜开头必须使用【人物镜*人数*年龄性别】和【主角：人物描述】；例如【人物镜*单人*中年女性】【主角：三十多岁女性，短发，穿深色风衣】。不得输出本镜独立选角编号或 R1-2 一类内部编号。",
-                "当 source 为 general、shotType 为 character 且 plannedDigitalHumanIds 非空时，人物镜开头同样必须使用【人物镜*人数*年龄性别】和【主角：人物描述】，年龄性别及人物描述必须来自 allowedCharacters，不得虚构或输出内部角色编号。",
+                "当 source 为 ass 且 plannedDigitalHumanIds 非空时，人物镜的 shotPrompt 必须逐一写入对应 allowedCharacters 的面部身份信息，并逐字写出 currentShot.outline.wardrobeByCharacter 中对应角色的本场完整服装。服装优先级为用户明确要求 > 季节 > 曲风 > 歌词情绪与叙事 > 场景和动作 > 光线、色彩与视觉风格；除非用户明确另有要求，必须严格符合歌曲季节设定。参考图只用于锁定面部、五官、脸型、肤色和年龄感，必须明确忽略参考图中的原始服装，严格换成本大场景服装；同一 sceneIndex 内服装一致，不同 sceneIndex 必须换装。允许符合场景的陪衬人物，不替换指定主角。",
+                "当 source 为 general 且 plannedDigitalHumanIds 非空时，人物参考图会提交给视频模型；参考卡只负责人物面部身份、五官、脸型、肤色和年龄感，不得从头肩照推断或锁定全身身体比例；儿童与卡通人物不得成人化。必须忽略卡片的原始服装（含白色T恤、历史浅灰下装）、灰色背景、排版（含历史多视图）及任何原始年代或职业暗示。人物镜的 shotPrompt 必须明确描写人物服装，并逐字使用 currentShot.outline.wardrobeByCharacter 的本组完整服装与动作；优先级固定为用户明确要求 > 季节 > 歌曲曲风 > 歌词情绪与叙事 > 场景和动作 > 光线、色彩与视觉风格。除非用户明确另有要求，服装必须严格符合所选季节的温度、天气与穿着逻辑。同一 wardrobeGroupIndex 内服装一致，切换组后必须换装。",
+                "当 source 为 general、shotType 为 character 且 plannedDigitalHumanIds 为空时，digitalHumanIds 必须为空，但 shotPrompt 应依据曲风、性别、年龄、场景和动作自由设计本镜人物，不要求跨镜为同一个人。人物镜开头必须使用【人物镜*主角人数*年龄性别】和【主角：人物描述】；例如【人物镜*主角1人*中年女性】【主角：三十多岁女性，短发，穿深色风衣】。不得输出本镜独立选角编号或 R1-2 一类内部编号。",
+                "当 source 为 general、shotType 为 character 且 plannedDigitalHumanIds 非空时，人物镜开头同样必须使用【人物镜*主角人数*年龄性别】和【主角：人物描述】，年龄性别及人物描述必须来自 allowedCharacters，不得虚构或输出内部角色编号。",
                 "当 shotType 为 empty 或 source 不为 general 且 plannedDigitalHumanIds 为空时，digitalHumanIds 必须为空，shotPrompt 必须明确为无人出镜的空镜，不得描写可识别人物。",
                 "动作必须能在 plannedDuration 内完成；画幅与清晰度由结构化运行参数控制，禁止写入 scenePrompt 或 shotPrompt。",
                 "shotPrompt 必须明确写出 plannedDuration 对应的秒数，并让动作、运镜和停顿在该时长内完整结束；不得套用固定 5 秒节奏。",
@@ -212,7 +216,7 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
         "format": "text",
         "variables": {"planned_ids": "本镜预分配人物 id 的 JSON 数组"},
         "required_fragments": ["digitalHumanIds"],
-        "content": "本镜人物已经由后端确定。digitalHumanIds 必须按原顺序、原数量精确返回 {{planned_ids}}，不得增删、替换或虚构角色。",
+        "content": "本镜人物已经由后端确定。digitalHumanIds 必须按原顺序、原数量精确返回 {{planned_ids}}，不得增删、替换或虚构角色 ID；此数组仅绑定指定主角的参考图，不限制画面中合理的背景人物。",
     },
     "storyboard_line.repair.system": {
         "name": "逐句分镜·JSON 修复器 system",
@@ -284,7 +288,8 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
         "format": "text",
         "variables": {},
         "required_fragments": ["严格一致"],
-        "content": "逐镜类型、人物、地点与动作均由全局大纲确定。单条生成必须严格沿用预分配角色、镜头类型、地点与人物动作；参考图仅用于保护人物面部身份，视频中的五官、脸型、肤色、年龄感和发型必须与参考图严格一致。服装不跟随参考图：同一大场景必须严格使用 scenePlan.wardrobeByCharacter 为该人物规划的整套服装，切换大场景必须更换明显不同的整套服装。不得临时改为空镜、替换人物或引入其他人物。",
+        "content": "逐镜类型、人物、地点与动作均由全局大纲确定。单条生成必须严格沿用预分配角色、镜头类型、地点与人物动作；参考图仅用于保护人物面部身份，视频中的五官、脸型、肤色和年龄感必须与参考图严格一致。服装不跟随参考图：同一大场景必须严格使用 scenePlan.wardrobeByCharacter 为该人物规划的整套服装，切换大场景必须更换明显不同的整套服装。不得临时改为空镜或替换指定主角；允许符合场景的陪衬人物。"
+        + CHARACTER_DIRECTION_RULE,
     },
     "story_bible.ass.negative_constraints": {
         "name": "Story Bible·ASS 负向约束",
@@ -298,7 +303,7 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
                 "无字幕",
                 "无水印",
                 "无 Logo",
-                "不得出现未指定人物",
+                "不得替换指定主角",
                 "不得改变人物面部身份",
                 "不得沿用参考图原始服装，必须执行本大场景服装方案",
             ],
@@ -340,7 +345,8 @@ DEFAULT_PROMPTS: dict[str, dict[str, Any]] = {
         "format": "text",
         "variables": {},
         "required_fragments": ["空镜严禁人物"],
-        "content": "空镜严禁人物；所有人物镜的 shotPrompt 必须明确描写人物服装。选择人物后，参考卡仅锁定人物面部身份、五官、脸型、肤色、年龄感和发型，不得从头肩照推断或锁定全身身体比例；儿童与卡通人物不得成人化。必须忽略卡片中的原始服装（含白色T恤、历史浅灰下装）、灰色背景、排版（含历史多视图）及原始职业与年代暗示。服装按 wardrobeGroupIndex 每 3 镜成组：同组严格一致，切换组时明显换整套；造型优先级固定为用户明确要求 > 季节 > 歌曲曲风 > 歌词情绪与叙事 > 场景和动作 > 光线、色彩与视觉风格，除非用户明确另有要求，必须严格符合所选季节。未选择人物时，每个人物镜可独立生成人物，不要求跨镜身份或着装一致。",
+        "content": "空镜严禁人物；所有人物镜的 shotPrompt 必须明确描写人物服装。选择人物后，参考卡仅锁定人物面部身份、五官、脸型、肤色和年龄感，不得从头肩照推断或锁定全身身体比例；儿童与卡通人物不得成人化。必须忽略卡片中的原始服装（含白色T恤、历史浅灰下装）、灰色背景、排版（含历史多视图）及原始职业与年代暗示。服装按 wardrobeGroupIndex 每 3 镜成组：同组严格一致，切换组时明显换整套；造型优先级固定为用户明确要求 > 季节 > 歌曲曲风 > 歌词情绪与叙事 > 场景和动作 > 光线、色彩与视觉风格，除非用户明确另有要求，必须严格符合所选季节。未选择人物时，每个人物镜可独立生成人物，不要求跨镜身份或着装一致。"
+        + CHARACTER_DIRECTION_RULE,
     },
     # ── 数字人身份大头照（image 引擎；角色描述拼接逻辑留在代码） ───────────────
     "portrait.digital_human_ref": {
