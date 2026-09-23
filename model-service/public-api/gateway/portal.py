@@ -10,7 +10,7 @@ from datetime import timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from .credits import account, default_rule, job_bill, ledger_view, lock, rules
@@ -22,10 +22,25 @@ router = APIRouter(prefix="/portal", tags=["User portal"])
 
 class Credentials(BaseModel):
     username: str = Field(min_length=3, max_length=80, pattern=r"^[A-Za-z0-9_.@-]+$")
-    password: str = Field(min_length=10, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
+
+
+def validate_password(value):
+    if not re.search(r"[A-Za-z]", value) or not re.search(r"[0-9]", value):
+        raise ValueError("密码至少 8 位，且包含字母和数字")
+    return value
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=8, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+    confirmation: str = Field(min_length=8, max_length=128)
+    _password_policy = field_validator("new_password")(validate_password)
 
 
 class Registration(Credentials):
+    _password_policy = field_validator("password")(validate_password)
+
     @field_validator("username")
     @classmethod
     def company_email(cls, value):
@@ -77,7 +92,7 @@ async def register(body: Registration, request: Request):
 async def login(body: Credentials, request: Request):
     await throttle(request, "portal.login")
     async with Session.begin() as db:
-        user = await db.scalar(select(User).where(User.username == body.username.lower(), User.deleted_at.is_(None)))
+        user = await db.scalar(select(User).where(User.username == body.username.lower(), User.deleted_at.is_(None)).with_for_update())
         stored = user.password_hash if user else "00" * 16 + ":" + "00" * 64
         candidate = await asyncio.to_thread(password_hash, body.password, stored.split(":")[0])
         if not user or not user.enabled or not hmac.compare_digest(stored, candidate):
@@ -87,7 +102,7 @@ async def login(body: Credentials, request: Request):
     return {"access_token": token, "expires_in": 28800, "user": {"id": user.id, "username": user.username}}
 
 
-async def current_user(request: Request):
+async def authenticated_user(request: Request):
     token = request.headers.get("authorization", "").removeprefix("Bearer ")
     async with Session() as db:
         session = await db.scalar(select(UserSession).where(UserSession.token_hash == token_hash(token), UserSession.deleted_at.is_(None)))
@@ -99,8 +114,44 @@ async def current_user(request: Request):
     return user
 
 
+async def current_user(user=Depends(authenticated_user)):
+    if user.password_changed_at is None:
+        raise HTTPException(403, "首次登录请先修改密码")
+    return user
+
+
+@router.post("/change-password", status_code=204)
+async def change_password(body: PasswordChange, request: Request, user=Depends(authenticated_user)):
+    await throttle(request, "portal.change_password")
+    if body.new_password != body.confirmation:
+        raise HTTPException(400, "两次输入的新密码不一致")
+    if body.new_password == body.current_password:
+        raise HTTPException(400, "新密码不能与原密码相同")
+    async with Session.begin() as db:
+        row = await db.scalar(select(User).where(User.id == user.id).with_for_update())
+        session = await db.scalar(
+            select(UserSession).where(
+                UserSession.token_hash == token_hash(request.headers.get("authorization", "").removeprefix("Bearer ")),
+                UserSession.user_id == user.id,
+                UserSession.deleted_at.is_(None),
+                UserSession.expires_at > now(),
+            )
+        )
+        if not session or not row or not row.enabled or row.deleted_at:
+            raise HTTPException(401, "Login required")
+        candidate = await asyncio.to_thread(password_hash, body.current_password, row.password_hash.split(":")[0])
+        if not hmac.compare_digest(row.password_hash, candidate):
+            raise HTTPException(400, "原密码不正确")
+        row.password_hash = await asyncio.to_thread(password_hash, body.new_password)
+        row.password_changed_at = now()
+        await db.execute(
+            update(UserSession).where(UserSession.user_id == user.id, UserSession.deleted_at.is_(None)).values(deleted_at=now())
+        )
+        db.add(Audit(id=uuid.uuid4().hex, actor=user.id, action="portal.password_changed", target=user.id, detail={}))
+
+
 @router.post("/logout", status_code=204)
-async def logout(request: Request, user=Depends(current_user)):
+async def logout(request: Request, user=Depends(authenticated_user)):
     async with Session.begin() as db:
         row = await db.scalar(
             select(UserSession).where(
@@ -113,12 +164,14 @@ async def logout(request: Request, user=Depends(current_user)):
 
 
 @router.get("/me")
-async def me(user=Depends(current_user)):
+async def me(user=Depends(authenticated_user)):
+    if user.password_changed_at is None:
+        return {"id": user.id, "username": user.username, "must_change_password": True, "keys": []}
     async with Session.begin() as db:
         await lock(db)
         clients = (await db.scalars(select(Client).where(Client.user_id == user.id, Client.deleted_at.is_(None)))).all()
         accounts = [await account(db, c) for c in clients]
-    return {"id": user.id, "username": user.username, "keys": accounts}
+    return {"id": user.id, "username": user.username, "must_change_password": False, "keys": accounts}
 
 
 @router.get("/models")

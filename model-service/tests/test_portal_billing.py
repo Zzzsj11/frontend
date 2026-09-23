@@ -15,6 +15,17 @@ async def user_key(api, ctl, name="alice", monthly=20):
     assert result.status_code == 201, result.text
     uid = result.json()["id"]
     token = (await api.post("/portal/login", json={"username": name, "password": "test-password-123"})).json()["access_token"]
+    changed = await api.post(
+        "/portal/change-password",
+        headers={"Authorization": "Bearer " + token},
+        json={
+            "current_password": "test-password-123",
+            "new_password": "test-password-456",
+            "confirmation": "test-password-456",
+        },
+    )
+    assert changed.status_code == 204, changed.text
+    token = (await api.post("/portal/login", json={"username": name, "password": "test-password-456"})).json()["access_token"]
     key = await ctl.post("/admin/clients", json={"name": name, "user_id": uid, "monthly_points": monthly})
     assert key.status_code == 201, key.text
     return uid, token, key.json()
@@ -49,7 +60,7 @@ async def test_registration_binding_and_private_data(service):
     auth = {"Authorization": "Bearer " + token}
     me = (await api.get("/portal/me", headers=auth)).json()
     assert len(me["keys"]) == 1 and me["keys"][0]["available_points"] == "20.000000"
-    assert "api_key" not in str(me) and "password" not in str(me)
+    assert "api_key" not in str(me) and "password_hash" not in str(me)
     assert (await ctl.get("/admin/users", headers=auth)).status_code == 401
     assert (await api.post("/portal/keys", headers=auth, json={})).status_code == 404
     assert (await api.post("/v1/jobs", json=body(), headers=headers(uid2, key))).status_code == 403

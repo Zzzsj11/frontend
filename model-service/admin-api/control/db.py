@@ -111,6 +111,7 @@ class User(Record, Base):
     __tablename__ = "portal_users"
     username: Mapped[str] = mapped_column(String(80), unique=True)
     password_hash: Mapped[str] = mapped_column(Text)
+    password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 

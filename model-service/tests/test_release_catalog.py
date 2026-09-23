@@ -51,3 +51,27 @@ def test_price_import_requires_explicit_environment(tmp_path):
         text=True,
     )
     assert result.returncode != 0 and "Set the target DATABASE_URL explicitly" in result.stderr
+
+
+def test_password_migration_preserves_existing_accounts(tmp_path):
+    database = tmp_path / "password.db"
+    env = {**os.environ, "DATABASE_URL": "sqlite+aiosqlite:///" + str(database)}
+
+    def migrate(revision):
+        subprocess.run([sys.executable, "-m", "alembic", "upgrade", revision], cwd=ROOT, env=env, check=True, capture_output=True)
+
+    migrate("0006")
+    with sqlite3.connect(database) as db:
+        db.execute(
+            "INSERT INTO portal_users (id, username, password_hash, enabled, created_at, updated_at) VALUES ('legacy', 'legacy@star-net.cn', 'existing-hash', 1, '2026-09-22', '2026-09-22')"
+        )
+    migrate("head")
+    with sqlite3.connect(database) as db:
+        assert db.execute("SELECT password_hash, password_changed_at FROM portal_users WHERE id='legacy'").fetchone() == (
+            "existing-hash",
+            None,
+        )
+        db.execute("UPDATE portal_users SET password_changed_at='2026-09-23' WHERE id='legacy'")
+    migrate("head")
+    with sqlite3.connect(database) as db:
+        assert db.execute("SELECT password_changed_at FROM portal_users WHERE id='legacy'").fetchone()[0] == "2026-09-23"

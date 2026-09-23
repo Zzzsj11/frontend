@@ -34,6 +34,8 @@ async def authenticate(request: Request) -> Client:
             user = await db.get(User, client.user_id)
         if not user or not user.enabled or user.deleted_at:
             raise HTTPException(401, "User disabled")
+        if user.password_changed_at is None:
+            raise HTTPException(403, "首次登录请先修改密码")
         supplied = request.headers.get("x-user-id")
         if supplied and supplied != client.user_id:
             raise HTTPException(403, "Bound API Key cannot override its user")

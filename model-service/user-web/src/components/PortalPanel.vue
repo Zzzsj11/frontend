@@ -1,24 +1,19 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import ApiDocs from './ApiDocs.vue'
+import PortalAuth from './PortalAuth.vue'
 import { labels, usePortal } from '../stores/portal'
 const store = usePortal()
 const section = ref('docs')
-const authMode = ref('login')
-const password = ref('')
-const emailName = ref('')
+watch(
+  () => store.user,
+  (user) => {
+    if (user) section.value = 'account'
+  },
+)
 async function showDocs() {
   section.value = 'docs'
   await store.loadModels()
-}
-async function submit() {
-  const account = emailName.value.toLowerCase() + '@star-net.cn'
-  await store.auth(authMode.value, account, password.value)
-  password.value = ''
-  if (store.user) section.value = 'account'
-  else if (store.message) {
-    authMode.value = 'login'
-  }
 }
 async function page(delta: number) {
   store.page += delta
@@ -38,9 +33,14 @@ onMounted(() => store.loadModels())
         <h1>模型中控台</h1>
       </div>
       <nav>
-        <button :class="{ secondary: section !== 'docs' }" @click="showDocs">API 文档</button
+        <button
+          v-if="!store.user?.must_change_password"
+          :class="{ secondary: section !== 'docs' }"
+          @click="showDocs"
+        >
+          API 文档</button
         ><button
-          v-if="store.user"
+          v-if="store.user && !store.user.must_change_password"
           :class="{ secondary: section !== 'account' }"
           @click="section = 'account'"
         >
@@ -52,44 +52,9 @@ onMounted(() => store.loadModels())
     </header>
     <p v-if="store.error" class="error" role="alert">{{ store.error }}</p>
     <p v-if="store.message" role="status">{{ store.message }}</p>
-    <ApiDocs v-if="section === 'docs'" />
-    <section v-else-if="!store.user" class="card auth">
-      <h2>{{ authMode === 'register' ? '企业邮箱注册' : '企业邮箱登录' }}</h2>
-      <form @submit.prevent="submit">
-        <label>
-          企业邮箱
-          <span class="email-account">
-            <input
-              v-model="emailName"
-              aria-label="企业邮箱前缀"
-              required
-              maxlength="68"
-              autocomplete="username"
-              pattern="[A-Za-z0-9_\-]+(\.[A-Za-z0-9_\-]+)*"
-              placeholder="zhangjiaqi"
-            />
-            <span>@star-net.cn</span>
-          </span>
-        </label>
-        <label
-          >密码<input
-            v-model="password"
-            required
-            type="password"
-            minlength="10"
-            maxlength="128"
-            :autocomplete="authMode === 'register' ? 'new-password' : 'current-password'" /></label
-        ><button :disabled="store.loading">{{ authMode === 'register' ? '注册' : '登录' }}</button
-        ><button
-          type="button"
-          class="secondary"
-          @click="authMode = authMode === 'register' ? 'login' : 'register'"
-        >
-          {{ authMode === 'register' ? '已有账号，登录' : '创建账号' }}
-        </button>
-      </form>
-    </section>
-    <template v-else
+    <PortalAuth v-if="store.user?.must_change_password || (section !== 'docs' && !store.user)" />
+    <ApiDocs v-else-if="section === 'docs'" />
+    <template v-else-if="store.user"
       ><section class="card">
         <div class="heading">
           <h2>{{ store.user.username }} 的账户</h2>
@@ -243,15 +208,6 @@ header {
 }
 .card {
   margin-bottom: 20px;
-}
-.auth {
-  max-width: 380px;
-  margin: 50px auto;
-}
-form {
-  display: grid;
-  gap: 16px;
-  margin-top: 20px;
 }
 .accounts {
   display: grid;

@@ -88,7 +88,12 @@ export const labels: Record<string, string> = {
 }
 export const usePortal = defineStore('portal', {
   state: () => ({
-    user: null as { id: string; username: string; keys: Key[] } | null,
+    user: null as {
+      id: string
+      username: string
+      must_change_password: boolean
+      keys: Key[]
+    } | null,
     models: [] as Model[],
     jobs: [] as Job[],
     ledger: [] as Ledger[],
@@ -131,12 +136,17 @@ export const usePortal = defineStore('portal', {
       })
     },
     async refresh() {
-      const [user, jobs, ledger] = await Promise.all([
-        api<NonNullable<typeof this.user>>('/me'),
+      this.user = await api<NonNullable<typeof this.user>>('/me')
+      if (this.user.must_change_password) {
+        this.jobs = []
+        this.ledger = []
+        this.total = this.ledgerTotal = 0
+        return
+      }
+      const [jobs, ledger] = await Promise.all([
         api<{ items: Job[]; total: number }>(`/jobs?page=${this.page}`),
         api<{ items: Ledger[]; total: number }>(`/ledger?page=${this.ledgerPage}`),
       ])
-      this.user = user
       this.jobs = jobs.items
       this.total = jobs.total
       this.ledger = ledger.items
@@ -144,6 +154,17 @@ export const usePortal = defineStore('portal', {
     },
     async reload() {
       await this.execute(() => this.refresh())
+    },
+    async changePassword(current_password: string, new_password: string, confirmation: string) {
+      await this.execute(async () => {
+        await api('/change-password', 'POST', { current_password, new_password, confirmation })
+        setToken('')
+        this.user = null
+        this.jobs = []
+        this.ledger = []
+        this.total = this.ledgerTotal = 0
+        this.message = '密码已更新，请使用新密码登录。'
+      })
     },
     async logout() {
       await this.execute(async () => {

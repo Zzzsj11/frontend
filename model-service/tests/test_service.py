@@ -1,5 +1,6 @@
 import importlib
 import os
+import sqlite3
 import subprocess
 import sys
 from copy import deepcopy
@@ -29,7 +30,11 @@ async def service(tmp_path, monkeypatch):
         if name.startswith(("gateway", "control")):
             del sys.modules[name]
     # Exercise legacy catalog compatibility; fresh head catalog has separate migration tests.
-    subprocess.run([sys.executable, "-m", "alembic", "-c", str(ROOT / "alembic.ini"), "upgrade", "0005"], check=True, capture_output=True)
+    subprocess.run([sys.executable, "-m", "alembic", "-c", str(ROOT / "alembic.ini"), "upgrade", "head"], check=True, capture_output=True)
+    # Disposable synthetic database: replace release catalog with legacy seed fixtures.
+    with sqlite3.connect(tmp_path / "test.db") as fixture_db:
+        fixture_db.execute("DELETE FROM model_routes")
+        fixture_db.execute("DELETE FROM models")
     subprocess.run(
         [sys.executable, str(ROOT / "scripts/seed.py")],
         env={**os.environ, "PYTHONPATH": str(ROOT / "public-api")},
