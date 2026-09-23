@@ -94,7 +94,7 @@ onMounted(() => store.execute(load))
               {{ points(u.quota.available_points) }}
             </td>
             <td>
-              <form @submit.prevent="save(u.id)">
+              <form class="quota-edit" @submit.prevent="save(u.id)">
                 <FinancialInput
                   v-model="values[u.id]"
                   :aria-label="`${u.username} 账号月总额度`"
@@ -149,6 +149,21 @@ input[type='number'] {
     max-width: none;
     min-width: 0;
   }
+}
+.quota-edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.quota-edit input[type='number'] {
+  width: 140px;
+  min-width: 100px;
+  margin: 0;
+}
+.quota-edit button {
+  flex-shrink: 0;
+  margin: 0;
+  white-space: nowrap;
 }
 .revealed {
   padding: 20px;
