@@ -1,16 +1,14 @@
 import hashlib
-import hmac
-import os
 import secrets
 import uuid
-from datetime import timedelta
 from decimal import Decimal
 
-import jwt
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from .authentication import admin
+from .authentication import router as auth_router
 from .billing import router_for
 from .channel_balances import router_for as channel_router_for
 from .credits import amount, job_bill, lock, reset
@@ -18,51 +16,7 @@ from .db import Audit, Client, Job, Model, Session, now
 from .routes import router_for as routes_router_for
 
 app = FastAPI(title="Model Service Control API", version="1.0.0")
-SECRET = os.environ["ADMIN_JWT_SECRET"]
-if len(SECRET) < 32:
-    raise RuntimeError("ADMIN_JWT_SECRET must contain at least 32 characters")
-
-
-async def admin(request: Request):
-    try:
-        claims = jwt.decode(
-            request.headers.get("authorization", "").removeprefix("Bearer "), SECRET, algorithms=["HS256"], audience="model-control"
-        )
-        return claims["sub"]
-    except (jwt.PyJWTError, KeyError):
-        raise HTTPException(401, "Admin authentication required") from None
-
-
-class Login(BaseModel):
-    username: str
-    password: str
-
-
-@app.post("/admin/login")
-async def login(body: Login, request: Request):
-    peer = request.client.host if request.client else "unknown"
-    async with Session.begin() as db:
-        count = await db.scalar(
-            select(func.count())
-            .select_from(Audit)
-            .where(Audit.action == "login.failed", Audit.target == peer, Audit.created_at > now() - timedelta(minutes=10))
-        )
-        if count >= 10:
-            raise HTTPException(429, "Too many login attempts")
-        password = os.environ.get("ADMIN_PASSWORD", "")
-        valid = (
-            bool(password)
-            and hmac.compare_digest(body.username, os.getenv("ADMIN_USERNAME", "admin"))
-            and hmac.compare_digest(body.password, password)
-        )
-        db.add(Audit(id=uuid.uuid4().hex, actor="anonymous", action="login.success" if valid else "login.failed", target=peer, detail={}))
-    if not valid:
-        raise HTTPException(401, "Invalid credentials")
-    return {
-        "access_token": jwt.encode(
-            {"sub": body.username, "aud": "model-control", "exp": now() + timedelta(minutes=30)}, SECRET, algorithm="HS256"
-        )
-    }
+app.include_router(auth_router)
 
 
 def audit(db, actor, action, target, detail):

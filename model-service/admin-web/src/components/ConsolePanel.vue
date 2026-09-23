@@ -5,6 +5,8 @@ import WalletPanel from './WalletPanel.vue'
 import ChannelBalancesPanel from './ChannelBalancesPanel.vue'
 import PricingPanel from './PricingPanel.vue'
 import JobsPanel from './JobsPanel.vue'
+import AdminLogin from './AdminLogin.vue'
+import AdminPassword from './AdminPassword.vue'
 import { useControl } from '../stores/control'
 const store = useControl()
 const sections = [
@@ -16,16 +18,11 @@ const sections = [
   { id: 'balances', label: '渠道余额' },
   { id: 'pricing', label: '生成方式费率' },
   { id: 'audits', label: '操作审计' },
+  { id: 'password', label: '修改密码' },
 ]
 const section = ref('jobs')
-const username = ref('admin')
-const password = ref('')
 const clientName = ref('')
 const requireAgent = ref(false)
-async function login() {
-  await store.login(username.value, password.value)
-  password.value = ''
-}
 async function createClient() {
   await store.createClient(clientName.value, requireAgent.value)
   clientName.value = ''
@@ -37,22 +34,7 @@ function changeLimit(id: string, event: Event) {
 }
 </script>
 <template>
-  <main v-if="!store.authenticated" class="login card">
-    <p class="eyebrow">INTERNAL MODEL PLATFORM</p>
-    <h1>模型服务管理台</h1>
-    <p>统一查看模型任务、调用方与测试用量。</p>
-    <form @submit.prevent="login">
-      <label>用户名<input v-model="username" autocomplete="username" required /></label
-      ><label
-        >密码<input
-          v-model="password"
-          type="password"
-          autocomplete="current-password"
-          required /></label
-      ><button :disabled="store.loading">登录</button>
-    </form>
-    <p v-if="store.error" role="alert" class="error">{{ store.error }}</p>
-  </main>
+  <AdminLogin v-if="!store.authenticated" />
   <div v-else class="shell">
     <aside>
       <p class="eyebrow">MODEL SERVICE</p>
@@ -80,7 +62,9 @@ function changeLimit(id: string, event: Event) {
           {{ store.loading ? '加载中…' : '刷新' }}
         </button>
       </header>
-      <p v-if="store.error" role="alert" class="error">{{ store.error }}</p>
+      <p v-if="store.error && section !== 'password'" role="alert" class="error">
+        {{ store.error }}
+      </p>
       <section class="stats">
         <article v-for="item in store.counts" :key="item.status + item.origin" class="card">
           <span>{{ item.status }} · {{ item.origin === 'agent_test' ? 'Agent 测试' : '业务' }}</span
@@ -88,6 +72,7 @@ function changeLimit(id: string, event: Event) {
         </article>
         <article v-if="!store.counts.length" class="card">暂无调用记录</article>
       </section>
+      <AdminPassword v-if="section === 'password'" />
       <RoutesPanel v-if="section === 'routes'" />
       <ChannelBalancesPanel v-if="section === 'balances'" />
       <WalletPanel v-if="section === 'wallets'" />

@@ -107,6 +107,13 @@ class Audit(Record, Base):
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class AdminCredential(Record, Base):
+    __tablename__ = "admin_credentials"
+    username: Mapped[str] = mapped_column(String(160), unique=True)
+    password_hash: Mapped[str] = mapped_column(Text)
+    auth_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+
+
 class User(Record, Base):
     __tablename__ = "portal_users"
     username: Mapped[str] = mapped_column(String(80), unique=True)

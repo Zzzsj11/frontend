@@ -35,6 +35,7 @@ export const useControl = defineStore('control', {
     authenticated: false,
     loading: false,
     error: '',
+    message: '',
     models: [] as Model[],
     clients: [] as Client[],
     jobs: [] as Job[],
@@ -67,11 +68,19 @@ export const useControl = defineStore('control', {
       }
     },
     async login(username: string, password: string) {
+      this.message = ''
       await this.execute(async () => {
         const data = await api<{ access_token: string }>('/login', 'POST', { username, password })
         setToken(data.access_token)
         this.authenticated = true
         await this.refresh()
+      })
+    },
+    async changePassword(current_password: string, new_password: string, confirmation: string) {
+      await this.execute(async () => {
+        await api('/change-password', 'POST', { current_password, new_password, confirmation })
+        this.logout()
+        this.message = '管理员密码已更新，请使用新密码重新登录。'
       })
     },
     logout() {
