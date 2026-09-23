@@ -91,7 +91,7 @@ async function changePassword() {
               maxlength="68"
               autocomplete="username"
               pattern="[A-Za-z0-9_\-]+(\.[A-Za-z0-9_\-]+)*"
-              placeholder="zhangjiaqi"
+              placeholder="star-net"
             /><span>@star-net.cn</span></span
           ></label
         >
