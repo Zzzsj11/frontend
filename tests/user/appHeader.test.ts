@@ -9,7 +9,7 @@ describe('AppHeader provider balances', () => {
   beforeEach(() => setActivePinia(createPinia()))
   afterEach(() => vi.useRealTimers())
 
-  it('同时展示英和与 PPIO 两个余额胶囊', () => {
+  it('仅展示英和余额胶囊及当前 Key 额度', () => {
     const auth = useAuthStore()
     auth.user = {
       id: 'u1',
@@ -48,29 +48,6 @@ describe('AppHeader provider balances', () => {
             remainingDisplay: '658.96',
           },
         },
-        ppio: {
-          available: true,
-          rawBalance: '1000000',
-          balance: '125',
-          balanceDisplay: '125.00',
-          unitScale: 10000,
-          currency: 'CNY',
-          updatedAt: '',
-          details: {
-            cashBalance: 80,
-            creditLimit: 20,
-            pendingCharges: 0,
-            outstandingInvoices: 0,
-            accountAvailableBalance: 100,
-            modelCreditBalance: 25,
-          },
-          rawDetails: {
-            cashBalance: '800000',
-            creditLimit: '200000',
-            pendingCharges: '0',
-            outstandingInvoices: '0',
-          },
-        },
       },
     }
     const wrapper = mount(AppHeader, {
@@ -78,13 +55,13 @@ describe('AppHeader provider balances', () => {
         stubs: { RouterLink: { template: '<a><slot /></a>' }, DeploymentBadge: true },
       },
     })
-    expect(wrapper.text()).toContain('英和')
-    expect(wrapper.text()).toContain('2626.47')
-    expect(wrapper.text()).toContain('yh-test*** 余 658.96')
-    expect(wrapper.get('[data-test="ppio-balance"]').text()).toContain('PPIO')
-    expect(wrapper.get('[data-test="ppio-balance"]').text()).toContain('125.00')
-    expect(wrapper.get('[data-test="ppio-balance"]').attributes('title')).toContain('现金 ¥80')
-    expect(wrapper.get('[data-test="ppio-balance"]').attributes('title')).toContain('模型额度 ¥25')
+    const balance = wrapper.get('.balance-pill.yinghe')
+    expect(wrapper.findAll('.balance-pill')).toHaveLength(1)
+    expect(balance.text()).toContain('英和')
+    expect(balance.get('.balance-value').text()).toBe('2626.47')
+    expect(balance.get('[data-test="key-quota"]').text()).toBe('yh-test*** 余 658.96')
+    expect(balance.attributes('title')).toContain('当前 Key yh-test***（视频 Key）')
+    expect(balance.attributes('title')).toContain('月度已用 341.04 / 限额 1000')
     wrapper.unmount()
   })
 
@@ -118,8 +95,43 @@ describe('AppHeader provider balances', () => {
     await vi.advanceTimersByTimeAsync(4 * 60_000)
     expect(loadBalance).toHaveBeenCalledWith(false)
 
-    await wrapper.get('[data-test="ppio-balance"]').trigger('click')
+    expect(wrapper.get('.balance-pill.yinghe .balance-value').text()).toBe('100.00')
+    await wrapper.get('.balance-pill.yinghe').trigger('click')
     expect(loadBalance).toHaveBeenLastCalledWith(true)
+    wrapper.unmount()
+  })
+
+  it('余额不可用时显示占位和原因，仍可手动刷新', async () => {
+    const auth = useAuthStore()
+    auth.user = {
+      id: 'u1',
+      username: 'dev01',
+      displayName: 'Dev 01',
+      role: 'user',
+      mustChangePassword: false,
+    }
+    auth.balance = {
+      available: false,
+      balance: null,
+      balanceDisplay: '--',
+      currency: 'CNY',
+      updatedAt: new Date().toISOString(),
+      message: '余额查询暂时不可用',
+    }
+    const loadBalance = vi.spyOn(auth, 'loadBalance').mockResolvedValue()
+    const wrapper = mount(AppHeader, {
+      global: {
+        stubs: { RouterLink: { template: '<a><slot /></a>' }, DeploymentBadge: true },
+      },
+    })
+
+    const balance = wrapper.get('.balance-pill.yinghe')
+    expect(balance.get('.balance-value').text()).toBe('--')
+    expect(balance.attributes('title')).toBe('余额查询暂时不可用')
+    expect(balance.find('[data-test="key-quota"]').exists()).toBe(false)
+    expect(wrapper.get('.user-name').text()).toBe('Dev 01')
+    await balance.trigger('click')
+    expect(loadBalance).toHaveBeenCalledWith(true)
     wrapper.unmount()
   })
 })

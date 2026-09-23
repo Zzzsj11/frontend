@@ -19,7 +19,7 @@ def provider_resolution(model: str, requested: str, capabilities: dict[str, Any]
         return value
     if isinstance(value, dict) and value.get("label"):
         return str(value["label"])
-    if model in {"minimax-h3", "minimax-h3-ppio"}:
+    if model == "minimax-h3":
         return "2K" if requested == "1080p" else "768P"
     if model == "minimax-h3-runninghub":
         return {"480p": "0.4MP", "720p": "0.9MP", "1080p": "1.8MP"}.get(requested, requested)

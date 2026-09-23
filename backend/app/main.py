@@ -752,19 +752,18 @@ async def _identity_reference_indices(db: AsyncSession, image_urls: list[str], *
     return {index for index, url in enumerate(image_urls, 1) if url in identity_urls}
 
 
-async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str], *, provider_code: str = "yinghe", user_id: str | None = None) -> list[str]:
-    """按视频模型渠道，把人物 TOS 原图替换为该供应商账号下的 asset://。"""
+async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str], *, user_id: str | None = None) -> list[str]:
+    """把人物 TOS 原图替换为英合供应商账号下的 asset://。"""
     if not image_urls:
         return image_urls
-    asset_field = DigitalHumanModel.ppio_asset_avatar_url if provider_code == "ppio" else DigitalHumanModel.asset_avatar_url
     humans = (
         (
             await db.execute(
                 select(DigitalHumanModel).where(
                     DigitalHumanModel.deleted_at.is_(None),
                     or_(DigitalHumanModel.scope == "system", DigitalHumanModel.user_id == user_id) if user_id else True,
-                    asset_field.isnot(None),
-                    asset_field != "",
+                    DigitalHumanModel.asset_avatar_url.isnot(None),
+                    DigitalHumanModel.asset_avatar_url != "",
                 )
             )
         )
@@ -773,7 +772,7 @@ async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str], *,
     )
     lookup: dict[str, str] = {}
     for human in humans:
-        asset_url = human.ppio_asset_avatar_url if provider_code == "ppio" else human.asset_avatar_url
+        asset_url = human.asset_avatar_url
         lookup[human.avatar_url] = asset_url
         if human.avatar_thumbnail_url:
             lookup[human.avatar_thumbnail_url] = asset_url
@@ -806,8 +805,8 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
     # 仅 Seedance 使用火山人物 asset:// 协议。HappyHorse/Wan/Kling 等英和模型
     # 仍须收到公网图片 URL，不能因为共用 provider.code 而误替换成私有资产链接。
     provider_protocol = str((model.capabilities or {}).get("providerProtocol") or "")
-    if provider.code in {"yinghe", "ppio"} and model.provider_model_id != "MiniMax-H3" and not provider_protocol:
-        payload.image_urls = await _resolve_asset_avatar_urls(db, payload.image_urls, provider_code=provider.code, user_id=user.id)
+    if provider.code == "yinghe" and model.provider_model_id != "MiniMax-H3" and not provider_protocol:
+        payload.image_urls = await _resolve_asset_avatar_urls(db, payload.image_urls, user_id=user.id)
     h3_compilation = compile_h3_prompt(payload, identity_reference_indices=identity_indices) if is_h3 else None
     if h3_compilation:
         payload.prompt = h3_compilation.prompt

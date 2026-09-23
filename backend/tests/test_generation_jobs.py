@@ -694,121 +694,6 @@ def test_direct_h3_video_uses_documented_contract_and_archives_output(monkeypatc
     assert result["usage"]["total_seconds"] == 5
 
 
-def test_ppio_h3_uses_original_protocol_routes(monkeypatch) -> None:
-    import httpx
-
-    from app import providers
-    from app.jobs import Job
-    from app.schemas import VideoGenerationCreate
-
-    calls: list[tuple[str, str]] = []
-
-    class Client:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
-            return None
-
-        async def post(self, url, headers=None, json=None):
-            calls.append(("POST", url))
-            assert json["model"] == "MiniMax-H3"
-            return httpx.Response(200, json={"task_id": "ppio-h3-1"}, request=httpx.Request("POST", url))
-
-        async def get(self, url, headers=None):
-            calls.append(("GET", url))
-            return httpx.Response(
-                200,
-                json={"task": {"id": "ppio-h3-1", "status": "succeeded", "content": {"url": "https://source.test/h3.mp4"}, "usage": {"output_seconds": 5}}},
-                request=httpx.Request("GET", url),
-            )
-
-    async def no_op(*_args, **_kwargs):
-        return None
-
-    async def set_task(job, provider, task_id, **_kwargs):
-        job.provider, job.provider_task_id = provider, task_id
-
-    monkeypatch.setattr(providers, "_ppio_config", lambda: ("https://api.ppio.test", {"Authorization": "Bearer test"}))
-    monkeypatch.setattr(providers.httpx, "AsyncClient", lambda **_kwargs: Client())
-    monkeypatch.setattr(providers.jobs, "mark_provider_submitting", no_op)
-    monkeypatch.setattr(providers.jobs, "set_provider_task", set_task)
-    monkeypatch.setattr(providers.jobs, "update_progress", no_op)
-    monkeypatch.setattr(providers, "import_remote", lambda *_args: no_op())
-    monkeypatch.setattr(providers, "_archive_h3_video_to_tos", lambda *_args: no_op())
-
-    async def archive(*_args):
-        return "https://tos.test/h3.mp4"
-
-    async def cover(*_args):
-        return "https://tos.test/h3.jpg", "https://tos.test/h3-thumb.jpg"
-
-    monkeypatch.setattr(providers, "_archive_h3_video_to_tos", archive)
-    monkeypatch.setattr(providers, "_video_first_frame", cover)
-    monkeypatch.setattr(providers, "H3_POLL_INTERVAL_SECONDS", 0)
-    request = VideoGenerationCreate(prompt="PPIO H3", duration=5, model="minimax-h3-ppio")
-    job = Job(
-        id="job-ppio-h3",
-        kind="video",
-        user_id="user-1",
-        request={"model": "minimax-h3-ppio", "_provider": "ppio", "_providerModelId": "MiniMax-H3", "_h3Mode": "text"},
-    )
-    result = asyncio.run(providers.generate_video(request, job))
-    assert calls == [
-        ("POST", "https://api.ppio.test/v3/minimax/v2/video_generation"),
-        ("GET", "https://api.ppio.test/v3/minimax/v2/query/video_generation/ppio-h3-1"),
-    ]
-    assert result["provider"] == "ppio"
-
-
-@pytest.mark.asyncio
-async def test_ppio_seedance_uses_standard_model_and_metered_routes(monkeypatch) -> None:
-    import httpx
-
-    from app import providers
-    from app.jobs import Job
-    from app.schemas import VideoGenerationCreate
-
-    submitted: dict = {}
-
-    class Client:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
-            return None
-
-        async def post(self, url, headers=None, json=None):
-            submitted.update(url=url, payload=json)
-            return httpx.Response(200, json={"id": "ppio-sd-1"}, request=httpx.Request("POST", url))
-
-    async def no_op(*_args, **_kwargs):
-        return None
-
-    async def set_task(job, provider, task_id, **_kwargs):
-        job.provider, job.provider_task_id = provider, task_id
-
-    async def poll(url, *_args, **_kwargs):
-        assert url.endswith("/v3/bytedance-cn/metered/contents/generations/tasks/ppio-sd-1")
-        return {"status": "succeeded", "content": {"video_url": "https://source.test/sd.mp4"}, "usage": {"completion_tokens": 50638}}
-
-    async def store(_job, _task_id, data, _created):
-        return {"provider": "ppio", "usage": data["usage"]}
-
-    monkeypatch.setattr(providers, "_ppio_config", lambda: ("https://api.ppio.test", {"Authorization": "Bearer test"}))
-    monkeypatch.setattr(providers.httpx, "AsyncClient", lambda **_kwargs: Client())
-    monkeypatch.setattr(providers.jobs, "mark_provider_submitting", no_op)
-    monkeypatch.setattr(providers.jobs, "set_provider_task", set_task)
-    monkeypatch.setattr(providers, "_poll_scheduled", poll)
-    monkeypatch.setattr(providers, "_store_video_result", store)
-    request = VideoGenerationCreate(prompt="PPIO SD", duration=5, resolution="480p", model="doubao-seedance-2.0-ppio")
-    job = Job(id="job-ppio-sd", kind="video", request={"model": request.model, "_provider": "ppio", "_providerModelId": "doubao-seedance-2-0-260128"})
-    result = await providers.generate_video(request, job)
-    assert submitted["url"] == "https://api.ppio.test/v3/bytedance-cn/metered/contents/generations/tasks"
-    assert submitted["payload"]["model"] == "doubao-seedance-2-0-260128"
-    assert result["usage"]["completion_tokens"] == 50638
-
-
 @pytest.mark.asyncio
 async def test_seedance_create_retries_once_with_identical_idempotent_request(monkeypatch) -> None:
     import httpx
@@ -956,49 +841,6 @@ async def test_seedance_does_not_retry_non_moderation_failure(monkeypatch) -> No
     with pytest.raises(providers.ProviderError, match="internal error"):
         await providers.generate_video(request, job)
     assert submitted == 1
-
-
-@pytest.mark.asyncio
-async def test_create_ppio_synthetic_image_asset_polls_until_active(monkeypatch) -> None:
-    import httpx
-
-    from app import providers
-
-    calls: list[tuple[str, dict, dict]] = []
-    asset_statuses = iter(["Processing", "Active"])
-
-    class Client:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
-            return None
-
-        async def post(self, url, headers=None, json=None, params=None):
-            calls.append((url, dict(params or {}), dict(json or {})))
-            request = httpx.Request("POST", url)
-            action = (params or {}).get("Action")
-            if action == "CreateAsset":
-                return httpx.Response(200, json={"ResponseMetadata": {}, "Result": {"Id": "asset-ppio-1"}}, request=request)
-            if action == "GetAsset":
-                return httpx.Response(200, json={"ResponseMetadata": {}, "Result": {"Id": "asset-ppio-1", "Status": next(asset_statuses)}}, request=request)
-            raise AssertionError(f"unexpected action: {action}")
-
-    async def no_op(*_args, **_kwargs):
-        return None
-
-    monkeypatch.setattr(providers, "_ppio_config", lambda: ("https://api.ppio.test", {"Authorization": "Bearer test"}))
-    monkeypatch.setattr(providers.httpx, "AsyncClient", lambda **_kwargs: Client())
-    monkeypatch.setattr(providers.asyncio, "sleep", no_op)
-    result = await providers.create_ppio_synthetic_image_asset("https://tos.test/users/u1/person.jpg")
-
-    assert result == "asset://asset-ppio-1"
-    assert [params.get("Action") for _, params, _ in calls] == ["CreateAsset", "GetAsset", "GetAsset"]
-    assert calls[0][2] == {
-        "URL": "https://tos.test/users/u1/person.jpg",
-        "AssetType": "Image",
-        "Name": providers._ppio_asset_name("https://tos.test/users/u1/person.jpg"),
-    }
 
 
 def test_direct_h3_video_reports_tos_archive_stage_when_source_url_is_rejected(monkeypatch) -> None:
@@ -1550,7 +1392,7 @@ def test_raise_for_status_translates_aigc_error_codes() -> None:
     # body 非 JSON：回退为 HTTP 状态错误描述
     with pytest.raises(ProviderError):
         _raise_for_status(make_response(502, None))
-    # PPIO 使用 error/message 结构；错误正文必须保留，方便定位必现的参数 400。
+    # error/message 结构的错误正文必须保留，方便定位必现的参数 400。
     with pytest.raises(ProviderError, match=r'duration is invalid.*供应商响应.*"code":"InvalidParameter".*"field":"duration"'):
         _raise_for_status(
             make_response(
@@ -2193,7 +2035,6 @@ async def test_resolve_asset_avatar_urls_maps_human_tos_to_asset(client) -> None
                 avatar_url="https://tos.test/human.jpg",
                 avatar_thumbnail_url="https://tos.test/human-thumb.jpg",
                 asset_avatar_url="asset://human-1",
-                ppio_asset_avatar_url="asset://ppio-human-1",
                 scope="private",
             )
         )
@@ -2206,14 +2047,6 @@ async def test_resolve_asset_avatar_urls_maps_human_tos_to_asset(client) -> None
         )
     # 头像（原图与缩略图）映射为 asset://，非头像 URL（场景图、已是 asset:// 的）原样保留
     assert result == ["asset://human-1", "https://tos.test/scene.png", "asset://human-1", "asset://already-asset"]
-
-    async with session_factory() as db:
-        ppio_result = await _resolve_asset_avatar_urls(
-            db,
-            ["https://tos.test/human.jpg", "https://tos.test/scene.png", "https://tos.test/human-thumb.jpg"],
-            provider_code="ppio",
-        )
-    assert ppio_result == ["asset://ppio-human-1", "https://tos.test/scene.png", "asset://ppio-human-1"]
 
 
 def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) -> None:
@@ -2267,7 +2100,11 @@ def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) ->
         assert state["status"] == "succeeded"
         assert captured["image_urls"] == ["asset://video-human-1", "https://tos.test/scene.png"]
         assert "人物身份参考硬约束" in str(captured["prompt"])
-        assert "纯白圆领T恤、浅灰棉质短裤" in str(captured["prompt"])
+        assert "五官、脸型、肤色、年龄感和发型" in str(captured["prompt"])
+        assert "不得从头肩照推断或锁定全身身体比例" in str(captured["prompt"])
+        assert "纯白圆领T恤、中性灰背景" in str(captured["prompt"])
+        assert "历史身份卡中的浅灰棉质短裤" in str(captured["prompt"])
+        assert "绝对不得继承到剧情画面" in str(captured["prompt"])
 
         captured.clear()
         response = client.post(
@@ -2299,70 +2136,6 @@ def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) ->
             connection.close()
 
 
-def test_ppio_video_endpoint_uses_ppio_asset_avatar_url(client, monkeypatch) -> None:
-    """选择 PPIO SD2.0 时必须使用 PPIO 账号资产，不能误传英合 asset://。"""
-    import time
-
-    from app import main
-
-    user = client.get("/api/auth/me").json()
-    _fail_active_jobs()
-    captured: dict[str, list[str]] = {}
-
-    async def fake_video(payload, job) -> dict:
-        captured["image_urls"] = list(payload.image_urls)
-        return {"videoUrl": "https://tos.test/videos/ppio.mp4", "coverUrl": "https://tos.test/images/ppio.png", "duration": 5}
-
-    monkeypatch.setattr(main, "generate_video", fake_video)
-
-    async def seed_human() -> None:
-        from app.database import session_factory
-        from app.models import DigitalHumanModel
-
-        async with session_factory() as db:
-            db.add(
-                DigitalHumanModel(
-                    id="dh-video-ppio-asset",
-                    user_id=user["id"],
-                    name="video-ppio-asset",
-                    description="",
-                    avatar_url="https://tos.test/video-ppio-human.jpg",
-                    asset_avatar_url="asset://yinghe-human-1",
-                    ppio_asset_avatar_url="asset://ppio-human-1",
-                    scope="private",
-                )
-            )
-            await db.commit()
-
-    asyncio.run(seed_human())
-    try:
-        response = client.post(
-            "/api/generations/videos",
-            json={
-                "prompt": "test PPIO video",
-                "image_urls": ["https://tos.test/video-ppio-human.jpg"],
-                "model": "doubao-seedance-2.0-ppio",
-            },
-        )
-        assert response.status_code == 202, response.text
-        job_id = response.json()["id"]
-        for _ in range(50):
-            state = client.get(f"/api/generations/{job_id}").json()
-            if state["status"] in {"succeeded", "failed"}:
-                break
-            time.sleep(0.05)
-        assert state["status"] == "succeeded"
-        assert captured["image_urls"] == ["asset://ppio-human-1"]
-    finally:
-        _fail_active_jobs()
-        connection = sqlite3.connect(TEST_DB, timeout=10)
-        try:
-            connection.execute("DELETE FROM daily_usage_quotas WHERE user_id = ? AND category = 'video'", (user["id"],))
-            connection.commit()
-        finally:
-            connection.close()
-
-
 def test_h3_endpoint_enforces_official_reference_capabilities(client) -> None:
     base = {
         "prompt": "故宫舞蹈",
@@ -2384,7 +2157,7 @@ def test_h3_endpoint_enforces_official_reference_capabilities(client) -> None:
 
 
 def test_create_human_registers_asset_avatar(client, monkeypatch) -> None:
-    """用户上传人物时并行注册英合与 PPIO 两份 asset://。"""
+    """用户上传人物时自动注册英合 asset://。"""
     from app import domain
 
     created: list[str] = []
@@ -2393,11 +2166,7 @@ def test_create_human_registers_asset_avatar(client, monkeypatch) -> None:
         created.append(public_url)
         return f"asset://user-{len(created)}"
 
-    async def fake_create_ppio_asset(public_url: str) -> str:
-        return "asset://ppio-user-1"
-
     monkeypatch.setattr("app.providers.create_real_face_asset", fake_create_asset)
-    monkeypatch.setattr("app.providers.create_ppio_synthetic_image_asset", fake_create_ppio_asset)
     payload = {
         "name": "上传人物-测试",
         "description": "t",
@@ -2408,7 +2177,7 @@ def test_create_human_registers_asset_avatar(client, monkeypatch) -> None:
     assert response.status_code == 201, response.text
     body = response.json()
     assert body["assetAvatarUrl"] == "asset://user-1"
-    assert body["providerAssetAvatarUrls"] == {"yinghe": "asset://user-1", "ppio": "asset://ppio-user-1"}
+    assert body["providerAssetAvatarUrls"] == {"yinghe": "asset://user-1"}
     assert body["originalAvatar"] == payload["avatar_url"]  # TOS 原路径保留
     assert created == [payload["avatar_url"]]
     assert domain._sync_human_asset_avatar is not None  # 引用保证函数存在
@@ -2422,20 +2191,12 @@ def test_update_human_re_registers_asset_avatar_on_avatar_change(client, monkeyp
         created.append(public_url)
         return f"asset://user-{len(created)}"
 
-    ppio_created: list[str] = []
-
-    async def fake_create_ppio_asset(public_url: str) -> str:
-        ppio_created.append(public_url)
-        return f"asset://ppio-user-{len(ppio_created)}"
-
     monkeypatch.setattr("app.providers.create_real_face_asset", fake_create_asset)
-    monkeypatch.setattr("app.providers.create_ppio_synthetic_image_asset", fake_create_ppio_asset)
     first = client.post(
         "/api/digital-humans",
         json={"name": "换图人物", "description": "t", "avatar_url": "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/old.jpg", "source": "uploaded"},
     ).json()
     assert first["assetAvatarUrl"] == "asset://user-1"
-    assert first["providerAssetAvatarUrls"]["ppio"] == "asset://ppio-user-1"
 
     second = client.patch(
         f"/api/digital-humans/{first['id']}",
@@ -2443,17 +2204,14 @@ def test_update_human_re_registers_asset_avatar_on_avatar_change(client, monkeyp
     )
     assert second.status_code == 200, second.text
     assert second.json()["assetAvatarUrl"] == "asset://user-2"
-    assert second.json()["providerAssetAvatarUrls"]["ppio"] == "asset://ppio-user-2"
     assert created == [
         "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/old.jpg",
         "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/new.jpg",
     ]
-    assert ppio_created == created
 
     # 未换图时（只改名字）不重新注册资产
     renamed = client.patch(f"/api/digital-humans/{first['id']}", json={"name": "改名字"})
     assert renamed.json()["assetAvatarUrl"] == "asset://user-2"
-    assert renamed.json()["providerAssetAvatarUrls"]["ppio"] == "asset://ppio-user-2"
     assert len(created) == 2
 
 
@@ -2465,14 +2223,13 @@ def test_create_human_asset_failure_degrades_gracefully(client, monkeypatch) -> 
         raise ProviderError("上游挂了")
 
     monkeypatch.setattr("app.providers.create_real_face_asset", boom)
-    monkeypatch.setattr("app.providers.create_ppio_synthetic_image_asset", lambda _url: boom(_url, name="ppio"))
     response = client.post(
         "/api/digital-humans",
         json={"name": "降级人物", "description": "t", "avatar_url": "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/face.jpg", "source": "uploaded"},
     )
     assert response.status_code == 201, response.text
     assert response.json()["assetAvatarUrl"] is None
-    assert response.json()["providerAssetAvatarUrls"] == {"yinghe": None, "ppio": None}
+    assert response.json()["providerAssetAvatarUrls"] == {"yinghe": None}
     assert response.json()["originalAvatar"].startswith("https://")
 
 
@@ -2788,88 +2545,6 @@ async def test_viduq3_uses_toapis_contract(monkeypatch, model, images, resolutio
     assert result["providerTaskId"] == "vidu-task-1"
 
 
-@pytest.mark.asyncio
-async def test_flux3_uses_bfl_keyframe_contract(client, monkeypatch) -> None:
-    import httpx
-
-    from app import providers
-    from app.jobs import Job
-    from app.schemas import VideoGenerationCreate
-
-    captured: dict = {}
-
-    class FakeClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return None
-
-        async def post(self, url, *, headers, json):
-            captured.update(url=url, headers=headers, payload=json)
-            return httpx.Response(200, json={"id": "flux-task-1", "polling_url": "https://api.eu.bfl.ai/v1/get_result?id=flux-task-1"}, request=httpx.Request("POST", url))
-
-    async def noop(*_args, **_kwargs):
-        return None
-
-    async def set_task(job, provider, task_id, **_kwargs):
-        job.provider = provider
-        job.provider_task_id = task_id
-        if _kwargs.get("polling_url"):
-            job.request["_providerPollingUrl"] = _kwargs["polling_url"]
-
-    async def poll(*_args, **_kwargs):
-        return {"id": "flux-task-1", "status": "Ready", "result": {"sample": "https://files.test/flux.mp4"}, "cost": 85}
-
-    async def store(job, task):
-        return {"provider": "bfl", "providerTaskId": job.provider_task_id, "sourceUrl": task["result"]["sample"]}
-
-    monkeypatch.setattr(providers, "_bfl_config", lambda: ("https://api.bfl.test", {"x-key": "test"}))
-    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
-    monkeypatch.setattr(providers.jobs, "mark_provider_submitting", noop)
-    monkeypatch.setattr(providers.jobs, "set_provider_task", set_task)
-    monkeypatch.setattr(providers, "_poll_bfl_flux3", poll)
-    monkeypatch.setattr(providers, "_store_bfl_flux3_result", store)
-    job = Job(
-        id="job-flux3",
-        kind="video",
-        user_id="u1",
-        request={"model": "flux-3-video", "_capabilities": {"providerResolutionMap": {"1080p": "fhd"}}},
-    )
-    request = VideoGenerationCreate(
-        prompt="测试",
-        model="flux-3-video",
-        image_urls=["https://cdn.test/start.jpg", "https://cdn.test/end.jpg"],
-        ratio="16:9",
-        resolution="1080p",
-        duration=8,
-        generate_audio=False,
-    )
-
-    result = await providers.generate_bfl_flux3_video(request, job)
-
-    assert captured["url"] == "https://api.bfl.test/v1/flux-3-video"
-    assert captured["payload"] == {
-        "mode": "i2v",
-        "prompt": "测试",
-        "aspect_ratio": "16:9",
-        "duration": 8,
-        "resolution": "fhd",
-        "version": "latest",
-        "generate_audio": False,
-        "safety_tolerance": 2,
-        "draft": False,
-        "user": "u1",
-        "keyframes": ["https://cdn.test/start.jpg", "https://cdn.test/end.jpg"],
-    }
-    assert job.request["_providerPollingUrl"] == "https://api.eu.bfl.ai/v1/get_result?id=flux-task-1"
-    assert job.provider == "bfl-flux3"
-    assert result["providerTaskId"] == "flux-task-1"
-
-
 @pytest.mark.parametrize(
     ("model", "images", "expected_input", "expect_ratio"),
     [
@@ -2977,70 +2652,20 @@ async def test_happyhorse_11_models_use_native_contract(monkeypatch, model, imag
     assert result["providerTaskId"] == "happyhorse-task-1"
 
 
-@pytest.mark.parametrize(
-    "url",
-    [
-        "https://evil.test/v1/get_result?id=task-1",
-        "https://api.bfl.ai.evil.test/v1/get_result?id=task-1",
-        "http://api.bfl.ai/v1/get_result?id=task-1",
-        "https://api.bfl.ai/v1/get_result?id=other",
-        "https://api.bfl.ai:invalid/v1/get_result?id=task-1",
-        "https://user:secret@api.bfl.ai/v1/get_result?id=task-1",
-        "https://api.bfl.ai/redirect?id=task-1",
-    ],
-)
-def test_bfl_polling_rejects_untrusted_urls(url):
-    from app.providers import ProviderError, _bfl_polling_url
-
-    with pytest.raises(ProviderError):
-        _bfl_polling_url("https://api.bfl.ai", "task-1", url)
-
-
-@pytest.mark.asyncio
-async def test_bfl_admin_query_uses_persisted_regional_polling_url(monkeypatch):
-    import httpx
-
-    from app import providers
-
-    polling_url = "https://api.eu.bfl.ai/v1/get_result?id=task-1"
-    captured = {}
-
-    class FakeClient:
-        def __init__(self, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            pass
-
-        async def get(self, url, *, headers):
-            captured.update(url=url, headers=headers)
-            return httpx.Response(200, json={"status": "Ready"}, request=httpx.Request("GET", url))
-
-    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
-    monkeypatch.setattr(providers, "_bfl_config", lambda: ("https://api.bfl.ai", {"x-key": "test-only"}))
-    result = await providers.query_provider_task("video", "task-1", "bfl-flux3", request={"_providerPollingUrl": polling_url})
-    assert result["status"] == "Ready"
-    assert captured == {"url": polling_url, "headers": {"x-key": "test-only"}}
-
-
-def test_provider_polling_url_and_redacted_wire_request_survive_reload(client):
+def test_provider_task_id_and_redacted_wire_request_survive_reload(client):
     from app.jobs import JobManager
 
-    job_id = "job-bfl-polling-durable"
+    job_id = "job-provider-task-durable"
     _insert_job(job_id, kind="video", status="running")
-    polling_url = "https://api.eu.bfl.ai/v1/get_result?id=task-1"
 
     async def exercise():
         manager = JobManager()
         job = await manager.get(job_id)
         await manager.record_provider_request(job, {"prompt": "subject", "images": ["https://cdn.test/original.jpg?token=secret"]})
-        await manager.set_provider_task(job, "bfl-flux3", "task-1", polling_url=polling_url)
+        await manager.set_provider_task(job, "yinghe", "provider-task-1")
         restored = await JobManager().get(job_id)
-        assert restored.provider_task_id == "task-1"
-        assert restored.request["_providerPollingUrl"] == polling_url
+        assert restored.provider == "yinghe"
+        assert restored.provider_task_id == "provider-task-1"
         assert restored.request["_providerRequest"]["images"] == ["https://cdn.test/original.jpg?token=***"]
 
     asyncio.run(exercise())
@@ -3093,7 +2718,7 @@ def test_confirmed_recovery_updates_usage_without_counting_the_same_call_twice(c
     async def exercise():
         manager = JobManager()
         job = await manager.get(job_id)
-        job.result = {"provider": "bfl", "providerTaskId": "pt-existing-usage", "usage": {"total_tokens": 12}}
+        job.result = {"provider": "yinghe", "providerTaskId": "pt-existing-usage", "usage": {"total_tokens": 12}}
         await manager._persist_asset(job)
         await manager.finalize_success(job, {**job.result, "usage": {"total_tokens": 24}})
         await manager.finalize_success(job, job.result)
@@ -3141,3 +2766,117 @@ async def test_gemini_existing_image_data_url_is_preserved(monkeypatch):
     monkeypatch.setattr(providers, "download_public_url", forbidden)
     value = "data:image/jpeg;base64,aGVsbG8="
     assert await providers._gemini_omni_image_data_url(value) == value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["generate", "resume", "store"])
+@pytest.mark.parametrize(
+    ("provider", "snapshot"),
+    [
+        ("retired-provider", {}),
+        (None, {"_provider": "retired-provider", "_providerModelId": "MiniMax-H3"}),
+        ("yinghe", {"_capabilities": {"providerCode": "retired-provider"}}),
+        (None, {"_capabilities": {"providerProtocol": "retired-protocol"}}),
+    ],
+)
+async def test_unsupported_media_source_never_falls_back_to_another_supplier(monkeypatch, operation, provider, snapshot):
+    from app import providers
+    from app.jobs import Job
+    from app.schemas import VideoGenerationCreate
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Unsupported sources must fail before contacting any supplier")
+
+    monkeypatch.setattr(providers.httpx, "AsyncClient", forbidden)
+    monkeypatch.setattr(providers, "_video_config", forbidden)
+    job = Job(id="retired-job", kind="video", provider=provider, provider_task_id="original-task", request=snapshot)
+    with pytest.raises(providers.ProviderError, match="不受支持"):
+        if operation == "generate":
+            await providers.generate_video(VideoGenerationCreate(prompt="test"), job)
+        elif operation == "resume":
+            await providers.resume_generation(job)
+        else:
+            await providers.store_provider_result(job, {"status": "succeeded"})
+    assert job.provider == provider
+    assert job.provider_task_id == "original-task"
+
+
+@pytest.mark.asyncio
+async def test_query_unsupported_supplier_never_uses_default_channel(monkeypatch):
+    from app import providers
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Unsupported supplier must not be queried")
+
+    monkeypatch.setattr(providers.httpx, "AsyncClient", forbidden)
+    with pytest.raises(providers.ProviderError, match="不受支持"):
+        await providers.query_provider_task("video", "old-task", "retired-provider")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["queued", "running"])
+@pytest.mark.parametrize("task_id", [None, "original-task"])
+async def test_worker_quarantines_unsupported_media_without_replay(client, status, task_id):
+    from app.database import session_factory
+    from app.models import GenerationJobModel
+    from app.worker import _claim, _recover_stale
+
+    job_id = f"retired-worker-{status}-{task_id}"
+    _insert_job(job_id, kind="video", status=status, provider_task_id=task_id, updated_at=datetime.now(timezone.utc) - timedelta(minutes=10))
+    async with session_factory() as db:
+        job = await db.get(GenerationJobModel, job_id)
+        job.request = {"_provider": "retired-provider", "_providerModelId": "MiniMax-H3"}
+        job.provider = "retired-provider"
+        job.result = {"usage": {"output_seconds": 4}, "sourceUrl": "https://media.test/original.mp4"}
+        job.phase = "submitting_provider"
+        job.idempotency_key = f"{job_id}:text"
+        job.worker_id = "old-worker"
+        job.lease_expires_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+        await db.commit()
+    if status == "queued":
+        assert await _claim(("video",), ("retired-provider",)) is None
+    else:
+        await _recover_stale(("video",), ("retired-provider",))
+    async with session_factory() as db:
+        job = await db.get(GenerationJobModel, job_id)
+        assert (job.status, job.phase) == ("failed", "manual_review")
+        assert "不受支持" in job.error
+        assert job.provider == "retired-provider"
+        assert job.provider_task_id == task_id
+        assert job.idempotency_key == f"{job_id}:text"
+        assert job.result["usage"] == {"output_seconds": 4}
+        assert job.worker_id is None and job.lease_expires_at is None
+
+
+@pytest.mark.parametrize(
+    ("snapshot", "status", "message"),
+    [
+        ({"_provider": "retired-provider"}, 422, "不受支持"),
+        ({"_provider": "yinghe", "_modelGateway": True}, 502, "MODEL_GATEWAY_URL"),
+    ],
+)
+def test_admin_sync_rejects_unavailable_source_before_query(client, monkeypatch, snapshot, status, message):
+    from app import admin
+    from app.database import session_factory
+    from app.models import GenerationJobModel
+
+    monkeypatch.delenv("MODEL_GATEWAY_URL", raising=False)
+    job_id = f"unavailable-admin-sync-{status}"
+    _insert_job(job_id, kind="video", status="failed", provider_task_id="original-task")
+
+    async def prepare():
+        async with session_factory() as db:
+            job = await db.get(GenerationJobModel, job_id)
+            job.provider = None
+            job.request = snapshot
+            await db.commit()
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Unavailable source must not reach the query adapter")
+
+    asyncio.run(prepare())
+    monkeypatch.setattr(admin, "query_provider_task", forbidden)
+    response = client.post(f"/api/admin/jobs/{job_id}/sync")
+    assert response.status_code == status
+    assert message in response.json()["detail"]
+    assert _job_row(job_id)["status"] == "failed"

@@ -1,0 +1,975 @@
+{
+  "source": "https://admin-aigc.yseeai.com/async/doc",
+  "models": [
+    {
+      "innerCode": "svip-claude-sonnet-4-6",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-claude-opus-4-7",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gemini-3.6-flash",
+      "groupName": "Gemini",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gpt-5.5",
+      "groupName": "GPT",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gemini-3.5-flash",
+      "groupName": "Gemini",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gemini-2.5-pro",
+      "groupName": "Gemini",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gpt-image-2",
+      "groupName": "GPT Image",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/image/generation/tasks|/image/generation/tasks/{task_id}",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gemini-3.1-pro-preview",
+      "groupName": "Gemini",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gpt-6-astra",
+      "groupName": "GPT",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gpt-5.6-sol",
+      "groupName": "GPT",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-claude-sonnet-5",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": null,
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-claude-opus-4-5-20251101",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gemini-3.1-flash-image-preview",
+      "groupName": "Gemini",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/image/generation/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-claude-fable-5",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-claude-haiku-4-5-20251001",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "seedream-4.0",
+      "groupName": "Seedream",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/images/generations",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gemini-3.7-flash",
+      "groupName": "Gemini",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "dreamina-seedance-2.5",
+      "groupName": "海外seedance系列",
+      "modelType": "VIDEO",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/v3/video/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "grok-4.5",
+      "groupName": "Grok",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gpt-image-2",
+      "groupName": "GPT Image",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/image/generation/tasks|/image/generation/tasks/{task_id}",
+      "callProtocol": "OpenAI",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "dreamactor-m2.0",
+      "groupName": "dreamactor",
+      "modelType": "VIDEO",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/video/generation/tasks",
+      "callProtocol": "自定义",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "z-claude-fable-5-1",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": null,
+      "apiPath": null,
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gpt-5.5",
+      "groupName": "GPT",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gpt-5.6-luna",
+      "groupName": "GPT",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gemini-3.8-flash",
+      "groupName": "Gemini",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": "OpenAI",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gemini-3.1-pro-preview",
+      "groupName": "Gemini",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-claude-sonnet-4-5-20250929",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gemini-3-flash-preview",
+      "groupName": "Gemini",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gemini-3.7-flash",
+      "groupName": "Gemini",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gemini-2.5-flash-lite",
+      "groupName": "Gemini",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gemini-3-pro-image-preview",
+      "groupName": "Gemini",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/image/generation/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "s-gpt-image-2",
+      "groupName": "GPT Image",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/image/generation/tasks|/image/generation/tasks/{task_id}",
+      "callProtocol": "OpenAI",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "claude-opus-5",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-claude-opus-4-8",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gemini-3.6-flash",
+      "groupName": "Gemini",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-claude-opus-4-6",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gemini-2.5-flash",
+      "groupName": "Gemini",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gemini-2.5-flash-image",
+      "groupName": "Gemini",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/image/generation/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "z-claude-fable-5",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": null,
+      "apiPath": null,
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "z-claude-sonnet-5",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": "Anthropic",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gpt-5.6-terra",
+      "groupName": "GPT",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gemini-3-pro-image-preview",
+      "groupName": "Gemini",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/image/generation/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gemini-3.1-flash-lite-preview",
+      "groupName": "Gemini",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gemini-3.1-flash-lite-preview",
+      "groupName": "Gemini",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gpt-5.4-mini",
+      "groupName": "GPT",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gemini-3.5-flash",
+      "groupName": "Gemini",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gemini-3-flash-preview",
+      "groupName": "Gemini",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gemini-3.8-flash",
+      "groupName": "Gemini",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "grok-4.6",
+      "groupName": "Grok",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "dreamina-seedance-2.0-mini",
+      "groupName": "海外seedance系列",
+      "modelType": "VIDEO",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/v3/video/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gemini-3.1-flash-image-preview",
+      "groupName": "Gemini",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/image/generation/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "claude-opus-4-6",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gpt-5.6-sol",
+      "groupName": "GPT",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gpt-5.6-terra",
+      "groupName": "GPT",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gpt-5.4",
+      "groupName": "GPT",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "claude-fable-5",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": "Anthropic",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "z-claude-opus-5",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": "Anthropic",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gpt-5.4-mini",
+      "groupName": "GPT",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "wan2.6-r2v-sg",
+      "groupName": "Wan",
+      "modelType": "VIDEO",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/video/generation/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "wan2.6-image-sg",
+      "groupName": "Wan",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/image/generation/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "wan2.6-t2v-sg",
+      "groupName": "Wan",
+      "modelType": "VIDEO",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/video/generation/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "wan2.6-t2i-sg",
+      "groupName": "Wan",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/image/generation/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "wan2.6-i2v-sg",
+      "groupName": "Wan",
+      "modelType": "VIDEO",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/video/generation/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "seedream-4.5",
+      "groupName": "Seedream",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/images/generations",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "dreamina-seedance-2.0",
+      "groupName": "海外seedance系列",
+      "modelType": "VIDEO",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/v3/video/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "dreamina-seedance-2.0-fast",
+      "groupName": "海外seedance系列",
+      "modelType": "VIDEO",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/v3/video/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "wan2.7-r2v-sg",
+      "groupName": "Wan",
+      "modelType": "VIDEO",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/video/generation/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "seedream-5.0",
+      "groupName": "Seedream",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/images/generations",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "wan2.7-image-sg",
+      "groupName": "Wan",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/image/generation/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "wan2.7-videoedit-sg",
+      "groupName": "Wan",
+      "modelType": "VIDEO",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/video/generation/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "wan2.7-i2v-sg",
+      "groupName": "Wan",
+      "modelType": "VIDEO",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/video/generation/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "claude-haiku-4-5-20251001",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "dola-seedream-5.0-pro",
+      "groupName": "Seedream",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/images/generations",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "wan3.0-video-sg",
+      "groupName": "Wan",
+      "modelType": "VIDEO",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/video/generation/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "wan3.0-video-prime-sg",
+      "groupName": "Wan",
+      "modelType": "VIDEO",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/video/generation/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "claude-opus-4-7",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": "Anthropic",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "claude-sonnet-4-6",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "codex-auto-review",
+      "groupName": "GPT",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/responses",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "claude-opus-4-8",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": "Anthropic",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "grok-4.3",
+      "groupName": "Grok",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": "OpenAI",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gpt-6-astra",
+      "groupName": "GPT",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/chat/completions",
+      "callProtocol": "OpenAI",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "seedream-4.0-filter",
+      "groupName": "Seedream",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/images/generations",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "seedream-4.5-filter",
+      "groupName": "Seedream",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/images/generations",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "seedream-5.0-filter",
+      "groupName": "Seedream",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/images/generations",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "dreamina-seedance-1.5-pro",
+      "groupName": "海外seedance系列",
+      "modelType": "VIDEO",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/video/generation/tasks",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "claude-sonnet-5",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": "Anthropic",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "veo-3.1-generate-preview",
+      "groupName": "Gemini视频",
+      "modelType": "VIDEO",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/video/generation/tasks",
+      "callProtocol": "自定义",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "veo-3.1-fast-generate-preview",
+      "groupName": "Gemini视频",
+      "modelType": "VIDEO",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/video/generation/tasks",
+      "callProtocol": "自定义",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gemini-omni-flash-preview",
+      "groupName": "Gemini视频",
+      "modelType": "VIDEO",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/video/generation/tasks",
+      "callProtocol": "自定义",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "claude-fable-5-1",
+      "groupName": "Claude",
+      "modelType": "TEXT",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/messages",
+      "callProtocol": "Anthropic",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "dola-seedream-5.0-pro-filter",
+      "groupName": "Seedream",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://ai-aigc.yseeai.com",
+      "apiPath": "/v1/images/generations",
+      "callProtocol": null,
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gpt-image-2.5-flare",
+      "groupName": "GPT Image",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/image/generation/tasks|/image/generation/tasks/{task_id}",
+      "callProtocol": "OpenAI",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "gpt-image-2.5-sunburst",
+      "groupName": "GPT Image",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/image/generation/tasks|/image/generation/tasks/{task_id}",
+      "callProtocol": "OpenAI",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "s-gpt-image-2.5-flare",
+      "groupName": "GPT Image",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/image/generation/tasks|/image/generation/tasks/{task_id}",
+      "callProtocol": "OpenAI",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "s-gpt-image-2.5-sunburst",
+      "groupName": "GPT Image",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/image/generation/tasks|/image/generation/tasks/{task_id}",
+      "callProtocol": "OpenAI",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gpt-image-2.5-flare",
+      "groupName": "GPT Image",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/image/generation/tasks|/image/generation/tasks/{task_id}",
+      "callProtocol": "OpenAI",
+      "status": true,
+      "docContent": null
+    },
+    {
+      "innerCode": "svip-gpt-image-2.5-sunburst",
+      "groupName": "GPT Image",
+      "modelType": "IMAGE",
+      "apiBaseUrl": "https://api-aigc.yseeai.com",
+      "apiPath": "/image/generation/tasks|/image/generation/tasks/{task_id}",
+      "callProtocol": "OpenAI",
+      "status": true,
+      "docContent": null
+    }
+  ]
+}

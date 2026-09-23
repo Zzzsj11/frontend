@@ -7,17 +7,16 @@ export interface VideoCostItem {
 
 export const SD20_ESTIMATE_PRICE_PER_SECOND = 0.83
 export const H3_ESTIMATE_PRICE_PER_SECOND = 0.425
-export const PPIO_SD20_ESTIMATE_PRICE_PER_SECOND = 0.8
 
-export type VideoProviderCode = 'yinghe' | 'ppio' | 'runninghub'
+export type VideoProviderCode = 'yinghe' | 'runninghub'
 
 export const videoProviderForModel = (model?: string): VideoProviderCode => {
   const configured = videoModelCapabilities(model).billing?.provider
-  if (configured === 'ppio' || configured === 'runninghub' || configured === 'yinghe') {
+  if (configured === 'runninghub' || configured === 'yinghe') {
     return configured
   }
   if (model === 'minimax-h3-runninghub') return 'runninghub'
-  return model?.endsWith('-ppio') ? 'ppio' : 'yinghe'
+  return 'yinghe'
 }
 
 export const videoEstimateUnitPrice = (model?: string): number => {
@@ -25,9 +24,7 @@ export const videoEstimateUnitPrice = (model?: string): number => {
   if (Number.isFinite(configured)) return Number(configured)
   if (model === 'minimax-h3-runninghub') return 0
   if (model?.startsWith('minimax-h3')) return H3_ESTIMATE_PRICE_PER_SECOND
-  return videoProviderForModel(model) === 'ppio'
-    ? PPIO_SD20_ESTIMATE_PRICE_PER_SECOND
-    : SD20_ESTIMATE_PRICE_PER_SECOND
+  return SD20_ESTIMATE_PRICE_PER_SECOND
 }
 
 export const videoBalanceCheckRequired = (model?: string): boolean => {

@@ -40,8 +40,6 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     assert image_models["gpt-image-2.5-flare"]["capabilities"]["referenceImage"] == {"min": 0, "max": 15}
     h3 = next(x for x in options if x["id"] == "minimax-h3-runninghub")
     direct_h3 = next(x for x in options if x["id"] == "minimax-h3")
-    ppio_sd = next(x for x in options if x["id"] == "doubao-seedance-2.0-ppio")
-    ppio_h3 = next(x for x in options if x["id"] == "minimax-h3-ppio")
     new_models = {
         x["id"]: x
         for x in options
@@ -79,11 +77,6 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     assert h3["capabilities"]["referenceVideo"]["max"] == 1
     assert "first_last" in h3["capabilities"]["h3Modes"]
     assert "first_last" in direct_h3["capabilities"]["h3Modes"]
-    assert ppio_sd["name"] == "SD2.0（PPIO）"
-    assert ppio_sd["capabilities"]["resolutions"] == ["480p", "720p", "1080p"]
-    assert ppio_h3["name"] == "H3（PPIO）"
-    assert ppio_h3["capabilities"]["providerCode"] == "ppio"
-    assert ppio_h3["capabilities"]["resolutionLabels"]["720p"] == "768P"
     assert {model_id: model["name"] for model_id, model in new_models.items()} == {
         "doubao-seedance-2.0-mini": "SD2.0 Mini（英和）",
         "doubao-seedance-2.0-fast": "SD2.0 Fast（英和）",

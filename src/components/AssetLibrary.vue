@@ -93,9 +93,17 @@ const upName = ref('')
 const upStyle = ref('')
 const upDesc = ref('')
 const upAvatar = ref('')
+const upAvatarLoading = ref(false)
+const upAvatarError = ref('')
 const upFileRef = ref<HTMLInputElement>()
 const uploadError = ref('')
-const canUpload = computed(() => !!upName.value.trim() && !!upStyle.value.trim())
+const canUpload = computed(
+  () =>
+    !!upName.value.trim() &&
+    !!upStyle.value.trim() &&
+    !upAvatarLoading.value &&
+    !upAvatarError.value,
+)
 
 const openUpload = () => {
   uploadOpen.value = !uploadOpen.value
@@ -104,43 +112,56 @@ const openUpload = () => {
   }
 }
 
-// 选择头像：等比缩放到 3:4 竖版范围内并转 data URL，提交时上传 TOS
 const onUpAvatarChange = (e: Event) => {
   const target = e.target as HTMLInputElement
   const file = target.files?.[0]
   target.value = ''
-  if (!file || !file.type.startsWith('image/')) return
+  if (!file || upAvatarLoading.value || store.dhGenerating) return
+  // 新选择失败时不能再使用旧图，也不能静默退回无参考图生成。
+  upAvatar.value = ''
+  uploadError.value = ''
+  if (!file.type.startsWith('image/')) {
+    upAvatarError.value = '请选择图片文件'
+    return
+  }
+  upAvatarLoading.value = true
   const url = URL.createObjectURL(file)
   const img = new Image()
   img.onload = () => {
-    const ratio = Math.min(600 / img.width, 800 / img.height, 1)
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.round(img.width * ratio)
-    canvas.height = Math.round(img.height * ratio)
-    canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height)
-    upAvatar.value = canvas.toDataURL('image/jpeg', 0.85)
+    try {
+      if (!img.width || !img.height) throw new Error('无效图片尺寸')
+      const ratio = Math.min(1024 / img.width, 1536 / img.height, 1)
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(img.width * ratio))
+      canvas.height = Math.max(1, Math.round(img.height * ratio))
+      const context = canvas.getContext('2d')
+      if (!context) throw new Error('无法读取图片')
+      context.drawImage(img, 0, 0, canvas.width, canvas.height)
+      upAvatar.value = canvas.toDataURL('image/jpeg', 0.9)
+      upAvatarError.value = ''
+    } catch {
+      upAvatarError.value = '图片无法读取，请重新选择'
+    } finally {
+      upAvatarLoading.value = false
+      URL.revokeObjectURL(url)
+    }
+  }
+  img.onerror = () => {
+    upAvatarLoading.value = false
+    upAvatarError.value = '图片无法读取，请重新选择'
     URL.revokeObjectURL(url)
   }
   img.src = url
 }
 
-// 未上传头像时，用「名称首字 + 风格配色」生成 3:4 竖版占位头像
-const initialsAvatar = (name: string, style: string): string => {
-  const ch = name.trim().charAt(0) || '?'
-  const palette = ['var(--primary)', '#3b82f6', '#10b981', '#8b5cf6', '#ef4444', '#f59e0b']
-  let hash = 0
-  for (const c of name + style) hash = (hash * 31 + c.charCodeAt(0)) >>> 0
-  const bg = palette[hash % palette.length]
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400">` +
-    `<rect width="300" height="400" fill="${bg}"/>` +
-    `<text x="150" y="205" font-size="150" fill="#fff" text-anchor="middle" ` +
-    `dominant-baseline="central" font-family="sans-serif" font-weight="600">${ch}</text></svg>`
-  return 'data:image/svg+xml,' + encodeURIComponent(svg)
+const removeUpAvatar = () => {
+  if (upAvatarLoading.value || store.dhGenerating) return
+  upAvatar.value = ''
+  upAvatarError.value = ''
 }
 
 const submitUpload = async () => {
-  if (!canUpload.value || store.dhGenerating) return
+  if (upAvatarError.value || !canUpload.value || store.dhGenerating) return
   const name = upName.value.trim()
   const style = upStyle.value.trim()
   uploadError.value = ''
@@ -149,7 +170,7 @@ const submitUpload = async () => {
       name,
       style,
       description: upDesc.value.trim(),
-      avatar: upAvatar.value || initialsAvatar(name, style),
+      avatar: upAvatar.value || undefined,
     })
     // 生成完成后才清空
     uploadOpen.value = false
@@ -280,7 +301,7 @@ const removeDh = async () => {
           class="upload-avatar"
           :class="{ filled: upAvatar, disabled: store.dhGenerating }"
           :title="
-            store.dhGenerating ? '正在生成中，请稍候' : '点击上传人物参考图（将统一生成三视图）'
+            store.dhGenerating ? '正在生成中，请稍候' : '点击上传人物参考图（将统一生成大头照）'
           "
           @click="!store.dhGenerating && upFileRef?.click()"
         >
@@ -318,8 +339,17 @@ const removeDh = async () => {
       </div>
       <div class="gen-actions">
         <span class="upload-tip"
-          >参考图会先存入 TOS，再按系统人物样式生成正面、侧面、背面三视图</span
+          >参考图会先存入
+          TOS，再生成一张白T灰底的正面大头照（1024×1536）；未上传时按身份特征生成</span
         >
+        <button
+          v-if="upAvatar || upAvatarError"
+          class="btn-outline"
+          :disabled="upAvatarLoading || store.dhGenerating"
+          @click="removeUpAvatar"
+        >
+          移除参考图
+        </button>
         <button
           class="gen-submit"
           :disabled="!canUpload || store.dhGenerating"
@@ -331,11 +361,12 @@ const removeDh = async () => {
             store.dhGenerating
               ? store.dhGeneratingPhase === 'uploading'
                 ? '正在上传…'
-                : '正在生成三视图…'
+                : '正在生成大头照…'
               : '添加到资产库'
           }}
         </button>
       </div>
+      <p v-if="upAvatarError" class="error-tip" role="alert">{{ upAvatarError }}</p>
       <p v-if="uploadError" class="error-tip" role="alert">{{ uploadError }}</p>
     </div>
 
@@ -496,8 +527,8 @@ const removeDh = async () => {
           <label class="edit-label">身份特征（不含服装、年代或职业）</label>
           <textarea v-model="editDesc" class="gen-desc" rows="2" :disabled="editing.readOnly" />
           <span class="readonly-tip"
-            >人物参考卡固定使用中性灰背景、白色圆领 T
-            恤和多视图排版；视频造型由歌曲曲风与当前分镜决定。</span
+            >重新生成的形象为中性灰背景、白色圆领 T
+            恤的单人正面大头照；视频造型由歌曲曲风与当前分镜决定。</span
           >
           <span v-if="editing.readOnly" class="readonly-tip"
             >系统人物为全局只读资产，所有用户均可使用，但不能编辑、重新生成或删除。</span
@@ -527,7 +558,7 @@ const removeDh = async () => {
         >
           <span v-if="regenBusy" class="spinner" />
           <AppIcon v-else name="sparkles" :size="13" />
-          {{ regenBusy ? '生成中（约需半分钟）…' : '重新生成形象' }}
+          {{ regenBusy ? '正在生成大头照…' : '重新生成大头照' }}
         </button>
         <button v-if="!editing.readOnly" class="edit-save" :disabled="regenBusy" @click="saveEdit">
           保存
@@ -915,7 +946,7 @@ const removeDh = async () => {
 }
 .dh-portrait {
   position: relative;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: 2 / 3;
   background: var(--surface-muted);
   overflow: hidden;
   cursor: pointer;

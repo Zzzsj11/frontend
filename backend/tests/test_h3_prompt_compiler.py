@@ -36,6 +36,15 @@ def test_h3_identity_card_preserves_identity_but_not_card_clothing_or_layout():
     assert "<Subject 1> is the visible identity, subject, scene, composition, and style" in compiled.prompt
     assert "<Subject 2> is an identity-only character card" in compiled.prompt
     assert "replace all card clothing" in compiled.prompt
+    assert "clothing, gray background, historical multi-view layout, era, and occupation are not target-video references" in compiled.prompt
+    retention = compiled.prompt.split("retention_analysis:\n", 1)[1].split("\n\ndetailed_description:", 1)[0]
+    assert "<Subject 1> (appears where required): fully_preserved" in retention
+    assert "<Subject 2> (appears where required): identity_only" in retention
+    assert "preserve facial features, face shape, skin tone, apparent age, and hairstyle only from the head-and-shoulders portrait" in retention
+    assert "do not infer full-body proportions" in retention
+    assert "never adultify children" in retention
+    assert "preserve cartoon style for cartoon characters" in retention
+    assert "body proportions only" not in retention
 
 
 def test_h3_compiler_preserves_expert_structure_and_forces_no_subtitles():

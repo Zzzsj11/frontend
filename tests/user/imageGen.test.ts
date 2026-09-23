@@ -4,8 +4,6 @@ import {
   createImageTask,
   DEFAULT_IMAGE_WAIT_TIMEOUT_MS,
   fetchPortraitPrompt,
-  getTemplateAvatar,
-  setTemplateAvatar,
 } from '../../src/api/imageGen'
 
 function mockJsonResponse(body: unknown) {
@@ -17,15 +15,6 @@ function mockJsonResponse(body: unknown) {
       }),
   )
 }
-
-describe('template avatar (system character 001 three-view sheet)', () => {
-  it('stores and returns the template url used as generation reference', () => {
-    setTemplateAvatar('https://tos.test/system/template.png')
-    expect(getTemplateAvatar()).toBe('https://tos.test/system/template.png')
-    setTemplateAvatar('')
-    expect(getTemplateAvatar()).toBe('')
-  })
-})
 
 describe('createImageTask', () => {
   it('serializes reference images and the digital_human purpose into the request body', async () => {
@@ -55,14 +44,14 @@ describe('createImageTask', () => {
       id: 'job-1',
       status: 'queued',
       progress: 0,
-      prompt: '参照第一张参考图的构图版式。角色描述：青衣少女。画面风格：古风。',
+      prompt: '生成单张正面头肩大头照。角色描述：青衣少女。',
     })
 
     const task = await createImageTask('', {
       portrait: { description: '青衣少女', style: '古风' },
     })
     expect(task.id).toBe('job-1')
-    expect(task.prompt).toContain('参照第一张参考图')
+    expect(task.prompt).toContain('单张正面头肩大头照')
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
     expect(body.prompt).toBe('')
     expect(body.portrait).toEqual({ description: '青衣少女', style: '古风' })
@@ -79,10 +68,10 @@ describe('createImageTask', () => {
 
 describe('fetchPortraitPrompt', () => {
   it('requests the registry-assembled prompt from the backend without creating a job', async () => {
-    const fetchMock = mockJsonResponse({ prompt: '参照第一张参考图的构图版式。' })
+    const fetchMock = mockJsonResponse({ prompt: '生成单张正面头肩大头照。' })
 
     const prompt = await fetchPortraitPrompt('青衣少女', '古风')
-    expect(prompt).toContain('参照第一张参考图')
+    expect(prompt).toContain('单张正面头肩大头照')
     const [url, init] = fetchMock.mock.calls[0]
     expect(String(url)).toContain('/generations/images/portrait-prompt')
     expect(JSON.parse(String(init?.body))).toEqual({ description: '青衣少女', style: '古风' })

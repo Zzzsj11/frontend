@@ -1,0 +1,5 @@
+{
+  "chat": ["claude-fable-5-1", "claude-opus-4-8", "gpt-6-astra", "gpt-5.6-sol", "gemini-3.1-pro-preview", "gemini-3.8-flash"],
+  "image": ["gpt-image-2.5-sunburst", "gpt-image-2.5-flare", "gpt-image-2", "gemini-3.1-flash-image-preview", "gemini-3-pro-image-preview", "seedream-5.0"],
+  "video": ["dreamina-seedance-2.5", "dreamina-seedance-2.0", "dreamina-seedance-2.0-fast", "dreamina-seedance-2.0-mini", "gemini-omni-flash-preview", "wan3.0-video-sg", "wan3.0-video-prime-sg"]
+}

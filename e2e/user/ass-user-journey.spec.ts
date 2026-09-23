@@ -1,6 +1,25 @@
 import { expect, test } from '@playwright/test'
 
+const ORIGIN = 'http://127.0.0.1:4173'
+test.use({ baseURL: ORIGIN, serviceWorkers: 'block' })
+
 test('user generates an editable storyboard from ASS', async ({ page }) => {
+  const unexpected: string[] = []
+  const pageErrors: string[] = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  await page.context().route('**/*', async (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    if (request.resourceType() === 'image')
+      return route.fulfill({
+        contentType: 'image/svg+xml',
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1536"><rect width="100%" height="100%" fill="#ccc"/></svg>',
+      })
+    if (!url.pathname.startsWith('/api/') && url.origin === ORIGIN && request.method() === 'GET')
+      return route.continue()
+    unexpected.push(`${request.method()} ${request.url()}`)
+    return route.abort('blockedbyclient')
+  })
   await page.route(/\/api\/release(?:\?|$)/, (route) =>
     route.fulfill({ contentType: 'application/json', body: JSON.stringify({ version: 'test' }) }),
   )
@@ -302,6 +321,16 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
 
   await expect(page.getByText('自动化测试歌词').first()).toBeVisible()
   await expect(page.getByText('镜头缓慢推进').first()).toBeVisible()
+  await page.locator('.script-line .dh-chips').click()
+  const detail = page.getByRole('dialog')
+  await expect(detail.locator('.identity-reference-tip')).toContainText('不从头肩照推断全身比例')
+  await expect(detail.locator('.pcard-avatars img')).toHaveAttribute(
+    'src',
+    'https://tos.test/luoli.png',
+  )
+  await expect(detail.locator('.pcard-avatars .character-portrait')).not.toHaveClass(/legacy-sheet/)
+  await page.screenshot({ path: test.info().outputPath('headshot-in-shot-detail.png') })
+  await detail.locator('.modal-header').getByRole('button', { name: '关闭' }).click()
   await expect(page.getByText('10012204').last()).toBeVisible()
   await expect(page.locator('.task-item').filter({ hasText: '10012204' })).toBeVisible()
   await expect(
@@ -354,4 +383,6 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await expect(creative.getByRole('button', { name: '首帧生成' })).toBeVisible()
   await expect(creative.getByRole('button', { name: '首尾帧生成' })).toBeVisible()
   await expect(creative.getByRole('button', { name: '多参考生成' })).toBeVisible()
+  expect(unexpected, '不允许未声明的请求穿透真实服务').toEqual([])
+  expect(pageErrors, '页面不应产生未处理异常').toEqual([])
 })

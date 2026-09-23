@@ -77,8 +77,7 @@ export const isH3VideoModel = (modelId?: string): boolean => {
   return (
     Boolean(option?.capabilities?.h3Modes?.length) ||
     modelId === 'minimax-h3-runninghub' ||
-    modelId === 'minimax-h3' ||
-    modelId === 'minimax-h3-ppio'
+    modelId === 'minimax-h3'
   )
 }
 export const generationModelLabel = (option: GenerationModelOption): string => {
@@ -92,16 +91,15 @@ export const generationModelLabel = (option: GenerationModelOption): string => {
 }
 const VIDEO_PROVIDER_SORT_ORDER: Record<string, number> = {
   yinghe: 0,
-  ppio: 1,
-  toapis: 2,
-  runninghub: 3,
+  toapis: 1,
+  runninghub: 2,
 }
 const videoProviderSortOrder = (option: GenerationModelOption): number => {
   const provider =
     option.value === 'minimax-h3-runninghub'
       ? 'runninghub'
       : String(option.capabilities?.providerCode ?? '').toLowerCase()
-  return VIDEO_PROVIDER_SORT_ORDER[provider] ?? 4
+  return VIDEO_PROVIDER_SORT_ORDER[provider] ?? 3
 }
 export const sortVideoModelOptions = (
   options: Array<GenerationModelOption>,
@@ -113,9 +111,25 @@ export const sortVideoModelOptions = (
       Number(left.capabilities?.sortOrder ?? 100) - Number(right.capabilities?.sortOrder ?? 100)
     )
   })
+export function assertGenerationModelAvailable(
+  modelId: string | undefined,
+  modality: 'image' | 'video',
+) {
+  const options = modality === 'image' ? IMAGE_MODEL_OPTIONS : VIDEO_MODEL_OPTIONS
+  if (!options.some((option) => option.value === modelId)) {
+    throw new Error(
+      `${modality === 'image' ? '图片' : '视频'}模型「${modelId || '未选择'}」已停用或不可用，请重新选择模型`,
+    )
+  }
+}
+
 let loaded = false
-export async function loadGenerationModels(force = false): Promise<void> {
-  if (loaded && !force) return
+export async function loadGenerationModels(
+  force = false,
+  { required = false }: { required?: boolean } = {},
+): Promise<void> {
+  // 展示可复用目录；费用预检和提交必须读取当前启用项，不能靠旧缓存放行。
+  if (loaded && !force && !required) return
   try {
     const items = await apiRequest<
       Array<{
@@ -138,10 +152,12 @@ export async function loadGenerationModels(force = false): Promise<void> {
         .filter((x) => x.modality === 'video')
         .map((x) => ({ value: x.id, label: x.name, capabilities: x.capabilities })),
     )
-    if (images.length) IMAGE_MODEL_OPTIONS.splice(0, IMAGE_MODEL_OPTIONS.length, ...images)
-    if (videos.length) VIDEO_MODEL_OPTIONS.splice(0, VIDEO_MODEL_OPTIONS.length, ...videos)
+    IMAGE_MODEL_OPTIONS.splice(0, IMAGE_MODEL_OPTIONS.length, ...images)
+    VIDEO_MODEL_OPTIONS.splice(0, VIDEO_MODEL_OPTIONS.length, ...videos)
     loaded = true
   } catch {
-    /* 保留内置默认模型，避免配置中心暂时不可用时阻断创作 */
+    loaded = false
+    if (required) throw new Error('模型目录加载失败，请稍后重试；本次不会提交生成任务')
+    /* 非提交展示保留已有选项，配置中心暂时不可用不影响编辑。 */
   }
 }

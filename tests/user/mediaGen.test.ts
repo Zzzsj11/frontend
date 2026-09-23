@@ -128,7 +128,7 @@ describe('media generation API client', () => {
     expect(body.image_urls).toEqual(['/media/scene.jpg', '/media/human.jpg'])
   })
 
-  it.each(['minimax-h3', 'minimax-h3-ppio', 'minimax-h3-runninghub'])(
+  it.each(['minimax-h3', 'minimax-h3-runninghub'])(
     'submits %s without references in automatic text mode',
     async (videoModel) => {
       const fetchMock = vi

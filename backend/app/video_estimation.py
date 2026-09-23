@@ -43,11 +43,7 @@ VIDEO_ESTIMATE_POLICIES = {
     "viduq3-turbo": VideoEstimatePolicy("toapis", 0.3085704, balance_check=False, billing_mode="supplier_usd_estimate"),
     "viduq3-pro": VideoEstimatePolicy("toapis", 0.5142888, balance_check=False, billing_mode="supplier_usd_estimate"),
     "viduq3": VideoEstimatePolicy("toapis", 0.3085704, balance_check=False, billing_mode="supplier_usd_estimate"),
-    # BFL FLUX 3 HD 文生/图生官方价 $0.17/秒，按 7.2 CNY/USD 粗估。
-    "flux-3-video": VideoEstimatePolicy("bfl", 1.224, balance_check=False, billing_mode="official_usd_estimate"),
     "minimax-h3": VideoEstimatePolicy("yinghe", 0.425),
-    "doubao-seedance-2.0-ppio": VideoEstimatePolicy("ppio", 0.8),
-    "minimax-h3-ppio": VideoEstimatePolicy("ppio", 0.425),
     "minimax-h3-runninghub": VideoEstimatePolicy("runninghub", 0, balance_check=False, billing_mode="excluded"),
 }
 

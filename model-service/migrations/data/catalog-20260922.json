@@ -1,0 +1,3317 @@
+{
+  "version": "20260922",
+  "models": [
+    {
+      "id": "claude-fable-5-1",
+      "channel": "yseeai-llm",
+      "provider_model": "claude-fable-5-1",
+      "kind": "chat",
+      "protocol": "anthropic",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "Claude",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/messages",
+        "stream": true,
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "claude-opus-4-8",
+      "channel": "yinghe-llm",
+      "provider_model": "claude-opus-4-8",
+      "kind": "chat",
+      "protocol": "anthropic",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "Claude",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/messages",
+        "stream": true,
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "dreamina-seedance-2.0",
+      "channel": "yseeai",
+      "provider_model": "dreamina-seedance-2.0",
+      "kind": "video",
+      "protocol": "seedance",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "海外seedance系列",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v3/video/tasks",
+        "duration": [
+          4,
+          15
+        ],
+        "resolution": [
+          "480p",
+          "720p"
+        ],
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "dreamina-seedance-2.0-fast",
+      "channel": "yseeai",
+      "provider_model": "dreamina-seedance-2.0-fast",
+      "kind": "video",
+      "protocol": "seedance",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "海外seedance系列",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v3/video/tasks",
+        "duration": [
+          4,
+          15
+        ],
+        "resolution": [
+          "480p",
+          "720p"
+        ],
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "dreamina-seedance-2.0-mini",
+      "channel": "yseeai",
+      "provider_model": "dreamina-seedance-2.0-mini",
+      "kind": "video",
+      "protocol": "seedance",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "海外seedance系列",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v3/video/tasks",
+        "duration": [
+          4,
+          15
+        ],
+        "resolution": [
+          "480p",
+          "720p"
+        ],
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "dreamina-seedance-2.5",
+      "channel": "yseeai",
+      "provider_model": "dreamina-seedance-2.5",
+      "kind": "video",
+      "protocol": "seedance",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "海外seedance系列",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v3/video/tasks",
+        "duration": [
+          4,
+          15
+        ],
+        "resolution": [
+          "480p",
+          "720p"
+        ],
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "gemini-3-pro-image-preview",
+      "channel": "yseeai",
+      "provider_model": "gemini-3-pro-image-preview",
+      "kind": "image",
+      "protocol": "image",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "Gemini",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/image/generation/tasks",
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "gemini-3.1-flash-image-preview",
+      "channel": "yseeai",
+      "provider_model": "gemini-3.1-flash-image-preview",
+      "kind": "image",
+      "protocol": "image",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "Gemini",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/image/generation/tasks",
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "gemini-3.1-pro-preview",
+      "channel": "yseeai-llm",
+      "provider_model": "gemini-3.1-pro-preview",
+      "kind": "chat",
+      "protocol": "chat",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "Gemini",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/chat/completions",
+        "stream": true,
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "gemini-3.8-flash",
+      "channel": "yseeai-llm",
+      "provider_model": "gemini-3.8-flash",
+      "kind": "chat",
+      "protocol": "chat",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "Gemini",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/chat/completions",
+        "stream": true,
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "gemini-omni-flash-preview",
+      "channel": "yseeai",
+      "provider_model": "gemini-omni-flash-preview",
+      "kind": "video",
+      "protocol": "unified",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "Gemini视频",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/video/generation/tasks",
+        "duration": [
+          1,
+          15
+        ],
+        "max_images": 3,
+        "reference_encoding": "base64",
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "gpt-5.6-sol",
+      "channel": "yinghe-llm",
+      "provider_model": "gpt-5.6-sol",
+      "kind": "chat",
+      "protocol": "chat",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "GPT",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/chat/completions",
+        "stream": true,
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "gpt-6-astra",
+      "channel": "yseeai-llm",
+      "provider_model": "gpt-6-astra",
+      "kind": "chat",
+      "protocol": "chat",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "GPT",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/chat/completions",
+        "stream": true,
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "gpt-image-2",
+      "channel": "yinghe",
+      "provider_model": "gpt-image-2",
+      "kind": "image",
+      "protocol": "image",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "GPT Image",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/image/generation/tasks",
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "gpt-image-2.5-flare",
+      "channel": "yinghe",
+      "provider_model": "gpt-image-2.5-flare",
+      "kind": "image",
+      "protocol": "image",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "GPT Image",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/image/generation/tasks",
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "gpt-image-2.5-sunburst",
+      "channel": "yinghe",
+      "provider_model": "gpt-image-2.5-sunburst",
+      "kind": "image",
+      "protocol": "image",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "GPT Image",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/image/generation/tasks",
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "seedream-5.0",
+      "channel": "yseeai-llm",
+      "provider_model": "seedream-5.0",
+      "kind": "image",
+      "protocol": "image-sync",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "Seedream",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/images/generations",
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "wan3.0-video-prime-sg",
+      "channel": "yseeai",
+      "provider_model": "wan3.0-video-prime-sg",
+      "kind": "video",
+      "protocol": "wan",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "Wan",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/video/generation/tasks",
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    },
+    {
+      "id": "wan3.0-video-sg",
+      "channel": "yseeai",
+      "provider_model": "wan3.0-video-sg",
+      "kind": "video",
+      "protocol": "wan",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "Wan",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/video/generation/tasks",
+        "unified_catalog": true,
+        "catalog_selected": true
+      }
+    }
+  ],
+  "routes": [
+    {
+      "id": "toapis--claude-fable-5-1",
+      "model_id": "claude-fable-5-1",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "claude-fable-5-1",
+      "protocol": "chat",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Claude",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/chat/completions",
+        "stream": true
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "21.0000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "105.0000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 文本目录参考价；1000积分=35元"
+          }
+        ],
+        "estimate_version": "ddcdde6e7d21546c",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--claude-opus-4-8",
+      "model_id": "claude-opus-4-8",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "claude-opus-4-8",
+      "protocol": "chat",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Claude",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/chat/completions",
+        "stream": true
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "10.50000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "52.50000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 文本目录参考价；1000积分=35元"
+          }
+        ],
+        "estimate_version": "4c3a93a2d126ae27",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--dreamina-seedance-2.0",
+      "model_id": "dreamina-seedance-2.0",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "seedance-2",
+      "protocol": "toapis-video",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "海外seedance系列",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/videos/generations",
+        "duration": [
+          4,
+          15
+        ],
+        "resolution": [
+          "480p",
+          "720p"
+        ]
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "4k",
+              "has_video_input": false,
+              "usage_required": "total_tokens"
+            },
+            "source": "登录态价格工作台：total_tokens计价",
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "unit": "1000000",
+                "cny": "25.97000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "4k",
+              "has_video_input": false
+            },
+            "source": "登录态价格工作台：按秒预算参考价（低至），不保证最终费用",
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "unit": "1",
+                "cny": "5.0694000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "4k",
+              "has_video_input": true,
+              "usage_required": "total_tokens"
+            },
+            "source": "登录态价格工作台：total_tokens计价",
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "unit": "1000000",
+                "cny": "16.03000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "4k",
+              "has_video_input": true
+            },
+            "source": "登录态价格工作台：按秒预算参考价（低至），不保证最终费用",
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "unit": "1",
+                "cny": "2.6432000"
+              },
+              {
+                "label": "input_seconds",
+                "path": "input_seconds",
+                "unit": "1",
+                "cny": "2.6432000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "480p",
+              "has_video_input": false,
+              "usage_required": "total_tokens"
+            },
+            "source": "登录态价格工作台：total_tokens计价",
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "unit": "1000000",
+                "cny": "45.99000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "480p",
+              "has_video_input": false
+            },
+            "source": "登录态价格工作台：按秒预算参考价（低至），不保证最终费用",
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "unit": "1",
+                "cny": "0.4186000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "480p",
+              "has_video_input": true,
+              "usage_required": "total_tokens"
+            },
+            "source": "登录态价格工作台：total_tokens计价",
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "unit": "1000000",
+                "cny": "28.000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "480p",
+              "has_video_input": true
+            },
+            "source": "登录态价格工作台：按秒预算参考价（低至），不保证最终费用",
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "unit": "1",
+                "cny": "0.2478000"
+              },
+              {
+                "label": "input_seconds",
+                "path": "input_seconds",
+                "unit": "1",
+                "cny": "0.2478000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "720p",
+              "has_video_input": false,
+              "usage_required": "total_tokens"
+            },
+            "source": "登录态价格工作台：total_tokens计价",
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "unit": "1000000",
+                "cny": "45.99000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "720p",
+              "has_video_input": false
+            },
+            "source": "登录态价格工作台：按秒预算参考价（低至），不保证最终费用",
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "unit": "1",
+                "cny": "0.9366000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "720p",
+              "has_video_input": true,
+              "usage_required": "total_tokens"
+            },
+            "source": "登录态价格工作台：total_tokens计价",
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "unit": "1000000",
+                "cny": "28.000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "720p",
+              "has_video_input": true
+            },
+            "source": "登录态价格工作台：按秒预算参考价（低至），不保证最终费用",
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "unit": "1",
+                "cny": "0.5565000"
+              },
+              {
+                "label": "input_seconds",
+                "path": "input_seconds",
+                "unit": "1",
+                "cny": "0.5565000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "1080p",
+              "has_video_input": false,
+              "usage_required": "total_tokens"
+            },
+            "source": "登录态价格工作台：total_tokens计价",
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "unit": "1000000",
+                "cny": "51.03000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "1080p",
+              "has_video_input": false
+            },
+            "source": "登录态价格工作台：按秒预算参考价（低至），不保证最终费用",
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "unit": "1",
+                "cny": "2.3373000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "1080p",
+              "has_video_input": true,
+              "usage_required": "total_tokens"
+            },
+            "source": "登录态价格工作台：total_tokens计价",
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "unit": "1000000",
+                "cny": "31.01000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "1080p",
+              "has_video_input": true
+            },
+            "source": "登录态价格工作台：按秒预算参考价（低至），不保证最终费用",
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "unit": "1",
+                "cny": "1.5127000"
+              },
+              {
+                "label": "input_seconds",
+                "path": "input_seconds",
+                "unit": "1",
+                "cny": "1.5127000"
+              }
+            ]
+          }
+        ],
+        "estimate_version": "dashboard-f4bdbfd22ef0416e9fd1f3f795f2a276",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--dreamina-seedance-2.0-fast",
+      "model_id": "dreamina-seedance-2.0-fast",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "seedance-2-fast",
+      "protocol": "toapis-video",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "海外seedance系列",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/videos/generations",
+        "duration": [
+          4,
+          15
+        ],
+        "resolution": [
+          "480p",
+          "720p"
+        ]
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "480p",
+              "has_video_input": false,
+              "usage_required": "total_tokens"
+            },
+            "source": "登录态价格工作台：total_tokens计价",
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "unit": "1000000",
+                "cny": "27.72000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "480p",
+              "has_video_input": false
+            },
+            "source": "登录态价格工作台：按秒预算参考价（低至），不保证最终费用",
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "unit": "1",
+                "cny": "0.0854000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "480p",
+              "has_video_input": true,
+              "usage_required": "total_tokens"
+            },
+            "source": "登录态价格工作台：total_tokens计价",
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "unit": "1000000",
+                "cny": "16.52000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "480p",
+              "has_video_input": true
+            },
+            "source": "登录态价格工作台：按秒预算参考价（低至），不保证最终费用",
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "unit": "1",
+                "cny": "0.049049000"
+              },
+              {
+                "label": "input_seconds",
+                "path": "input_seconds",
+                "unit": "1",
+                "cny": "0.049049000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "720p",
+              "has_video_input": false,
+              "usage_required": "total_tokens"
+            },
+            "source": "登录态价格工作台：total_tokens计价",
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "unit": "1000000",
+                "cny": "27.72000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "720p",
+              "has_video_input": false
+            },
+            "source": "登录态价格工作台：按秒预算参考价（低至），不保证最终费用",
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "unit": "1",
+                "cny": "0.5803000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "720p",
+              "has_video_input": true,
+              "usage_required": "total_tokens"
+            },
+            "source": "登录态价格工作台：total_tokens计价",
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "unit": "1000000",
+                "cny": "16.52000"
+              }
+            ]
+          },
+          {
+            "confirmed": true,
+            "conditions": {
+              "resolution": "720p",
+              "has_video_input": true
+            },
+            "source": "登录态价格工作台：按秒预算参考价（低至），不保证最终费用",
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "unit": "1",
+                "cny": "0.3108000"
+              },
+              {
+                "label": "input_seconds",
+                "path": "input_seconds",
+                "unit": "1",
+                "cny": "0.3108000"
+              }
+            ]
+          }
+        ],
+        "estimate_version": "dashboard-b14e9979d1094f1a86295a0bfb891674",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--dreamina-seedance-2.0-mini",
+      "model_id": "dreamina-seedance-2.0-mini",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "seedance-2-mini",
+      "protocol": "toapis-video",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "海外seedance系列",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/videos/generations",
+        "duration": [
+          4,
+          15
+        ],
+        "resolution": [
+          "480p",
+          "720p"
+        ]
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "has_video_input": false,
+              "resolution": "480p"
+            },
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "cny": "9.200002000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "has_video_input": false,
+              "resolution": "720p"
+            },
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "cny": "9.200002000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "has_video_input": true,
+              "resolution": "480p"
+            },
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "cny": "5.6000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "has_video_input": true,
+              "resolution": "720p"
+            },
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "cny": "5.6000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          }
+        ],
+        "estimate_version": "172d3d5671bb5ab3",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--dreamina-seedance-2.5",
+      "model_id": "dreamina-seedance-2.5",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "seedance-2-5",
+      "protocol": "toapis-video",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "海外seedance系列",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/videos/generations",
+        "duration": [
+          4,
+          15
+        ],
+        "resolution": [
+          "480p",
+          "720p"
+        ]
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "has_video_input": false,
+              "resolution": "480p"
+            },
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "cny": "70.000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "has_video_input": false,
+              "resolution": "720p"
+            },
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "cny": "70.000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "has_video_input": true,
+              "resolution": "480p"
+            },
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "cny": "42.000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "has_video_input": true,
+              "resolution": "720p"
+            },
+            "rates": [
+              {
+                "label": "total_tokens",
+                "path": "total_tokens",
+                "cny": "42.000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          }
+        ],
+        "estimate_version": "4d41f0f83345100c",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--gemini-3-pro-image-preview",
+      "model_id": "gemini-3-pro-image-preview",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "gemini-3-pro-image-preview",
+      "protocol": "toapis-image",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Gemini",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/images/generations"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "input_image_count": 0,
+              "resolution": "1K"
+            },
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.28000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "input_image_count": 0,
+              "resolution": "2K"
+            },
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.35000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "input_image_count": 0,
+              "resolution": "4K"
+            },
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.42000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          }
+        ],
+        "estimate_version": "7aabcf4d82561e9d",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--gemini-3.1-flash-image-preview",
+      "model_id": "gemini-3.1-flash-image-preview",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "gemini-3.1-flash-image-preview",
+      "protocol": "toapis-image",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Gemini",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/images/generations"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "resolution": "1K"
+            },
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.175000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "resolution": "2K"
+            },
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.21000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "resolution": "4K"
+            },
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.28000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          }
+        ],
+        "estimate_version": "488186fd80a1e1b1",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--gemini-3.1-pro-preview",
+      "model_id": "gemini-3.1-pro-preview",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "gemini-3.1-pro-preview-official",
+      "protocol": "chat",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Gemini",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/chat/completions",
+        "stream": true
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "11.2000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "67.2000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 文本目录参考价；1000积分=35元"
+          }
+        ],
+        "estimate_version": "2a806b044869ae4f",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--gemini-3.8-flash",
+      "model_id": "gemini-3.8-flash",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "gemini-3.8-flash",
+      "protocol": "chat",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Gemini",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/chat/completions",
+        "stream": true
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "2.10000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "10.50000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 文本目录参考价；1000积分=35元"
+          }
+        ],
+        "estimate_version": "74242f8d863bd27d",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--gemini-omni-flash-preview",
+      "model_id": "gemini-omni-flash-preview",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "gemini-omni-flash-preview-official",
+      "protocol": "toapis-video",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Gemini视频",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/videos/generations",
+        "duration": [
+          1,
+          15
+        ],
+        "max_images": 3,
+        "reference_encoding": "base64"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "resolution": "720p"
+            },
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "cny": "0.56000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          }
+        ],
+        "estimate_version": "e72e6ff09ada5694",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--gpt-5.6-sol",
+      "model_id": "gpt-5.6-sol",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "gpt-5.6-sol",
+      "protocol": "chat",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "GPT",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/chat/completions",
+        "stream": true
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "7.0000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "42.0000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 文本目录参考价；1000积分=35元"
+          }
+        ],
+        "estimate_version": "50ca61b5a0dd3c11",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--gpt-6-astra",
+      "model_id": "gpt-6-astra",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "gpt-6-astra",
+      "protocol": "chat",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "GPT",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/chat/completions",
+        "stream": true
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "14.000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "70.000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 文本目录参考价；1000积分=35元"
+          }
+        ],
+        "estimate_version": "702f4a1c8e97d7cd",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--gpt-image-2",
+      "model_id": "gpt-image-2",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "gpt-image-2",
+      "protocol": "toapis-image",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "GPT Image",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/images/generations"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "resolution": "1K"
+            },
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.105000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "resolution": "4K"
+            },
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.175000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "resolution": "2K"
+            },
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.14000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          }
+        ],
+        "estimate_version": "5980a2b1d4754689",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--gpt-image-2.5-flare",
+      "model_id": "gpt-image-2.5-flare",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "gpt-image-2.5-flare",
+      "protocol": "toapis-image",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "GPT Image",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/images/generations"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "quality": "high",
+              "resolution": "1K"
+            },
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.1575000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "quality": "high",
+              "resolution": "2K"
+            },
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.21000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "quality": "high",
+              "resolution": "4K"
+            },
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.2625000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          }
+        ],
+        "estimate_version": "74f18085532adec8",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--gpt-image-2.5-sunburst",
+      "model_id": "gpt-image-2.5-sunburst",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "gpt-image-2.5-sunburst",
+      "protocol": "toapis-image",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "GPT Image",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/images/generations"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "quality": "high",
+              "resolution": "1K"
+            },
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.1575000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "quality": "high",
+              "resolution": "2K"
+            },
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.21000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "quality": "high",
+              "resolution": "4K"
+            },
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.2625000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          }
+        ],
+        "estimate_version": "4178d43e91052811",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--seedream-5.0",
+      "model_id": "seedream-5.0",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "doubao-seedream-5-0",
+      "protocol": "toapis-image",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Seedream",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/images/generations"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.2205000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          }
+        ],
+        "estimate_version": "fda03a9074200b21",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--wan3.0-video-prime-sg",
+      "model_id": "wan3.0-video-prime-sg",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "wan3.0-video-prime",
+      "protocol": "toapis-video",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Wan",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/videos/generations"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "resolution": "480p"
+            },
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "cny": "0.315000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "resolution": "720p"
+            },
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "cny": "0.63000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "resolution": "1080p"
+            },
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "cny": "1.26000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          }
+        ],
+        "estimate_version": "d72755d3d742d460",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "toapis--wan3.0-video-sg",
+      "model_id": "wan3.0-video-sg",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "wan3.0-video",
+      "protocol": "toapis-video",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Wan",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/videos/generations"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "resolution": "480p"
+            },
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "cny": "0.21000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "resolution": "720p"
+            },
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "cny": "0.42000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          },
+          {
+            "conditions": {
+              "resolution": "1080p"
+            },
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "cny": "0.84000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "Toapis 当前Key生效价；1000积分=35元"
+          }
+        ],
+        "estimate_version": "0b2373f6b670ee5e",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--claude-fable-5-1",
+      "model_id": "claude-fable-5-1",
+      "supplier": "yseeai",
+      "channel": "yseeai-llm",
+      "provider_model": "claude-fable-5-1",
+      "protocol": "anthropic",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Claude",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/messages",
+        "stream": true
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "17.25000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "86.25000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "claude_web_search_requests",
+                "path": "claude_web_search_requests",
+                "cny": "17.25000",
+                "unit": "1000",
+                "optional": true
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "6515aa8ab6966398",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--claude-opus-4-8",
+      "model_id": "claude-opus-4-8",
+      "supplier": "yseeai",
+      "channel": "yseeai-llm",
+      "provider_model": "claude-opus-4-8",
+      "protocol": "anthropic",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Claude",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/messages",
+        "stream": true
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "8.625000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "43.125000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "claude_web_search_requests",
+                "path": "claude_web_search_requests",
+                "cny": "17.25000",
+                "unit": "1000",
+                "optional": true
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "13cc1af81b0de6b8",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--dreamina-seedance-2.0",
+      "model_id": "dreamina-seedance-2.0",
+      "supplier": "yseeai",
+      "channel": "yseeai",
+      "provider_model": "dreamina-seedance-2.0",
+      "protocol": "seedance",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "海外seedance系列",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v3/video/tasks",
+        "duration": [
+          4,
+          15
+        ],
+        "resolution": [
+          "480p",
+          "720p"
+        ]
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "has_video_input": false,
+              "resolution": "480p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "41.05500",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": false,
+              "resolution": "720p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "41.05500",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": false,
+              "resolution": "1080p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "45.160500",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": true,
+              "resolution": "480p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "25.219500",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": true,
+              "resolution": "720p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "25.219500",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": true,
+              "resolution": "1080p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "27.565500",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": false,
+              "resolution": "4k"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "23.460000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": true,
+              "resolution": "4k"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "14.076000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "ecafb0c5edf7c0fe",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--dreamina-seedance-2.0-fast",
+      "model_id": "dreamina-seedance-2.0-fast",
+      "supplier": "yseeai",
+      "channel": "yseeai",
+      "provider_model": "dreamina-seedance-2.0-fast",
+      "protocol": "seedance",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "海外seedance系列",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v3/video/tasks",
+        "duration": [
+          4,
+          15
+        ],
+        "resolution": [
+          "480p",
+          "720p"
+        ]
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "has_video_input": false,
+              "resolution": "480p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "24.633000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": false,
+              "resolution": "720p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "24.633000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": true,
+              "resolution": "480p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "14.515875",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": true,
+              "resolution": "720p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "14.515875",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "b9b7957e92cab85e",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--dreamina-seedance-2.0-mini",
+      "model_id": "dreamina-seedance-2.0-mini",
+      "supplier": "yseeai",
+      "channel": "yseeai",
+      "provider_model": "dreamina-seedance-2.0-mini",
+      "protocol": "seedance",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "海外seedance系列",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v3/video/tasks",
+        "duration": [
+          4,
+          15
+        ],
+        "resolution": [
+          "480p",
+          "720p"
+        ]
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "has_video_input": false,
+              "resolution": "480p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "8.211000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": false,
+              "resolution": "720p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "8.211000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": true,
+              "resolution": "480p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "4.926600",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": true,
+              "resolution": "720p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "4.926600",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "5c55a552b9c7e943",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--dreamina-seedance-2.5",
+      "model_id": "dreamina-seedance-2.5",
+      "supplier": "yseeai",
+      "channel": "yseeai",
+      "provider_model": "dreamina-seedance-2.5",
+      "protocol": "seedance",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "海外seedance系列",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v3/video/tasks",
+        "duration": [
+          4,
+          15
+        ],
+        "resolution": [
+          "480p",
+          "720p"
+        ]
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "has_video_input": false,
+              "resolution": "480p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "62.755500",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": false,
+              "resolution": "720p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "62.755500",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": false,
+              "resolution": "1080p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "68.620500",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": true,
+              "resolution": "480p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "37.536000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": true,
+              "resolution": "720p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "37.536000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "has_video_input": true,
+              "resolution": "1080p"
+            },
+            "rates": [
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "41.055000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "5c7e09b84ce5ffbb",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--gemini-3-pro-image-preview",
+      "model_id": "gemini-3-pro-image-preview",
+      "supplier": "yseeai",
+      "channel": "yseeai",
+      "provider_model": "gemini-3-pro-image-preview",
+      "protocol": "image",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Gemini",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/image/generation/tasks"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "6.62400",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "397.44000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "dd0b185d1eadbb14",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--gemini-3.1-flash-image-preview",
+      "model_id": "gemini-3.1-flash-image-preview",
+      "supplier": "yseeai",
+      "channel": "yseeai",
+      "provider_model": "gemini-3.1-flash-image-preview",
+      "protocol": "image",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Gemini",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/image/generation/tasks"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "1.656000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "198.720000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "b9090fbea188bec3",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--gemini-3.1-pro-preview",
+      "model_id": "gemini-3.1-pro-preview",
+      "supplier": "yseeai",
+      "channel": "yseeai-llm",
+      "provider_model": "gemini-3.1-pro-preview",
+      "protocol": "chat",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Gemini",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/chat/completions",
+        "stream": true
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "input_max": "200000"
+            },
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "5.52000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "33.12000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "11.04000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "49.680000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "e332517c8e7948c0",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--gemini-3.8-flash",
+      "model_id": "gemini-3.8-flash",
+      "supplier": "yseeai",
+      "channel": "yseeai-llm",
+      "provider_model": "gemini-3.8-flash",
+      "protocol": "chat",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Gemini",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/chat/completions",
+        "stream": true
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "2.0700000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "10.3500000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "2aee8b6663df8065",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--gemini-omni-flash-preview",
+      "model_id": "gemini-omni-flash-preview",
+      "supplier": "yseeai",
+      "channel": "yseeai",
+      "provider_model": "gemini-omni-flash-preview",
+      "protocol": "unified",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Gemini视频",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/video/generation/tasks",
+        "duration": [
+          1,
+          15
+        ],
+        "max_images": 3,
+        "reference_encoding": "base64"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "102.637500",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "102.637500",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "e7c519003b78b768",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--gpt-5.6-sol",
+      "model_id": "gpt-5.6-sol",
+      "supplier": "yseeai",
+      "channel": "yseeai-llm",
+      "provider_model": "gpt-5.6-sol",
+      "protocol": "chat",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "GPT",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/chat/completions",
+        "stream": true
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "10.35000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "82.80000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "b940fd1edfdb7587",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--gpt-6-astra",
+      "model_id": "gpt-6-astra",
+      "supplier": "yseeai",
+      "channel": "yseeai-llm",
+      "provider_model": "gpt-6-astra",
+      "protocol": "chat",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "GPT",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/chat/completions",
+        "stream": true
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "input_max": "271999.000"
+            },
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "20.70000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "103.50000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "41.40000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "155.2500000",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "13c2f846130fe62e",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--gpt-image-2",
+      "model_id": "gpt-image-2",
+      "supplier": "yseeai",
+      "channel": "yseeai",
+      "provider_model": "gpt-image-2",
+      "protocol": "image",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "GPT Image",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/image/generation/tasks"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "12.075000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "72.450000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "image_tokens",
+                "path": "image_tokens",
+                "cny": "7.24500",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "0e1aca9b8a124ca7",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--gpt-image-2.5-flare",
+      "model_id": "gpt-image-2.5-flare",
+      "supplier": "yseeai",
+      "channel": "yseeai",
+      "provider_model": "gpt-image-2.5-flare",
+      "protocol": "image",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "GPT Image",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/image/generation/tasks"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "12.075000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "72.450000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "image_tokens",
+                "path": "image_tokens",
+                "cny": "7.24500",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "23b06dee8d84a04a",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--gpt-image-2.5-sunburst",
+      "model_id": "gpt-image-2.5-sunburst",
+      "supplier": "yseeai",
+      "channel": "yseeai",
+      "provider_model": "gpt-image-2.5-sunburst",
+      "protocol": "image",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "GPT Image",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/image/generation/tasks"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "input_tokens",
+                "path": "input_tokens",
+                "cny": "12.075000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "output_tokens",
+                "path": "output_tokens",
+                "cny": "72.450000",
+                "unit": "1000000",
+                "optional": false
+              },
+              {
+                "label": "image_tokens",
+                "path": "image_tokens",
+                "cny": "7.24500",
+                "unit": "1000000",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "d941e512aaa09a25",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--seedream-5.0",
+      "model_id": "seedream-5.0",
+      "supplier": "yseeai",
+      "channel": "yseeai-llm",
+      "provider_model": "seedream-5.0",
+      "protocol": "image-sync",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Seedream",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/images/generations"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {},
+            "rates": [
+              {
+                "label": "images",
+                "path": "images",
+                "cny": "0.17871000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "47b04affe04aca68",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--wan3.0-video-prime-sg",
+      "model_id": "wan3.0-video-prime-sg",
+      "supplier": "yseeai",
+      "channel": "yseeai",
+      "provider_model": "wan3.0-video-prime-sg",
+      "protocol": "wan",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Wan",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/video/generation/tasks"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "resolution": "480p"
+            },
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "cny": "0.48875460000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "resolution": "720p"
+            },
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "cny": "1.00626150000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "resolution": "1080p"
+            },
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "cny": "2.0125230000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "99d19667eb446fed",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    },
+    {
+      "id": "yseeai--wan3.0-video-sg",
+      "model_id": "wan3.0-video-sg",
+      "supplier": "yseeai",
+      "channel": "yseeai",
+      "provider_model": "wan3.0-video-sg",
+      "protocol": "wan",
+      "priority": 10,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Wan",
+        "source": "yseeai-overseas-2026-09-21",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/video/generation/tasks"
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "resolution": "480p"
+            },
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "cny": "0.3693570000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "resolution": "720p"
+            },
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "cny": "0.7387140000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          },
+          {
+            "conditions": {
+              "resolution": "1080p"
+            },
+            "rates": [
+              {
+                "label": "seconds",
+                "path": "seconds",
+                "cny": "1.4774280000",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "英和账户费率快照；USD/CNY=6.9"
+          }
+        ],
+        "estimate_version": "2f2d584a4f40fd38",
+        "release_source": "2026-09-22 account/dashboard quote snapshots; indicative only"
+      }
+    }
+  ]
+}

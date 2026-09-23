@@ -65,7 +65,7 @@ from .prompt_optimizer import PROVIDERS as PROMPT_OPTIMIZER_PROVIDERS
 from .prompt_optimizer import RATIOS as PROMPT_OPTIMIZER_RATIOS
 from .prompt_optimizer import provider_status as prompt_optimizer_provider_status
 from .prompts import DEFAULT_PROMPTS, invalidate, render_lenient, template_variables
-from .providers import ProviderError, list_video_models, query_provider_task, resume_generation, store_provider_result
+from .providers import ProviderError, list_video_models, query_provider_task, resume_generation, store_provider_result, validate_media_job_source
 from .rbac import (
     SONG_EMOTIONS_MANAGE,
     SONG_EMOTIONS_READ,
@@ -473,10 +473,19 @@ async def sync_generation_job(job_id: str, request: Request, user: CurrentUser, 
         raise HTTPException(404, "任务不存在")
     if not model.provider_task_id:
         raise HTTPException(422, "该任务没有供应商任务ID，无法同步")
+    try:
+        validate_media_job_source(model)
+    except ProviderError as exc:
+        raise HTTPException(422, str(exc)) from exc
     if job_manager.is_active(job_id):
         return {"providerStatus": None, "action": "skipped", "detail": "任务正在本机执行中，无需同步"}
     try:
-        data = await query_provider_task(model.kind, model.provider_task_id, model.provider, request=model.request)
+        from .model_gateway import run_with_context
+
+        async def query_in_owner_context(_job):
+            return await query_provider_task(model.kind, model.provider_task_id, model.provider)
+
+        data = await run_with_context(model, query_in_owner_context)
     except Exception as exc:
         raise HTTPException(502, f"查询供应商失败：{str(exc)[:300]}") from exc
     provider_status = str(data.get("status") or data.get("task_status") or "").upper()
@@ -722,7 +731,7 @@ async def _billing_reference_url_map(db: AsyncSession, urls: set[str]) -> dict[s
         (
             await db.execute(
                 select(DigitalHumanModel)
-                .where(or_(DigitalHumanModel.asset_avatar_url.in_(asset_urls), DigitalHumanModel.ppio_asset_avatar_url.in_(asset_urls)))
+                .where(DigitalHumanModel.asset_avatar_url.in_(asset_urls))
                 .order_by(DigitalHumanModel.deleted_at.is_(None).desc(), DigitalHumanModel.updated_at.desc())
             )
         )
@@ -732,9 +741,9 @@ async def _billing_reference_url_map(db: AsyncSession, urls: set[str]) -> dict[s
     resolved: dict[str, str] = {}
     for human in humans:
         preview_url = str(human.avatar_url or human.avatar_thumbnail_url or "")
-        for asset_url in (str(human.asset_avatar_url or ""), str(human.ppio_asset_avatar_url or "")):
-            if asset_url and preview_url and asset_url not in resolved:
-                resolved[asset_url] = preview_url
+        asset_url = str(human.asset_avatar_url or "")
+        if asset_url and preview_url and asset_url not in resolved:
+            resolved[asset_url] = preview_url
     return resolved
 
 

@@ -7,13 +7,14 @@ from datetime import datetime
 from typing import Any
 
 import httpx
-from openai import AsyncOpenAI
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
 from .config import settings
 from .database import session_factory
 from .jobs import Job, jobs
+from .model_gateway import AsyncOpenAI
+from .model_gateway import enabled as gateway_enabled
 from .models import ChatMessageModel, ChatSessionModel
 from .redis_store import append_chat_event, chat_events_after, redis
 from .token_usage import add_token_usage
@@ -169,7 +170,7 @@ class ChatManager:
         request_id: str | None = None
         usage_recorded = False
         try:
-            if not settings.llm_api_key:
+            if not settings.llm_api_key and not gateway_enabled():
                 raise RuntimeError("LLM_API_KEY 未配置")
             chunks: list[str] = []
             if settings.llm_api_mode == "anthropic":

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import select, update
 
 from .config import settings
 from .database import session_factory
 from .error_logging import log_background_error
+from .headshot_assets import HEADSHOT_ASSETS
 from .models import (
     AdminPermissionModel,
     AdminRoleModel,
@@ -179,10 +180,6 @@ async def seed_system_data() -> None:
         if not runninghub_provider:
             runninghub_provider = AiProviderModel(id="provider-runninghub", code="runninghub", name="RunningHub", base_url="", status="active")
             session.add(runninghub_provider)
-        ppio_provider = await session.get(AiProviderModel, "provider-ppio")
-        if not ppio_provider:
-            ppio_provider = AiProviderModel(id="provider-ppio", code="ppio", name="PPIO", base_url="https://api.ppio.com", status="active")
-            session.add(ppio_provider)
         yseeai_provider = await session.get(AiProviderModel, "provider-yseeai")
         if not yseeai_provider:
             yseeai_provider = AiProviderModel(
@@ -203,16 +200,6 @@ async def seed_system_data() -> None:
                 status="active",
             )
             session.add(toapis_provider)
-        bfl_provider = await session.get(AiProviderModel, "provider-bfl")
-        if not bfl_provider:
-            bfl_provider = AiProviderModel(
-                id="provider-bfl",
-                code="bfl",
-                name="Black Forest Labs",
-                base_url="https://api.bfl.ai",
-                status="active",
-            )
-            session.add(bfl_provider)
         defaults = [
             ("model-chat-default", provider.id, "chat-default", "默认 Chat 模型", "chat", "", {"structuredOutput": True}, True),
             ("model-img2", provider.id, "gpt-image-2", "Img2", "image", "gpt-image-2", {"ratios": ["16:9", "9:16", "4:3", "1:1"], "imageToImage": True}, True),
@@ -530,26 +517,6 @@ async def seed_system_data() -> None:
                 False,
             ),
             (
-                "model-sd20-ppio",
-                ppio_provider.id,
-                "doubao-seedance-2.0-ppio",
-                "SD2.0（PPIO）",
-                "video",
-                "doubao-seedance-2-0-260128",
-                {
-                    "durations": {"min": 4, "max": 15},
-                    "ratios": ["16:9", "9:16", "4:3", "1:1"],
-                    "resolutions": ["480p", "720p", "1080p"],
-                    "nativeAudio": True,
-                    "executionPool": "ppio-seedance",
-                    "executionConcurrency": 200,
-                    "providerCode": "ppio",
-                    "billing": video_estimate_policy("doubao-seedance-2.0-ppio").capability(),
-                    "sortOrder": 30,
-                },
-                False,
-            ),
-            (
                 "model-veo31-yseeai",
                 yseeai_provider.id,
                 "veo-3.1-generate-preview",
@@ -653,34 +620,6 @@ async def seed_system_data() -> None:
                 False,
             ),
             (
-                "model-flux-3-video-bfl",
-                bfl_provider.id,
-                "flux-3-video",
-                "FLUX 3（BFL，仅测试10刀额度）",
-                "video",
-                "flux-3-video",
-                {
-                    "durations": {"min": 5, "max": 20},
-                    "ratios": ["16:9", "9:16", "4:3", "1:1"],
-                    "resolutions": ["720p", "1080p", "4k"],
-                    "resolutionLabels": {"720p": "HD", "1080p": "FHD", "4k": "UHD"},
-                    "providerResolutionMap": {"720p": "hd", "1080p": "fhd", "4k": "uhd"},
-                    "referenceImage": {"min": 0, "max": 10},
-                    "referenceVideo": {"min": 0, "max": 1},
-                    "referenceAudio": {"min": 0, "max": 0},
-                    "providerProtocol": "flux3-bfl",
-                    "nativeAudio": True,
-                    "executionPool": "bfl-flux3-test",
-                    "executionConcurrency": 1,
-                    "providerCode": "bfl",
-                    "testOnly": True,
-                    "creditLimitLabel": "仅测试10刀额度",
-                    "billing": video_estimate_policy("flux-3-video").capability(),
-                    "sortOrder": 32,
-                },
-                False,
-            ),
-            (
                 "model-viduq3-turbo-toapis",
                 toapis_provider.id,
                 "viduq3-turbo",
@@ -755,37 +694,6 @@ async def seed_system_data() -> None:
                 },
                 False,
             ),
-            (
-                "model-h3-ppio",
-                ppio_provider.id,
-                "minimax-h3-ppio",
-                "H3（PPIO）",
-                "video",
-                "MiniMax-H3",
-                {
-                    "durations": {"min": 4, "max": 15},
-                    "ratios": ["16:9", "9:16", "4:3", "1:1"],
-                    "resolutions": ["720p", "1080p"],
-                    "resolutionLabels": {"720p": "768P", "1080p": "2K"},
-                    "providerResolutionMap": {"720p": "768P", "1080p": "2K"},
-                    "h3Modes": ["auto", "text", "first_frame", "first_last", "reference"],
-                    "referenceImage": {"min": 0, "max": 6},
-                    "referenceVideo": {"min": 0, "max": 1},
-                    "referenceAudio": {"min": 0, "max": 3},
-                    "referenceTotalMax": 10,
-                    "referenceAudioRequiresVisual": True,
-                    "workflowVersion": "minimax-h3-ppio-v1",
-                    "promptCompiler": "h3-prompt-writing",
-                    "promptCompilerVersion": "1.2.0",
-                    "nativeAudio": True,
-                    "executionPool": "ppio-h3",
-                    "executionConcurrency": 200,
-                    "providerCode": "ppio",
-                    "billing": video_estimate_policy("minimax-h3-ppio").capability(),
-                    "sortOrder": 40,
-                },
-                False,
-            ),
         ]
         for mid, model_provider_id, code, name, modality, provider_id, capabilities, is_default in defaults:
             if code in {
@@ -805,23 +713,12 @@ async def seed_system_data() -> None:
                 "viduq3-turbo",
                 "viduq3-pro",
                 "viduq3",
-                "flux-3-video",
                 "minimax-h3-runninghub",
                 "minimax-h3",
-                "doubao-seedance-2.0-ppio",
-                "minimax-h3-ppio",
             }:
                 capabilities = {**capabilities, "systemManaged": True}
             provider_configured = (
-                bool(settings.ppio_api_key)
-                if code.endswith("-ppio")
-                else bool(settings.yseeai_api_key)
-                if model_provider_id == yseeai_provider.id
-                else bool(settings.toapis_api_key)
-                if model_provider_id == toapis_provider.id
-                else bool(settings.bfl_api_key)
-                if model_provider_id == bfl_provider.id
-                else True
+                bool(settings.yseeai_api_key) if model_provider_id == yseeai_provider.id else bool(settings.toapis_api_key) if model_provider_id == toapis_provider.id else True
             )
             model = await session.get(AiModelModel, mid)
             if not model:
@@ -886,6 +783,7 @@ async def seed_system_data() -> None:
 
         for data in SYSTEM_HUMANS:
             human_id = f"dh-system-{data['asset_code']}"
+            headshot = HEADSHOT_ASSETS.get(human_id, {})
             human = await session.get(DigitalHumanModel, human_id)
             style = system_styles[data["category"]]
             bucket, object_key = TosStorage._bucket_for(f"system/digital-humans/{data['asset_code']}.jpg")
@@ -894,6 +792,9 @@ async def seed_system_data() -> None:
             thumbnail_url = TosStorage._public_url(thumbnail_bucket, thumbnail_key)
             # 平台虚拟资产链接已注册并固化，seed 直接写入（asset:// 由平台托管，跨环境通用）
             asset_avatar_url = SYSTEM_HUMAN_ASSET_URLS.get(data["asset_code"])
+            avatar_url = headshot.get("avatar_url", avatar_url)
+            thumbnail_url = headshot.get("avatar_thumbnail_url", thumbnail_url)
+            asset_avatar_url = headshot.get("asset_avatar_url", asset_avatar_url)
             if not human:
                 human = DigitalHumanModel(
                     id=human_id,
@@ -922,11 +823,18 @@ async def seed_system_data() -> None:
                 # asset:// 覆盖数据库里已经切换完成的新资产。仅为旧库缺失字段兜底。
                 if not human.asset_avatar_url:
                     human.asset_avatar_url = asset_avatar_url
-                human.avatar_prompt, human.description = data["system_prompt"], data["appearance_style"]
-                for key, value in data.items():
-                    if key == "category":
-                        continue
-                    setattr(human, key, value)
+                if "/neutral-" not in (human.avatar_url or ""):
+                    human.avatar_prompt, human.description = data["system_prompt"], data["appearance_style"]
+                    for key, value in data.items():
+                        if key == "category":
+                            continue
+                        setattr(human, key, value)
+            # Existing URLs change only through the matching reviewed migration.
+            # Apply this overlay's identity text only to this exact asset version.
+            if headshot and human.avatar_url == headshot.get("avatar_url"):
+                for key, value in headshot.items():
+                    if key not in {"avatar_url", "avatar_thumbnail_url", "asset_avatar_url"}:
+                        setattr(human, key, value)
 
         for song_code, payload in SONG_EMOTIONS.items():
             profile = await session.get(SongEmotionProfileModel, song_code)
@@ -954,10 +862,10 @@ async def seed_system_data() -> None:
 
 
 async def ensure_pending_asset_avatars() -> None:
-    """补齐数字人在英合和 PPIO 两个账号下的 asset://，供 cron 幂等执行。"""
+    """补齐数字人在英合账号下的 asset://，供 cron 幂等执行。"""
     import asyncio
 
-    from .providers import create_ppio_synthetic_image_asset, create_real_face_asset
+    from .providers import create_real_face_asset
 
     async with session_factory() as session:
         pending = (
@@ -965,7 +873,7 @@ async def ensure_pending_asset_avatars() -> None:
                 await session.execute(
                     select(DigitalHumanModel).where(
                         DigitalHumanModel.deleted_at.is_(None),
-                        or_(DigitalHumanModel.asset_avatar_url.is_(None), DigitalHumanModel.ppio_asset_avatar_url.is_(None)),
+                        DigitalHumanModel.asset_avatar_url.is_(None),
                         DigitalHumanModel.avatar_url.isnot(None),
                         DigitalHumanModel.avatar_url != "",
                     )
@@ -977,31 +885,21 @@ async def ensure_pending_asset_avatars() -> None:
     semaphore = asyncio.Semaphore(4)
 
     async def sync_human(human: DigitalHumanModel) -> None:
-        registrations = []
-        if human.asset_avatar_url is None:
-            registrations.append(("yinghe", "asset_avatar_url", "/v3/assets", create_real_face_asset(human.avatar_url, name=f"mv-{human.asset_code or human.id}")))
-        if human.ppio_asset_avatar_url is None:
-            registrations.append(("ppio", "ppio_asset_avatar_url", "/v3/synthetic-cn/bytedance/ark", create_ppio_synthetic_image_asset(human.avatar_url)))
         async with semaphore:
-            results = await asyncio.gather(*(call for _, _, _, call in registrations), return_exceptions=True)
+            try:
+                asset_url = await create_real_face_asset(human.avatar_url, name=f"mv-{human.asset_code or human.id}")
+            except Exception as exc:
+                await log_background_error(
+                    user_id=human.user_id,
+                    path="/v3/assets",
+                    error_type="AssetError",
+                    message=f"digital human yinghe asset create failed: {human.id}: {exc}",
+                )
+                return
         async with session_factory() as session:
             current = await session.get(DigitalHumanModel, human.id)
-            if not current:
-                return
-            changed = False
-            for (provider, field, path, _), result in zip(registrations, results, strict=True):
-                if isinstance(result, Exception):
-                    await log_background_error(
-                        user_id=human.user_id,
-                        path=path,
-                        error_type="AssetError",
-                        message=f"digital human {provider} asset create failed: {human.id}: {result}",
-                    )
-                    continue
-                if getattr(current, field) is None:
-                    setattr(current, field, result)
-                    changed = True
-            if changed:
+            if current and current.asset_avatar_url is None:
+                current.asset_avatar_url = asset_url
                 await session.commit()
 
     await asyncio.gather(*(sync_human(human) for human in pending))

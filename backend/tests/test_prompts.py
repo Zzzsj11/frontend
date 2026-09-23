@@ -108,6 +108,34 @@ def test_seed_prompts_idempotent(client) -> None:
     assert detail["versions"][0]["content"] == DEFAULT_PROMPTS["ass.scene_plan.system"]["content"]
 
 
+def test_seed_does_not_upgrade_existing_portrait_content_or_metadata(client, monkeypatch) -> None:
+    """默认值升级不是存量 DB 升级：seed 不改元数据，也不自动发布新文案。"""
+    from app import seed
+    from app.database import session_factory
+
+    key = "portrait.digital_human_ref"
+    before = client.get(f"/api/admin/prompts/{key}").json()
+    future_spec = {
+        **DEFAULT_PROMPTS[key],
+        "name": "未来名称",
+        "description": "未来说明",
+        "content": "未来文案 {{extra}}",
+        "variables": {"extra": "未来变量说明"},
+        "required_fragments": ["未来必含片段"],
+    }
+    monkeypatch.setattr(seed, "DEFAULT_PROMPTS", {key: future_spec})
+
+    async def _reseed() -> None:
+        async with session_factory() as session:
+            await seed.seed_prompts(session)
+            await session.commit()
+
+    asyncio.run(_reseed())
+    after = client.get(f"/api/admin/prompts/{key}").json()
+    for field in ("name", "description", "variables", "requiredFragments", "currentVersionId", "versions"):
+        assert after[field] == before[field]
+
+
 def test_get_prompt_resolves_db_published_version(client) -> None:
     resolved = asyncio.run(get_prompt("ass.scene_plan.system"))
     assert resolved.source == "db"
@@ -290,37 +318,169 @@ async def test_story_bible_policies_come_from_registry(client) -> None:
     assert general["characterPolicy"] == DEFAULT_PROMPTS["story_bible.general.character_policy"]["content"]
 
 
-def test_portrait_prompt_preview_and_create_validation(client, monkeypatch) -> None:
-    """定妆照提示词由后端注册中心拼装：preview 不调模型，create 空 prompt+无 portrait 拒绝。"""
+@pytest.mark.parametrize("has_identity", [False, True], ids=["free-casting", "selected-identity"])
+async def test_general_prompt_keeps_headshot_identity_and_legacy_card_safety(client, monkeypatch, has_identity) -> None:
+    from app import storyboard_prompt
+    from app.story_bible import build_general_story_bible
+
+    planned = ["child-identity"] if has_identity else []
+    humans = [{"id": "child-identity", "name": "儿童", "description": "六岁儿童，圆脸短发"}] if has_identity else []
+    wardrobe = "蓝色羽绒服、长裤、冬靴"
+    bible = await build_general_story_bible(config={"genre": "流行歌曲", "season": "冬"}, shots=[], durations=[])
+    valid = json.dumps({"scenePrompt": "冬日公园", "shotPrompt": f"儿童穿{wardrobe}向前走", "digitalHumanIds": planned})
+    monkeypatch.setattr(storyboard_prompt, "settings", replace(storyboard_prompt.settings, llm_api_key="fake-key"))
+    monkeypatch.setattr(storyboard_prompt, "AsyncOpenAI", lambda **kwargs: _FakeOpenAI([valid]))
+    result = await storyboard_prompt.generate_storyboard_line(
+        source="general",
+        current={
+            "shotType": "character",
+            "plannedDigitalHumanIds": planned,
+            "outline": {"wardrobeByCharacter": {planned[0]: wardrobe} if planned else {}, "wardrobeGroupIndex": 0},
+        },
+        full_context={"storyBible": bible},
+        allowed_humans=humans,
+    )
+    messages = result["usageRecords"][0]["requestMessages"]
+    payload, _ = json.JSONDecoder().raw_decode(messages[1]["content"])
+    reference_rule = next(rule for rule in payload["requirements"] if rule.startswith("当 source 为 general 且 plannedDigitalHumanIds 非空时"))
+    for text in (reference_rule, payload["globalContext"]["storyBible"]["characterPolicy"]):
+        assert "五官、脸型、肤色、年龄感和发型" in text
+        assert "不得从头肩照推断或锁定全身身体比例" in text
+        assert "儿童与卡通人物不得成人化" in text
+        assert "必须忽略卡片" in text
+        assert "原始服装（含白色T恤、历史浅灰下装）、灰色背景、排版（含历史多视图）" in text
+        assert "职业" in text and "年代" in text
+        assert "用户明确要求 > 季节 > 歌曲曲风" in text
+        assert "wardrobeGroupIndex" in text
+        assert "发型和身体比例" not in text
+    assert "未选择人物时，每个人物镜可独立生成人物" in bible["characterPolicy"]
+    assert any("plannedDigitalHumanIds 为空时" in rule and "自由设计本镜人物" in rule for rule in payload["requirements"])
+    assert payload["allowedCharacters"] == humans
+    assert result["digitalHumanIds"] == planned
+    assert wardrobe in result["shotPrompt"]
+
+
+PORTRAIT_KEY = "portrait.digital_human_ref"
+
+
+def _assert_single_headshot_prompt(prompt: str) -> None:
+    for fragment in (
+        "1024x1536 竖版单人正面头肩大头照",
+        "完整保留头顶与发型",
+        "禁止全身像、侧面像、背面像、多人、拼图或多视图排版",
+        "有身份参考图时，仅以这一张图确定人物身份",
+        "五官、脸型、肤色、年龄感和发型一致",
+        "无身份参考图时，按角色描述生成人物身份",
+        "儿童保持儿童面貌与年龄感",
+        "卡通人物保持卡通特征，不得成人化",
+        "不得把卡通强行真人化",
+        "纯白无图案圆领短袖T恤",
+        "不佩戴饰品，不持道具",
+        "中性灰纯色背景，棚拍柔光",
+        "禁止继承参考图或角色描述中的原服装、配饰、职业、年代和场景背景",
+        "无边框、无文字、无Logo、无水印",
+    ):
+        assert fragment in prompt
+    for obsolete in ("第一张参考图", "第二张参考图", "左侧大幅", "右侧依次排列", "身体比例", "中性浅灰下装", "画面风格", "{{extra}}"):
+        assert obsolete not in prompt
+
+
+@pytest.mark.parametrize(
+    ("description", "images"),
+    [
+        ("青衣少女", []),
+        ("六岁儿童，圆脸短发", []),
+        ("卡通儿童，圆脸卷发", []),
+        ("", ["https://example.test/identity.png"]),
+        ("卡通儿童，圆脸卷发", ["https://example.test/identity.png"]),
+    ],
+    ids=["ai-adolescent", "ai-child", "ai-cartoon", "identity-only", "identity-and-description"],
+)
+def test_portrait_prompt_preview_matches_generation_snapshot(client, monkeypatch, description, images) -> None:
+    """覆盖无图 AI 创建/单图身份参考；拦截工单，不执行 runner 或访问图片 URL。"""
     from app import main
 
-    async def generate_image(payload, job):
-        return {"urls": ["https://example.test/portrait.png"]}
+    captured = []
 
-    monkeypatch.setattr(main, "generate_image", generate_image)
-    preview = client.post("/api/generations/images/portrait-prompt", json={"description": "青衣少女", "style": "古风"})
+    async def create_job(kind, request, runner, **kwargs):
+        assert kind == "image"
+        captured.append(request)
+        return SimpleNamespace(public=lambda: {"id": "job-headshot-test", "status": "queued"})
+
+    monkeypatch.setattr(main.jobs, "create", create_job)
+    portrait = {"description": f"  {description}  ", "style": "古风分类不得入画"}
+    preview = client.post("/api/generations/images/portrait-prompt", json=portrait)
     assert preview.status_code == 200
+    assert captured == []
     prompt = preview.json()["prompt"]
-    assert "第一张参考图只定义身份参考卡" in prompt
-    assert "第二张参考图只定义人物身份" in prompt
-    assert "禁止继承任一参考图中的原服装" in prompt
-    assert "保持一模一样的人物外貌、服装和配饰" not in prompt
-    assert "角色描述：青衣少女" in prompt
-    assert "画面风格：古风" not in prompt
-    category_only = client.post("/api/generations/images/portrait-prompt", json={"description": "", "style": "女"})
-    assert "画面风格" not in category_only.json()["prompt"]
-    assert "角色描述" not in category_only.json()["prompt"]
+    _assert_single_headshot_prompt(prompt)
+    assert portrait["style"] not in prompt
+    if description:
+        assert f"角色描述：{description}。" in prompt
+    else:
+        assert "角色描述：" not in prompt
 
-    empty = client.post("/api/generations/images/portrait-prompt", json={})
-    assert "角色描述" not in empty.json()["prompt"] and "画面风格" not in empty.json()["prompt"]
-
-    rejected = client.post("/api/generations/images", json={"prompt": "  "})
-    assert rejected.status_code == 422
-
-    # portrait 模式：后端拼装 prompt 并随响应返回（供前端落库 avatarPrompt）
-    created = client.post("/api/generations/images", json={"portrait": {"description": "青衣少女", "style": "古风"}})
+    # 覆盖调用方实际提交的竖版参数；默认 size 的后端契约由生成模块测试负责。
+    created = client.post(
+        "/api/generations/images",
+        json={"portrait": portrait, "images": images, "size": "1024x1536", "purpose": "digital_human", "prompt": "旧版多视图提示词应被替换"},
+    )
     assert created.status_code == 202
-    assert "角色描述：青衣少女" in created.json()["prompt"]
+    assert len(captured) == 1
+    assert created.json()["prompt"] == captured[0]["prompt"] == prompt
+    assert captured[0]["images"] == images
+    assert captured[0]["size"] == "1024x1536"
+    assert captured[0]["purpose"] == "digital_human"
+    assert "旧版多视图提示词应被替换" not in prompt
+
+
+def test_portrait_prompt_empty_description_and_create_validation(client, monkeypatch) -> None:
+    from app import main
+
+    async def unexpected_job(*args, **kwargs):
+        pytest.fail("预览与无效请求不得创建生成工单")
+
+    monkeypatch.setattr(main.jobs, "create", unexpected_job)
+    empty = client.post("/api/generations/images/portrait-prompt", json={})
+    category_only = client.post("/api/generations/images/portrait-prompt", json={"description": "  ", "style": "古风分类不得入画"})
+    assert empty.status_code == category_only.status_code == 200
+    assert empty.json()["prompt"] == category_only.json()["prompt"]
+    _assert_single_headshot_prompt(empty.json()["prompt"])
+    assert "角色描述：" not in empty.json()["prompt"]
+    assert "古风分类不得入画" not in empty.json()["prompt"]
+    assert client.post("/api/generations/images", json={"prompt": "  "}).status_code == 422
+
+
+def test_portrait_admin_preview_uses_single_headshot_metadata(client) -> None:
+    spec = DEFAULT_PROMPTS[PORTRAIT_KEY]
+    detail = client.get(f"/api/admin/prompts/{PORTRAIT_KEY}").json()
+    assert detail["name"] == spec["name"]
+    assert detail["description"] == spec["description"]
+    assert detail["variables"] == spec["variables"]
+    assert detail["requiredFragments"] == spec["required_fragments"]
+    assert set(detail["variables"]) == {"extra"}
+    assert all("第一张" not in fragment and "第二张" not in fragment for fragment in detail["requiredFragments"])
+    preview = client.post(f"/api/admin/prompts/{PORTRAIT_KEY}/preview", json={"content": detail["defaultContent"], "variables": {"extra": ""}})
+    assert preview.status_code == 200
+    report = preview.json()
+    assert report["missingFragments"] == report["missingVariables"] == report["undeclaredVariables"] == []
+    assert report["jsonError"] == ""
+    _assert_single_headshot_prompt(report["rendered"])
+
+
+@pytest.mark.parametrize("fragment", DEFAULT_PROMPTS["portrait.digital_human_ref"]["required_fragments"])
+def test_portrait_publish_rejects_missing_headshot_safety_fragment(fragment) -> None:
+    from fastapi import HTTPException
+
+    from app.admin import _validate_prompt_content
+
+    spec = DEFAULT_PROMPTS[PORTRAIT_KEY]
+    template = SimpleNamespace(required_fragments=spec["required_fragments"], variables=spec["variables"], format=spec["format"])
+    _validate_prompt_content(template, spec["content"])
+    with pytest.raises(HTTPException) as exc:
+        _validate_prompt_content(template, spec["content"].replace(fragment, ""))
+    assert exc.value.status_code == 422
+    assert fragment in exc.value.detail
 
 
 @pytest.mark.parametrize(

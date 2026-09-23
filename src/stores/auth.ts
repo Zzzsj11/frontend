@@ -22,27 +22,13 @@ export interface AccountBalance {
   available: boolean
   balance: string | null
   balanceDisplay: string
-  rawBalance?: string | null
-  unitScale?: number
-  modelCreditUnitScale?: number
   currency: string
   updatedAt: string
   message?: string | null
   key?: KeyQuotaInfo | null
   keyError?: string | null
-  details?: {
-    cashBalance: number | null
-    creditLimit: number | null
-    pendingCharges: number | null
-    outstandingInvoices: number | null
-    accountAvailableBalance?: number | null
-    modelCreditBalance?: number | null
-  }
-  rawModelCreditBalance?: string | null
-  rawDetails?: Record<string, string | null>
   providers?: {
     yinghe: AccountBalance
-    ppio: AccountBalance
   }
 }
 export const useAuthStore = defineStore('auth', {

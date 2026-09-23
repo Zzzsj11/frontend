@@ -54,6 +54,30 @@ def test_system_characters_are_visible_and_read_only_for_every_user(client) -> N
     assert client.delete("/api/digital-humans/dh-system-020", headers=user).status_code == 404
 
 
+def test_system_human_runtime_identity_is_headshot_only() -> None:
+    from app.system_humans import SYSTEM_HUMAN_MARKDOWN, SYSTEM_HUMANS, parse_system_human
+
+    assert len(SYSTEM_HUMANS) == 32
+    for human in SYSTEM_HUMANS:
+        code = human["asset_code"]
+        # Re-parsing startup seed data must not restore historical body/layout constraints.
+        assert parse_system_human(code, SYSTEM_HUMAN_MARKDOWN[code]) == human
+        identity = human["appearance_style"]
+        assert identity.startswith(f"{human['age_description']}，{human['gender']}，")
+        assert "仅参考头肩大头照中的五官、脸型、肤色、年龄感和发型" in identity
+        assert "不得从头肩图推断全身比例" in identity
+        assert "儿童保持儿童年龄，不得成人化" in identity
+        assert "卡通人物保持卡通风格" in identity
+        assert "忽略参考图服装、灰背景、历史多视图排版、年代和职业" in identity
+        assert "服装与场景遵循当前创作要求" in identity
+        assert f"人物身份描述：{identity}" in human["system_prompt"]
+        assert "身体比例" not in human["system_prompt"]
+        assert "三视图一致性" not in human["system_prompt"]
+        assert "汉服" not in human["system_prompt"] and "铠甲" not in human["system_prompt"]
+        assert human["clothing_description"] == human["suitable_music_styles"] == ""
+        assert human["category"] == ("儿童" if code in {"031", "032"} else human["gender"])
+
+
 def test_uploaded_character_keeps_its_category_and_is_visible_immediately(client, monkeypatch) -> None:
     from app import domain
 

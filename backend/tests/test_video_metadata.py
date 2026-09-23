@@ -10,9 +10,9 @@ from app import video_metadata
 
 def test_provider_resolution_uses_model_capability_mapping_and_legacy_fallback():
     capabilities = {"providerResolutionMap": {"720p": "768P"}}
-    assert video_metadata.provider_resolution("minimax-h3-ppio", "720p", capabilities) == "768P"
+    assert video_metadata.provider_resolution("minimax-h3", "720p", capabilities) == "768P"
     assert video_metadata.provider_resolution("minimax-h3-runninghub", "720p") == "0.9MP"
-    assert video_metadata.provider_resolution("doubao-seedance-2.0-ppio", "1080p") == "1080P"
+    assert video_metadata.provider_resolution("doubao-seedance-2.0", "1080p") == "1080P"
 
 
 def test_wan_resolution_mapping_keeps_ui_values_out_of_provider_payload():

@@ -572,7 +572,7 @@ describe('outline segment retry polling', () => {
   })
 })
 
-describe('digital human generation with template reference', () => {
+describe('digital human generation as headshots', () => {
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
@@ -580,14 +580,7 @@ describe('digital human generation with template reference', () => {
     setActivePinia(createPinia())
   })
 
-  afterEach(async () => {
-    // 复位模块级模板单例，避免污染其它测试
-    const { setTemplateAvatar } = await import('../../src/api/imageGen')
-    setTemplateAvatar('')
-  })
-
-  it('loads the original public image as the system template, never the thumbnail', async () => {
-    const { getTemplateAvatar } = await import('../../src/api/imageGen')
+  it('loads original images alongside thumbnails without a system template dependency', async () => {
     const store = useProjectStore()
     vi.spyOn(domainApi, 'fetchSongProjects').mockResolvedValue([])
     vi.spyOn(domainApi, 'fetchDigitalHumanStyles').mockResolvedValue([])
@@ -603,14 +596,15 @@ describe('digital human generation with template reference', () => {
       },
     ])
     await store.loadSongProjects()
-    expect(getTemplateAvatar()).toBe('https://tos.test/001.jpg')
+    expect(store.digitalHumans[0].originalAvatar).toBe('https://tos.test/001.jpg')
+    expect(store.digitalHumans[0].avatar).toBe('https://tos.test/thumbnails/001.jpg')
   })
 
   it('keeps an uploaded character name out of the identity description', async () => {
     const imageApi = await import('../../src/api/imageGen')
-    imageApi.setTemplateAvatar('https://tos.test/001.jpg')
     const store = useProjectStore()
     store.dhStyleIds = { 女: 'style-female' }
+    store.dhStyles = ['女']
     vi.spyOn(domainApi, 'uploadDataUrl').mockResolvedValue({ url: 'https://tos.test/upload.jpg' })
     const generate = vi
       .spyOn(imageApi, 'generateImageAsset')
@@ -632,7 +626,8 @@ describe('digital human generation with template reference', () => {
       '',
       expect.objectContaining({
         portrait: { description: '', style: '女' },
-        image: ['https://tos.test/001.jpg', 'https://tos.test/upload.jpg'],
+        size: '1024x1536',
+        image: 'https://tos.test/upload.jpg',
       }),
       expect.any(Function),
     )
@@ -641,10 +636,100 @@ describe('digital human generation with template reference', () => {
     )
   })
 
-  it('sends the system template sheet as the first reference image', async () => {
-    const { setTemplateAvatar } = await import('../../src/api/imageGen')
-    setTemplateAvatar('https://tos.test/system/template.png')
+  it('generates without an uploaded image instead of sending an initials placeholder', async () => {
+    const imageApi = await import('../../src/api/imageGen')
+    const store = useProjectStore()
+    store.dhStyleIds = { 女: 'style-female' }
+    store.dhStyles = ['女']
+    const upload = vi.spyOn(domainApi, 'uploadDataUrl')
+    const generate = vi
+      .spyOn(imageApi, 'generateImageAsset')
+      .mockResolvedValue({ url: 'https://tos.test/new.png' })
+    vi.spyOn(domainApi, 'createDigitalHuman').mockResolvedValue({
+      id: 'new',
+      name: '新人物',
+      style: '女',
+      description: '短发',
+      avatar: 'https://tos.test/new.png',
+    })
+    await store.addCustomDigitalHuman({ name: '新人物', style: '女', description: '短发' })
+    expect(upload).not.toHaveBeenCalled()
+    expect(generate.mock.calls[0][1]).toEqual({
+      size: '1024x1536',
+      quality: 'medium',
+      portrait: { description: '短发', style: '女' },
+    })
+    expect(store.castIds).toEqual([])
+    expect(store.dhGenerating).toBe(false)
+    expect(store.dhGeneratingPhase).toBe('')
+  })
 
+  it('does not generate or create a character when reference upload fails', async () => {
+    const imageApi = await import('../../src/api/imageGen')
+    const store = useProjectStore()
+    store.dhStyleIds = { 女: 'style-female' }
+    store.dhStyles = ['女']
+    vi.spyOn(domainApi, 'uploadDataUrl').mockRejectedValue(new Error('上传失败'))
+    const generate = vi.spyOn(imageApi, 'generateImageAsset')
+    const create = vi.spyOn(domainApi, 'createDigitalHuman')
+    await expect(
+      store.addCustomDigitalHuman({
+        name: '新人物',
+        style: '女',
+        avatar: 'data:image/jpeg;base64,AA==',
+      }),
+    ).rejects.toThrow('上传失败')
+    expect(generate).not.toHaveBeenCalled()
+    expect(create).not.toHaveBeenCalled()
+    expect(store.dhGenerating).toBe(false)
+    expect(store.dhGeneratingPhase).toBe('')
+  })
+
+  it('resumes the existing image job and only finalizes the returned headshot', async () => {
+    const imageApi = await import('../../src/api/imageGen')
+    const store = useProjectStore()
+    localStorage.setItem(
+      'mv:pending-dh',
+      JSON.stringify({
+        mode: 'uploaded',
+        jobId: 'job-pending',
+        name: '恢复人物',
+        style: '女',
+        styleId: 'female',
+        description: '短发',
+      }),
+    )
+    const wait = vi.spyOn(imageApi, 'waitForImageAsset').mockResolvedValue({
+      url: 'https://tos.test/headshot.png',
+      thumbnailUrl: 'https://tos.test/headshot-thumb.png',
+    })
+    vi.spyOn(imageApi, 'fetchPortraitPrompt').mockResolvedValue('单张正面头肩大头照')
+    const generate = vi.spyOn(imageApi, 'generateImageAsset')
+    const create = vi.spyOn(domainApi, 'createDigitalHuman').mockResolvedValue({
+      id: 'restored',
+      name: '恢复人物',
+      style: '女',
+      description: '短发',
+      avatar: 'https://tos.test/headshot-thumb.png',
+    })
+    store.dhStyleIds = { 女: 'female' }
+    store.dhStyles = ['女']
+    await store.resumePendingDigitalHuman()
+    expect(wait).toHaveBeenCalledWith('job-pending')
+    expect(generate).not.toHaveBeenCalled()
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        avatar: 'https://tos.test/headshot.png',
+        thumbnail: 'https://tos.test/headshot-thumb.png',
+        source: 'uploaded',
+      }),
+    )
+    expect(store.digitalHumans.map((h) => h.id)).toEqual(['restored'])
+    expect(localStorage.getItem('mv:pending-dh')).toBeNull()
+    expect(store.dhGenerating).toBe(false)
+  })
+
+  it('sends only the identity reference for a single portrait headshot', async () => {
     const store = useProjectStore()
     store.dhStyleIds = { 古风: 'style-1' }
     const calls: { url: string; body?: Record<string, unknown> }[] = []
@@ -659,7 +744,7 @@ describe('digital human generation with template reference', () => {
           id: 'job-dh',
           status: 'queued',
           progress: 0,
-          prompt: '参照第一张参考图的构图版式。角色描述：青衣少女。画面风格：古风。',
+          prompt: '生成单张正面头肩大头照。角色描述：青衣少女。',
         })
       if (url === '/api/generations/status')
         return json([
@@ -707,25 +792,33 @@ describe('digital human generation with template reference', () => {
 
     const creation = calls.find((call) => call.url === '/api/generations/images')
     expect(creation, '未发起生图请求').toBeDefined()
-    // 模板三视图在前（prompt 中的「第一张参考图」），用户参考图在后
-    expect(creation!.body?.images).toEqual([
-      'https://tos.test/system/template.png',
-      'https://tos.test/user-photo.png',
-    ])
+    expect(creation!.body?.images).toEqual(['https://tos.test/user-photo.png'])
+    expect(creation!.body?.size).toBe('1024x1536')
+    expect(creation!.body?.n).toBe(1)
     // 提示词由后端注册中心模板拼装：前端只传原始 portrait 参数，prompt 留空
     expect(creation!.body?.prompt).toBe('')
     expect(creation!.body?.portrait).toEqual({ description: '青衣少女', style: '古风' })
     // 最终生效的 prompt 来自后端响应，随数字人落库 avatar_prompt
     const dhCreation = calls.find((call) => call.url === '/api/digital-humans')
-    expect(String(dhCreation!.body?.avatar_prompt)).toContain('参照第一张参考图')
+    expect(String(dhCreation!.body?.avatar_prompt)).toContain('单张正面头肩大头照')
     // 任务创建后留了恢复草稿，完成后又清理掉
     expect(localStorage.getItem('mv:pending-dh')).toBeNull()
   })
 
-  it('omits the images field when neither template nor user reference exists', async () => {
+  it('omits images without a user reference even if system humans are loaded', async () => {
     const store = useProjectStore()
     store.dhStyleIds = { 古风: 'style-1' }
-    store.digitalHumans = []
+    store.digitalHumans = [
+      {
+        id: 'dh-system-001',
+        name: '系统',
+        style: '女',
+        description: '',
+        avatar: 'https://tos.test/system.jpg',
+        originalAvatar: 'https://tos.test/original-system.jpg',
+        readOnly: true,
+      },
+    ]
     const calls: { url: string; body?: Record<string, unknown> }[] = []
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input)
@@ -770,7 +863,7 @@ describe('digital human generation with template reference', () => {
   })
 })
 
-describe('digital human avatar regeneration with template reference', () => {
+describe('digital human avatar regeneration as headshots', () => {
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
@@ -791,16 +884,7 @@ describe('digital human avatar regeneration with template reference', () => {
     setActivePinia(createPinia())
   })
 
-  afterEach(async () => {
-    // 复位模块级模板单例，避免污染其它测试
-    const { setTemplateAvatar } = await import('../../src/api/imageGen')
-    setTemplateAvatar('')
-  })
-
-  it('sends the template sheet before the current avatar and persists private humans', async () => {
-    const { setTemplateAvatar } = await import('../../src/api/imageGen')
-    setTemplateAvatar('https://tos.test/system/template.png')
-
+  it('sends the current original avatar as the only reference and persists private humans', async () => {
     const store = useProjectStore()
     store.digitalHumans = [
       dhFixture({ name: '女10', description: '', originalAvatar: 'https://tos.test/original.png' }),
@@ -843,11 +927,8 @@ describe('digital human avatar regeneration with template reference', () => {
     await store.regenerateDigitalHumanAvatar('dh-1')
 
     const creation = calls.find((call) => call.url === '/api/generations/images')
-    // 模板三视图在前（prompt 中的「第一张参考图」），当前头像在后
-    expect(creation!.body?.images).toEqual([
-      'https://tos.test/system/template.png',
-      'https://tos.test/original.png',
-    ])
+    expect(creation!.body?.images).toEqual(['https://tos.test/original.png'])
+    expect(creation!.body?.size).toBe('1024x1536')
     expect(creation!.body?.portrait).toEqual({ description: '', style: '古风' })
     const patch = calls.find((call) => call.url === '/api/digital-humans/dh-1')
     expect(patch?.method).toBe('PATCH')
@@ -857,47 +938,24 @@ describe('digital human avatar regeneration with template reference', () => {
     expect(store.digitalHumans[0].originalAvatar).toBe('https://tos.test/new.png')
   })
 
-  it('updates a system (readOnly) human locally without persisting to the backend', async () => {
+  it('does not generate or change read-only system humans', async () => {
     const store = useProjectStore()
-    store.digitalHumans = [
-      dhFixture({
-        id: 'dh-system-001',
-        scope: 'system',
-        readOnly: true,
-        avatar: 'https://tos.test/sys.png',
-      }),
-    ]
-    const calls: { url: string; method?: string }[] = []
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-      const url = String(input)
-      calls.push({ url, method: init?.method })
-      if (url === '/api/generations/images')
-        return json({ id: 'job-re', status: 'queued', progress: 0 })
-      if (url === '/api/generations/status')
-        return json([
-          {
-            id: 'job-re',
-            status: 'succeeded',
-            progress: 100,
-            result: { urls: ['https://tos.test/new.png'] },
-          },
-        ])
-      if (url === '/api/generations/job-re')
-        return json({
-          id: 'job-re',
-          status: 'succeeded',
-          progress: 100,
-          result: { urls: ['https://tos.test/new.png'] },
-        })
-      return json({}, 404)
-    })
-
+    store.digitalHumans = [dhFixture({ id: 'dh-system-001', scope: 'system', readOnly: true })]
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
     await store.regenerateDigitalHumanAvatar('dh-system-001')
+    expect(store.digitalHumans[0].avatar).toBe('https://tos.test/old.png')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
 
-    // 无缩略图时头像回落到原图
-    expect(store.digitalHumans[0].avatar).toBe('https://tos.test/new.png')
-    // 系统人物只读：不回写后端
-    expect(calls.some((call) => call.url.includes('/api/digital-humans'))).toBe(false)
+  it('keeps the previous avatar when persisting the replacement fails', async () => {
+    const imageApi = await import('../../src/api/imageGen')
+    const store = useProjectStore()
+    store.digitalHumans = [dhFixture({})]
+    vi.spyOn(imageApi, 'generateImageAsset').mockResolvedValue({ url: 'https://tos.test/new.png' })
+    vi.spyOn(domainApi, 'updateDigitalHuman').mockRejectedValue(new Error('保存失败'))
+    await expect(store.regenerateDigitalHumanAvatar('dh-1')).rejects.toThrow('保存失败')
+    expect(store.digitalHumans[0].avatar).toBe('https://tos.test/old.png')
+    expect(store.dhRegeneratingId).toBeNull()
   })
 })
 

@@ -104,6 +104,7 @@ PostgreSQL 是持久化事实来源，主要保存用户、刷新令牌、项目
 │   ├── app/                     FastAPI、领域服务、任务、存储和种子数据
 │   ├── migrations/              Alembic 迁移
 │   └── tests/                   后端自动化测试
+├── model-service/               可选独立模型服务（对外/管理 API + 双前端，承接全部模型调用）
 ├── e2e/                         Playwright 端到端测试
 │   ├── user/                    用户侧旅程、远程冒烟与真实生成全链路
 │   ├── admin/                   管理后台 API 契约与控制台 UI
@@ -148,6 +149,7 @@ cp backend/.env.example backend/.env
 - `VIDEO_*`：视频生成服务。
 - `TOS_*`：引用媒体桶、视频归档桶、前缀和公开域名。
 - `BUSINESS_API_KEY`、`BUSINESS_USER_ID`：顶部栏业务余额查询凭证；未配置时安全显示 `--`，不会阻塞其他功能。
+- `MODEL_GATEWAY_URL`、`MODEL_GATEWAY_API_KEY`：可选独立模型服务内部接入凭证；留空保持直连各供应商，详见 `docs/ARCHITECTURE.md` 与 `model-service/README.md`。
 - `DATABASE_URL`、`REDIS_URL`：本地启动时的数据服务地址。
 
 项目也支持将统一供应商配置放在 `backend/.provider_config.py`，Compose 会将其作为 secret 挂载。`backend/.env`、`.env.chat` 和 `.provider_config.py` 均已被 Git 忽略，严禁提交真实密钥。
@@ -249,5 +251,7 @@ docker compose exec redis redis-cli
 数据库结构变更必须通过 Alembic 迁移；清理业务数据必须使用产品删除 API 或更新 `deleted_at`，不得绕过软删除规则。
 
 ## 当前状态
+
+PPIO 与 BFL（Black Forest Labs，历史 FLUX 3）已从 MV 与 model-service 移除支持，不再提供配置、调用或余额入口。历史 Alembic 保留防断链；存量配置行须通过两侧各自的前向迁移退役，历史财务工单、费用与媒体保留。详见 [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) 与 [model-service 部署说明](model-service/docs/DEPLOYMENT.md)。
 
 `v0.9.1` 是 Web 内测版初版，已完成登录、多用户隔离、ASS/通用分镜、逐条提示词生成、角色库、TOS 媒体、图片/视频生成、素材导出、Token 记账、错误审计及完整自动化测试资产。当前只维护本地开发环境和服务器测试环境；预发布、正式生产及其容量/安全方案在 v1.0.0 完成后再考虑。服务器测试部署前仍须轮换密钥、修改默认密码并验证外部服务限流。

@@ -188,7 +188,7 @@ async def run_prompt_optimization_job(job: Job) -> dict[str, Any]:
                     await session.commit()
             deadline = time.monotonic() + 20 * 60
             while True:
-                result = await query_minimax(created["taskId"], agent_name=agent_name, agent_run_id=agent_run_id)
+                result = await query_minimax(created["taskId"], via_gateway=bool(created.get("viaGateway")), agent_name=agent_name, agent_run_id=agent_run_id)
                 normalized = str(result.get("status") or "running").lower()
                 if normalized in {"success", "succeeded", "completed", "failed", "error", "cancelled"}:
                     result["status"] = "succeeded" if normalized in {"success", "succeeded", "completed"} else "failed"

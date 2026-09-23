@@ -80,13 +80,16 @@ describe('ShotDetailModal general MV character controls', () => {
     expect(document.body.querySelectorAll('.preview-cards .pcard')).toHaveLength(3)
     const portrait = document.body.querySelector('.pcard-avatars [role="img"]') as HTMLElement
     expect(portrait.getAttribute('aria-label')).toBe('定制人物')
-    expect(portrait.style.backgroundImage).toContain('/character.jpg')
+    expect(portrait.querySelector('img')?.getAttribute('src')).toBe('/character.jpg')
     expect(document.body.textContent).toContain('选择人物、视频或场景，调整对应内容')
     expect(document.body.textContent).toContain('出演角色')
     expect(document.body.textContent).toContain('定制人物')
     expect(document.body.textContent).toContain('管理阵容')
-    expect(document.body.textContent).toContain('人物身份参考图（不参考服装）')
-    expect(document.body.textContent).toContain('白色 T 恤与浅灰短裤不会带入剧情镜头')
+    expect(document.body.textContent).toContain(
+      '人物身份参考图仅锁定五官、脸型、肤色、年龄感和发型',
+    )
+    expect(document.body.textContent).toContain('不从头肩照推断全身比例')
+    expect(document.body.textContent).toContain('灰背景及历史身份卡的服装不会带入剧情镜头')
   })
 
   it('shows server-based elapsed seconds while video is generating', async () => {

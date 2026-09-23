@@ -1903,7 +1903,6 @@ def human_json(item: DigitalHumanModel, style_name: str | None = None) -> dict:
         "assetAvatarUrl": item.asset_avatar_url,
         "providerAssetAvatarUrls": {
             "yinghe": item.asset_avatar_url,
-            "ppio": item.ppio_asset_avatar_url,
         },
         "description": item.description,
         "avatarPrompt": item.avatar_prompt,
@@ -1930,48 +1929,21 @@ async def list_humans(user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
 
 
 async def _sync_human_asset_avatar(human: DigitalHumanModel) -> None:
-    """将同一人物原图并行注册到英合与 PPIO 各自的虚拟人物素材库。
-
-    供应商资产 ID 归属不同账号，不能跨渠道复用。单渠道失败只记录日志，另一渠道
-    仍可正常落库；换图调用方需先清空两个渠道字段。
-    """
+    """将人物原图注册到英合虚拟人物素材库，生成视频时用 asset:// 链接替代原始 TOS 路径以通过真人人脸校验。"""
     from .error_logging import log_background_error
-    from .providers import create_ppio_synthetic_image_asset, create_real_face_asset
+    from .providers import create_real_face_asset
 
-    if not human.avatar_url:
+    if not human.avatar_url or human.asset_avatar_url:
         return
-    registrations = []
-    if not human.asset_avatar_url:
-        registrations.append(
-            (
-                "yinghe",
-                "asset_avatar_url",
-                "/v3/assets",
-                create_real_face_asset(human.avatar_url, name=f"mv-{human.asset_code or human.id}"),
-            )
+    try:
+        human.asset_avatar_url = await asyncio.wait_for(create_real_face_asset(human.avatar_url, name=f"mv-{human.asset_code or human.id}"), timeout=30)
+    except Exception as exc:
+        await log_background_error(
+            user_id=human.user_id,
+            path="/v3/assets",
+            error_type="AssetError",
+            message=f"digital human yinghe asset create failed: {human.id}: {exc}",
         )
-    if not human.ppio_asset_avatar_url:
-        registrations.append(
-            (
-                "ppio",
-                "ppio_asset_avatar_url",
-                "/v3/synthetic-cn/bytedance/ark",
-                create_ppio_synthetic_image_asset(human.avatar_url),
-            )
-        )
-    if not registrations:
-        return
-    results = await asyncio.gather(*(asyncio.wait_for(call, timeout=30) for _, _, _, call in registrations), return_exceptions=True)
-    for (provider, field, path, _), result in zip(registrations, results, strict=True):
-        if isinstance(result, Exception):
-            await log_background_error(
-                user_id=human.user_id,
-                path=path,
-                error_type="AssetError",
-                message=f"digital human {provider} asset create failed: {human.id}: {result}",
-            )
-            continue
-        setattr(human, field, result)
 
 
 @router.post("/digital-humans", status_code=201)
@@ -1986,7 +1958,6 @@ async def create_human(payload: DigitalHumanCreate, user: CurrentUser, db: Async
     item = DigitalHumanModel(id=uid("dh"), user_id=user.id, scope="private", **payload.model_dump())
     db.add(item)
     await db.commit()
-    # 用户上传/生成的三视图同时注册英合与 PPIO 两份平台资产。
     await _sync_human_asset_avatar(item)
     await db.commit()
     return human_json(item, style.name if style else None)
@@ -2006,10 +1977,9 @@ async def update_human(human_id: str, payload: DigitalHumanUpdate, user: Current
         if key in {"avatar_url", "avatar_thumbnail_url"} and value and not is_tos_url(str(value)):
             raise HTTPException(422, "角色图片必须存储在配置的 TOS")
         setattr(item, key, value)
-    # 换图后两个渠道的旧资产链接都失效，必须分别重新注册。
+    # 换图后旧资产链接失效，必须重新注册。
     if "avatar_url" in payload.model_dump(exclude_unset=True):
         item.asset_avatar_url = None
-        item.ppio_asset_avatar_url = None
         await db.commit()
         await _sync_human_asset_avatar(item)
     await db.commit()

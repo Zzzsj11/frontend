@@ -112,15 +112,6 @@ export async function fetchPortraitPrompt(description: string, style: string): P
   return data.prompt
 }
 
-/** 获取系统人物三视图模板（用于生成/重生的参考图） */
-let _templateAvatar: string | null = null
-export function setTemplateAvatar(url: string) {
-  _templateAvatar = url
-}
-export function getTemplateAvatar(): string | null {
-  return _templateAvatar
-}
-
 /** 生成结果已经由后端落入本地存储或 TOS，无需浏览器二次下载。 */
 export async function localizeImage(id: string, url: string): Promise<string> {
   void id

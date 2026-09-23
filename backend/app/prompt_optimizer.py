@@ -5,6 +5,7 @@ from typing import Any
 
 import httpx
 
+from . import model_gateway
 from .agent_attribution import current_agent_attribution
 from .config import settings
 from .error_logging import redact_error_text
@@ -86,7 +87,11 @@ async def call_gemini(*, prompt: str, duration: int, ratio: str, media: list[dic
     headers = {"Authorization": f"Bearer {settings.prompt_optimizer_gemini_api_key}", "Content-Type": "application/json", **_agent_headers(agent_name, agent_run_id)}
     started = time.perf_counter()
     async with httpx.AsyncClient(timeout=settings.prompt_optimizer_timeout) as client:
-        response = await client.post(f"{settings.prompt_optimizer_gemini_base_url}/chat/completions", headers=headers, json=payload)
+        url = f"{settings.prompt_optimizer_gemini_base_url}/chat/completions"
+        if model_gateway.routed("optimizer-gemini"):
+            url = model_gateway.base_url() + "/v1/chat/completions"
+            headers.update(model_gateway.request_headers())
+        response = await client.post(url, headers=headers, json=payload)
     _raise_provider_error(response, "Gemini")
     body = response.json()
     return {
@@ -111,20 +116,29 @@ async def create_minimax(*, prompt: str, duration: int, ratio: str, media: list[
         )
     payload = {"model": settings.prompt_optimizer_minimax_model, "content": content, "duration": duration, "ratio": ratio}
     headers = {"Authorization": f"Bearer {settings.prompt_optimizer_minimax_api_key}", "Content-Type": "application/json", **_agent_headers(agent_name, agent_run_id)}
+    via_gateway = model_gateway.routed("optimizer-minimax")
     async with httpx.AsyncClient(timeout=settings.prompt_optimizer_timeout) as client:
-        response = await client.post(f"{settings.prompt_optimizer_minimax_base_url}/v2/h3_context_ir", headers=headers, json=payload)
+        base = settings.prompt_optimizer_minimax_base_url
+        if via_gateway:
+            base, gateway_headers = model_gateway.route("optimizer-minimax")
+            headers.update(gateway_headers)
+        response = await client.post(f"{base}/v2/h3_context_ir", headers=headers, json=payload)
     _raise_provider_error(response, "MiniMax")
     body = response.json()
     task_id = str(body.get("task_id") or "").strip()
     if not task_id:
         raise RuntimeError(f"MiniMax HTTP {response.status_code}: response missing task_id; body={redact_error_text(response.text[:4000])}")
-    return {"taskId": task_id, "requestId": response.headers.get("x-request-id")}
+    return {"taskId": task_id, "requestId": response.headers.get("x-request-id"), "viaGateway": via_gateway}
 
 
-async def query_minimax(task_id: str, *, agent_name: str = "", agent_run_id: str = "") -> dict[str, Any]:
+async def query_minimax(task_id: str, *, via_gateway: bool, agent_name: str = "", agent_run_id: str = "") -> dict[str, Any]:
     headers = {"Authorization": f"Bearer {settings.prompt_optimizer_minimax_api_key}", **_agent_headers(agent_name, agent_run_id)}
     async with httpx.AsyncClient(timeout=settings.prompt_optimizer_timeout) as client:
-        response = await client.get(f"{settings.prompt_optimizer_minimax_base_url}/v2/query/video_generation/{task_id}", headers=headers)
+        base = settings.prompt_optimizer_minimax_base_url
+        if via_gateway:
+            base, gateway_headers = model_gateway.route("optimizer-minimax")
+            headers.update(gateway_headers)
+        response = await client.get(f"{base}/v2/query/video_generation/{task_id}", headers=headers)
     _raise_provider_error(response, "MiniMax")
     task = response.json().get("task") or {}
     return {

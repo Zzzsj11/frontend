@@ -1,0 +1,61 @@
+import { chromium, expect } from '@playwright/test'
+import fs from 'node:fs'
+
+const root = new URL('../', import.meta.url)
+const env = Object.fromEntries(fs.readFileSync(new URL('.env', root), 'utf8').split('\n').filter((line) => line.includes('=') && !line.startsWith('#')).map((line) => {
+  const i = line.indexOf('=')
+  return [line.slice(0, i), line.slice(i + 1)]
+}))
+const browser = await chromium.launch({ headless: true })
+const page = await browser.newPage({ viewport: { width: 1600, height: 1050 } })
+const errors = []
+page.on('pageerror', (error) => errors.push(error.message))
+try {
+  await page.goto('http://127.0.0.1:5180')
+  await page.getByLabel('用户名').fill(env.ADMIN_USERNAME || 'admin')
+  await page.getByLabel('密码', { exact: true }).fill(env.ADMIN_PASSWORD)
+  await page.getByRole('button', { name: '登录', exact: true }).click()
+  const balanceResponse = page.waitForResponse((r) => r.url().endsWith('/admin/channel-balances') && r.request().method() === 'GET')
+  await page.getByRole('button', { name: '渠道余额', exact: true }).click()
+  const current = (await (await balanceResponse).json()).find((x) => x.id === 'yseeai')
+  expect(current.balance).not.toBeNull()
+  const display = (value) => Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 6 })
+  const overseas = page.getByRole('row').filter({ has: page.getByText('英和海外', { exact: true }) })
+  await expect(overseas).toContainText('美元')
+  await expect(overseas).toContainText('US$1 = ¥6.9')
+  await expect(overseas).toContainText('供应商查询')
+  await expect(overseas).toContainText(display(current.balance))
+  await expect(overseas).toContainText(display(current.cny_balance))
+  await expect(overseas).toContainText('未设 Key 限额')
+  await page.screenshot({ path: new URL('.runtime/channel-balances.png', root).pathname, fullPage: true })
+  await overseas.getByRole('button', { name: '设置', exact: true }).click()
+  await expect(page.getByLabel('余额币种', { exact: true })).toBeDisabled()
+  await expect(page.getByLabel('美元人民币汇率')).toHaveValue('6.90000000')
+  const points = page.getByRole('row').filter({ has: page.getByText('RunningHub', { exact: true }) })
+  await expect(points).toContainText('兑换比例待配置')
+  await points.getByRole('button', { name: '设置', exact: true }).click()
+  await expect(page.getByLabel('积分兑换比例')).toBeVisible()
+  await page.getByLabel('积分兑换币种').selectOption('USD')
+  await expect(page.getByLabel('美元人民币汇率')).toBeVisible()
+  await expect(page.getByLabel('人工余额')).toBeVisible()
+  // 浏览器层提交使用隔离替身，避免改变真实供应商余额或兑换配置。
+  await page.route('**/admin/channel-balances/runninghub', async (route) => {
+    if (route.request().method() !== 'PATCH') return route.continue()
+    const body = route.request().postDataJSON()
+    expect(body.points_per_unit).toBe('100')
+    expect(body.points_currency).toBe('USD')
+    await route.fulfill({ json: {} })
+  })
+  await page.getByLabel('积分兑换比例').fill('100')
+  await page.getByRole('button', { name: '保存兑换配置', exact: true }).click()
+  await expect(page.getByRole('status')).toContainText('兑换配置已保存')
+  await page.route('**/admin/channel-balances/runninghub/manual', (route) => route.fulfill({ status: 422, json: { detail: '测试：金额格式无效' } }))
+  await page.getByLabel('人工余额').fill('invalid')
+  await page.getByLabel('核对来源与备注').fill('isolated browser fixture')
+  await page.getByRole('button', { name: '保存人工快照' }).click()
+  await expect(page.getByRole('alert')).toContainText('金额格式无效')
+  expect(errors).toEqual([])
+  console.log('Channel balances browser: real read-only USD/CNY snapshot, key quota, points editor, save contract and error states passed')
+} finally {
+  await browser.close()
+}

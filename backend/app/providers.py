@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import hashlib
 import io
 import json
 import math
@@ -15,14 +14,16 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 import httpx
 from PIL import Image, UnidentifiedImageError
 
+from . import model_gateway
 from .config import settings
 from .error_logging import _redact
 from .jobs import Job, jobs
+from .models import GenerationJobModel
 from .runninghub import RunningHubError
 from .runninghub import query_task as runninghub_query_task
 from .runninghub import submit_first_frame_task as runninghub_submit_first_frame_task
@@ -37,6 +38,27 @@ from .video_prompt_policy import compile_content_safety_retry_prompt
 
 class ProviderError(RuntimeError):
     pass
+
+
+SUPPORTED_MEDIA_PROVIDERS = frozenset(
+    {"yinghe", "yinghe-h3", "yinghe-wan", "yinghe-kling", "yinghe-happyhorse", "runninghub", "yseeai", "yseeai-omni", "yseeai-unified", "toapis", "toapis-grok", "toapis-viduq3"}
+)
+SUPPORTED_VIDEO_PROTOCOLS = frozenset({"wan-native", "kling-native", "happyhorse-native", "veo-unified", "gemini-omni-unified", "grok-toapis", "viduq3-toapis"})
+
+
+def validate_media_provider(provider: str | None) -> None:
+    if provider and provider not in SUPPORTED_MEDIA_PROVIDERS:
+        raise ProviderError("该工单的供应商已不受支持，历史记录仅供查看，不能恢复或重新提交")
+
+
+def validate_media_job_source(job: Job | GenerationJobModel) -> None:
+    request = job.request or {}
+    capabilities = request.get("_capabilities") or {}
+    for provider in (job.provider, request.get("_provider"), capabilities.get("providerCode")):
+        validate_media_provider(provider)
+    protocol = capabilities.get("providerProtocol")
+    if protocol and protocol not in SUPPORTED_VIDEO_PROTOCOLS:
+        raise ProviderError("该工单的供应商协议已不受支持，历史记录仅供查看，不能恢复或重新提交")
 
 
 class ProviderRejectedError(ProviderError):
@@ -181,7 +203,6 @@ POLL_SCHEDULER_TICK_SECONDS = 1.0
 
 ASSET_POLL_TIMEOUT_SECONDS = 180
 ASSET_POLL_INTERVAL_SECONDS = 3.0
-PPIO_SYNTHETIC_ASSET_VERSION = "2024-01-01"
 
 
 async def create_real_face_asset(public_url: str, *, name: str) -> str:
@@ -218,102 +239,36 @@ async def create_real_face_asset(public_url: str, *, name: str) -> str:
         raise ProviderError(f"虚拟资产创建超时：{asset_id}")
 
 
-def _ppio_ark_result(body: Any) -> dict[str, Any]:
-    """解析 PPIO 火山 Ark 原厂响应，并兼容网关可能增加的 data 包装。"""
-    if not isinstance(body, dict):
-        raise ProviderError("PPIO 虚拟人物素材接口返回格式异常")
-    metadata = body.get("ResponseMetadata")
-    if isinstance(metadata, dict) and metadata.get("Error"):
-        raise ProviderRejectedError(f"PPIO 虚拟人物素材接口返回错误；供应商响应：{_provider_error_body(body)}")
-    result = body.get("Result") or body.get("result")
-    if not isinstance(result, dict) and isinstance(body.get("data"), dict):
-        data = body["data"]
-        result = data.get("Result") or data.get("result") or data
-    if not isinstance(result, dict):
-        raise ProviderError(f"PPIO 虚拟人物素材接口未返回 Result；供应商响应：{_provider_error_body(body)}")
-    return result
-
-
-def _ppio_asset_name(public_url: str) -> str:
-    """名称与稳定 URL 路径绑定，使 Worker 重放和同图多工单命中 PPIO 幂等。"""
-    parsed = urlparse(public_url)
-    stable_source = f"{parsed.netloc}{parsed.path}"
-    return f"mv-{hashlib.sha256(stable_source.encode()).hexdigest()[:24]}"
-
-
-async def create_ppio_synthetic_image_asset(public_url: str) -> str:
-    """将公网图片注册到 PPIO 虚拟人物素材库，等待 Active 后返回 asset://。"""
-    if public_url.startswith("asset://"):
-        return public_url
-    base, headers = _ppio_config()
-    endpoint = f"{base}/v3/synthetic-cn/bytedance/ark"
-    name = _ppio_asset_name(public_url)
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.post(
-            endpoint,
-            params={"Action": "CreateAsset", "Version": PPIO_SYNTHETIC_ASSET_VERSION},
-            headers=headers,
-            json={"URL": public_url, "AssetType": "Image", "Name": name},
-        )
-        _raise_for_status(response)
-        created = _ppio_ark_result(response.json())
-        asset_id = str(created.get("Id") or created.get("id") or "")
-        if not asset_id:
-            raise ProviderError(f"PPIO 虚拟人物素材创建成功但未返回 Id；供应商响应：{_provider_error_body(response.json())}")
-        deadline = time.monotonic() + ASSET_POLL_TIMEOUT_SECONDS
-        while time.monotonic() < deadline:
-            detail_response = await client.post(
-                endpoint,
-                params={"Action": "GetAsset", "Version": PPIO_SYNTHETIC_ASSET_VERSION},
-                headers=headers,
-                json={"Id": asset_id},
-            )
-            _raise_for_status(detail_response)
-            detail = _ppio_ark_result(detail_response.json())
-            status = str(detail.get("Status") or detail.get("status") or "")
-            if status.lower() == "active":
-                return f"asset://{asset_id}"
-            if status.lower() in {"failed", "rejected"}:
-                error = detail.get("Error") or detail.get("error") or status
-                raise ProviderRejectedError(f"PPIO 虚拟人物素材处理失败：{error}；供应商响应：{_provider_error_body(detail_response.json())}")
-            await asyncio.sleep(ASSET_POLL_INTERVAL_SECONDS)
-    raise ProviderError(f"PPIO 虚拟人物素材处理超时：{asset_id}")
-
-
 def _image_config() -> tuple[str, dict[str, str]]:
+    if model_gateway.routed("yinghe"):
+        return model_gateway.route("yinghe")
     if not settings.image_api_key:
         raise ProviderError("IMAGE_API_KEY 未配置")
     return settings.image_api_base_url.rstrip("/"), _headers(settings.image_api_key, x_api_key=True)
 
 
 def _video_config() -> tuple[str, dict[str, str]]:
+    if model_gateway.routed("yinghe"):
+        return model_gateway.route("yinghe")
     if not settings.video_api_key:
         raise ProviderError("VIDEO_API_KEY 未配置")
     return settings.video_api_base_url.rstrip("/"), _headers(settings.video_api_key)
 
 
-def _ppio_config() -> tuple[str, dict[str, str]]:
-    if not settings.ppio_api_key:
-        raise ProviderError("PPIO_API_KEY 未配置")
-    return settings.ppio_api_base_url, _headers(settings.ppio_api_key)
-
-
 def _yseeai_config() -> tuple[str, dict[str, str]]:
+    if model_gateway.routed("yseeai"):
+        return model_gateway.route("yseeai")
     if not settings.yseeai_api_key:
         raise ProviderError("YSEEAI_API_KEY 未配置")
     return settings.yseeai_api_base_url, _headers(settings.yseeai_api_key)
 
 
 def _toapis_config() -> tuple[str, dict[str, str]]:
+    if model_gateway.routed("toapis"):
+        return model_gateway.route("toapis")
     if not settings.toapis_api_key:
         raise ProviderError("TOAPIS_API_KEY 未配置")
     return settings.toapis_api_base_url, _headers(settings.toapis_api_key)
-
-
-def _bfl_config() -> tuple[str, dict[str, str]]:
-    if not settings.bfl_api_key:
-        raise ProviderError("BFL_API_KEY 未配置")
-    return settings.bfl_api_base_url, {"x-key": settings.bfl_api_key, "Content-Type": "application/json"}
 
 
 async def _query_task(client: httpx.AsyncClient, url: str, headers: dict[str, str]) -> dict[str, Any]:
@@ -562,6 +517,7 @@ async def list_video_models() -> list[dict[str, Any]]:
 
 
 async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, Any]:
+    validate_media_job_source(job)
     base, headers = _image_config()
     # 供应商以 Header 中的 Idempotency-Key 去重创建。键必须在发请求前由
     # 本地持久化工单 ID 确定，不能使用 _headers() 的随机默认值，否则进程
@@ -953,43 +909,6 @@ async def generate_happyhorse_video(request: VideoGenerationCreate, job: Job) ->
     return await _store_happyhorse_result(job, await _poll_happyhorse(base, headers, job))
 
 
-async def _submit_ppio_seedance_video(request: VideoGenerationCreate, job: Job, image_urls: list[str]) -> tuple[str, dict[str, Any], str, dict[str, str]]:
-    base, headers = _ppio_config()
-    variant = "reference" if image_urls else "text"
-    if (job.request or {}).get("_contentSafetyRetry"):
-        variant += ":content-safety"
-    job.idempotency_key = f"{job.id}:ppio:{variant}"
-    headers["Idempotency-Key"] = job.idempotency_key
-    content: list[dict[str, Any]] = [{"type": "text", "text": request.prompt}]
-    content.extend({"type": "image_url", "image_url": {"url": url}, "role": "reference_image"} for url in image_urls)
-    payload = {
-        "model": str((job.request or {}).get("_providerModelId") or "doubao-seedance-2-0-260128"),
-        "content": content,
-        "generate_audio": request.generate_audio,
-        "ratio": request.ratio,
-        "resolution": request.resolution,
-        "duration": request.duration,
-        "watermark": request.watermark,
-    }
-    await jobs.mark_provider_submitting(job)
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await _post_idempotent_video_create(
-            client,
-            f"{base}/v3/bytedance-cn/metered/contents/generations/tasks",
-            headers=headers,
-            payload=payload,
-            job=job,
-            provider="ppio",
-        )
-        _raise_for_status(response)
-        created = _unwrap(response.json())
-    task_id = str(created.get("id") or "")
-    if not task_id:
-        raise ProviderError("PPIO Seedance 提交成功但未返回任务 id")
-    await jobs.set_provider_task(job, "ppio", task_id, idempotency_key=job.idempotency_key)
-    return task_id, created, base, headers
-
-
 async def _post_idempotent_video_create(
     client: httpx.AsyncClient,
     url: str,
@@ -1040,15 +959,14 @@ def _direct_h3_content(request: VideoGenerationCreate, mode: str) -> list[dict[s
     return content
 
 
-async def _poll_direct_h3(base: str, headers: dict[str, str], job: Job, *, provider: str = "yinghe") -> dict[str, Any]:
+async def _poll_direct_h3(base: str, headers: dict[str, str], job: Job) -> dict[str, Any]:
     deadline = time.monotonic() + _remaining_video_job_timeout(job)
     consecutive_errors = 0
     async with httpx.AsyncClient(timeout=60) as client:
         while time.monotonic() < deadline:
             await asyncio.sleep(H3_POLL_INTERVAL_SECONDS)
             try:
-                path = f"/v3/minimax/v2/query/video_generation/{job.provider_task_id}" if provider == "ppio" else f"/video/generation/tasks/{job.provider_task_id}"
-                response = await client.get(f"{base}{path}", headers=headers)
+                response = await client.get(f"{base}/video/generation/tasks/{job.provider_task_id}", headers=headers)
                 _raise_for_status(response)
                 body = _unwrap(response.json())
                 task = body.get("task") if isinstance(body.get("task"), dict) else body
@@ -1069,8 +987,7 @@ async def _poll_direct_h3(base: str, headers: dict[str, str], job: Job, *, provi
 
 
 async def generate_direct_h3_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
-    provider = str((job.request or {}).get("_provider") or "yinghe")
-    base, headers = _ppio_config() if provider == "ppio" else _video_config()
+    base, headers = _video_config()
     mode = str((job.request or {}).get("_h3Mode") or request.h3_mode)
     if mode == "auto":
         mode = "reference" if request.image_urls or request.video_urls or request.audio_urls else "text"
@@ -1088,16 +1005,14 @@ async def generate_direct_h3_video(request: VideoGenerationCreate, job: Job) -> 
     }
     await jobs.mark_provider_submitting(job)
     async with httpx.AsyncClient(timeout=60) as client:
-        path = "/v3/minimax/v2/video_generation" if provider == "ppio" else "/video/generation/tasks"
-        response = await client.post(f"{base}{path}", headers=headers, json=payload)
+        response = await client.post(f"{base}/video/generation/tasks", headers=headers, json=payload)
         _raise_for_status(response)
         created = _unwrap(response.json())
     task_id = str(created.get("task_id") or "")
     if not task_id:
         raise ProviderError("H3 提交成功但未返回 task_id")
-    stored_provider = "ppio" if provider == "ppio" else "yinghe-h3"
-    await jobs.set_provider_task(job, stored_provider, task_id, idempotency_key=job.idempotency_key)
-    return await _store_direct_h3_result(job, await _poll_direct_h3(base, headers, job, provider=provider))
+    await jobs.set_provider_task(job, "yinghe-h3", task_id, idempotency_key=job.idempotency_key)
+    return await _store_direct_h3_result(job, await _poll_direct_h3(base, headers, job))
 
 
 async def _store_direct_h3_result(job: Job, task: dict[str, Any]) -> dict[str, Any]:
@@ -1111,7 +1026,7 @@ async def _store_direct_h3_result(job: Job, task: dict[str, Any]) -> dict[str, A
     stored_cover, stored_cover_thumbnail = await _video_first_frame(source_url, f"h3-{task_id}", job.user_id)
     request = job.request or {}
     return {
-        "provider": "ppio" if request.get("_provider") == "ppio" else "yinghe-h3",
+        "provider": "yinghe-h3",
         "providerTaskId": task_id,
         "model": request.get("model") or "minimax-h3",
         "usage": task.get("usage") or {},
@@ -1133,6 +1048,7 @@ async def _archive_h3_video_to_tos(source_url: str, owner_prefix: str, filename:
 
 
 async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
+    validate_media_job_source(job)
     if (job.request or {}).get("_provider") == "runninghub":
         return await generate_h3_video(request, job)
     if (job.request or {}).get("_providerModelId") == "MiniMax-H3":
@@ -1151,14 +1067,10 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         return await generate_toapis_grok_video(request, job)
     if ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "viduq3-toapis":
         return await generate_toapis_viduq3_video(request, job)
-    if ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "flux3-bfl":
-        return await generate_bfl_flux3_video(request, job)
-    is_ppio = (job.request or {}).get("_provider") == "ppio"
-    submit = _submit_ppio_seedance_video if is_ppio else _submit_seedance_video
-    task_id, created, base, headers = await submit(request, job, request.image_urls)
+    task_id, created, base, headers = await _submit_seedance_video(request, job, request.image_urls)
     try:
         data = await _poll_scheduled(
-            f"{base}{f'/v3/bytedance-cn/metered/contents/generations/tasks/{task_id}' if is_ppio else f'/v3/video/tasks/{task_id}'}",
+            f"{base}/v3/video/tasks/{task_id}",
             headers,
             job,
             timeout_seconds=_remaining_video_job_timeout(job),
@@ -1195,10 +1107,10 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
                 increment=True,
             )
             retry_request = request.model_copy(update={"prompt": retry_prompt})
-            task_id, created, base, headers = await submit(retry_request, job, retry_request.image_urls)
+            task_id, created, base, headers = await _submit_seedance_video(retry_request, job, retry_request.image_urls)
             try:
                 data = await _poll_scheduled(
-                    f"{base}{f'/v3/bytedance-cn/metered/contents/generations/tasks/{task_id}' if is_ppio else f'/v3/video/tasks/{task_id}'}",
+                    f"{base}/v3/video/tasks/{task_id}",
                     headers,
                     job,
                     timeout_seconds=_remaining_video_job_timeout(job),
@@ -1229,9 +1141,9 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
             raise
         # 通用人物镜不要求跨镜身份一致。若 AI 场景首帧被上游误判为
         # 真人参考，安全降级为纯文本视频，避免整条全量任务被阻断。
-        task_id, created, base, headers = await submit(request, job, [])
+        task_id, created, base, headers = await _submit_seedance_video(request, job, [])
         data = await _poll_scheduled(
-            f"{base}{f'/v3/bytedance-cn/metered/contents/generations/tasks/{task_id}' if is_ppio else f'/v3/video/tasks/{task_id}'}",
+            f"{base}/v3/video/tasks/{task_id}",
             headers,
             job,
             timeout_seconds=_remaining_video_job_timeout(job),
@@ -1364,7 +1276,7 @@ async def generate_gemini_omni_video(request: VideoGenerationCreate, job: Job) -
         "metadata": {"aspect_ratio": request.ratio, "task": task},
     }
     if images:
-        payload["images"] = [await _gemini_omni_image_data_url(url) for url in images]
+        payload["images"] = images if model_gateway.routed("yseeai") else [await _gemini_omni_image_data_url(url) for url in images]
     await jobs.record_provider_request(job, payload)
     await jobs.mark_provider_submitting(job)
     async with httpx.AsyncClient(timeout=60) as client:
@@ -1563,142 +1475,6 @@ async def generate_toapis_viduq3_video(request: VideoGenerationCreate, job: Job)
         raise ProviderError(f"{model} 提交成功但未返回任务 ID；供应商响应：{_provider_error_body(created)}")
     await jobs.set_provider_task(job, "toapis-viduq3", task_id, idempotency_key=job.idempotency_key)
     return await _store_toapis_video_result(job, await _poll_toapis_video(base, headers, job))
-
-
-def _bfl_polling_url(base: str, task_id: str, polling_url: str | None) -> str:
-    if not polling_url:
-        # Only old jobs predate persisted polling URLs.
-        return f"{base}/v1/get_result?id={task_id}"
-    try:
-        parsed = urlparse(polling_url)
-        port = parsed.port
-    except ValueError as exc:
-        raise ProviderError("BFL 返回了无效的 polling_url") from exc
-    host = parsed.hostname or ""
-    allowed_host = host == urlparse(base).hostname or host == "api.bfl.ai" or host.endswith(".bfl.ai")
-    if (
-        parsed.scheme != "https"
-        or not allowed_host
-        or parsed.username
-        or parsed.password
-        or port not in (None, 443)
-        or parsed.path != "/v1/get_result"
-        or parse_qs(parsed.query).get("id") != [task_id]
-        or parsed.fragment
-    ):
-        raise ProviderError("BFL 返回了不可信或不匹配的 polling_url，已停止查询以保护凭据")
-    return polling_url
-
-
-async def _query_bfl_flux3_task(base: str, headers: dict[str, str], task_id: str, polling_url: str | None = None) -> dict[str, Any]:
-    url = _bfl_polling_url(base, task_id, polling_url)
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.get(url, headers=headers)
-        _raise_for_status(response)
-        body = response.json()
-    if not isinstance(body, dict):
-        raise ProviderError("BFL 返回了无法解析的任务状态")
-    return body
-
-
-async def _poll_bfl_flux3(base: str, headers: dict[str, str], job: Job) -> dict[str, Any]:
-    deadline = time.monotonic() + _remaining_video_job_timeout(job)
-    consecutive_errors = 0
-    while time.monotonic() < deadline:
-        await asyncio.sleep(H3_POLL_INTERVAL_SECONDS)
-        try:
-            task = await _query_bfl_flux3_task(base, headers, job.provider_task_id or "", (job.request or {}).get("_providerPollingUrl"))
-        except (httpx.HTTPError, ValueError, ProviderError) as exc:
-            consecutive_errors += 1
-            if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS:
-                raise ProviderError(f"BFL 状态查询连续失败：{exc}") from exc
-            continue
-        consecutive_errors = 0
-        status = str(task.get("status") or "")
-        progress = task.get("progress")
-        await jobs.update_progress(job, int(progress if isinstance(progress, (int, float)) else job.progress + 3))
-        if status == "Ready":
-            return task
-        if status in {"Error", "Request Moderated", "Content Moderated", "Task not found"}:
-            reason = task.get("details") or task.get("result") or status
-            raise ProviderError(f"FLUX 3 生成失败：{reason}；供应商响应：{_provider_error_body(task)}")
-    raise ProviderError("视频生成超过20分钟，已判定失败，请重新生成")
-
-
-async def _store_bfl_flux3_result(job: Job, task: dict[str, Any]) -> dict[str, Any]:
-    result = task.get("result") if isinstance(task.get("result"), dict) else {}
-    source_url = str(result.get("sample") or result.get("url") or "")
-    if not source_url:
-        raise ProviderError("FLUX 3 生成成功但未返回视频地址")
-    task_id = job.provider_task_id or str(task.get("id") or "")
-    owner_prefix = f"users/{job.user_id}/generated"
-    stored_url = await import_remote(source_url, f"{owner_prefix}/videos", f"flux-3-{task_id}.mp4")
-    stored_cover, stored_cover_thumbnail = await _video_first_frame(source_url, f"flux-3-{task_id}", job.user_id)
-    request = job.request or {}
-    cost = task.get("cost")
-    usage = dict(task.get("usage") or {})
-    usage.setdefault("output_seconds", request.get("duration") or 0)
-    if isinstance(cost, (int, float)):
-        usage["credits"] = cost
-        usage["cost_usd"] = float(cost) * 0.01
-    return {
-        "provider": "bfl",
-        "providerTaskId": task_id,
-        "model": request.get("model") or "flux-3-video",
-        "usage": usage,
-        "videoUrl": stored_url,
-        "coverUrl": stored_cover,
-        "coverThumbnailUrl": stored_cover_thumbnail,
-        "sourceUrl": source_url,
-        "duration": request.get("duration"),
-        "ratio": request.get("ratio"),
-    }
-
-
-async def generate_bfl_flux3_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
-    base, headers = _bfl_config()
-    images = [url.strip() for url in request.image_urls if url.strip()]
-    videos = [url.strip() for url in request.video_urls if url.strip()]
-    if images and videos:
-        raise ProviderRejectedError("FLUX 3 图片关键帧和视频续编不能同时使用")
-    mode = "v2v" if videos else "i2v" if images else "t2v"
-    resolution_map = ((job.request or {}).get("_capabilities") or {}).get("providerResolutionMap") or {}
-    job.idempotency_key = f"{job.id}:flux3:{mode}"
-    headers["Idempotency-Key"] = job.idempotency_key
-    payload: dict[str, Any] = {
-        "mode": mode,
-        "prompt": request.prompt,
-        "aspect_ratio": request.ratio,
-        "duration": request.duration,
-        "resolution": str(resolution_map.get(request.resolution) or "hd"),
-        "version": "latest",
-        "generate_audio": request.generate_audio,
-        "safety_tolerance": 2,
-        "draft": False,
-        "user": job.user_id,
-    }
-    if images:
-        payload["keyframes"] = images
-    elif videos:
-        payload["start_video"] = videos[0]
-    await jobs.record_provider_request(job, payload)
-    await jobs.mark_provider_submitting(job)
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.post(f"{base}/v1/flux-3-video", headers=headers, json=payload)
-        _raise_for_status(response)
-        created = response.json()
-    task_id = str(created.get("id") or "") if isinstance(created, dict) else ""
-    if not task_id:
-        raise ProviderError(f"FLUX 3 提交成功但未返回任务 ID；供应商响应：{_provider_error_body(created)}")
-    polling_url = str(created.get("polling_url") or "")
-    # Persist the task ID even if the provider omitted/returned an unsafe URL;
-    # the submission must remain recoverable without creating another task.
-    await jobs.set_provider_task(job, "bfl-flux3", task_id, idempotency_key=job.idempotency_key)
-    if not polling_url:
-        raise ProviderError("BFL 已接收任务但未返回 polling_url，请按原任务核对，勿重复提交")
-    polling_url = _bfl_polling_url(base, task_id, polling_url)
-    await jobs.set_provider_task(job, "bfl-flux3", task_id, idempotency_key=job.idempotency_key, polling_url=polling_url)
-    return await _store_bfl_flux3_result(job, await _poll_bfl_flux3(base, headers, job))
 
 
 def _h3_aspect_ratio(ratio: str) -> str:
@@ -1945,14 +1721,14 @@ async def _store_video_result_inner(job: Job, task_id: str, data: dict[str, Any]
 
 async def resume_generation(job: Job) -> dict[str, Any]:
     """重启恢复：按已落库的供应商 taskId 续跑轮询，不重复提交任务"""
+    validate_media_job_source(job)
     if not job.provider_task_id:
         raise ProviderError("缺少供应商任务ID，无法恢复")
     if (job.request or {}).get("_provider") == "runninghub":
         return await _store_h3_video_result(job, await _poll_runninghub(job))
     if job.provider == "yinghe-h3" or (job.request or {}).get("_providerModelId") == "MiniMax-H3":
-        provider = str((job.request or {}).get("_provider") or "yinghe")
-        base, headers = _ppio_config() if provider == "ppio" else _video_config()
-        return await _store_direct_h3_result(job, await _poll_direct_h3(base, headers, job, provider=provider))
+        base, headers = _video_config()
+        return await _store_direct_h3_result(job, await _poll_direct_h3(base, headers, job))
     if job.provider == "yinghe-wan" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "wan-native":
         base, headers = _video_config()
         return await _store_wan_result(job, await _poll_wan(base, headers, job))
@@ -1968,19 +1744,14 @@ async def resume_generation(job: Job) -> dict[str, Any]:
     if job.provider in {"toapis-grok", "toapis-viduq3"} or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") in {"grok-toapis", "viduq3-toapis"}:
         base, headers = _toapis_config()
         return await _store_toapis_video_result(job, await _poll_toapis_video(base, headers, job))
-    if job.provider == "bfl-flux3" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "flux3-bfl":
-        base, headers = _bfl_config()
-        return await _store_bfl_flux3_result(job, await _poll_bfl_flux3(base, headers, job))
     if job.kind == "image":
         base, headers = _image_config()
         url, timeout = f"{base}/image/generation/tasks/{job.provider_task_id}", IMAGE_POLL_TIMEOUT_SECONDS
         timeout = _remaining_provider_timeout(job, timeout)
         timeout_error = "gpt-image-2 生成超过10分钟，已判定失败"
     elif job.kind == "video":
-        provider = str((job.request or {}).get("_provider") or "yinghe")
-        base, headers = _ppio_config() if provider == "ppio" else _video_config()
-        path = f"/v3/bytedance-cn/metered/contents/generations/tasks/{job.provider_task_id}" if provider == "ppio" else f"/v3/video/tasks/{job.provider_task_id}"
-        url, timeout = f"{base}{path}", _remaining_video_job_timeout(job)
+        base, headers = _video_config()
+        url, timeout = f"{base}/v3/video/tasks/{job.provider_task_id}", _remaining_video_job_timeout(job)
         timeout_error = "视频生成超过20分钟，已判定失败，请重新生成"
     else:
         raise ProviderError(f"不支持恢复的任务类型：{job.kind}")
@@ -1988,8 +1759,9 @@ async def resume_generation(job: Job) -> dict[str, Any]:
     return await store_provider_result(job, data)
 
 
-async def query_provider_task(kind: str, task_id: str, provider: str | None = None, *, request: dict[str, Any] | None = None) -> dict[str, Any]:
+async def query_provider_task(kind: str, task_id: str, provider: str | None = None) -> dict[str, Any]:
     """单次查询供应商任务状态（管理后台对账用）"""
+    validate_media_provider(provider)
     if provider == "runninghub":
         try:
             return await runninghub_query_task(task_id)
@@ -2017,20 +1789,6 @@ async def query_provider_task(kind: str, task_id: str, provider: str | None = No
     if provider in {"toapis-grok", "toapis-viduq3"}:
         base, headers = _toapis_config()
         return await _query_toapis_video_task(base, headers, task_id)
-    if provider == "bfl-flux3":
-        base, headers = _bfl_config()
-        return await _query_bfl_flux3_task(base, headers, task_id, (request or {}).get("_providerPollingUrl"))
-    if provider == "ppio":
-        base, headers = _ppio_config()
-        async with httpx.AsyncClient(timeout=60) as client:
-            seedance = await client.get(f"{base}/v3/bytedance-cn/metered/contents/generations/tasks/{task_id}", headers=headers)
-            if seedance.status_code != 404:
-                _raise_for_status(seedance)
-                return _unwrap(seedance.json())
-            h3 = await client.get(f"{base}/v3/minimax/v2/query/video_generation/{task_id}", headers=headers)
-            _raise_for_status(h3)
-            body = _unwrap(h3.json())
-            return body.get("task") if isinstance(body.get("task"), dict) else body
     if kind == "image":
         base, headers = _image_config()
         url = f"{base}/image/generation/tasks/{task_id}"
@@ -2045,6 +1803,7 @@ async def query_provider_task(kind: str, task_id: str, provider: str | None = No
 
 async def store_provider_result(job: Job, data: dict[str, Any]) -> dict[str, Any]:
     """供应商成功结果下载落库（重启恢复与对账同步共用）"""
+    validate_media_job_source(job)
     if (job.request or {}).get("_provider") == "runninghub":
         return await _store_h3_video_result(job, data)
     if job.provider == "yinghe-h3" or (job.request or {}).get("_providerModelId") == "MiniMax-H3":
@@ -2059,8 +1818,6 @@ async def store_provider_result(job: Job, data: dict[str, Any]) -> dict[str, Any
         return await _store_gemini_omni_result(job, data)
     if job.provider in {"toapis-grok", "toapis-viduq3"} or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") in {"grok-toapis", "viduq3-toapis"}:
         return await _store_toapis_video_result(job, data)
-    if job.provider == "bfl-flux3" or ((job.request or {}).get("_capabilities") or {}).get("providerProtocol") == "flux3-bfl":
-        return await _store_bfl_flux3_result(job, data)
     task_id = job.provider_task_id or ""
     if job.kind == "image":
         return await _store_image_result(job, task_id, data, {})

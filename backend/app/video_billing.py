@@ -13,13 +13,10 @@ from .models import GenerationJobModel, TokenUsageModel, VideoBillingRecordModel
 TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
 ZERO = Decimal("0")
 YINGHE_SD20_DISCOUNT_RATE = Decimal("0.83")
-PPIO_SD20_DISCOUNT_RATE = Decimal("0.80")
-PPIO_H3_DISCOUNT_RATE = Decimal("0.85")
 TOKEN_BILLED_VIDEO_MODELS = {
     "doubao-seedance-2.0",
     "doubao-seedance-2.0-mini",
     "doubao-seedance-2.0-fast",
-    "doubao-seedance-2.0-ppio",
     "happyhorse-1.1-t2v",
     "happyhorse-1.1-i2v",
     "happyhorse-1.1-r2v",
@@ -35,17 +32,12 @@ SECOND_BILLED_VIDEO_MODELS = {
     "viduq3-turbo",
     "viduq3-pro",
     "viduq3",
-    "flux-3-video",
 }
 
 
 def video_discount_rate(*, model: str, provider: str) -> Decimal:
     if model == "doubao-seedance-2.0" and provider == "yinghe":
         return YINGHE_SD20_DISCOUNT_RATE
-    if model == "doubao-seedance-2.0-ppio" and provider == "ppio":
-        return PPIO_SD20_DISCOUNT_RATE
-    if model == "minimax-h3-ppio" and provider == "ppio":
-        return PPIO_H3_DISCOUNT_RATE
     return Decimal("1")
 
 
@@ -53,10 +45,6 @@ def video_discount_label(*, model: str, provider: str) -> str:
     rate = video_discount_rate(model=model, provider=provider)
     if rate == YINGHE_SD20_DISCOUNT_RATE:
         return "英和 83 折"
-    if rate == PPIO_SD20_DISCOUNT_RATE:
-        return "PPIO 8 折"
-    if rate == PPIO_H3_DISCOUNT_RATE:
-        return "PPIO 85 折"
     return ""
 
 
@@ -136,13 +124,30 @@ async def reconcile_video_job(
     # 财务事实不随项目软删除消失；否则测试清理或用户删项目会造成历史成本漏账。
     if job.kind != "video" or job.status not in TERMINAL_STATUSES:
         return None
+    record = existing_record
     if not preloaded:
+        record = (await db.execute(select(VideoBillingRecordModel).where(VideoBillingRecordModel.generation_job_id == job.id))).scalar_one_or_none()
         usage = (
             await db.execute(select(TokenUsageModel).where(TokenUsageModel.generation_job_id == job.id).order_by(TokenUsageModel.created_at.desc()).limit(1))
         ).scalar_one_or_none()
+    model, provider = _model_provider(job, usage)
+    is_runninghub = provider == "runninghub" or model == "minimax-h3-runninghub"
+    is_token_billed = model in TOKEN_BILLED_VIDEO_MODELS
+    is_second_billed = model in SECOND_BILLED_VIDEO_MODELS or (model == "minimax-h3" and provider == "yinghe-h3")
+    if record is not None:
+        # 模型或关联报价退役后，历史财务快照只读，不能按当前能力重算为零。
+        if not (is_runninghub or is_token_billed or is_second_billed):
+            return record
+        if record.pricing_rule_id:
+            historical_rule = (
+                next((rule for rule in pricing_rules if rule.id == record.pricing_rule_id), None)
+                if pricing_rules is not None
+                else await db.get(VideoPricingRuleModel, record.pricing_rule_id)
+            )
+            if historical_rule is not None and historical_rule.deleted_at is not None:
+                return record
     raw_usage = dict(usage.raw_usage or {}) if usage else dict((job.result or {}).get("usage") or {})
     metrics = _usage_metrics(raw_usage)
-    model, provider = _model_provider(job, usage)
     resolution = str((job.request or {}).get("resolution") or "720p")
     completed_at = job.finished_at or job.updated_at or job.created_at or datetime.now(timezone.utc)
     failed = job.status != "succeeded"
@@ -153,12 +158,12 @@ async def reconcile_video_job(
     amount = ZERO
     rule = None
 
-    if provider == "runninghub" or model == "minimax-h3-runninghub":
+    if is_runninghub:
         billing_status = "excluded"
         usage_type = "runninghub_coins"
         usage_unit = "RH币"
         quantity = _decimal(metrics.get("consumeCoins"))
-    elif model in TOKEN_BILLED_VIDEO_MODELS:
+    elif is_token_billed:
         usage_type = "completion_tokens"
         usage_unit = "Token"
         quantity = _decimal((usage.output_tokens if usage else 0) or metrics.get("completion_tokens") or metrics.get("completionTokens"))
@@ -169,7 +174,7 @@ async def reconcile_video_job(
                 else await _price_rule(db, model=model, provider=provider, resolution=resolution, at=completed_at)
             )
             billing_status = "priced" if rule else "unpriced"
-    elif model in SECOND_BILLED_VIDEO_MODELS or (model == "minimax-h3" and provider == "yinghe-h3") or (model == "minimax-h3-ppio" and provider == "ppio"):
+    elif is_second_billed:
         usage_type = "output_seconds"
         usage_unit = "秒"
         reported_seconds = metrics.get("output_seconds") or metrics.get("outputSeconds")
@@ -191,9 +196,6 @@ async def reconcile_video_job(
     else:
         applied_unit_price = ZERO
 
-    record = existing_record
-    if not preloaded:
-        record = (await db.execute(select(VideoBillingRecordModel).where(VideoBillingRecordModel.generation_job_id == job.id))).scalar_one_or_none()
     if record is None:
         record = VideoBillingRecordModel(id=f"vbill-{uuid.uuid4().hex}", generation_job_id=job.id)
         db.add(record)

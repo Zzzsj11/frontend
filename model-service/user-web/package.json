@@ -1,0 +1,23 @@
+{
+  "name": "model-service-user",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5181",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 5181"
+  },
+  "dependencies": {
+    "vue": "^3.5.40",
+    "pinia": "^4.0.2",
+    "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "vite": "^8.2.0",
+    "typescript": "~6.0.2",
+    "vue-tsc": "^3.3.8",
+    "@types/node": "^24.13.3"
+  }
+}

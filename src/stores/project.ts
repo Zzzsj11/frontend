@@ -413,9 +413,6 @@ export const useProjectStore = defineStore('project', {
         ])
         this.songProjects = projects
         this.digitalHumans = humans
-        // 以系统人物 001 的中性身份参考卡作为统一版式模板；第二张图只提供人物身份。
-        const template = humans.find((h) => h.id === 'dh-system-001')
-        imageGen.setTemplateAvatar(template?.originalAvatar || '')
         this.dhStyles = styles.map((item) => item.name)
         this.dhStyleIds = Object.fromEntries(styles.map((item) => [item.name, item.id]))
         this.systemDhStyles = styles.filter((item) => item.readOnly).map((item) => item.name)
@@ -1516,17 +1513,13 @@ export const useProjectStore = defineStore('project', {
       this.dhGenerating = true
       try {
         const id = nextId('dh')
-        const template = imageGen.getTemplateAvatar()
-        const userRef =
-          input.referenceImage || this.digitalHumans.find((human) => human.readOnly)?.originalAvatar
-        const references = [template, userRef].filter(Boolean) as string[]
         const generated = await imageGen.generateImageAsset(
           '',
           {
-            size: '1344x768',
+            size: '1024x1536',
             quality: 'medium',
             portrait: { description: input.description, style: input.style },
-            ...(references.length ? { image: references } : {}),
+            ...(input.referenceImage ? { image: input.referenceImage } : {}),
           },
           // 任务创建后先留草稿：页面刷新后可据此恢复等待态并补建数字人
           (jobId) =>
@@ -1554,15 +1547,14 @@ export const useProjectStore = defineStore('project', {
       }
     },
 
-    /** 上传自定义数字人：以用户自备头像为参考图生成三视图定妆照后加入资产库（名称、风格必填） */
     async addCustomDigitalHuman(input: {
       name: string
       style: string
       description?: string
-      avatar: string
+      avatar?: string
     }): Promise<DigitalHuman> {
       this.dhGenerating = true
-      this.dhGeneratingPhase = 'uploading'
+      this.dhGeneratingPhase = input.avatar ? 'uploading' : 'generating'
       try {
         let styleId = this.dhStyleIds[input.style]
         if (!styleId) {
@@ -1571,16 +1563,17 @@ export const useProjectStore = defineStore('project', {
           this.dhStyleIds[input.style] = style.id
           if (!this.dhStyles.includes(input.style)) this.dhStyles.push(input.style)
         }
-        const reference = await api.uploadDataUrl(input.avatar, `${nextId('reference')}.jpg`)
+        const reference = input.avatar
+          ? await api.uploadDataUrl(input.avatar, `${nextId('reference')}.jpg`)
+          : undefined
         this.dhGeneratingPhase = 'generating'
-        const template = imageGen.getTemplateAvatar()
         const generated = await imageGen.generateImageAsset(
           '',
           {
-            size: '1344x768',
+            size: '1024x1536',
             quality: 'medium',
             portrait: { description: input.description?.trim() || '', style: input.style },
-            image: template ? [template, reference.url] : reference.url,
+            ...(reference ? { image: reference.url } : {}),
           },
           (jobId) =>
             savePendingDhDraft({
@@ -1710,30 +1703,25 @@ export const useProjectStore = defineStore('project', {
     /** 用（可能已修改的）提示词重新生成数字人形象，成功后本地化存储并替换头像 */
     async regenerateDigitalHumanAvatar(id: string): Promise<void> {
       const dh = this.digitalHumans.find((d) => d.id === id)
-      if (!dh || this.dhRegeneratingId) return
+      if (!dh || dh.readOnly || this.dhRegeneratingId) return
       this.dhRegeneratingId = id
       try {
-        // 重新生成也必须经过服务端中性参考卡模板，不能让历史自由提示词把旧服装、
-        // 职业或年代重新带回人物素材。编辑内容仅作为身份补充描述。
         const identityDescription = (dh.description || '').trim()
-        const template = imageGen.getTemplateAvatar()
         const dhRef = dh.originalAvatar || dh.avatar
-        const references = [template, dhRef].filter(Boolean) as string[]
         const generated = await imageGen.generateImageAsset('', {
-          size: '1344x768',
+          size: '1024x1536',
           quality: 'medium',
           portrait: { description: identityDescription, style: dh.style },
-          ...(references.length ? { image: references } : {}),
+          ...(dhRef ? { image: dhRef } : {}),
+        })
+        await api.updateDigitalHuman(id, {
+          avatar_url: generated.url,
+          avatar_thumbnail_url: generated.thumbnailUrl,
+          avatar_prompt: generated.prompt || '',
         })
         dh.avatar = generated.thumbnailUrl || generated.url
         dh.originalAvatar = generated.url
         dh.avatarPrompt = generated.prompt || ''
-        if (!dh.readOnly)
-          await api.updateDigitalHuman(id, {
-            avatar_url: generated.url,
-            avatar_thumbnail_url: generated.thumbnailUrl,
-            avatar_prompt: generated.prompt || '',
-          })
       } finally {
         this.dhRegeneratingId = null
       }

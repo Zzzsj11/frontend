@@ -1,0 +1,281 @@
+from __future__ import annotations
+
+import asyncio
+import io
+import mimetypes
+import re
+import tempfile
+import uuid
+from pathlib import Path
+from typing import Awaitable, Callable, Protocol
+from urllib.parse import quote, unquote, urljoin, urlparse
+
+import httpx
+from PIL import Image, ImageOps
+
+from .config import settings
+from .network import media_client, public_addresses
+
+
+class Storage(Protocol):
+    async def put_bytes(self, key: str, content: bytes, content_type: str | None = None) -> str: ...
+
+    async def put_file(
+        self,
+        key: str,
+        path: str | Path,
+        content_type: str | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> str: ...
+
+
+def safe_key(category: str, filename: str) -> str:
+    category_parts = []
+    for part in category.replace("\\", "/").split("/"):
+        if not part or part in {".", ".."}:
+            continue
+        clean_part = re.sub(r"[^A-Za-z0-9_-]", "-", part).strip("-")
+        if clean_part:
+            category_parts.append(clean_part)
+    clean_category = "/".join(category_parts) or "misc"
+    clean_name = re.sub(r"[^A-Za-z0-9._-]", "-", Path(filename).name) or uuid.uuid4().hex
+    return f"{clean_category}/{uuid.uuid4().hex[:12]}-{clean_name}"
+
+
+def is_tos_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    allowed = {settings.tos_public_domain.lower()} if settings.tos_public_domain else set()
+    endpoint = settings.tos_endpoint.replace("https://", "").replace("http://", "").strip("/").lower()
+    for bucket in (settings.tos_reference_bucket, settings.tos_video_bucket):
+        if bucket and endpoint:
+            allowed.add(f"{bucket}.{endpoint}")
+    return urlparse(url).scheme == "https" and host in allowed
+
+
+def is_user_owned_tos_url(url: str, user_id: str) -> bool:
+    """Accept only TOS objects stored below the authenticated user's prefix."""
+    if not is_tos_url(url):
+        return False
+    path = unquote(urlparse(url).path).replace("\\", "/")
+    return f"/users/{user_id}/" in f"/{path.lstrip('/')}"
+
+
+class TosStorage:
+    def __init__(self) -> None:
+        import tos
+
+        try:
+            self.client = tos.TosClientV2(
+                settings.tos_access_key,
+                settings.tos_secret_key,
+                settings.tos_endpoint,
+                settings.tos_region,
+                request_timeout=settings.tos_request_timeout_seconds,
+                socket_timeout=settings.tos_socket_timeout_seconds,
+                max_retry_count=settings.tos_max_retry_count,
+            )
+        except TypeError:
+            self.client = tos.TosClientV2(settings.tos_access_key, settings.tos_secret_key, settings.tos_endpoint)
+
+    @staticmethod
+    def _bucket_for(key: str) -> tuple[str, str]:
+        if key.startswith("videos/") or "/videos/" in key:
+            bucket = settings.tos_video_bucket or settings.tos_reference_bucket
+            prefix = settings.tos_video_prefix
+        else:
+            bucket = settings.tos_reference_bucket or settings.tos_video_bucket
+            prefix = settings.tos_reference_prefix
+        return bucket, f"{prefix}/{key}" if prefix else key
+
+    @staticmethod
+    def _public_url(bucket: str, key: str) -> str:
+        safe = quote(key, safe="/-_.~")
+        if settings.tos_public_domain:
+            return f"https://{settings.tos_public_domain}/{safe}"
+        return f"https://{bucket}.{settings.tos_endpoint.strip('/')}/{safe}"
+
+    async def put_bytes(self, key: str, content: bytes, content_type: str | None = None) -> str:
+        import asyncio
+
+        bucket, object_key = self._bucket_for(key)
+        stream = io.BytesIO(content)
+
+        def upload() -> None:
+            try:
+                self.client.put_object(
+                    bucket,
+                    object_key,
+                    content_length=len(content),
+                    content_type=content_type or "application/octet-stream",
+                    content=stream,
+                )
+            except TypeError:
+                stream.seek(0)
+                self.client.put_object(bucket, object_key, len(content), content_type or "application/octet-stream", content=stream)
+
+        await asyncio.to_thread(upload)
+        return self._public_url(bucket, object_key)
+
+    async def put_file(
+        self,
+        key: str,
+        path: str | Path,
+        content_type: str | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> str:
+        bucket, object_key = self._bucket_for(key)
+        file_path = str(path)
+
+        def upload() -> None:
+            # TOS SDK 的 data_transfer_listener 为 (consumed, total, rw_once, type) 同步回调，
+            # 统一包装成 (consumed, total) 供上层估算上传进度
+            listener = None
+            if progress_callback:
+                listener = lambda consumed, total, _rw, _type: progress_callback(consumed, total)  # noqa: E731
+            # 大文件使用 SDK 的分片并发上传；相比 put_object_from_file 单路上传，能更充分利用带宽。
+            self.client.upload_file(
+                bucket,
+                object_key,
+                file_path,
+                content_type=content_type or "application/octet-stream",
+                part_size=settings.export_upload_part_size_mb * 1024 * 1024,
+                task_num=settings.export_upload_concurrency,
+                enable_checkpoint=False,
+                data_transfer_listener=listener,
+            )
+
+        await asyncio.to_thread(upload)
+        return self._public_url(bucket, object_key)
+
+
+def get_storage() -> Storage:
+    if settings.storage_backend != "tos":
+        raise RuntimeError("持久媒体仅支持 TOS，请设置 STORAGE_BACKEND=tos")
+    required = (
+        settings.tos_endpoint,
+        settings.tos_region,
+        settings.tos_access_key,
+        settings.tos_secret_key,
+        settings.tos_reference_bucket or settings.tos_video_bucket,
+    )
+    if not all(required):
+        raise RuntimeError("TOS 配置不完整")
+    return TosStorage()
+
+
+async def import_remote(url: str, category: str, filename: str | None = None) -> str:
+    with tempfile.TemporaryDirectory(prefix="mvagent-import-") as temp_dir:
+        target = Path(temp_dir) / "remote.bin"
+        response_url, content_type, _size = await download_public_url_to_path(url, target)
+        guessed = filename or Path(httpx.URL(response_url).path).name or "asset.bin"
+        if "." not in guessed:
+            guessed += mimetypes.guess_extension(content_type) or ""
+        return await get_storage().put_file(safe_key(category, guessed), target, content_type)
+
+
+def make_image_thumbnail(content: bytes, max_size: tuple[int, int] = (640, 640)) -> bytes:
+    """Create a lightweight JPEG preview while preserving the complete image aspect ratio."""
+    with Image.open(io.BytesIO(content)) as source:
+        image = ImageOps.exif_transpose(source).convert("RGB")
+        image.thumbnail(max_size, Image.Resampling.LANCZOS)
+        output = io.BytesIO()
+        image.save(output, format="JPEG", quality=78, optimize=True, progressive=True)
+        return output.getvalue()
+
+
+async def put_image_with_thumbnail(key: str, content: bytes, content_type: str | None = None) -> tuple[str, str]:
+    storage = get_storage()
+    original_url = await storage.put_bytes(key, content, content_type)
+    thumbnail_key = f"{key.rsplit('.', 1)[0]}-thumbnail.jpg"
+    thumbnail_url = await storage.put_bytes(thumbnail_key, make_image_thumbnail(content), "image/jpeg")
+    return original_url, thumbnail_url
+
+
+async def import_remote_image(url: str, category: str, filename: str | None = None) -> tuple[str, str]:
+    response_url, content, content_type = await download_public_url(url)
+    guessed = filename or Path(httpx.URL(response_url).path).name or "image.png"
+    return await put_image_with_thumbnail(safe_key(category, guessed), content, content_type)
+
+
+_HTTP_PUBLIC_URL_ALLOWLIST = frozenset({"store.vod-qcloud.com"})
+
+
+async def _validate_public_url(url: str) -> None:
+    parsed = urlparse(url)
+    hostname = (parsed.hostname or "").lower()
+    scheme_allowed = parsed.scheme == "https" or (parsed.scheme == "http" and hostname in _HTTP_PUBLIC_URL_ALLOWLIST)
+    if not scheme_allowed or not hostname or parsed.username or parsed.password:
+        raise ValueError("仅支持不含凭证的 HTTPS 公网地址（受信任供应商域名除外）")
+    default_port = 443 if parsed.scheme == "https" else 80
+    await public_addresses(hostname, parsed.port or default_port)
+
+
+async def download_public_url(url: str, max_bytes: int = 500 * 1024 * 1024) -> tuple[str, bytes, str]:
+    current = url
+    async with media_client() as client:
+        for _ in range(4):
+            await _validate_public_url(current)
+            async with client.stream("GET", current) as response:
+                if response.is_redirect:
+                    location = response.headers.get("location")
+                    if not location:
+                        response.raise_for_status()
+                    current = urljoin(current, location)
+                    continue
+                response.raise_for_status()
+                declared = int(response.headers.get("content-length") or 0)
+                if declared > max_bytes:
+                    raise ValueError("远程文件超过允许大小")
+                chunks, size = [], 0
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > max_bytes:
+                        raise ValueError("远程文件超过允许大小")
+                    chunks.append(chunk)
+                content_type = response.headers.get("content-type", "application/octet-stream").split(";", 1)[0]
+                return current, b"".join(chunks), content_type
+    raise ValueError("远程地址重定向次数过多")
+
+
+async def download_public_url_to_path(
+    url: str,
+    destination: str | Path,
+    max_bytes: int = 500 * 1024 * 1024,
+    progress_callback: Callable[[int, int | None], Awaitable[None]] | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> tuple[str, str, int]:
+    """Stream a public HTTPS object to disk instead of retaining it in memory."""
+    current = url
+    target = Path(destination)
+    owned_client = client is None
+    active_client = client or media_client()
+    try:
+        for _ in range(4):
+            await _validate_public_url(current)
+            async with active_client.stream("GET", current) as response:
+                if response.is_redirect:
+                    location = response.headers.get("location")
+                    if not location:
+                        response.raise_for_status()
+                    current = urljoin(current, location)
+                    continue
+                response.raise_for_status()
+                declared = int(response.headers.get("content-length") or 0)
+                if declared > max_bytes:
+                    raise ValueError("远程文件超过允许大小")
+                size = 0
+                total = declared or None
+                with target.open("wb") as output:
+                    async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
+                        size += len(chunk)
+                        if size > max_bytes:
+                            raise ValueError("远程文件超过允许大小")
+                        output.write(chunk)
+                        if progress_callback:
+                            await progress_callback(size, total)
+                content_type = response.headers.get("content-type", "application/octet-stream").split(";", 1)[0]
+                return current, content_type, size
+        raise ValueError("远程地址重定向次数过多")
+    finally:
+        if owned_client:
+            await active_client.aclose()

@@ -213,16 +213,9 @@ const submit = async () => {
       const providerCode = videoProviderForModel(request.videoModel)
       const providerBalance =
         providerCode === 'runninghub' ? balance : (balance.providers?.[providerCode] ?? balance)
-      const keyRemaining =
-        providerCode === 'ppio'
-          ? providerBalance.balance == null
-            ? null
-            : Number(providerBalance.balance)
-          : providerBalance.key?.remaining
+      const keyRemaining = providerBalance.key?.remaining
       const keyLabel =
-        providerCode === 'ppio'
-          ? 'PPIO'
-          : providerBalance.key?.keyName || providerBalance.key?.keyMasked || '当前视频 Key'
+        providerBalance.key?.keyName || providerBalance.key?.keyMasked || '当前视频 Key'
       const unlimited = Boolean(
         providerCode === 'yinghe' &&
         providerBalance.available &&

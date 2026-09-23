@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compress system character sheets and upload originals plus thumbnails to TOS."""
+"""Upload original-resolution system character headshots and portrait thumbnails to TOS."""
 
 from __future__ import annotations
 
@@ -20,10 +20,11 @@ load_dotenv(ROOT / "backend" / ".env")
 from app.storage import get_storage  # noqa: E402
 
 
-def jpeg_bytes(path: Path, size: tuple[int, int], quality: int) -> bytes:
+def jpeg_bytes(path: Path, size: tuple[int, int] | None, quality: int) -> bytes:
     with Image.open(path) as source:
         image = ImageOps.exif_transpose(source).convert("RGB")
-        image.thumbnail(size, Image.Resampling.LANCZOS)
+        if size is not None:
+            image.thumbnail(size, Image.Resampling.LANCZOS)
         output = io.BytesIO()
         image.save(output, format="JPEG", quality=quality, optimize=True, progressive=True)
         return output.getvalue()
@@ -32,8 +33,8 @@ def jpeg_bytes(path: Path, size: tuple[int, int], quality: int) -> bytes:
 async def upload_assets(assets: list[tuple[str, Path]]) -> None:
     storage = get_storage()
     for asset_code, path in assets:
-        original = jpeg_bytes(path, (1600, 900), 88)
-        thumbnail = jpeg_bytes(path, (640, 360), 76)
+        original = jpeg_bytes(path, None, 88)
+        thumbnail = jpeg_bytes(path, (320, 480), 76)
         await storage.put_bytes(f"system/digital-humans/{asset_code}.jpg", original, "image/jpeg")
         await storage.put_bytes(f"system/digital-humans/thumbnails/{asset_code}.jpg", thumbnail, "image/jpeg")
         print(f"uploaded {asset_code}: original={len(original)} thumbnail={len(thumbnail)}")
@@ -44,7 +45,7 @@ def directory_assets(source: Path) -> list[tuple[str, Path]]:
     expected = {f"{index:03d}" for index in range(1, 33)}
     found = {path.stem for path in files}
     if found != expected:
-        raise SystemExit(f"Expected character sheets 001–032, got {sorted(found)}")
+        raise SystemExit(f"Expected character headshots 001–032, got {sorted(found)}")
     return [(path.stem, path) for path in files]
 
 
@@ -60,8 +61,8 @@ def explicit_assets(values: list[str]) -> list[tuple[str, Path]]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("source", nargs="?", type=Path, help="Directory containing 001.png through 032.png")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source", nargs="?", type=Path, help="Directory containing headshots 001.png through 032.png")
     parser.add_argument("--asset", action="append", default=[], help="Upload one asset as CODE=/path/to/image; repeat as needed")
     args = parser.parse_args()
     if bool(args.source) == bool(args.asset):

@@ -1,0 +1,28 @@
+import { chromium } from '@playwright/test'
+import fs from 'node:fs'
+const env=Object.fromEntries(fs.readFileSync(new URL('../.env',import.meta.url),'utf8').split('\n').filter(x=>x.includes('=')).map(x=>{let i=x.indexOf('=');return [x.slice(0,i),x.slice(i+1)]}))
+const browser=await chromium.launch({headless:true})
+const page=await browser.newPage({viewport:{width:1440,height:1000}})
+const errors=[];page.on('pageerror',e=>errors.push(e.message))
+try {
+ await page.goto('http://127.0.0.1:5180')
+ await page.getByLabel('用户名').fill(env.ADMIN_USERNAME)
+ await page.getByLabel('密码',{exact:true}).fill(env.ADMIN_PASSWORD)
+ await page.getByRole('button',{name:'登录',exact:true}).click()
+ await page.getByRole('heading',{name:'任务与用量'}).waitFor()
+ await page.getByRole('button',{name:'模型管理',exact:true}).click()
+ await page.getByRole('cell',{name:'gemini-omni-flash-preview',exact:false}).waitFor()
+ await page.screenshot({path:new URL('../.runtime/admin-models.png',import.meta.url).pathname,fullPage:true})
+ await page.getByRole('button',{name:'调用方密钥',exact:true}).click()
+ await page.getByLabel('调用方名称').fill('browser-test')
+ await page.getByText('仅允许 Agent 测试',{exact:true}).click()
+ await page.getByRole('button',{name:'创建 API Key',exact:true}).click()
+ await page.getByText('新密钥仅展示一次，请保存至调用方的 Secret。').waitFor()
+ await page.getByRole('button',{name:'已保存，隐藏'}).click()
+ await page.getByRole('button',{name:'操作审计',exact:true}).click()
+ await page.getByRole('cell',{name:'client.create',exact:true}).first().waitFor()
+ await page.getByRole('button',{name:'退出登录'}).click()
+ await page.getByRole('button',{name:'登录',exact:true}).waitFor()
+ if(errors.length)throw Error(errors.join('\n'))
+ console.log('Browser login, model catalog, client creation, audit and logout passed')
+} finally { await browser.close() }

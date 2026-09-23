@@ -111,10 +111,10 @@ def compile_h3_prompt(payload: VideoGenerationCreate, *, identity_reference_indi
     for index in range(1, len(payload.image_urls) + 1):
         if index in identity_indices:
             definitions.append(
-                f"<Subject {index}> is an identity-only character card supplied by <Picture {index}>; its clothing, gray background, multi-view layout, era, and occupation are not target-video references."
+                f"<Subject {index}> is an identity-only character card supplied by <Picture {index}>; its clothing, gray background, historical multi-view layout, era, and occupation are not target-video references."
             )
             retention.append(
-                f"<Subject {index}> (appears where required): identity_only - preserve facial features, face shape, skin tone, apparent age, hairstyle, and body proportions only; replace all card clothing with the wardrobe required by the creative direction."
+                f"<Subject {index}> (appears where required): identity_only - preserve facial features, face shape, skin tone, apparent age, and hairstyle only from the head-and-shoulders portrait; do not infer full-body proportions; never adultify children; preserve cartoon style for cartoon characters; replace all card clothing with the wardrobe required by the creative direction."
             )
         else:
             definitions.append(f"<Subject {index}> is the visible identity, subject, scene, composition, and style supplied by <Picture {index}>.")

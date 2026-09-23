@@ -139,8 +139,6 @@ class Settings:
     yseeai_api_key: str = _read_provider_value("YSEEAI_API_KEY")
     toapis_api_base_url: str = os.getenv("TOAPIS_API_BASE_URL", "https://toapis.cn").rstrip("/")
     toapis_api_key: str = _read_provider_value("TOAPIS_API_KEY")
-    bfl_api_base_url: str = os.getenv("BFL_API_BASE_URL", "https://api.bfl.ai").rstrip("/")
-    bfl_api_key: str = _read_provider_value("BFL_API_KEY")
     # 虚拟资产（真人人脸素材）注册用的分组；资产创建后返回 asset:// 链接，生成视频时
     # 传 asset:// 引用可绕过上游对真实人物的直接检测（原始 TOS 路径保留用于展示）
     # V3 素材组（POST /v3/asset-groups 创建，按 API Key 所属账户隔离）
@@ -157,11 +155,6 @@ class Settings:
     business_rate_limit_cooldown_seconds: int = max(60, int(os.getenv("BUSINESS_RATE_LIMIT_COOLDOWN_SECONDS", "60")))
     # 供应商公布上限为 60 次/分钟；应用只使用 45 次，给人工排查和供应商口径偏差留余量。
     business_api_rate_limit_per_minute: int = max(1, min(55, int(os.getenv("BUSINESS_API_RATE_LIMIT_PER_MINUTE", "45"))))
-    ppio_api_base_url: str = os.getenv("PPIO_API_BASE_URL", "https://api.ppio.com").rstrip("/")
-    ppio_api_key: str = _read_provider_value("PPIO_API_KEY")
-    ppio_balance_url: str = os.getenv("PPIO_BALANCE_URL", "https://api.ppio.com/openapi/v1/billing/balance/detail")
-    ppio_model_balance_url: str = os.getenv("PPIO_MODEL_BALANCE_URL", "https://api.ppio.com/v3/user")
-    ppio_balance_timeout: float = float(os.getenv("PPIO_BALANCE_TIMEOUT", "10"))
     storage_backend: str = os.getenv("STORAGE_BACKEND", "tos").lower()
     tos_endpoint: str = os.getenv("TOS_ENDPOINT", "")
     tos_region: str = os.getenv("TOS_REGION", "")

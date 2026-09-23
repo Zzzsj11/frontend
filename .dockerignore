@@ -7,3 +7,12 @@ backend/.env
 backend/.provider_config.py
 backend/data
 test-artifacts
+# Independent service has its own four build contexts; never copy its private runtime into MV.
+model-service
+**/.env
+**/.env.*
+**/.secrets
+**/.runtime
+output
+.codex-build
+.codex-finalizer

@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 
+from . import model_gateway
 from .config import settings
 
 MODES: tuple[str, ...] = ("std", "pro", "4k")  # 720P / 1080P / 4K
@@ -23,7 +24,13 @@ class KlingError(RuntimeError):
     pass
 
 
+def _base_url() -> str:
+    return model_gateway.route("yinghe")[0] if model_gateway.routed("yinghe") else settings.kling_api_base_url
+
+
 def _headers() -> dict[str, str]:
+    if model_gateway.routed("yinghe"):
+        return model_gateway.request_headers()
     if not settings.kling_api_key:
         raise KlingError("Kling API Key 未配置，请设置 KLING_API_KEY 或 VIDEO_API_KEY/共享 AIGC_TOKEN")
     return {"Content-Type": "application/json", "Authorization": f"Bearer {settings.kling_api_key}"}
@@ -110,7 +117,7 @@ def _unwrap(body: dict[str, Any]) -> dict[str, Any]:
 async def create_task(**kwargs: Any) -> dict[str, Any]:
     """创建生成任务，返回 {taskId, status}。"""
     payload = build_task_payload(**kwargs)
-    url = f"{settings.kling_api_base_url}/video/generation/tasks"
+    url = f"{_base_url()}/video/generation/tasks"
     try:
         async with httpx.AsyncClient(timeout=settings.kling_timeout) as client:
             response = await client.post(url, headers=_headers(), json=payload)
@@ -132,7 +139,7 @@ async def query_task(task_id: str) -> dict[str, Any]:
     task_id = task_id.strip()
     if not task_id:
         raise KlingError("taskId 不能为空")
-    url = f"{settings.kling_api_base_url}/video/generation/tasks/{task_id}"
+    url = f"{_base_url()}/video/generation/tasks/{task_id}"
     try:
         async with httpx.AsyncClient(timeout=settings.kling_timeout) as client:
             response = await client.get(url, headers=_headers())

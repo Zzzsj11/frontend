@@ -6,7 +6,6 @@ import logging
 import time
 from collections import deque
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
 from email.utils import parsedate_to_datetime
 from typing import Any
 
@@ -25,13 +24,7 @@ _business_cooldown_until = 0.0
 _local_business_request_times: deque[float] = deque()
 _local_business_rate_lock = asyncio.Lock()
 _lock = asyncio.Lock()
-_ppio_cache: dict[str, Any] | None = None
-_ppio_cache_expires_at = 0.0
-_ppio_cache_cached_at = 0.0
-_ppio_lock = asyncio.Lock()
 logger = logging.getLogger(__name__)
-PPIO_BALANCE_UNIT_SCALE = Decimal("10000")
-PPIO_MODEL_CREDIT_UNIT_SCALE = Decimal("1000000")
 
 
 class BusinessApiRateLimitedError(ValueError):
@@ -65,30 +58,6 @@ def _to_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
-def _ppio_amount_in_yuan(value: Any) -> Decimal | None:
-    """PPIO 余额接口金额单位为 1/10000 元；业务与前端统一使用人民币元。"""
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        return Decimal(str(value)) / PPIO_BALANCE_UNIT_SCALE
-    except (InvalidOperation, ValueError, TypeError):
-        return None
-
-
-def _ppio_model_credit_in_yuan(value: Any) -> Decimal | None:
-    """模型 API 的 credit_balance 使用百万分之一元精度。"""
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        return Decimal(str(value)) / PPIO_MODEL_CREDIT_UNIT_SCALE
-    except (InvalidOperation, ValueError, TypeError):
-        return None
-
-
-def _decimal_text(value: Decimal) -> str:
-    return format(value.normalize(), "f")
 
 
 def unavailable_balance(message: str = "余额暂不可用") -> dict[str, Any]:
@@ -317,77 +286,10 @@ async def query_business_balance(*, force: bool = False) -> dict[str, Any]:
         return dict(result)
 
 
-async def query_ppio_balance(*, force: bool = False) -> dict[str, Any]:
-    global _ppio_cache, _ppio_cache_expires_at, _ppio_cache_cached_at
-    if not settings.ppio_api_key:
-        return unavailable_balance("未配置 PPIO_API_KEY")
-    now = time.monotonic()
-    if _cache_is_usable(_ppio_cache, _ppio_cache_expires_at, _ppio_cache_cached_at, force=force, now=now):
-        return dict(_ppio_cache)
-    async with _ppio_lock:
-        now = time.monotonic()
-        if _cache_is_usable(_ppio_cache, _ppio_cache_expires_at, _ppio_cache_cached_at, force=force, now=now):
-            return dict(_ppio_cache)
-        try:
-            async with httpx.AsyncClient(timeout=settings.ppio_balance_timeout) as client:
-                headers = {"Authorization": f"Bearer {settings.ppio_api_key}", "Content-Type": "application/json"}
-                account_response = await client.get(settings.ppio_balance_url, headers=headers)
-                account_response.raise_for_status()
-                data = account_response.json()
-                model_response = await client.get(settings.ppio_model_balance_url, headers=headers)
-                model_response.raise_for_status()
-                model_data = model_response.json()
-            raw_available = data.get("availableBalance")
-            account_available = _ppio_amount_in_yuan(raw_available)
-            if account_available is None:
-                raise ValueError("PPIO 余额接口未返回 availableBalance")
-            raw_model_credit = model_data.get("credit_balance")
-            model_credit = _ppio_model_credit_in_yuan(raw_model_credit)
-            if model_credit is None:
-                raise ValueError("PPIO 模型余额接口未返回 credit_balance")
-            available = account_available + model_credit
-            raw_details = {
-                "cashBalance": data.get("cashBalance"),
-                "creditLimit": data.get("creditLimit"),
-                "pendingCharges": data.get("pendingCharges"),
-                "outstandingInvoices": data.get("outstandingInvoices"),
-            }
-            details = {key: _ppio_amount_in_yuan(value) for key, value in raw_details.items()}
-            result = {
-                "available": True,
-                "rawBalance": str(raw_available),
-                "balance": _decimal_text(available),
-                "balanceDisplay": f"{available:.2f}",
-                "currency": "CNY",
-                "unitScale": int(PPIO_BALANCE_UNIT_SCALE),
-                "modelCreditUnitScale": int(PPIO_MODEL_CREDIT_UNIT_SCALE),
-                "updatedAt": datetime.now(UTC).isoformat(),
-                "message": None,
-                "rawDetails": raw_details,
-                "rawModelCreditBalance": str(raw_model_credit),
-                "details": {
-                    **{key: float(value) if value is not None else None for key, value in details.items()},
-                    "accountAvailableBalance": float(account_available),
-                    "modelCreditBalance": float(model_credit),
-                },
-            }
-        except (httpx.HTTPError, ValueError, TypeError) as exc:
-            result = unavailable_balance(str(exc) or "PPIO 余额服务请求失败")
-        _ppio_cache = result
-        _ppio_cache_cached_at = time.monotonic()
-        _ppio_cache_expires_at = time.monotonic() + settings.business_balance_cache_seconds
-        return dict(result)
-
-
 async def query_provider_balances(*, force: bool = False, providers: set[str] | None = None) -> dict[str, Any]:
-    requested = providers or {"yinghe", "ppio"}
-    yinghe_task = query_business_balance(force=force) if "yinghe" in requested else None
-    ppio_task = query_ppio_balance(force=force) if "ppio" in requested else None
-    results = await asyncio.gather(*(task for task in (yinghe_task, ppio_task) if task is not None))
-    iterator = iter(results)
-    yinghe = next(iterator) if yinghe_task is not None else unavailable_balance("本次未查询英和余额")
-    ppio = next(iterator) if ppio_task is not None else unavailable_balance("本次未查询 PPIO 余额")
-    return {"providers": {"yinghe": yinghe, "ppio": ppio}, **yinghe}
+    requested = providers or {"yinghe"}
+    yinghe = await query_business_balance(force=force) if "yinghe" in requested else unavailable_balance("本次未查询英和余额")
+    return {"providers": {"yinghe": yinghe}, **yinghe}
 
 
 def estimate_item_cost(item: Any) -> tuple[str, float]:
@@ -413,16 +315,14 @@ async def ensure_video_batch_balance(items: list[Any]) -> dict[str, Any]:
         balance = balances["providers"][provider]
         if provider == "yinghe" and balance.get("keyError"):
             raise ValueError(f"英和子账号 Key 余额查询失败（{balance['keyError']}），请稍后再试")
-        raw_available = (balance.get("key") or {}).get("remaining") if provider == "yinghe" else balance.get("balance")
+        raw_available = (balance.get("key") or {}).get("remaining")
         available = _to_float(raw_available) if balance.get("available") else None
         if available is None:
-            label = "PPIO" if provider == "ppio" else "英和子账号 Key"
             reason = balance.get("keyError") or balance.get("message")
             detail = f"（{reason}）" if reason else ""
-            raise ValueError(f"{label} 余额查询失败{detail}，请稍后再试")
+            raise ValueError(f"英和子账号 Key 余额查询失败{detail}，请稍后再试")
         if available + 1e-9 < estimated:
-            label = "PPIO" if provider == "ppio" else "英和子账号 Key"
-            raise ValueError(f"{label} 余额不足，请先完成充值或提升余额上限后再试")
+            raise ValueError("英和子账号 Key 余额不足，请先完成充值或提升余额上限后再试")
         available_by_provider[provider] = available
     estimated_total = round(sum(estimates.values()), 2)
     return {"estimatedCost": estimated_total, "availableBalance": min(available_by_provider.values(), default=-1.0), "providerEstimates": estimates}

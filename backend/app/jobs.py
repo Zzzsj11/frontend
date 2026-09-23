@@ -296,7 +296,9 @@ class JobManager:
         job.status, job.progress, job.phase = "running", 5, "executing"
         await self._persist(job)
         try:
-            job.result = await runner(job)
+            from .model_gateway import run_with_context
+
+            job.result = await run_with_context(job, runner)
             job.progress, job.status, job.phase = 100, "succeeded", "succeeded"
             await self._persist_asset(job)
         except JobExpiredError:
@@ -490,21 +492,17 @@ class JobManager:
                 model.request = job.request
                 await session.commit()
 
-    async def set_provider_task(self, job: Job, provider: str, task_id: str, *, idempotency_key: str | None = None, polling_url: str | None = None) -> None:
+    async def set_provider_task(self, job: Job, provider: str, task_id: str, *, idempotency_key: str | None = None) -> None:
         """供应商 taskId 即时落库：重启恢复与后台对账都依赖它，成功失败都要保留"""
         job.provider, job.provider_task_id, job.phase = provider, task_id, "provider_running"
         if idempotency_key:
             job.idempotency_key = idempotency_key
-        if polling_url:
-            job.request = {**(job.request or {}), "_providerPollingUrl": polling_url}
         job.updated_at = time.time()
         job.provider_submitted_at = job.updated_at
         async with session_factory() as session:
             model = await session.get(GenerationJobModel, job.id)
             if model:
                 model.provider, model.provider_task_id = job.provider, job.provider_task_id
-                if polling_url:
-                    model.request = job.request
                 model.idempotency_key = job.idempotency_key
                 model.phase = job.phase
                 model.provider_submitted_at = utcnow()

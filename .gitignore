@@ -64,3 +64,8 @@ test-artifacts/verify-*.png
 test-artifacts/h3-*-comparison.html
 # 本地并发压测原始采样；正式结论固化到 docs/reports
 test-artifacts/load-monitor/
+
+# 本地 Agent 产物与批量生成输出（不随仓库发布）
+/.codex-build/
+/.codex-finalizer/
+/output/

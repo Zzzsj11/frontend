@@ -32,21 +32,23 @@ describe('generation model labels', () => {
   it('recognizes both the retained RunningHub model and direct H3 model', () => {
     expect(isH3VideoModel('minimax-h3-runninghub')).toBe(true)
     expect(isH3VideoModel('minimax-h3')).toBe(true)
-    expect(isH3VideoModel('minimax-h3-ppio')).toBe(true)
     expect(isH3VideoModel('doubao-seedance-2.0')).toBe(false)
   })
 
-  it('sorts video models by Yinghe, PPIO, ToAPIs, RunningHub, then other providers', () => {
+  it('sorts video models by Yinghe, ToAPIs, RunningHub, then other providers', () => {
     expect(
       sortVideoModelOptions([
-        { value: 'flux-3-video', label: 'FLUX 3', capabilities: { providerCode: 'bfl' } },
+        {
+          value: 'veo-3.1-generate-preview',
+          label: 'Veo 3.1（英和海外）',
+          capabilities: { providerCode: 'yseeai' },
+        },
         {
           value: 'minimax-h3-runninghub',
           label: 'H3',
           capabilities: { providerCode: 'runninghub' },
         },
         { value: 'viduq3-pro', label: 'Vidu Q3 Pro', capabilities: { providerCode: 'toapis' } },
-        { value: 'minimax-h3-ppio', label: 'H3', capabilities: { providerCode: 'ppio' } },
         {
           value: 'doubao-seedance-2.0',
           label: 'SD2.0',
@@ -55,10 +57,9 @@ describe('generation model labels', () => {
       ]).map((option) => option.value),
     ).toEqual([
       'doubao-seedance-2.0',
-      'minimax-h3-ppio',
       'viduq3-pro',
       'minimax-h3-runninghub',
-      'flux-3-video',
+      'veo-3.1-generate-preview',
     ])
   })
 
@@ -68,8 +69,8 @@ describe('generation model labels', () => {
       0,
       VIDEO_MODEL_OPTIONS.length,
       {
-        value: 'minimax-h3-ppio',
-        label: 'H3（PPIO）',
+        value: 'minimax-h3',
+        label: 'H3（英和）',
         capabilities: { resolutionLabels: { '720p': '768P' } },
       },
       {
@@ -78,9 +79,12 @@ describe('generation model labels', () => {
         capabilities: { resolutionLabels: { '720p': '736P' } },
       },
     )
-    expect(videoResolutionLabel('minimax-h3-ppio', '720p')).toBe('768P')
-    expect(videoResolutionLabel('minimax-h3-runninghub', '720p')).toBe('736P')
-    expect(videoResolutionLabel('minimax-h3-ppio', '480p')).toBe('480P')
-    VIDEO_MODEL_OPTIONS.splice(0, VIDEO_MODEL_OPTIONS.length, ...original)
+    try {
+      expect(videoResolutionLabel('minimax-h3', '720p')).toBe('768P')
+      expect(videoResolutionLabel('minimax-h3-runninghub', '720p')).toBe('736P')
+      expect(videoResolutionLabel('minimax-h3', '480p')).toBe('480P')
+    } finally {
+      VIDEO_MODEL_OPTIONS.splice(0, VIDEO_MODEL_OPTIONS.length, ...original)
+    }
   })
 })

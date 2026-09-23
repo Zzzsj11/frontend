@@ -17,7 +17,7 @@ from .database import close_database, init_database, session_factory
 from .domain import _run_material_export, run_storyboard_job
 from .jobs import Job, jobs
 from .models import GenerationJobModel, ProjectTaskModel, WorkerInstanceModel, utcnow
-from .providers import generate_image, generate_video, resume_generation
+from .providers import ProviderError, generate_image, generate_video, resume_generation, validate_media_job_source
 from .redis_store import close_redis, wait_for_worker_wakeup
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
 
@@ -34,6 +34,20 @@ def _job_from_model(model: GenerationJobModel) -> Job:
     return jobs._from_model(model)
 
 
+def _reject_unsupported_media_job(model: GenerationJobModel) -> bool:
+    if model.kind not in {"image", "video"}:
+        return False
+    try:
+        validate_media_job_source(model)
+    except ProviderError as exc:
+        model.status, model.phase = "failed", "manual_review"
+        model.error = str(exc)
+        model.finished_at = utcnow()
+        model.worker_id = model.heartbeat_at = model.lease_expires_at = None
+        return True
+    return False
+
+
 async def _claim(kinds: tuple[str, ...], providers: tuple[str, ...], worker_id: str = "test-worker") -> Job | None:
     async with session_factory() as session:
         query = (
@@ -48,7 +62,8 @@ async def _claim(kinds: tuple[str, ...], providers: tuple[str, ...], worker_id: 
             .limit(100)
         )
         rows = list((await session.execute(query)).scalars())
-        candidates = [row for row in rows if not providers or str((row.request or {}).get("_provider") or "internal") in providers]
+        supported = [row for row in rows if not _reject_unsupported_media_job(row)]
+        candidates = [row for row in supported if not providers or str((row.request or {}).get("_provider") or "internal") in providers]
         task_ids = {row.project_task_id for row in candidates if row.project_task_id}
         active_by_task: dict[str, int] = {}
         if task_ids:
@@ -74,6 +89,7 @@ async def _claim(kinds: tuple[str, ...], providers: tuple[str, ...], worker_id: 
             default=None,
         )
         if model is None:
+            await session.commit()
             return None
         # Claim ownership without starting the execution clock. A model-level
         # semaphore (for example H3=2) may still keep this job waiting; the
@@ -110,6 +126,9 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
             ).scalars()
         )
         for model in rows:
+            if _reject_unsupported_media_job(model):
+                failed += 1
+                continue
             provider = str((model.request or {}).get("_provider") or "internal")
             if providers and provider not in providers:
                 continue

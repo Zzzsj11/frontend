@@ -14,6 +14,7 @@ from typing import Any
 
 import httpx
 
+from . import model_gateway
 from .config import settings
 
 # 工作流节点 ID 映射（来源：YZ金鱼-MiniMax H3超级多合一工作流-官方版_api.json）
@@ -133,10 +134,23 @@ class RunningHubError(RuntimeError):
     pass
 
 
+def _base_url() -> str:
+    if model_gateway.routed("runninghub"):
+        return model_gateway.route("runninghub")[0] + "/openapi/v2"
+    return settings.runninghub_base_url
+
+
 def _headers() -> dict[str, str]:
+    if model_gateway.routed("runninghub"):
+        return model_gateway.request_headers()
     if not settings.runninghub_api_key:
         raise RunningHubError("RunningHub API Key 未配置，请在 backend/.env 设置 RUNNINGHUB_API_KEY")
     return {"Content-Type": "application/json", "Authorization": f"Bearer {settings.runninghub_api_key}"}
+
+
+def _upload_headers() -> dict[str, str]:
+    # multipart 上传的 Content-Type 必须由 httpx 按 boundary 生成，不能沿用 JSON 头
+    return {key: value for key, value in _headers().items() if key.lower() != "content-type"}
 
 
 def _check_megapixels(value: float, stage: str) -> None:
@@ -283,7 +297,7 @@ def build_first_last_frame_node_info_list(
 
 
 async def _post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
-    url = f"{settings.runninghub_base_url}{path}"
+    url = f"{_base_url()}{path}"
     try:
         async with httpx.AsyncClient(timeout=settings.runninghub_timeout) as client:
             response = await client.post(url, headers=_headers(), json=payload)
@@ -547,10 +561,10 @@ async def _submit_custom_workflow_json(workflow: str | dict[str, Any], node_info
         workflow = json.dumps(workflow, ensure_ascii=False, separators=(",", ":"))
     # RunningHub 的高级 ComfyUI 接口允许直接提交完整工作流；返回结构为
     # {code, msg, data:{taskId, taskStatus}}，与 /openapi/v2/run/workflow 不同。
-    origin = settings.runninghub_base_url.removesuffix("/openapi/v2")
+    origin = _base_url().removesuffix("/openapi/v2")
     url = f"{origin}/task/openapi/create"
     payload = {
-        "apiKey": settings.runninghub_api_key,
+        "apiKey": "" if model_gateway.routed("runninghub") else settings.runninghub_api_key,
         # 高级接口的校验仍要求 workflowId 非空；传入 workflow 时完整 JSON 优先。
         "workflowId": settings.runninghub_workflow_id,
         "workflow": workflow,
@@ -594,10 +608,10 @@ async def upload_media(content: bytes, filename: str) -> dict[str, Any]:
     if not content:
         raise RunningHubError("上传文件为空")
     safe_name = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or f"{uuid.uuid4().hex}.png"
-    url = f"{settings.runninghub_base_url}/media/upload/binary"
+    url = f"{_base_url()}/media/upload/binary"
     try:
         async with httpx.AsyncClient(timeout=settings.runninghub_timeout) as client:
-            response = await client.post(url, headers={"Authorization": _headers()["Authorization"]}, files={"file": (safe_name, content)})
+            response = await client.post(url, headers=_upload_headers(), files={"file": (safe_name, content)})
     except RunningHubError:
         raise
     except httpx.HTTPError as exc:

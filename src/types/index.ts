@@ -45,8 +45,8 @@ export interface DigitalHuman {
   originalAvatar?: string
   /** 英合账号下的兼容旧字段。 */
   assetAvatarUrl?: string
-  /** 同一人物在各视频供应商账号下的虚拟资产引用。 */
-  providerAssetAvatarUrls?: { yinghe?: string; ppio?: string }
+  /** 人物在英合供应商账号下的虚拟资产引用。 */
+  providerAssetAvatarUrls?: { yinghe?: string }
   description: string
   /** 生成形象时使用的完整提示词（可在编辑界面查看 / 修改后重新生成） */
   avatarPrompt?: string

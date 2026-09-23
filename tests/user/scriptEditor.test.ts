@@ -8,6 +8,16 @@ import type { ScriptLine } from '../../src/types'
 import * as apiClient from '../../src/api/client'
 import * as confirmDialogModule from '../../src/composables/useConfirmDialog'
 
+function mockBalanceApi(balance: unknown) {
+  return vi.spyOn(apiClient, 'apiRequest').mockImplementation(async <T>(path: string) => {
+    if (path === '/model-options') {
+      return [{ id: 'doubao-seedance-2.0', name: 'SD2.0', modality: 'video' }] as T
+    }
+    if (path === '/account/balance') return balance as T
+    throw new Error(`Unexpected API request: ${path}`)
+  })
+}
+
 const pendingLine = (id: string): ScriptLine =>
   ({
     id,
@@ -35,7 +45,7 @@ describe('ScriptEditor batch generation confirmation', () => {
     const store = useProjectStore()
     store.lines = [pendingLine('line-1'), pendingLine('line-2')]
     const generate = vi.spyOn(store, 'generateAllShots').mockResolvedValue()
-    vi.spyOn(apiClient, 'apiRequest').mockResolvedValue({
+    mockBalanceApi({
       available: true,
       balance: '100',
       balanceDisplay: '100.00',
@@ -62,7 +72,7 @@ describe('ScriptEditor batch generation confirmation', () => {
     const store = useProjectStore()
     store.lines = [pendingLine('line-1'), pendingLine('line-2')]
     const generate = vi.spyOn(store, 'generateAllShots').mockResolvedValue()
-    vi.spyOn(apiClient, 'apiRequest').mockResolvedValue({
+    mockBalanceApi({
       available: true,
       balance: '5',
       balanceDisplay: '5.00',
@@ -86,7 +96,7 @@ describe('ScriptEditor batch generation confirmation', () => {
     const store = useProjectStore()
     store.lines = [pendingLine('line-1')]
     const generate = vi.spyOn(store, 'generateAllShots').mockResolvedValue()
-    vi.spyOn(apiClient, 'apiRequest').mockResolvedValue({
+    mockBalanceApi({
       available: true,
       balance: '100',
       balanceDisplay: '100.00',

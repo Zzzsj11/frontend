@@ -6,9 +6,11 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from openai import AsyncOpenAI
 
+from . import model_gateway
 from .config import settings
+from .model_gateway import AsyncOpenAI
+from .model_gateway import enabled as gateway_enabled
 from .token_usage import normalize_usage
 
 
@@ -51,10 +53,12 @@ async def _call_anthropic(model: str, messages: list[dict[str, str]], temperatur
     payload: dict[str, Any] = {"model": model, "messages": conversation, "temperature": temperature, "max_tokens": max_tokens}
     if system:
         payload["system"] = system
+    gateway_headers = model_gateway.request_headers() if model_gateway.enabled() else {}
+    gateway_url = model_gateway.base_url() + "/v1/messages" if model_gateway.enabled() else _anthropic_messages_url()
     async with httpx.AsyncClient(timeout=120) as client:
         response = await client.post(
-            _anthropic_messages_url(),
-            headers={"x-api-key": settings.llm_api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            gateway_url,
+            headers={"x-api-key": settings.llm_api_key, "anthropic-version": "2023-06-01", "content-type": "application/json", **gateway_headers},
             json=payload,
         )
         response.raise_for_status()
@@ -70,7 +74,7 @@ async def call_chat_model(*, model: str, protocol: str, messages: list[dict[str,
 
 
 async def compare_chat_models(*, models: list[str], system_prompt: str, prompt: str, temperature: float, max_tokens: int) -> list[dict[str, Any]]:
-    if not settings.llm_api_key:
+    if not settings.llm_api_key and not gateway_enabled():
         raise RuntimeError("LLM_API_KEY 未配置")
     semaphore = asyncio.Semaphore(3)
     messages = ([{"role": "system", "content": system_prompt}] if system_prompt else []) + [{"role": "user", "content": prompt}]

@@ -1,0 +1,20 @@
+# Same-host deployment: reuse MV's PostgreSQL endpoint, not its database or roles.
+services:
+  public-api:
+    networks:
+      default: {}
+      mv:
+        aliases: [model-public]
+  worker:
+    networks:
+      default: {}
+      mv: {}
+  admin-api:
+    networks:
+      default: {}
+      mv: {}
+
+networks:
+  mv:
+    external: true
+    name: ${MV_DOCKER_NETWORK:-mv-agent-frontend_default}
