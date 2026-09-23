@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { points } from '../utils/financial'
+import FinancialInput from './FinancialInput.vue'
 import KeyReveal from './KeyReveal.vue'
 import { usePortal } from '../stores/portal'
 const store = usePortal()
@@ -27,16 +29,17 @@ async function remove(id: string) {
   <div v-if="store.user?.quota" class="quota-summary">
     <h3>账号月度总额度</h3>
     <p>
-      月上限 <strong>{{ store.user.quota.monthly_points }}</strong> 积分 · 本月已用
-      {{ store.user.quota.spent_points }} · 预占 {{ store.user.quota.reserved_points }} · 可用
-      {{ store.user.quota.available_points }}
+      月上限 <strong>{{ points(store.user.quota.monthly_points) }}</strong> 积分 · 本月已用
+      {{ points(store.user.quota.spent_points) }} · 预占
+      {{ points(store.user.quota.reserved_points) }} · 可用
+      {{ points(store.user.quota.available_points) }}
     </p>
     <p class="muted">
       {{ store.user.quota.billing_month }} · 北京时间每月 1 日更新。账号总额度由管理员设置。
     </p>
     <p>
       Key：{{ store.user.quota.key_count }} / {{ store.user.quota.key_limit }} · 已分配上限合计
-      {{ store.user.quota.allocated_points }} 积分
+      {{ points(store.user.quota.allocated_points) }} 积分
     </p>
     <p class="muted">各 Key 上限之和可超过账号总额度；实际消费同时受 Key 和账号总额度限制。</p>
   </div>
@@ -46,12 +49,12 @@ async function remove(id: string) {
   <form class="fields" @submit.prevent="create">
     <label>Key 名称<input v-model="name" required maxlength="160" /></label>
     <label
-      >Key 月消费上限<input
+      >Key 月消费上限<FinancialInput
         v-model="quota"
         type="number"
         min="0"
         max="1000000000"
-        step="0.000001"
+        step="1"
         required
     /></label>
     <button
@@ -74,18 +77,18 @@ async function remove(id: string) {
       </h3>
       <code>{{ key.key_prefix }}…</code>
       <p>
-        本月已用 {{ key.spent_points }} · 预占 {{ key.reserved_points }} · 当前可用
-        {{ key.available_points }}
+        本月已用 {{ points(key.spent_points) }} · 预占 {{ points(key.reserved_points) }} · 当前可用
+        {{ points(key.available_points) }}
       </p>
       <form @submit.prevent="store.setKeyQuota(key.id, values[key.id])">
         <label
-          >月消费上限<input
+          >月消费上限<FinancialInput
             v-model="values[key.id]"
             :aria-label="`${key.name} 月消费上限`"
             type="number"
             min="0"
             max="1000000000"
-            step="0.000001"
+            step="1"
             required
         /></label>
         <button :disabled="store.loading">保存月上限</button>

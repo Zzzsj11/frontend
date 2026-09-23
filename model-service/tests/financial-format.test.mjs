@@ -28,3 +28,13 @@ test('财务详情格式化不改变原始 API 数据', () => {
   assert.equal(view.pricing.rates[0].cny, '0.00')
   assert.equal(JSON.stringify(source), original)
 })
+
+test('用户门户积分展示与后台一致，不把小数进位或显示负零', async () => {
+  const portal = await import('../user-web/src/utils/financial.ts')
+  assert.equal(portal.points('100.000000'), '100')
+  assert.equal(portal.points('0.999999'), '0')
+  assert.equal(portal.points('123.987654'), '123')
+  assert.equal(portal.signedPoints('-0.123456'), '0')
+  assert.equal(portal.signedPoints('-12.987654'), '-12')
+  assert.equal(portal.money('1.005'), '1.01')
+})

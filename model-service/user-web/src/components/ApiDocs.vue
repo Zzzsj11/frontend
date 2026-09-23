@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { money, moneyPoints } from '../utils/financial'
 import { computed, ref, watch } from 'vue'
 import { alphabetical, modelVendor } from '../utils/modelCatalog'
 import CodeExample from './CodeExample.vue'
@@ -186,8 +187,8 @@ const example = computed(() => {
                   {{ r.path
                   }}<small v-if="r.subtract?.length"> 减去 {{ r.subtract.join('、') }}</small>
                 </td>
-                <td>¥{{ r.cny }} / {{ r.unit }}</td>
-                <td>{{ Number(r.cny) * 100 }} 积分 / {{ r.unit }}</td>
+                <td>¥{{ money(r.cny) }} / {{ r.unit }}</td>
+                <td>{{ moneyPoints(r.cny) }} 积分 / {{ r.unit }}</td>
               </tr>
             </tbody>
           </table>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { points, signedPoints, money, financialDetails } from '../utils/financial'
 import { onMounted, ref, watch } from 'vue'
 import ApiDocs from './ApiDocs.vue'
 import PortalAuth from './PortalAuth.vue'
@@ -98,9 +99,9 @@ onMounted(() => store.loadModels())
                 <p class="error">{{ job.error }}</p>
               </td>
               <td>
-                {{ job.billing.points ?? '待核账' }}
-                <p v-if="job.billing.cny !== null">¥{{ job.billing.cny }}</p>
-                <p>预占 {{ job.billing.reserved_points }}</p>
+                {{ job.billing.points == null ? '待核账' : points(job.billing.points) }}
+                <p v-if="job.billing.cny !== null">¥{{ money(job.billing.cny) }}</p>
+                <p>预占 {{ points(job.billing.reserved_points) }}</p>
               </td>
               <td>
                 {{ labels[job.billing.status] || job.billing.status }}
@@ -148,8 +149,8 @@ onMounted(() => store.loadModels())
                   labels[row.kind] || row.kind
                 }}</span>
               </td>
-              <td>{{ Number(row.points) > 0 ? '+' : '' }}{{ row.points }}</td>
-              <td>{{ row.monthly_after }} / {{ row.extra_after }}</td>
+              <td>{{ signedPoints(row.points) }}</td>
+              <td>{{ points(row.monthly_after) }} / {{ points(row.extra_after) }}</td>
               <td>
                 {{ row.reason }}
                 <p v-if="row.job_id">
@@ -157,7 +158,7 @@ onMounted(() => store.loadModels())
                 </p>
                 <details>
                   <summary>核算明细</summary>
-                  <pre>{{ JSON.stringify(row.evidence, null, 2) }}</pre>
+                  <pre>{{ JSON.stringify(financialDetails(row.evidence), null, 2) }}</pre>
                 </details>
               </td>
             </tr>
