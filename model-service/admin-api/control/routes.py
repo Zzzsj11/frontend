@@ -48,7 +48,7 @@ class EstimateConfig(BaseModel):
 class RoutePatch(BaseModel):
     enabled: bool | None = None
     priority: int | None = Field(default=None, ge=0, le=1000)
-    concurrency: int | None = Field(default=None, ge=1, le=100)
+    concurrency: int | None = Field(default=None, ge=1, le=200)
 
 
 class Verification(BaseModel):
@@ -161,17 +161,19 @@ def router_for(admin):
             changes = body.model_dump(exclude_none=True)
             if changes.get("enabled") and row.verification != "passed":
                 raise HTTPException(409, "Complete attributed live verification before enabling this route")
+            enabled_changed = "enabled" in changes and changes["enabled"] != row.enabled
             for k, v in changes.items():
                 setattr(row, k, v)
             await db.flush()
-            model = await db.get(Model, row.model_id)
-            model.enabled = bool(
-                await db.scalar(
-                    select(ModelRoute.id)
-                    .where(ModelRoute.model_id == model.id, ModelRoute.enabled.is_(True), ModelRoute.deleted_at.is_(None))
-                    .limit(1)
+            if enabled_changed:
+                model = await db.get(Model, row.model_id)
+                model.enabled = bool(
+                    await db.scalar(
+                        select(ModelRoute.id)
+                        .where(ModelRoute.model_id == model.id, ModelRoute.enabled.is_(True), ModelRoute.deleted_at.is_(None))
+                        .limit(1)
+                    )
                 )
-            )
             db.add(Audit(id=uuid.uuid4().hex, actor=actor, action="route.update", target=rid, detail=changes))
             return view(row)
 

@@ -59,7 +59,9 @@ onMounted(load)
 <template>
   <section class="card table-wrap">
     <h3>模型供应商路由</h3>
-    <p class="muted">数字越小优先级越高。历史任务固定原渠道；未验证渠道不能启用。</p>
+    <p class="muted">
+      每个模型、每个渠道可独立修改并发上限（1–200）。实际并发还受模型总上限、调用方与渠道总上限约束。数字越小优先级越高。
+    </p>
     <p v-if="error" role="alert" class="error">{{ error }}</p>
     <p v-if="message" role="status">{{ message }}</p>
     <table>
@@ -69,14 +71,24 @@ onMounted(load)
           <th>上游模型</th>
           <th>验证</th>
           <th>优先级</th>
-          <th>并发</th>
+          <th>渠道并发上限</th>
           <th>启用</th>
           <th>操作</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="row.id">
-          <td>{{ row.model_id }}<br />{{ row.supplier === 'yseeai' ? '英和海外' : 'Toapis' }}</td>
+          <td>
+            {{ row.model_id }}<br />{{
+              row.supplier === 'yseeai'
+                ? '英和海外'
+                : row.supplier === 'yinghe'
+                  ? '英和国内'
+                  : row.supplier === 'toapis'
+                    ? 'Toapis'
+                    : row.supplier
+            }}
+          </td>
           <td>
             {{ row.provider_model }}
             <details>
@@ -105,7 +117,7 @@ onMounted(load)
               v-model.number="row.concurrency"
               type="number"
               min="1"
-              max="100"
+              max="200"
               :aria-label="row.id + '并发'"
             />
           </td>

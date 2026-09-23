@@ -163,3 +163,38 @@ async def test_verification_requires_matching_attributed_success(service):
         r = await db.get(ModelRoute, route.id)
         r.provider_model = "changed-after-test"
     assert (await ctl.post("/admin/routes/verify-route/verify", json=body)).status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_admin_can_edit_route_concurrency_to_150(service):
+    from gateway.db import Model, ModelRoute, Session
+
+    _, ctl, _, _ = service
+    async with Session.begin() as db:
+        model = await db.get(Model, "gpt-5.6-sol")
+        model.enabled = True
+        db.add(
+            ModelRoute(
+                id="manual-limit",
+                model_id="gpt-5.6-sol",
+                supplier="yseeai",
+                channel="yseeai-llm",
+                provider_model="gpt-5.6-sol",
+                protocol="chat",
+                enabled=False,
+                priority=10,
+                concurrency=2,
+                verification="pending",
+                capabilities={},
+                pricing={},
+            )
+        )
+    response = await ctl.patch("/admin/routes/manual-limit", json={"concurrency": 150, "enabled": False})
+    assert response.status_code == 200, response.text
+    async with Session() as db:
+        route = await db.get(ModelRoute, "manual-limit")
+        assert route.concurrency == 150
+        assert not route.enabled
+        assert (await db.get(Model, "gpt-5.6-sol")).enabled
+    for invalid in (0, 201):
+        assert (await ctl.patch("/admin/routes/manual-limit", json={"concurrency": invalid})).status_code == 422

@@ -133,6 +133,11 @@ try {
  const savedQuota=await quotaResponse
  if(!savedQuota.ok())throw Error('Quota save failed: '+await savedQuota.text()+' payload '+savedQuota.request().postData())
  await admin.getByRole('button',{name:'模型供应商',exact:true}).click()
+ await admin.getByLabel('quote-browser-route并发',{exact:true}).fill('150')
+ await admin.getByRole('button',{name:'保存',exact:true}).click()
+ await expect(admin.getByRole('status')).toContainText('配置已保存')
+ await expect(admin.getByLabel('quote-browser-route并发',{exact:true})).toHaveValue('150')
+
  await admin.getByRole('button',{name:'登记验收',exact:true}).click()
  await admin.getByLabel('验收工单 ID',{exact:true}).fill('missing-fixture-job')
  await admin.getByLabel('验收记录',{exact:true}).fill('Synthetic browser guard test; no model call')

@@ -151,3 +151,7 @@ curl --fail http://127.0.0.1:18012/health
 ## 渠道余额升级
 
 执行 Alembic 0003 后再更新管理 API/Web 与公开 Worker。新增 `channel_accounts` 的读写权限须授予管理与执行数据库角色；供应商业务凭据仅进入 `.env.public` 或本机 Worker 环境，不进入管理 API。管理页面读取数据库快照，Worker 每 5 分钟自动采集 `yinghe`（英和国内）、`yseeai`（英和海外）与 `toapis`。人工快照、积分换算和双站模型授权工具见 [CHANNEL-BALANCES.md](CHANNEL-BALANCES.md)。
+
+### 0010 英和视频模型路由限额
+
+按用户提供限额设置当前保留的英和国内/海外视频路由：Seedance 2.0 / Mini / Fast 为 50，Wan 3.0 / Prime 为 100，Gemini Omni Flash 为 8。范围取下限；不新增已移除模型，不修改 Seedance 2.5 或其他供应商，不修改启停及验证状态。变更前后值进入审计。此迁移只执行一次，后续后台人工修改不会在重启时被覆盖。「模型供应商」的渠道并发可设置 1–200；模型、调用方、渠道全局限额仍独立生效。
