@@ -128,14 +128,31 @@ summary {
 
 .email-account {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: stretch;
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--panel);
+}
+.email-account:focus-within {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 .email-account input {
   min-width: 0;
   flex: 1;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
 }
 .email-account > span {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
   white-space: nowrap;
-  color: var(--muted);
+  color: var(--primary);
+  background: var(--primary-light);
+  font-weight: 600;
 }

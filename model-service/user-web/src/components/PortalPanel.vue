@@ -36,6 +36,7 @@ onMounted(() => store.loadModels())
       <div>
         <p class="eyebrow">COMPANY MODEL API</p>
         <h1>开发者中心</h1>
+        <p v-if="!store.user" class="muted">仅限 @star-net.cn 企业邮箱登录</p>
       </div>
       <nav>
         <button :class="{ secondary: section !== 'docs' }" @click="showDocs">API 文档</button
@@ -45,7 +46,8 @@ onMounted(() => store.loadModels())
           @click="section = 'account'"
         >
           我的用量与积分</button
-        ><button v-if="!store.user" class="secondary" @click="section = 'auth'">登录 / 注册</button
+        ><button v-if="!store.user" class="secondary" @click="section = 'auth'">
+          企业邮箱登录 / 注册</button
         ><button v-else class="secondary" @click="store.logout">退出登录</button>
       </nav>
     </header>
@@ -53,17 +55,16 @@ onMounted(() => store.loadModels())
     <p v-if="store.message" role="status">{{ store.message }}</p>
     <ApiDocs v-if="section === 'docs'" />
     <section v-else-if="!store.user" class="card auth">
-      <h2>{{ authMode === 'register' ? '注册账号' : '登录开发者中心' }}</h2>
-      <p class="muted">
-        仅支持 @star-net.cn 公司邮箱注册。注册后由管理员生成、绑定密钥并分配积分。
-      </p>
+      <h2>{{ authMode === 'register' ? '企业邮箱注册' : '企业邮箱登录' }}</h2>
+      <p class="muted">请使用 @star-net.cn 企业邮箱登录或注册。</p>
       <form @submit.prevent="submit">
         <label>
-          公司邮箱
+          企业邮箱
           <span class="email-account">
             <input
               v-model="emailName"
-              aria-label="公司邮箱前缀"
+              aria-label="企业邮箱前缀"
+              aria-describedby="company-email-hint"
               required
               maxlength="68"
               autocomplete="username"
@@ -73,6 +74,9 @@ onMounted(() => store.loadModels())
             <span>@star-net.cn</span>
           </span>
         </label>
+        <p id="company-email-hint" class="muted">
+          只需输入邮箱前缀，例如 zhangjiaqi；右侧后缀自动补全，无需重复输入。
+        </p>
         <label
           >密码<input
             v-model="password"
