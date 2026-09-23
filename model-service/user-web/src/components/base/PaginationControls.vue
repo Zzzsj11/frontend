@@ -66,8 +66,14 @@ label {
 }
 input,
 select {
-  width: 70px;
   margin: 0;
+}
+input {
+  width: 70px;
+}
+select {
+  width: 100px;
+  flex-shrink: 0;
 }
 button {
   font-size: 13px;
