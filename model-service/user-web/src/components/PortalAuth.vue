@@ -13,7 +13,6 @@ function readUsername() {
 }
 const emailName = ref(readUsername())
 const remember = ref(!!emailName.value)
-const authMode = ref('login')
 const password = ref('')
 const newPassword = ref('')
 const confirmation = ref('')
@@ -30,15 +29,13 @@ function saveUsername(enabled: boolean) {
   }
 }
 async function submit() {
-  await store.auth(authMode.value, emailName.value.toLowerCase() + '@star-net.cn', password.value)
+  await store.auth(emailName.value.toLowerCase() + '@star-net.cn', password.value)
   password.value = ''
   if (store.user) saveUsername(remember.value)
-  else if (store.message) authMode.value = 'login'
 }
 async function changePassword() {
   await store.changePassword(password.value, newPassword.value, confirmation.value)
   password.value = newPassword.value = confirmation.value = ''
-  if (!store.user) authMode.value = 'login'
 }
 </script>
 <template>
@@ -76,11 +73,12 @@ async function changePassword() {
             maxlength="128"
             autocomplete="new-password"
         /></label>
+        <p v-if="store.error" class="error" role="alert">{{ store.error }}</p>
         <button :disabled="store.loading">更新密码</button>
       </form>
     </template>
     <template v-else>
-      <h2>{{ authMode === 'register' ? '企业邮箱注册' : '企业邮箱登录' }}</h2>
+      <h2>企业邮箱登录</h2>
       <form @submit.prevent="submit">
         <label
           >企业邮箱<span class="email-account"
@@ -102,21 +100,12 @@ async function changePassword() {
             type="password"
             minlength="8"
             maxlength="128"
-            :pattern="authMode === 'register' ? passwordPattern : undefined"
-            :autocomplete="authMode === 'register' ? 'new-password' : 'current-password'"
+            autocomplete="current-password"
         /></label>
-        <p v-if="authMode === 'register'" class="muted">至少 8 位，包含字母和数字。</p>
-        <label v-if="authMode === 'login'" class="remember"
-          ><input v-model="remember" type="checkbox" />记住用户名</label
-        >
-        <button :disabled="store.loading">{{ authMode === 'register' ? '注册' : '登录' }}</button>
-        <button
-          type="button"
-          class="secondary"
-          @click="authMode = authMode === 'register' ? 'login' : 'register'"
-        >
-          {{ authMode === 'register' ? '已有账号，登录' : '创建账号' }}
-        </button>
+        <label class="remember"><input v-model="remember" type="checkbox" />记住用户名</label>
+        <p v-if="store.error" class="error" role="alert">{{ store.error }}</p>
+        <p v-else-if="store.message" role="status">{{ store.message }}</p>
+        <button :disabled="store.loading">登录</button>
       </form>
     </template>
   </section>

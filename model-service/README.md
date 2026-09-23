@@ -70,4 +70,4 @@ VERSION=<不可变版本> scripts/deploy.sh public
 
 模型并发和调用方并发在 PostgreSQL 事务锁下分配。Worker 与公开 API 必须使用同一个数据库。原始用量记录在工单上，缺失用量保留为空，不伪造零费用；未配置费率的用量不伪造金额。
 
-用户注册、管理员绑定 Key、分模型/生成方式费率、月度额度、临时增减与逐任务积分见 [PORTAL-AND-CREDITS.md](docs/PORTAL-AND-CREDITS.md)。1 积分 = ¥0.01；支持实际用量 × 费率计价，保留每任务费率快照与不可覆盖的流水。
+管理员建号、用户自助创建 Key、账号与 Key 两级月上限、分模型/生成方式费率、月度额度、临时增减与逐任务积分见 [PORTAL-AND-CREDITS.md](docs/PORTAL-AND-CREDITS.md)。1 积分 = ¥0.01；支持实际用量 × 费率计价，保留每任务费率快照与不可覆盖的流水。

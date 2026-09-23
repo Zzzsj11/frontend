@@ -61,9 +61,9 @@ const example = computed(() => {
   <section class="card">
     <p class="eyebrow">API REFERENCE</p>
     <h2>一次接入，多种模型</h2>
-    <p>注册账号 → 等待管理员分配 API Key 和积分 → 发起任务 → 查询结果与积分明细。</p>
+    <p>联系管理员开通账号及月额度 → 登录创建自己的 API Key → 发起任务 → 查询积分明细。</p>
     <p class="muted">
-      用户不能自行创建密钥。管理员交付密钥后请保存到服务端环境变量，门户仅显示密钥前缀。
+      每个账号最多创建 10 个 Key；Key 明文仅在创建时展示一次，请保存到服务端环境变量。
     </p>
     <details>
       <summary>鉴权、任务状态与错误码</summary>

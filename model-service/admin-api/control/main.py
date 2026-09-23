@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from .billing import router_for
 from .channel_balances import router_for as channel_router_for
 from .credits import amount, job_bill, lock, reset
-from .db import Audit, Client, Job, Model, Session, User, now
+from .db import Audit, Client, Job, Model, Session, now
 from .routes import router_for as routes_router_for
 
 app = FastAPI(title="Model Service Control API", version="1.0.0")
@@ -113,9 +113,7 @@ async def create_client(body: ClientCreate, actor=Depends(admin)):
     async with Session.begin() as db:
         await lock(db)
         if body.user_id:
-            user = await db.get(User, body.user_id)
-            if not user or user.deleted_at or not user.enabled:
-                raise HTTPException(404, "User not found")
+            raise HTTPException(403, "用户 Key 请由账号持有者登录后自行创建")
         c = Client(
             id="client-" + uuid.uuid4().hex,
             key_hash=hashlib.sha256(key.encode()).hexdigest(),

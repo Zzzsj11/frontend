@@ -2,6 +2,7 @@
 import { onMounted, ref, watch } from 'vue'
 import ApiDocs from './ApiDocs.vue'
 import PortalAuth from './PortalAuth.vue'
+import UserKeys from './UserKeys.vue'
 import { labels, usePortal } from '../stores/portal'
 const store = usePortal()
 const section = ref('docs')
@@ -45,13 +46,23 @@ onMounted(() => store.loadModels())
           @click="section = 'account'"
         >
           我的用量与积分</button
-        ><button v-if="!store.user" class="secondary" @click="section = 'auth'">
-          企业邮箱登录 / 注册</button
+        ><button v-if="!store.user" class="secondary" @click="section = 'auth'">企业邮箱登录</button
         ><button v-else class="secondary" @click="store.logout">退出登录</button>
       </nav>
     </header>
-    <p v-if="store.error" class="error" role="alert">{{ store.error }}</p>
-    <p v-if="store.message" role="status">{{ store.message }}</p>
+    <p
+      v-if="store.error && section === 'docs' && !store.user?.must_change_password"
+      class="error"
+      role="alert"
+    >
+      {{ store.error }}
+    </p>
+    <p
+      v-if="store.message && section === 'docs' && !store.user?.must_change_password"
+      role="status"
+    >
+      {{ store.message }}
+    </p>
     <PortalAuth v-if="store.user?.must_change_password || (section !== 'docs' && !store.user)" />
     <ApiDocs v-else-if="section === 'docs'" />
     <template v-else-if="store.user"
@@ -61,21 +72,7 @@ onMounted(() => store.loadModels())
           <button :disabled="store.loading" class="secondary" @click="store.reload">刷新</button>
         </div>
         <p class="muted">用户 ID：{{ store.user.id }} · 1 积分 = ¥0.01</p>
-        <p v-if="!store.user.keys.length">尚未分配 API Key，请等待管理员生成与绑定。</p>
-        <div class="accounts">
-          <article v-for="key in store.user.keys" :key="key.id" class="card">
-            <h3>
-              {{ key.name }} <small>{{ key.enabled ? '已启用' : '已停用' }}</small>
-            </h3>
-            <code>{{ key.key_prefix }}…</code>
-            <p>
-              可用积分 <strong>{{ key.available_points }}</strong>
-            </p>
-            <p>本月额度 {{ key.monthly_points }} · 剩余 {{ key.monthly_balance }}</p>
-            <p>临时余额 {{ key.extra_balance }} · 预占 {{ key.reserved_points }}</p>
-            <p class="muted">额度周期 {{ key.billing_month }}，北京时间每月重置。</p>
-          </article>
-        </div>
+        <UserKeys />
       </section>
       <section class="card table-wrap">
         <h3>每次任务的积分消耗</h3>

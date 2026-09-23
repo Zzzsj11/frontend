@@ -35,4 +35,4 @@ def test_runtime_environment_still_protects_compose_interpolation(tmp_path):
     path = tmp_path / ".env.public"
     module.write_private(path, {"SYNTHETIC_KEY": "dollar$literal#suffix"})
     assert path.read_text() == "SYNTHETIC_KEY='dollar$literal#suffix'\n"
-    assert module.migration_head() == "0007"
+    assert module.migration_head() == "0008"

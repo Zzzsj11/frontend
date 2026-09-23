@@ -7,7 +7,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from fastapi import HTTPException
 from sqlalchemy import func, select, text
 
-from .db import Client, Job, Ledger, PricingRule, now
+from .db import Client, Job, Ledger, PricingRule, User, now
 
 UNIT = Decimal("0.000001")
 ZERO = Decimal(0)
@@ -80,10 +80,92 @@ async def held(db, cid):
     return amount(await db.scalar(select(func.coalesce(func.sum(Job.reserved_points), 0)).where(Job.client_id == cid)) or 0)
 
 
+async def monthly_spent(db, *, user_id=None, client_id=None):
+    start = (
+        now().astimezone(timezone(timedelta(hours=8))).replace(day=1, hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    )
+    query = select(func.coalesce(-func.sum(Ledger.points), 0)).where(
+        Ledger.kind.in_(["task_charge", "reconciliation"]),
+        Ledger.created_at >= start,
+    )
+    query = query.where(Ledger.user_id == user_id) if user_id else query.where(Ledger.client_id == client_id)
+    return amount(max(ZERO, amount(await db.scalar(query) or 0)))
+
+
+async def user_account(db, user):
+    # Include reservations and charges from disabled/deleted keys: retiring a key cannot free spent credit.
+    reserved = amount(
+        await db.scalar(
+            select(func.coalesce(func.sum(Job.reserved_points), 0)).where(
+                Job.client_id.in_(select(Client.id).where(Client.user_id == user.id)),
+            )
+        )
+        or 0
+    )
+    spent = await monthly_spent(db, user_id=user.id)
+    count, allocated = (
+        await db.execute(
+            select(func.count(), func.coalesce(func.sum(Client.monthly_points), 0)).where(
+                Client.user_id == user.id,
+                Client.deleted_at.is_(None),
+            )
+        )
+    ).one()
+    return {
+        "monthly_points": str(amount(user.monthly_points)),
+        "spent_points": str(spent),
+        "reserved_points": str(reserved),
+        "available_points": str(amount(max(ZERO, amount(user.monthly_points) - spent - reserved))),
+        "allocated_points": str(amount(allocated)),
+        "key_count": count,
+        "key_limit": 10,
+        "billing_month": month(),
+    }
+
+
+async def ensure_key_slot(db, user_id):
+    count = await db.scalar(select(func.count()).select_from(Client).where(Client.user_id == user_id, Client.deleted_at.is_(None)))
+    if count >= 10:
+        raise HTTPException(409, "每个账号最多绑定 10 个 Key，请先删除不再使用的 Key")
+
+
+async def configure_quota(db, c, points, actor):
+    if not c.user_id:
+        c.billing_enabled = True
+        c.monthly_points = amount(points)
+        await reset(db, c)
+        return
+    await reset(db, c)
+    previous = amount(c.monthly_points)
+    c.billing_enabled = True
+    c.monthly_points = amount(points)
+    if c.user_id:
+        # Adjust allowance by the difference; never reset this month's spending or reservations.
+        c.monthly_balance = amount(c.monthly_balance) + c.monthly_points - previous
+        entry(
+            db,
+            c,
+            "quota_adjust",
+            c.monthly_points - previous,
+            "quota:" + uuid.uuid4().hex,
+            actor,
+            "调整 Key 月上限，保留本月已消费积分",
+            evidence={"previous": str(previous), "monthly_points": str(c.monthly_points)},
+        )
+    await db.flush()
+
+
 async def account(db, c):
     await reset(db, c)
     reserved = await held(db, c.id)
+    available = amount(c.monthly_balance) + amount(c.extra_balance) - reserved
+    spent = await monthly_spent(db, client_id=c.id)
+    if c.user_id:
+        user = await db.get(User, c.user_id)
+        owner = await user_account(db, user)
+        available = min(available, amount(c.monthly_points) - spent - reserved, amount(owner["available_points"]))
     return {
+        "spent_points": str(spent),
         "id": c.id,
         "name": c.name,
         "user_id": c.user_id,
@@ -94,7 +176,7 @@ async def account(db, c):
         "monthly_balance": str(c.monthly_balance),
         "extra_balance": str(c.extra_balance),
         "reserved_points": str(reserved),
-        "available_points": str(amount(c.monthly_balance) + amount(c.extra_balance) - reserved),
+        "available_points": str(amount(max(ZERO, available))),
         "billing_month": c.billing_month,
     }
 
@@ -217,6 +299,15 @@ async def reserve(db, client, job, model):
     available = amount(c.monthly_balance) + amount(c.extra_balance) - await held(db, c.id)
     if available < points:
         raise HTTPException(402, "Insufficient points after active task reservations")
+    if c.user_id:
+        user = await db.get(User, c.user_id, populate_existing=True)
+        if not user or user.deleted_at or not user.enabled:
+            raise HTTPException(403, "账号不可用")
+        if amount(c.monthly_points) - await monthly_spent(db, client_id=c.id) - await held(db, c.id) < points:
+            raise HTTPException(402, "该 Key 的本月积分额度不足")
+        owner = await user_account(db, user)
+        if amount(owner["available_points"]) < points:
+            raise HTTPException(402, "账号本月总积分额度不足")
     job.reserved_points = points
     job.billing_status = "reserved"
 

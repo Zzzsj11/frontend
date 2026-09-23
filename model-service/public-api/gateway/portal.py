@@ -1,4 +1,4 @@
-"""User portal; no endpoint can mint or bind an API key."""
+"""Private user portal: administrators create accounts, users manage their own keys."""
 
 import asyncio
 import hashlib
@@ -7,14 +7,27 @@ import re
 import secrets
 import uuid
 from datetime import timedelta, timezone
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select, update
-from sqlalchemy.exc import IntegrityError
 
-from .credits import account, default_rule, job_bill, ledger_view, lock, rules
+from .credits import (
+    account,
+    amount,
+    configure_quota,
+    default_rule,
+    ensure_key_slot,
+    job_bill,
+    ledger_view,
+    lock,
+    reset,
+    rules,
+    user_account,
+)
 from .db import Audit, Client, Job, Ledger, Model, Session, User, UserSession, now
+from .passwords import password_hash
 from .status import public_status
 
 router = APIRouter(prefix="/portal", tags=["User portal"])
@@ -38,24 +51,6 @@ class PasswordChange(BaseModel):
     _password_policy = field_validator("new_password")(validate_password)
 
 
-class Registration(Credentials):
-    _password_policy = field_validator("password")(validate_password)
-
-    @field_validator("username")
-    @classmethod
-    def company_email(cls, value):
-        value = value.lower()
-        if not re.fullmatch(r"[a-z0-9_-]+(?:\.[a-z0-9_-]+)*@star-net\.cn", value):
-            raise ValueError("仅支持 @star-net.cn 公司邮箱注册")
-        return value
-
-
-def password_hash(value, salt=None):
-    salt = salt or secrets.token_hex(16)
-    hashed = hashlib.scrypt(value.encode(), salt=bytes.fromhex(salt), n=16384, r=8, p=1).hex()
-    return salt + ":" + hashed
-
-
 def token_hash(value):
     return hashlib.sha256(value.encode()).hexdigest()
 
@@ -70,22 +65,13 @@ async def throttle(request, action):
             .where(Audit.action == action, Audit.target == peer, Audit.created_at > now() - timedelta(minutes=10))
         )
         if count >= (5 if action == "portal.register" else 20):
-            raise HTTPException(429, "Too many attempts; retry after ten minutes")
+            raise HTTPException(429, "尝试次数过多，请 10 分钟后重试")
         db.add(Audit(id=uuid.uuid4().hex, actor="anonymous", action=action, target=peer, detail={}))
 
 
-@router.post("/register", status_code=201)
-async def register(body: Registration, request: Request):
-    await throttle(request, "portal.register")
-    hashed = await asyncio.to_thread(password_hash, body.password)
-    async with Session.begin() as db:
-        user = User(id="user-" + uuid.uuid4().hex, username=body.username.lower(), password_hash=hashed)
-        db.add(user)
-        try:
-            await db.flush()
-        except IntegrityError:
-            raise HTTPException(409, "Username unavailable") from None
-    return {"id": user.id, "username": user.username, "message": "注册成功，请等待管理员生成并绑定 API Key"}
+@router.post("/register")
+async def register():
+    raise HTTPException(403, "账号由管理员创建，请联系管理员")
 
 
 @router.post("/login")
@@ -96,7 +82,7 @@ async def login(body: Credentials, request: Request):
         stored = user.password_hash if user else "00" * 16 + ":" + "00" * 64
         candidate = await asyncio.to_thread(password_hash, body.password, stored.split(":")[0])
         if not user or not user.enabled or not hmac.compare_digest(stored, candidate):
-            raise HTTPException(401, "Invalid credentials")
+            raise HTTPException(401, "邮箱或密码不正确")
         token = secrets.token_urlsafe(40)
         db.add(UserSession(id=uuid.uuid4().hex, user_id=user.id, token_hash=token_hash(token), expires_at=now() + timedelta(hours=8)))
     return {"access_token": token, "expires_in": 28800, "user": {"id": user.id, "username": user.username}}
@@ -107,10 +93,10 @@ async def authenticated_user(request: Request):
     async with Session() as db:
         session = await db.scalar(select(UserSession).where(UserSession.token_hash == token_hash(token), UserSession.deleted_at.is_(None)))
         if not session or session.expires_at.replace(tzinfo=timezone.utc) <= now():
-            raise HTTPException(401, "Login required")
+            raise HTTPException(401, "登录已失效，请重新登录")
         user = await db.get(User, session.user_id)
         if not user or not user.enabled or user.deleted_at:
-            raise HTTPException(401, "Login required")
+            raise HTTPException(401, "登录已失效，请重新登录")
     return user
 
 
@@ -138,7 +124,7 @@ async def change_password(body: PasswordChange, request: Request, user=Depends(a
             )
         )
         if not session or not row or not row.enabled or row.deleted_at:
-            raise HTTPException(401, "Login required")
+            raise HTTPException(401, "登录已失效，请重新登录")
         candidate = await asyncio.to_thread(password_hash, body.current_password, row.password_hash.split(":")[0])
         if not hmac.compare_digest(row.password_hash, candidate):
             raise HTTPException(400, "原密码不正确")
@@ -171,7 +157,84 @@ async def me(user=Depends(authenticated_user)):
         await lock(db)
         clients = (await db.scalars(select(Client).where(Client.user_id == user.id, Client.deleted_at.is_(None)))).all()
         accounts = [await account(db, c) for c in clients]
-    return {"id": user.id, "username": user.username, "must_change_password": False, "keys": accounts}
+        owner = await db.get(User, user.id)
+        limits = await user_account(db, owner)
+    return {"id": user.id, "username": user.username, "must_change_password": False, "keys": accounts, "quota": limits}
+
+
+class KeyCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=160)
+    monthly_points: Decimal = Field(ge=0, le=1000000000, decimal_places=6)
+
+
+@router.post("/keys", status_code=201)
+async def create_key(body: KeyCreate, user=Depends(current_user)):
+    key = "ms_" + secrets.token_urlsafe(32)
+    async with Session.begin() as db:
+        await lock(db)
+        await ensure_key_slot(db, user.id)
+        c = Client(
+            id="client-" + uuid.uuid4().hex,
+            name=body.name,
+            user_id=user.id,
+            key_hash=token_hash(key),
+            key_prefix=key[:12],
+            enabled=True,
+            billing_enabled=True,
+            monthly_points=amount(body.monthly_points),
+            monthly_balance=amount(0),
+            extra_balance=amount(0),
+            billing_month="",
+        )
+        db.add(c)
+        await db.flush()
+        await reset(db, c)
+        db.add(
+            Audit(
+                id=uuid.uuid4().hex,
+                actor=user.id,
+                action="client.create",
+                target=c.id,
+                detail={"name": c.name, "user_id": user.id, "monthly_points": str(body.monthly_points)},
+            )
+        )
+        return {**await account(db, c), "api_key": key}
+
+
+@router.delete("/keys/{cid}", status_code=204)
+async def delete_key(cid: str, user=Depends(current_user)):
+    async with Session.begin() as db:
+        await lock(db)
+        c = await db.get(Client, cid)
+        if not c or c.deleted_at or c.user_id != user.id:
+            raise HTTPException(404, "Key 不存在")
+        c.deleted_at, c.enabled = now(), False
+        db.add(Audit(id=uuid.uuid4().hex, actor=user.id, action="client.delete", target=cid, detail={}))
+
+
+class KeyQuota(BaseModel):
+    points: Decimal = Field(ge=0, le=1000000000, decimal_places=6)
+
+
+@router.post("/keys/{cid}/quota")
+async def key_quota(cid: str, body: KeyQuota, user=Depends(current_user)):
+    async with Session.begin() as db:
+        await lock(db)
+        c = await db.get(Client, cid)
+        if not c or c.deleted_at or c.user_id != user.id:
+            raise HTTPException(404, "Key 不存在")
+        await configure_quota(db, c, body.points, user.id)
+        db.add(
+            Audit(
+                id=uuid.uuid4().hex,
+                actor=user.id,
+                action="quota.configure",
+                target=cid,
+                detail={"monthly_points": str(body.points), "effect": "immediate"},
+            )
+        )
+        return await account(db, c)
 
 
 @router.get("/models")

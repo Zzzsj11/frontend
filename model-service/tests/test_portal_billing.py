@@ -11,7 +11,7 @@ from test_service import body
 
 async def user_key(api, ctl, name="alice", monthly=20):
     name += "@star-net.cn"
-    result = await api.post("/portal/register", json={"username": name, "password": "test-password-123"})
+    result = await ctl.post("/admin/users", json={"username": name, "initial_password": "test-password-123", "monthly_points": monthly})
     assert result.status_code == 201, result.text
     uid = result.json()["id"]
     token = (await api.post("/portal/login", json={"username": name, "password": "test-password-123"})).json()["access_token"]
@@ -26,7 +26,7 @@ async def user_key(api, ctl, name="alice", monthly=20):
     )
     assert changed.status_code == 204, changed.text
     token = (await api.post("/portal/login", json={"username": name, "password": "test-password-456"})).json()["access_token"]
-    key = await ctl.post("/admin/clients", json={"name": name, "user_id": uid, "monthly_points": monthly})
+    key = await api.post("/portal/keys", headers={"Authorization": "Bearer " + token}, json={"name": name, "monthly_points": monthly})
     assert key.status_code == 201, key.text
     return uid, token, key.json()
 
@@ -62,7 +62,7 @@ async def test_registration_binding_and_private_data(service):
     assert len(me["keys"]) == 1 and me["keys"][0]["available_points"] == "20.000000"
     assert "api_key" not in str(me) and "password_hash" not in str(me)
     assert (await ctl.get("/admin/users", headers=auth)).status_code == 401
-    assert (await api.post("/portal/keys", headers=auth, json={})).status_code == 404
+    assert (await api.post("/portal/keys", headers=auth, json={})).status_code == 422
     assert (await api.post("/v1/jobs", json=body(), headers=headers(uid2, key))).status_code == 403
     assert (await api.post("/v1/jobs", json=body(), headers=headers(uid, key))).status_code == 503
     await publish(ctl)
@@ -71,7 +71,7 @@ async def test_registration_binding_and_private_data(service):
     assert (await api.get("/portal/jobs", headers=auth)).json()["total"] == 1
     other = {"Authorization": "Bearer " + token2}
     assert (await api.get("/portal/jobs", headers=other)).json()["total"] == 0
-    assert (await ctl.post(f"/admin/clients/{key['id']}/bind", json={"user_id": uid2})).status_code == 409
+    assert (await ctl.post(f"/admin/clients/{key['id']}/bind", json={"user_id": uid2})).status_code == 403
     assert (await api.post("/portal/logout", headers=auth)).status_code == 204
     assert (await api.get("/portal/me", headers=auth)).status_code == 401
     db = importlib.import_module("gateway.db")
@@ -128,10 +128,12 @@ async def test_monthly_reset_adjustment_audit_and_reconciliation(service, monkey
     assert (
         await ctl.post(f"/admin/clients/{cid}/adjust", json={**minus, "operation_id": "debit-too-large", "points": "-100"})
     ).status_code == 409
-    assert (await ctl.post(f"/admin/clients/{cid}/quota", json={"points": "30"})).status_code == 200
+    assert (
+        await api.post(f"/portal/keys/{cid}/quota", headers={"Authorization": "Bearer " + token}, json={"points": "30"})
+    ).status_code == 200
     auth = {"Authorization": "Bearer " + token}
     before = (await api.get("/portal/me", headers=auth)).json()["keys"][0]
-    assert before["monthly_balance"] == "20.000000" and before["extra_balance"] == "3.125000"
+    assert before["monthly_balance"] == "30.000000" and before["extra_balance"] == "3.125000"
     credits = importlib.import_module("gateway.credits")
     monkeypatch.setattr(credits, "month", lambda: "2099-01")
     after = (await api.get("/portal/me", headers=auth)).json()["keys"][0]
@@ -222,7 +224,8 @@ async def test_public_status_projection_preserves_internal_state(service):
 
 @pytest.mark.asyncio
 async def test_registration_requires_exact_company_email(service):
-    api, _, _, _ = service
+    api, ctl, _, _ = service
+    assert (await api.post("/portal/register", json={})).status_code == 403
     for name in (
         "alice",
         "alice@example.com",
@@ -232,10 +235,10 @@ async def test_registration_requires_exact_company_email(service):
         ".alice@star-net.cn",
         "alice..bob@star-net.cn",
     ):
-        response = await api.post("/portal/register", json={"username": name, "password": "test-password-123"})
+        response = await ctl.post("/admin/users", json={"username": name, "initial_password": "test-password-123"})
         assert response.status_code == 422
-    response = await api.post("/portal/register", json={"username": "Alice@STAR-NET.CN", "password": "test-password-123"})
+    response = await ctl.post("/admin/users", json={"username": "Alice@STAR-NET.CN", "initial_password": "test-password-123"})
     assert response.status_code == 201
     assert response.json()["username"] == "alice@star-net.cn"
-    duplicate = await api.post("/portal/register", json={"username": "alice@star-net.cn", "password": "test-password-123"})
+    duplicate = await ctl.post("/admin/users", json={"username": "alice@star-net.cn", "initial_password": "test-password-123"})
     assert duplicate.status_code == 409

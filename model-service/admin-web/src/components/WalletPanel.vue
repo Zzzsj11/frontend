@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { api } from '../api/client'
 import { useControl } from '../stores/control'
+import AccountManagement from './AccountManagement.vue'
 interface User {
   id: string
   username: string
@@ -34,10 +35,7 @@ const store = useControl()
 const users = ref<User[]>([]),
   wallets = ref<Wallet[]>([]),
   ledger = ref<Ledger[]>([])
-const owner = ref(''),
-  name = ref(''),
-  initialQuota = ref('0'),
-  keyId = ref(''),
+const keyId = ref(''),
   quota = ref('0'),
   delta = ref(''),
   reason = ref(''),
@@ -68,19 +66,6 @@ async function load() {
 }
 async function refresh() {
   await store.execute(load)
-}
-async function create() {
-  await store.execute(async () => {
-    const data = await api<{ api_key: string }>('/clients', 'POST', {
-      name: name.value,
-      user_id: owner.value,
-      monthly_points: initialQuota.value,
-    })
-    store.revealedKey = data.api_key
-    name.value = ''
-    await load()
-    await store.refresh()
-  })
 }
 function choose() {
   quota.value = wallets.value.find((w) => w.id === keyId.value)?.monthly_points || '0'
@@ -115,37 +100,7 @@ async function changePage(n: number) {
 onMounted(refresh)
 </script>
 <template>
-  <section class="card">
-    <h3>注册用户与密钥分配</h3>
-    <p>
-      用户只能注册、登录和查看自己的消费。仅管理员生成
-      Key、绑定用户并分配积分；绑定后不可转移所有权。
-    </p>
-    <form class="fields" @submit.prevent="create">
-      <label
-        >注册用户<select aria-label="注册用户" v-model="owner" required>
-          <option value="">选择用户</option>
-          <option v-for="u in users" :key="u.id" :value="u.id">
-            {{ u.username }} · {{ u.id }}
-          </option>
-        </select></label
-      ><label>Key 名称<input v-model="name" required /></label
-      ><label
-        >每月积分额度<input
-          v-model="initialQuota"
-          type="number"
-          min="0"
-          step="0.000001"
-          required /></label
-      ><button :disabled="store.loading">生成并绑定 Key</button>
-    </form>
-    <p v-if="!users.length" class="muted">暂无注册用户。</p>
-    <div v-if="store.revealedKey" class="key">
-      <p>仅展示一次，请通过安全渠道交付给所属用户。</p>
-      <code>{{ store.revealedKey }}</code
-      ><button class="secondary" @click="store.revealedKey = ''">已保存，隐藏</button>
-    </div>
-  </section>
+  <AccountManagement />
   <section class="card table-wrap">
     <h3>Key 额度与余额</h3>
     <table>
@@ -171,10 +126,11 @@ onMounted(refresh)
         </tr>
       </tbody>
     </table>
+    <p class="muted">用户 Key 的月上限由账号持有者自行分配。以下操作仅用于系统 Key。</p>
     <label
-      >选择操作 Key<select aria-label="选择操作 Key" v-model="keyId" @change="choose">
+      >选择系统 Key<select aria-label="选择系统 Key" v-model="keyId" @change="choose">
         <option value="">请选择</option>
-        <option v-for="w in wallets" :key="w.id" :value="w.id">
+        <option v-for="w in wallets.filter((w) => !w.user_id)" :key="w.id" :value="w.id">
           {{ w.name }} · {{ w.key_prefix }}
         </option>
       </select></label

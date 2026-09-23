@@ -75,3 +75,29 @@ def test_password_migration_preserves_existing_accounts(tmp_path):
     migrate("head")
     with sqlite3.connect(database) as db:
         assert db.execute("SELECT password_changed_at FROM portal_users WHERE id='legacy'").fetchone()[0] == "2026-09-23"
+
+
+def test_account_limit_migration_preserves_existing_key_allowances(tmp_path):
+    database = tmp_path / "accounts.db"
+    env = {**os.environ, "DATABASE_URL": "sqlite+aiosqlite:///" + str(database)}
+
+    def migrate(revision):
+        subprocess.run([sys.executable, "-m", "alembic", "upgrade", revision], cwd=ROOT, env=env, check=True, capture_output=True)
+
+    migrate("0007")
+    with sqlite3.connect(database) as db:
+        db.execute(
+            "INSERT INTO portal_users (id, username, password_hash, enabled, created_at, updated_at) VALUES ('owner', 'owner@star-net.cn', 'preserved', 1, '2026-09-22', '2026-09-22')"
+        )
+        for ident, points, deleted in (("a", 10, None), ("b", 20, None), ("retired", 100, "2026-09-22")):
+            db.execute(
+                "INSERT INTO clients (id, name, key_hash, key_prefix, enabled, allowed_models, concurrency, require_agent, user_id, monthly_points, created_at, updated_at, deleted_at) VALUES (?, ?, ?, 'test', 1, '[]', 1, 0, 'owner', ?, '2026-09-22', '2026-09-22', ?)",
+                (ident, ident, ident, points, deleted),
+            )
+    migrate("head")
+    with sqlite3.connect(database) as db:
+        assert db.execute("SELECT monthly_points, password_hash FROM portal_users WHERE id='owner'").fetchone() == (30, "preserved")
+        db.execute("UPDATE portal_users SET monthly_points=15 WHERE id='owner'")
+    migrate("head")
+    with sqlite3.connect(database) as db:
+        assert db.execute("SELECT monthly_points FROM portal_users WHERE id='owner'").fetchone()[0] == 15

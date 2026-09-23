@@ -7,7 +7,7 @@ import pytest
 async def test_first_login_password_gate_and_session_revocation(service):
     api, ctl, _, _ = service
     credentials = {"username": "first@star-net.cn", "password": "Initial123"}
-    created = await api.post("/portal/register", json=credentials)
+    created = await ctl.post("/admin/users", json={"username": credentials["username"], "initial_password": credentials["password"]})
     assert created.status_code == 201
     tokens = [(await api.post("/portal/login", json=credentials)).json()["access_token"] for _ in range(2)]
     auth = {"Authorization": "Bearer " + tokens[0]}
@@ -15,10 +15,7 @@ async def test_first_login_password_gate_and_session_revocation(service):
     assert me["must_change_password"] is True and me["keys"] == []
     for path in ("/portal/jobs", "/portal/ledger"):
         assert (await api.get(path, headers=auth)).status_code == 403
-    key = (await ctl.post("/admin/clients", json={"name": "first", "user_id": created.json()["id"]})).json()
-    assert (
-        await api.get("/v1/models", headers={"Authorization": "Bearer " + key["api_key"], "X-User-Id": created.json()["id"]})
-    ).status_code == 403
+    assert (await api.post("/portal/keys", headers=auth, json={"name": "first", "monthly_points": 0})).status_code == 403
     for value in ("abc1234", "12345678", "abcdefgh"):
         result = await api.post(
             "/portal/change-password",
@@ -48,6 +45,7 @@ async def test_first_login_password_gate_and_session_revocation(service):
     auth = {"Authorization": "Bearer " + login.json()["access_token"]}
     assert (await api.get("/portal/me", headers=auth)).json()["must_change_password"] is False
     assert (await api.get("/portal/jobs", headers=auth)).status_code == 200
+    key = (await api.post("/portal/keys", headers=auth, json={"name": "first", "monthly_points": 0})).json()
     assert (
         await api.get("/v1/models", headers={"Authorization": "Bearer " + key["api_key"], "X-User-Id": created.json()["id"]})
     ).status_code == 200

@@ -30,6 +30,7 @@ interface Key {
   name: string
   key_prefix: string
   enabled: boolean
+  spent_points: string
   monthly_points: string
   monthly_balance: string
   extra_balance: string
@@ -68,6 +69,7 @@ interface Ledger {
 }
 export const labels: Record<string, string> = {
   monthly_reset: '月度重置',
+  quota_adjust: '月上限调整',
   manual_credit: '临时增加',
   manual_debit: '临时扣减',
   task_charge: '任务消费',
@@ -93,6 +95,16 @@ export const usePortal = defineStore('portal', {
       username: string
       must_change_password: boolean
       keys: Key[]
+      quota?: {
+        monthly_points: string
+        spent_points: string
+        reserved_points: string
+        available_points: string
+        allocated_points: string
+        key_count: number
+        key_limit: number
+        billing_month: string
+      }
     } | null,
     models: [] as Model[],
     jobs: [] as Job[],
@@ -104,11 +116,13 @@ export const usePortal = defineStore('portal', {
     loading: false,
     error: '',
     message: '',
+    revealedKey: '',
   }),
   actions: {
     async execute(action: () => Promise<void>) {
       this.loading = true
       this.error = ''
+      this.message = ''
       try {
         await action()
       } catch (e) {
@@ -122,13 +136,9 @@ export const usePortal = defineStore('portal', {
         this.models = await api<Model[]>('/models')
       })
     },
-    async auth(mode: string, username: string, password: string) {
+    async auth(username: string, password: string) {
+      this.revealedKey = ''
       await this.execute(async () => {
-        if (mode === 'register') {
-          await api('/register', 'POST', { username, password })
-          this.message = '注册成功，请登录。API Key 由管理员生成与绑定。'
-          return
-        }
         const result = await api<{ access_token: string }>('/login', 'POST', { username, password })
         setToken(result.access_token)
         this.message = ''
@@ -155,10 +165,32 @@ export const usePortal = defineStore('portal', {
     async reload() {
       await this.execute(() => this.refresh())
     },
+    async createKey(name: string, monthly_points: string) {
+      await this.execute(async () => {
+        const data = await api<{ api_key: string }>('/keys', 'POST', { name, monthly_points })
+        this.revealedKey = data.api_key
+        await this.refresh()
+      })
+    },
+    async setKeyQuota(id: string, points: string) {
+      await this.execute(async () => {
+        await api(`/keys/${id}/quota`, 'POST', { points })
+        await this.refresh()
+        this.message = 'Key 月上限已更新，本月消费记录保留。'
+      })
+    },
+    async deleteKey(id: string) {
+      await this.execute(async () => {
+        await api(`/keys/${id}`, 'DELETE')
+        this.revealedKey = ''
+        await this.refresh()
+      })
+    },
     async changePassword(current_password: string, new_password: string, confirmation: string) {
       await this.execute(async () => {
         await api('/change-password', 'POST', { current_password, new_password, confirmation })
         setToken('')
+        this.revealedKey = ''
         this.user = null
         this.jobs = []
         this.ledger = []
@@ -170,6 +202,7 @@ export const usePortal = defineStore('portal', {
       await this.execute(async () => {
         await api('/logout', 'POST')
         setToken('')
+        this.revealedKey = ''
         this.user = null
         this.jobs = []
         this.ledger = []

@@ -281,9 +281,18 @@ def test_upgrade_without_retired_rows_preserves_seeded_channels(legacy_db):
 
 def test_single_head_and_unbroken_history():
     directory = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
-    assert directory.get_heads() == ["0007"]
+    assert directory.get_heads() == ["0008"]
     assert directory.get_revision(REVISION).down_revision == PREVIOUS
-    assert {revision.revision for revision in directory.walk_revisions()} == {"0001", "0002", "0003", PREVIOUS, REVISION, "0006", "0007"}
+    assert {revision.revision for revision in directory.walk_revisions()} == {
+        "0001",
+        "0002",
+        "0003",
+        PREVIOUS,
+        REVISION,
+        "0006",
+        "0007",
+        "0008",
+    }
 
 
 def test_fresh_database_full_upgrade(tmp_path):

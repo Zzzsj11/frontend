@@ -1,15 +1,33 @@
 """Control-plane operations only; no dependency on gateway code or provider credentials."""
 
+import asyncio
+import re
+import secrets
 import uuid
 from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
-from .credits import account, amount, default_rule, entry, held, ledger_view, lock, reset, rules, settle
+from .credits import (
+    account,
+    amount,
+    configure_quota,
+    default_rule,
+    entry,
+    held,
+    ledger_view,
+    lock,
+    reset,
+    rules,
+    settle,
+    user_account,
+)
 from .db import Audit, Client, Job, Ledger, Model, PricingRule, Session, User, now
+from .passwords import password_hash
 
 
 def router_for(admin):
@@ -17,9 +35,55 @@ def router_for(admin):
 
     @router.get("/users")
     async def users():
-        async with Session() as db:
+        async with Session.begin() as db:
+            await lock(db)
             rows = (await db.scalars(select(User).where(User.deleted_at.is_(None)).order_by(User.created_at.desc()).limit(1000))).all()
-        return [{"id": u.id, "username": u.username, "enabled": u.enabled, "created_at": u.created_at} for u in rows]
+            return [
+                {"id": u.id, "username": u.username, "enabled": u.enabled, "created_at": u.created_at, "quota": await user_account(db, u)}
+                for u in rows
+            ]
+
+    @router.post("/users", status_code=201)
+    async def create_user(body: UserCreate, actor=Depends(admin)):
+        password = body.initial_password or secrets.token_urlsafe(18) + "A1"
+        hashed = await asyncio.to_thread(password_hash, password)
+        async with Session.begin() as db:
+            user = User(id="user-" + uuid.uuid4().hex, username=body.username, password_hash=hashed, monthly_points=body.monthly_points)
+            db.add(user)
+            try:
+                await db.flush()
+            except IntegrityError:
+                raise HTTPException(409, "该企业邮箱账号已存在") from None
+            db.add(
+                Audit(
+                    id=uuid.uuid4().hex,
+                    actor=actor,
+                    action="user.create",
+                    target=user.id,
+                    detail={"username": user.username, "monthly_points": str(body.monthly_points)},
+                )
+            )
+        return {"id": user.id, "username": user.username, "initial_password": password}
+
+    @router.post("/users/{uid}/quota")
+    async def user_quota(uid: str, body: Quota, actor=Depends(admin)):
+        async with Session.begin() as db:
+            await lock(db)
+            user = await db.get(User, uid)
+            if not user or user.deleted_at:
+                raise HTTPException(404, "账号不存在")
+            previous = str(user.monthly_points)
+            user.monthly_points = amount(body.points)
+            db.add(
+                Audit(
+                    id=uuid.uuid4().hex,
+                    actor=actor,
+                    action="user.quota",
+                    target=uid,
+                    detail={"previous": previous, "monthly_points": str(body.points), "effect": "immediate"},
+                )
+            )
+            return await user_account(db, user)
 
     @router.get("/wallets")
     async def wallets():
@@ -30,24 +94,7 @@ def router_for(admin):
 
     @router.post("/clients/{cid}/bind")
     async def bind(cid: str, body: Binding, actor=Depends(admin)):
-        async with Session.begin() as db:
-            await lock(db)
-            c = await db.get(Client, cid)
-            user = await db.get(User, body.user_id)
-            if not c or c.deleted_at or not user or user.deleted_at or not user.enabled:
-                raise HTTPException(404)
-            if c.user_id == user.id:
-                return {"ok": True}
-            if c.user_id or await db.scalar(select(func.count()).select_from(Job).where(Job.client_id == cid)):
-                raise HTTPException(409, "Only unused, unbound keys can be bound; ownership cannot be transferred")
-            c.user_id = user.id
-            c.billing_enabled = True
-            # Associate the unused key's previous balance entries with its first and permanent owner.
-            records = (await db.scalars(select(Ledger).where(Ledger.client_id == cid))).all()
-            for row in records:
-                row.user_id = user.id
-            db.add(Audit(id=uuid.uuid4().hex, actor=actor, action="client.bind", target=cid, detail={"user_id": user.id}))
-        return {"ok": True}
+        raise HTTPException(403, "用户 Key 由账号持有者创建并自动归属，不能转移绑定")
 
     @router.post("/clients/{cid}/quota")
     async def quota(cid: str, body: Quota, actor=Depends(admin)):
@@ -56,18 +103,22 @@ def router_for(admin):
             c = await db.get(Client, cid)
             if not c or c.deleted_at:
                 raise HTTPException(404)
+            if c.user_id:
+                raise HTTPException(403, "用户 Key 月上限由账号持有者分配")
             # Initialize an unconfigured key in the current month at its first configured allowance.
             previous = str(c.monthly_points)
-            c.billing_enabled = True
-            c.monthly_points = amount(body.points)
-            await reset(db, c)
+            await configure_quota(db, c, body.points, actor)
             db.add(
                 Audit(
                     id=uuid.uuid4().hex,
                     actor=actor,
                     action="quota.configure",
                     target=cid,
-                    detail={"previous": previous, "monthly_points": str(c.monthly_points), "effect": "next_reset"},
+                    detail={
+                        "previous": previous,
+                        "monthly_points": str(c.monthly_points),
+                        "effect": "immediate" if c.user_id else "next_reset",
+                    },
                 )
             )
             return await account(db, c)
@@ -220,3 +271,24 @@ class Reconcile(BaseModel):
     operation_id: str = Field(min_length=8, max_length=160)
     reason: str = Field(min_length=3, max_length=500)
     reference: str = Field(min_length=3, max_length=500)
+
+
+class UserCreate(BaseModel):
+    username: str = Field(min_length=3, max_length=80)
+    monthly_points: Decimal = Field(default=0, ge=0, le=1000000000, decimal_places=6)
+    initial_password: str | None = Field(default=None, min_length=8, max_length=128)
+
+    @field_validator("username")
+    @classmethod
+    def email(cls, value):
+        value = value.lower()
+        if not re.fullmatch(r"[a-z0-9_-]+(?:\.[a-z0-9_-]+)*@star-net\.cn", value):
+            raise ValueError("仅支持 @star-net.cn 企业邮箱")
+        return value
+
+    @field_validator("initial_password")
+    @classmethod
+    def password(cls, value):
+        if value is not None and (not re.search(r"[A-Za-z]", value) or not re.search(r"[0-9]", value)):
+            raise ValueError("密码至少 8 位，且包含字母和数字")
+        return value
