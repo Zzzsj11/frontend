@@ -25,7 +25,7 @@ export interface Model {
   capabilities: Record<string, unknown>
   pricing: Price[]
 }
-interface Key {
+export interface Key {
   id: string
   name: string
   key_prefix: string
@@ -45,7 +45,8 @@ interface Bill {
   reserved_points: string
   rule: Price
 }
-interface Job {
+export interface Job {
+  key_name: string
   id: string
   client_id: string
   model: string
@@ -55,7 +56,8 @@ interface Job {
   created_at: string
   error: string | null
 }
-interface Ledger {
+export interface Ledger {
+  key_name: string
   id: string
   kind: string
   client_id: string
@@ -113,6 +115,10 @@ export const usePortal = defineStore('portal', {
     ledgerTotal: 0,
     page: 1,
     ledgerPage: 1,
+    ledgerLimit: 10,
+    ledgerKey: '',
+    ledgerKind: '',
+    historyKeys: [] as { id: string; name: string; deleted: boolean }[],
     loading: false,
     error: '',
     message: '',
@@ -141,6 +147,9 @@ export const usePortal = defineStore('portal', {
       await this.execute(async () => {
         const result = await api<{ access_token: string }>('/login', 'POST', { username, password })
         setToken(result.access_token)
+        this.page = this.ledgerPage = 1
+        this.ledgerKey = this.ledgerKind = ''
+        this.historyKeys = []
         this.message = ''
         await this.refresh()
       })
@@ -150,17 +159,29 @@ export const usePortal = defineStore('portal', {
       if (this.user.must_change_password) {
         this.jobs = []
         this.ledger = []
+        this.historyKeys = []
+        this.ledgerKey = this.ledgerKind = ''
+        this.page = this.ledgerPage = 1
         this.total = this.ledgerTotal = 0
         return
       }
-      const [jobs, ledger] = await Promise.all([
-        api<{ items: Job[]; total: number }>(`/jobs?page=${this.page}`),
-        api<{ items: Ledger[]; total: number }>(`/ledger?page=${this.ledgerPage}`),
+      const [jobs, ledger, historyKeys] = await Promise.all([
+        api<{ items: Job[]; total: number; page: number }>(`/jobs?page=${this.page}`),
+        api<{ items: Ledger[]; total: number; page: number }>(
+          `/ledger?page=${this.ledgerPage}&limit=${this.ledgerLimit}&client_id=${encodeURIComponent(this.ledgerKey)}&kind=${encodeURIComponent(this.ledgerKind)}`,
+        ),
+        api<typeof this.historyKeys>('/history-keys'),
       ])
       this.jobs = jobs.items
       this.total = jobs.total
+      this.page = jobs.page
       this.ledger = ledger.items
       this.ledgerTotal = ledger.total
+      this.ledgerPage = ledger.page
+      this.historyKeys = historyKeys
+    },
+    async jobDetail(id: string) {
+      return api<Job>(`/jobs/${encodeURIComponent(id)}`)
     },
     async reload() {
       await this.execute(() => this.refresh())
@@ -194,6 +215,9 @@ export const usePortal = defineStore('portal', {
         this.user = null
         this.jobs = []
         this.ledger = []
+        this.historyKeys = []
+        this.ledgerKey = this.ledgerKind = ''
+        this.page = this.ledgerPage = 1
         this.total = this.ledgerTotal = 0
         this.message = '密码已更新，请使用新密码登录。'
       })
@@ -206,6 +230,9 @@ export const usePortal = defineStore('portal', {
         this.user = null
         this.jobs = []
         this.ledger = []
+        this.historyKeys = []
+        this.ledgerKey = this.ledgerKind = ''
+        this.page = this.ledgerPage = 1
         this.total = 0
         this.ledgerTotal = 0
       })

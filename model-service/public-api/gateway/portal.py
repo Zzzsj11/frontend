@@ -255,38 +255,74 @@ async def models():
         ]
 
 
-@router.get("/jobs")
-async def jobs(page: int = 1, limit: int = 30, user=Depends(current_user)):
-    limit = max(1, min(limit, 100))
-    query = select(Job).where(
-        Job.user_id == user.id, Job.deleted_at.is_(None), Job.client_id.in_(select(Client.id).where(Client.user_id == user.id))
+def private_jobs(uid):
+    return select(Job).where(
+        Job.user_id == uid, Job.deleted_at.is_(None), Job.client_id.in_(select(Client.id).where(Client.user_id == uid))
     )
-    async with Session() as db:
-        total = await db.scalar(select(func.count()).select_from(query.subquery()))
-        rows = (await db.scalars(query.order_by(Job.created_at.desc()).offset((max(1, page) - 1) * limit).limit(limit))).all()
+
+
+def portal_job(job, key_name):
     return {
-        "total": total,
-        "items": [
-            {
-                "id": j.id,
-                "client_id": j.client_id,
-                "model": j.model_id,
-                "status": public_status(j.status),
-                "usage": j.usage,
-                "billing": job_bill(j),
-                "created_at": j.created_at,
-                "error": j.error,
-            }
-            for j in rows
-        ],
+        "id": job.id,
+        "client_id": job.client_id,
+        "key_name": key_name,
+        "model": job.model_id,
+        "status": public_status(job.status),
+        "usage": job.usage,
+        "billing": job_bill(job),
+        "created_at": job.created_at,
+        "error": job.error,
     }
 
 
-@router.get("/ledger")
-async def ledger(page: int = 1, limit: int = 50, user=Depends(current_user)):
+async def paginate(db, query, page, limit, timestamp, identity):
     limit = max(1, min(limit, 100))
-    query = select(Ledger).where(Ledger.user_id == user.id, Ledger.deleted_at.is_(None))
+    total = await db.scalar(select(func.count()).select_from(query.subquery()))
+    page = max(1, min(page, max(1, (total + limit - 1) // limit)))
+    rows = (await db.scalars(query.order_by(timestamp.desc(), identity.desc()).offset((page - 1) * limit).limit(limit))).all()
+    return rows, {"total": total, "page": page, "limit": limit}
+
+
+@router.get("/history-keys")
+async def history_keys(user=Depends(current_user)):
     async with Session() as db:
-        total = await db.scalar(select(func.count()).select_from(query.subquery()))
-        rows = (await db.scalars(query.order_by(Ledger.created_at.desc()).offset((max(1, page) - 1) * limit).limit(limit))).all()
-    return {"total": total, "items": [ledger_view(row) for row in rows]}
+        keys = (await db.scalars(select(Client).where(Client.user_id == user.id).order_by(Client.created_at, Client.id))).all()
+        return [{"id": c.id, "name": c.name, "deleted": c.deleted_at is not None} for c in keys]
+
+
+@router.get("/jobs")
+async def jobs(page: int = 1, limit: int = 30, client_id: str = "", user=Depends(current_user)):
+    query = private_jobs(user.id)
+    if client_id:
+        query = query.where(Job.client_id == client_id)
+    async with Session() as db:
+        rows, metadata = await paginate(db, query, page, limit, Job.created_at, Job.id)
+        names = dict((await db.execute(select(Client.id, Client.name).where(Client.user_id == user.id))).all())
+        return {**metadata, "items": [portal_job(j, names.get(j.client_id, "已删除 Key")) for j in rows]}
+
+
+@router.get("/jobs/{jid}")
+async def job_detail(jid: str, user=Depends(current_user)):
+    async with Session() as db:
+        job = await db.scalar(private_jobs(user.id).where(Job.id == jid))
+        if not job:
+            raise HTTPException(404, "任务不存在或无权访问")
+        client = await db.get(Client, job.client_id)
+        return portal_job(job, client.name)
+
+
+@router.get("/ledger")
+async def ledger(page: int = 1, limit: int = 50, client_id: str = "", kind: str = "", user=Depends(current_user)):
+    query = select(Ledger).where(
+        Ledger.user_id == user.id,
+        Ledger.deleted_at.is_(None),
+        Ledger.client_id.in_(select(Client.id).where(Client.user_id == user.id)),
+    )
+    if client_id:
+        query = query.where(Ledger.client_id == client_id)
+    if kind:
+        query = query.where(Ledger.kind == kind)
+    async with Session() as db:
+        rows, metadata = await paginate(db, query, page, limit, Ledger.created_at, Ledger.id)
+        names = dict((await db.execute(select(Client.id, Client.name).where(Client.user_id == user.id))).all())
+        return {**metadata, "items": [{**ledger_view(row), "key_name": names.get(row.client_id, "已删除 Key")} for row in rows]}

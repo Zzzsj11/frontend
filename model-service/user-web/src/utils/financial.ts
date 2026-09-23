@@ -47,3 +47,13 @@ export function financialDetails(value: unknown): unknown {
     }),
   )
 }
+
+export const prettyPoints = (value: Amount) => points(value).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+export const prettySignedPoints = (value: Amount) =>
+  signedPoints(value).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+export function localDate(value: string) {
+  const date = new Date(value.endsWith('Z') || /[+-]\d\d:\d\d$/.test(value) ? value : value + 'Z')
+  return Number.isNaN(date.getTime())
+    ? '—'
+    : date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
+}

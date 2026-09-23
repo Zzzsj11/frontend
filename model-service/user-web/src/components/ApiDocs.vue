@@ -1,269 +1,272 @@
 <script setup lang="ts">
-import { money, moneyPoints } from '../utils/financial'
-import { computed, ref, watch } from 'vue'
-import { alphabetical, modelVendor } from '../utils/modelCatalog'
 import CodeExample from './CodeExample.vue'
-import { labels, usePortal } from '../stores/portal'
-const store = usePortal()
-const search = ref('')
-const selected = ref('')
-const category = ref('')
-const searchInput = ref<HTMLInputElement | null>(null)
-function clearSearch() {
-  search.value = ''
-  searchInput.value?.focus()
-}
-const models = computed(() =>
-  store.models.filter(
-    (m) =>
-      m.enabled &&
-      (category.value === 'text' ? ['chat', 'text'].includes(m.kind) : m.kind === category.value) &&
-      m.id.toLowerCase().includes(search.value.toLowerCase()),
-  ),
-)
-const groups = computed(() => {
-  const vendors = [...new Set(models.value.map((m) => modelVendor(m.id)))].sort(alphabetical)
-  return vendors.map((vendor) => ({
-    vendor,
-    models: models.value
-      .filter((m) => modelVendor(m.id) === vendor)
-      .sort((a, b) => alphabetical(a.id, b.id)),
-  }))
-})
-watch(category, () => {
-  selected.value = ''
-  search.value = ''
-})
-watch(models, (items) => {
-  if (!items.some((m) => m.id === selected.value)) selected.value = ''
-})
-const model = computed(() => models.value.find((m) => m.id === selected.value))
-const example = computed(() => {
-  const m = model.value
-  const name = (m?.id || '').replace(/^yseeai--/, '').replace(/^(svip-|s-|z-)/, '')
-  const responses = m?.capabilities.native_endpoint === '/v1/responses'
-  const body = responses
-    ? { model: m?.id, input: '你好', max_output_tokens: 128 }
-    : m?.kind === 'chat'
-      ? { model: m.id, messages: [{ role: 'user', content: '你好' }], max_tokens: 128 }
-      : m?.kind === 'image'
-        ? { model: m.id, prompt: '清晨的海边', size: '1024x1024', quality: 'medium' }
-        : {
-            model: m?.id || 'MODEL_ID',
-            prompt: '清晨的海边，镜头缓慢前移',
-            duration: name.startsWith('veo-') ? 8 : name === 'gemini-omni-flash-preview' ? 10 : 5,
-            resolution: '720p',
-            reference_mode: 'text',
-          }
-  return `curl -X POST "$MODEL_API_BASE/v1/${responses ? 'responses' : m?.kind === 'chat' ? (name.startsWith('claude') ? 'messages' : 'chat/completions') : m?.kind === 'image' ? 'images' : 'videos'}" \\\n  -H "Authorization: Bearer $MODEL_API_KEY" \\\n  -H "Idempotency-Key: unique-request-id" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(body, null, 2)}'`
-})
+import CopyButton from './CopyButton.vue'
+import ModelPricing from './ModelPricing.vue'
+import { useApiDocs } from '../composables/useApiDocs'
+const {
+  search,
+  selected,
+  category,
+  exampleId,
+  categories,
+  models,
+  groups,
+  model,
+  docs,
+  example,
+  parameters,
+  fullGuide,
+  modelVendor,
+} = useApiDocs()
 </script>
 <template>
-  <section class="card">
+  <section class="card docs-intro">
     <p class="eyebrow">API REFERENCE</p>
     <h2>一次接入，多种模型</h2>
-    <p>联系管理员开通账号及月额度 → 登录创建自己的 API Key → 发起任务 → 查询积分明细。</p>
-    <p class="muted">
-      每个账号最多创建 10 个 Key；Key 明文仅在创建时展示一次，请保存到服务端环境变量。
+    <p class="muted">选择模型，复制示例即可开始接入。Key 在服务端保存，不要放入前端代码。</p>
+    <p class="base-note">
+      API 基础地址：<code>$MODEL_API_BASE</code> · 请向管理员获取地址，不包含 <code>/v1</code>。
     </p>
-    <details>
-      <summary>鉴权、任务状态与错误码</summary>
-      <p>API 地址和 Bearer Token 由管理员提供。</p>
-      <p>
-        每次生成必须携带唯一 Idempotency-Key；重复同一 key 返回原任务，改变参数返回 409。查询 GET
-        /v1/jobs/{id}，状态依次 queued / running / succeeded/failed。
-      </p>
-      <p>
-        401：鉴权失败；402：积分不足；403：无模型权限；422：参数错误；429：并发限制；503：模型费率尚未配置。失败任务如有实际用量仍可计费，用量缺失显示待核账。
-      </p>
-    </details>
   </section>
-  <section class="card">
-    <h3>只估价，不生成</h3>
-    <p>
-      在文本、图片或视频请求中增加 <code>estimate_only: true</code>，或调用
-      <code>POST /v1/pricing/estimate</code>。估价不扣积分、不创建生成任务，无需 Idempotency-Key。
-    </p>
-    <p class="muted">
-      文本和图片会根据输入内容、生成规格及历史用量自动给出参考价，无需填写 Token。 可用
-      estimate_usage 覆盖预计用量。参考区间不代表价格保证，最终费用以实际生成用量为准。
-    </p>
-    <CodeExample
-      :code="
-        JSON.stringify(
-          {
-            model: 'gpt-5.6-sol',
-            estimate_only: true,
-            messages: [{ role: 'user', content: '帮我写一段产品介绍' }],
-            max_tokens: 500,
-          },
-          null,
-          2,
-        )
-      "
-    />
-  </section>
-  <section class="card">
-    <h3>模型与积分费率</h3>
-    <div class="model-search">
-      <label for="model-search-input">搜索模型</label>
-      <div class="search-field">
-        <input
-          id="model-search-input"
-          ref="searchInput"
-          v-model="search"
-          placeholder="输入模型名称"
-        />
+  <section class="card model-browser" aria-label="API 模型目录">
+    <div class="heading">
+      <div class="category-tabs" role="group" aria-label="模型类型">
         <button
-          v-if="search"
-          type="button"
-          class="clear-search"
-          aria-label="清除搜索"
-          title="清除搜索"
-          @click="clearSearch"
+          v-for="item in categories"
+          :key="item.id"
+          :class="{ active: category === item.id }"
+          :aria-pressed="category === item.id"
+          @click="category = item.id"
         >
-          <svg
-            viewBox="0 0 20 20"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-            aria-hidden="true"
-          >
-            <path d="m6 6 8 8M14 6l-8 8" />
-          </svg>
+          {{ item.label }}
         </button>
       </div>
+      <input
+        v-model="search"
+        aria-label="搜索模型或公司"
+        placeholder="搜索模型或公司"
+        type="search"
+      />
     </div>
-    <div class="model-selectors">
-      <label
-        >模型类型<select v-model="category" aria-label="模型类型">
-          <option value="">请选择模型类型</option>
-          <option value="text">文本</option>
-          <option value="image">图片</option>
-          <option value="video">视频</option>
-        </select></label
-      >
-      <label
-        >选择模型<select v-model="selected" aria-label="选择模型" :disabled="!category">
-          <option value="">
-            {{ !category ? '请先选择模型类型' : models.length ? '请选择模型' : '没有匹配的模型' }}
-          </option>
-          <optgroup v-for="group in groups" :key="group.vendor" :label="group.vendor">
-            <option v-for="m in group.models" :key="m.id" :value="m.id">
-              {{ m.id }}
-            </option>
-          </optgroup>
-        </select></label
-      >
+    <div class="company-list">
+      <section v-for="group in groups" :key="group.vendor" :aria-label="group.vendor + ' 模型'">
+        <h3>
+          {{ group.vendor }} <small>{{ group.models.length }}</small>
+        </h3>
+        <div class="model-chips">
+          <button
+            v-for="item in group.models"
+            :key="item.id"
+            :aria-pressed="selected === item.id"
+            :class="{ selected: selected === item.id }"
+            @click="selected = item.id"
+          >
+            {{ item.id }}<small v-if="!item.enabled">暂未开放</small>
+          </button>
+        </div>
+      </section>
     </div>
-    <template v-if="model"
-      ><h3>{{ model.id }}</h3>
-      <details>
-        <summary>模型参数限制</summary>
-        <pre>{{ JSON.stringify(model.capabilities, null, 2) }}</pre>
-      </details>
-      <article v-for="(rule, index) in model.pricing" :key="rule.id || index" class="rule">
-        <h4>
-          {{ labels[rule.selector?.mode || ''] || '全部生成方式' }} ·
-          {{ rule.selector?.resolution || '全部规格' }} · {{ rule.confirmed ? '已发布' : '待配置' }}
-        </h4>
-        <p v-if="rule.selector?.quality || rule.selector?.sound">
-          质量：{{ rule.selector?.quality || '全部' }}；声音：{{ rule.selector?.sound || '全部' }}
+    <p v-if="!models.length" class="empty">
+      {{ search ? '没有匹配的模型或公司' : '该类型暂无模型'
+      }}<button v-if="search" class="link-button" @click="search = ''">清除搜索</button>
+    </p>
+  </section>
+  <section v-if="model && docs" class="card model-docs" aria-label="当前模型文档">
+    <div class="heading">
+      <div>
+        <p class="eyebrow">{{ modelVendor(model.id) }}</p>
+        <h2>{{ model.id }}</h2>
+      </div>
+      <CopyButton :text="fullGuide" label="复制当前模型文档" />
+    </div>
+    <p v-if="!model.enabled" class="muted">
+      当前模型暂未开放，示例供接入准备；可用性以管理员实际启用配置为准。
+    </p>
+    <template v-if="!docs.custom">
+      <div class="example-tabs" role="group" aria-label="调用示例">
+        <button
+          v-for="item in docs.examples"
+          :key="item.id"
+          :class="{ secondary: exampleId !== item.id }"
+          :aria-pressed="exampleId === item.id"
+          @click="exampleId = item.id"
+        >
+          {{ item.label }}
+        </button>
+      </div>
+      <template v-if="example"
+        ><p>
+          <code>{{ example.path }}</code>
         </p>
+        <p class="muted">{{ example.hint }}</p>
+        <CodeExample :code="example.code" copy-label="复制命令"
+      /></template>
+      <details class="responses">
+        <summary>成功 / 失败响应示例（结构示意）</summary>
+        <div class="response-grid">
+          <div>
+            <h4>创建成功</h4>
+            <pre>{{ docs.success }}</pre>
+          </div>
+          <div>
+            <h4>参数错误 · HTTP 422</h4>
+            <pre>{{ docs.failure }}</pre>
+          </div>
+        </div>
+        <p class="muted">
+          示意省略部分字段；估价返回费用预估，查询返回任务当前状态，具体字段以实际响应为准。
+        </p>
+      </details>
+      <details>
+        <summary>请求参数与限制</summary>
         <div class="table-wrap">
-          <table v-if="rule.rates.length">
-            <thead>
-              <tr>
-                <th>用量</th>
-                <th>返回字段</th>
-                <th>人民币费率</th>
-                <th>积分费率</th>
-              </tr>
-            </thead>
+          <table>
             <tbody>
-              <tr v-for="r in rule.rates" :key="r.path">
-                <td>{{ r.label }}</td>
-                <td>
-                  {{ r.path
-                  }}<small v-if="r.subtract?.length"> 减去 {{ r.subtract.join('、') }}</small>
-                </td>
-                <td>¥{{ money(r.cny) }} / {{ r.unit }}</td>
-                <td>{{ moneyPoints(r.cny) }} 积分 / {{ r.unit }}</td>
+              <tr v-for="param in parameters" :key="param.name">
+                <th>{{ param.name }}</th>
+                <td>{{ param.value }}</td>
               </tr>
             </tbody>
           </table>
         </div>
-      </article>
-      <p v-if="model.id === 'minimax-h3-runninghub' || model.kind === 'text'" class="muted">
-        此模型使用工作流/提示词优化原生接口，请向管理员获取对应工作流参数；下方统一生成示例不适用。
-      </p>
-      <h3 v-else>请求示例</h3>
-      <p class="muted">
-        以下为文生示例。视频须按上方能力限制调整 duration；参考素材通过 images 原图 URL
-        数组传入，reference_mode 可选 reference、first_frame、first_last，具体支持以模型能力为准。
-      </p>
-      <CodeExample
-        v-if="model.id !== 'minimax-h3-runninghub' && model.kind !== 'text'"
-        :code="example"
-      />
+      </details>
     </template>
-    <p v-else class="muted">请选择模型，查看每种生成方式及规格的具体费率。</p>
+    <p v-else class="muted">此模型采用原生工作流接口，请联系管理员获取专用参数文档。</p>
+    <ModelPricing :model="model" />
+    <details>
+      <summary>鉴权、任务状态与错误码</summary>
+      <p class="muted">
+        绑定账号的 Key 自动确定用户身份。生成请求使用唯一 Idempotency-Key；同
+        Key、同参数重试不会重复创建任务，修改参数返回 409。任务查询 GET /v1/jobs/{id}，状态为 queued
+        / running / succeeded / failed。
+      </p>
+      <p class="muted">
+        401 鉴权失败 · 402 积分不足 · 403 无权限 · 409 请求冲突 · 422 参数错误 · 429 并发限制 · 503
+        费率或服务暂不可用。
+      </p>
+    </details>
   </section>
 </template>
 <style scoped>
 .card {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
-.rule {
-  border-top: 1px solid var(--border);
-  margin-top: 20px;
-  padding-top: 8px;
+h2 {
+  font-size: 23px;
+  overflow-wrap: anywhere;
 }
-.model-search {
-  display: block;
-  max-width: 360px;
-  margin: 16px 0;
+.base-note {
+  background: var(--bg);
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1.8;
 }
-.search-field {
-  position: relative;
+.category-tabs {
+  display: flex;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  gap: 4px;
 }
-.search-field input {
-  padding-right: 42px;
-}
-.clear-search {
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
+.category-tabs button {
   background: transparent;
   color: var(--muted);
 }
-.clear-search:hover {
-  background: var(--bg);
-  color: var(--text);
+.category-tabs button.active {
+  background: var(--primary-light);
+  color: var(--primary);
 }
-.clear-search svg {
-  width: 18px;
-  height: 18px;
+.heading input {
+  width: min(100%, 300px);
+  margin: 0;
 }
-.model-selectors {
+.company-list {
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr);
-  gap: 20px;
-  margin: 16px 0 24px;
+  gap: 18px;
+  margin-top: 24px;
 }
-.model-selectors label {
+.company-list h3 {
+  font-size: 14px;
+  margin: 0 0 10px;
+  color: var(--muted);
+}
+.company-list h3 small {
+  font-weight: 400;
+  margin-left: 6px;
+}
+.model-chips {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.model-chips button {
+  background: var(--panel);
+  border-color: var(--border);
+  color: var(--text);
+  text-align: left;
+  font-size: 13px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.model-chips button.selected {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+}
+.model-chips small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.example-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+}
+.responses {
+  margin-top: 24px;
+}
+.response-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.response-grid > div {
   min-width: 0;
 }
+.response-grid pre {
+  background: var(--bg);
+  padding: 16px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.empty {
+  text-align: center;
+  padding: 24px;
+  color: var(--muted);
+}
+.empty button {
+  display: block;
+  margin: 16px auto 0;
+}
 @media (max-width: 600px) {
-  .model-selectors {
-    grid-template-columns: minmax(90px, 1fr) minmax(0, 2fr);
-    gap: 12px;
+  .card {
+    padding: 18px;
+  }
+  .response-grid {
+    grid-template-columns: 1fr;
+  }
+  .heading input {
+    width: 100%;
+  }
+  .category-tabs {
+    width: 100%;
+  }
+  .category-tabs button {
+    flex: 1;
   }
 }
 </style>
