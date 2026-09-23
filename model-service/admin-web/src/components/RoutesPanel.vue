@@ -60,7 +60,7 @@ onMounted(load)
   <section class="card table-wrap">
     <h3>模型供应商路由</h3>
     <p class="muted">
-      每个模型、每个渠道可独立修改并发上限（1–200）。实际并发还受模型总上限、调用方与渠道总上限约束。数字越小优先级越高。
+      每个模型、每个渠道可独立修改并发上限（1–1000）。实际并发还受模型总上限、调用方与渠道总上限约束。数字越小优先级越高。
     </p>
     <p v-if="error" role="alert" class="error">{{ error }}</p>
     <p v-if="message" role="status">{{ message }}</p>
@@ -117,7 +117,7 @@ onMounted(load)
               v-model.number="row.concurrency"
               type="number"
               min="1"
-              max="200"
+              max="1000"
               :aria-label="row.id + '并发'"
             />
           </td>

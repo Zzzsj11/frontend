@@ -196,5 +196,6 @@ async def test_admin_can_edit_route_concurrency_to_150(service):
         assert route.concurrency == 150
         assert not route.enabled
         assert (await db.get(Model, "gpt-5.6-sol")).enabled
-    for invalid in (0, 201):
+    assert (await ctl.patch("/admin/routes/manual-limit", json={"concurrency": 1000})).status_code == 200
+    for invalid in (0, 1001):
         assert (await ctl.patch("/admin/routes/manual-limit", json={"concurrency": invalid})).status_code == 422

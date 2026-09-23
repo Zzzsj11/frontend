@@ -48,7 +48,7 @@ class EstimateConfig(BaseModel):
 class RoutePatch(BaseModel):
     enabled: bool | None = None
     priority: int | None = Field(default=None, ge=0, le=1000)
-    concurrency: int | None = Field(default=None, ge=1, le=200)
+    concurrency: int | None = Field(default=None, ge=1, le=1000)
 
 
 class Verification(BaseModel):
