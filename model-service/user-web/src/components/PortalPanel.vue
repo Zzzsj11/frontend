@@ -34,9 +34,8 @@ onMounted(() => store.loadModels())
   <div class="portal-shell">
     <header>
       <div>
-        <p class="eyebrow">COMPANY MODEL API</p>
-        <h1>开发者中心</h1>
-        <p v-if="!store.user" class="muted">仅限 @star-net.cn 企业邮箱登录</p>
+        <p class="eyebrow">ALL IN ONE MODEL API</p>
+        <h1>模型中控台</h1>
       </div>
       <nav>
         <button :class="{ secondary: section !== 'docs' }" @click="showDocs">API 文档</button
