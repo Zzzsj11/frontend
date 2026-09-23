@@ -56,7 +56,6 @@ onMounted(() => store.loadModels())
     <ApiDocs v-if="section === 'docs'" />
     <section v-else-if="!store.user" class="card auth">
       <h2>{{ authMode === 'register' ? '企业邮箱注册' : '企业邮箱登录' }}</h2>
-      <p class="muted">请使用 @star-net.cn 企业邮箱登录或注册。</p>
       <form @submit.prevent="submit">
         <label>
           企业邮箱
@@ -64,7 +63,6 @@ onMounted(() => store.loadModels())
             <input
               v-model="emailName"
               aria-label="企业邮箱前缀"
-              aria-describedby="company-email-hint"
               required
               maxlength="68"
               autocomplete="username"
@@ -74,9 +72,6 @@ onMounted(() => store.loadModels())
             <span>@star-net.cn</span>
           </span>
         </label>
-        <p id="company-email-hint" class="muted">
-          只需输入邮箱前缀，例如 zhangjiaqi；右侧后缀自动补全，无需重复输入。
-        </p>
         <label
           >密码<input
             v-model="password"
@@ -251,12 +246,13 @@ header {
   margin-bottom: 20px;
 }
 .auth {
-  max-width: 500px;
+  max-width: 380px;
   margin: 50px auto;
 }
 form {
   display: grid;
-  gap: 18px;
+  gap: 16px;
+  margin-top: 20px;
 }
 .accounts {
   display: grid;
