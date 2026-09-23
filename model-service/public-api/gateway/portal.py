@@ -3,12 +3,13 @@
 import asyncio
 import hashlib
 import hmac
+import re
 import secrets
 import uuid
 from datetime import timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
@@ -22,6 +23,16 @@ router = APIRouter(prefix="/portal", tags=["User portal"])
 class Credentials(BaseModel):
     username: str = Field(min_length=3, max_length=80, pattern=r"^[A-Za-z0-9_.@-]+$")
     password: str = Field(min_length=10, max_length=128)
+
+
+class Registration(Credentials):
+    @field_validator("username")
+    @classmethod
+    def company_email(cls, value):
+        value = value.lower()
+        if not re.fullmatch(r"[a-z0-9_-]+(?:\.[a-z0-9_-]+)*@star-net\.cn", value):
+            raise ValueError("仅支持 @star-net.cn 公司邮箱注册")
+        return value
 
 
 def password_hash(value, salt=None):
@@ -49,7 +60,7 @@ async def throttle(request, action):
 
 
 @router.post("/register", status_code=201)
-async def register(body: Credentials, request: Request):
+async def register(body: Registration, request: Request):
     await throttle(request, "portal.register")
     hashed = await asyncio.to_thread(password_hash, body.password)
     async with Session.begin() as db:

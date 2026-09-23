@@ -10,6 +10,7 @@ from test_service import body
 
 
 async def user_key(api, ctl, name="alice", monthly=20):
+    name += "@star-net.cn"
     result = await api.post("/portal/register", json={"username": name, "password": "test-password-123"})
     assert result.status_code == 201, result.text
     uid = result.json()["id"]
@@ -206,3 +207,24 @@ async def test_public_status_projection_preserves_internal_state(service):
         assert (await ctl.get("/admin/jobs/" + jid)).json()["status"] == internal
         async with db.Session() as session:
             assert (await session.get(db.Job, jid)).status == internal
+
+
+@pytest.mark.asyncio
+async def test_registration_requires_exact_company_email(service):
+    api, _, _, _ = service
+    for name in (
+        "alice",
+        "alice@example.com",
+        "alice@sub.star-net.cn",
+        "alice@star-net.cn.evil.com",
+        "alice@@star-net.cn",
+        ".alice@star-net.cn",
+        "alice..bob@star-net.cn",
+    ):
+        response = await api.post("/portal/register", json={"username": name, "password": "test-password-123"})
+        assert response.status_code == 422
+    response = await api.post("/portal/register", json={"username": "Alice@STAR-NET.CN", "password": "test-password-123"})
+    assert response.status_code == 201
+    assert response.json()["username"] == "alice@star-net.cn"
+    duplicate = await api.post("/portal/register", json={"username": "alice@star-net.cn", "password": "test-password-123"})
+    assert duplicate.status_code == 409

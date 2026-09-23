@@ -5,17 +5,20 @@ import { labels, usePortal } from '../stores/portal'
 const store = usePortal()
 const section = ref('docs')
 const authMode = ref('login')
-const username = ref('')
 const password = ref('')
+const emailName = ref('')
 async function showDocs() {
   section.value = 'docs'
   await store.loadModels()
 }
 async function submit() {
-  await store.auth(authMode.value, username.value, password.value)
+  const account = emailName.value.toLowerCase() + '@star-net.cn'
+  await store.auth(authMode.value, account, password.value)
   password.value = ''
   if (store.user) section.value = 'account'
-  else if (store.message) authMode.value = 'login'
+  else if (store.message) {
+    authMode.value = 'login'
+  }
 }
 async function page(delta: number) {
   store.page += delta
@@ -51,17 +54,26 @@ onMounted(() => store.loadModels())
     <ApiDocs v-if="section === 'docs'" />
     <section v-else-if="!store.user" class="card auth">
       <h2>{{ authMode === 'register' ? '注册账号' : '登录开发者中心' }}</h2>
-      <p class="muted">注册后由管理员生成、绑定密钥并分配积分。</p>
+      <p class="muted">
+        仅支持 @star-net.cn 公司邮箱注册。注册后由管理员生成、绑定密钥并分配积分。
+      </p>
       <form @submit.prevent="submit">
+        <label>
+          公司邮箱
+          <span class="email-account">
+            <input
+              v-model="emailName"
+              aria-label="公司邮箱前缀"
+              required
+              maxlength="68"
+              autocomplete="username"
+              pattern="[A-Za-z0-9_\-]+(\.[A-Za-z0-9_\-]+)*"
+              placeholder="zhangjiaqi"
+            />
+            <span>@star-net.cn</span>
+          </span>
+        </label>
         <label
-          >用户名<input
-            v-model="username"
-            required
-            minlength="3"
-            maxlength="80"
-            autocomplete="username"
-            pattern="[A-Za-z0-9_.@\-]+" /></label
-        ><label
           >密码<input
             v-model="password"
             required

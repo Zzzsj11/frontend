@@ -125,3 +125,17 @@ summary {
   color: var(--primary);
   margin-top: 8px;
 }
+
+.email-account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.email-account input {
+  min-width: 0;
+  flex: 1;
+}
+.email-account > span {
+  white-space: nowrap;
+  color: var(--muted);
+}
