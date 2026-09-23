@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FinancialInput from './FinancialInput.vue'
 import { ref } from 'vue'
 import { api } from '../api/client'
 const props = defineProps<{
@@ -61,7 +62,14 @@ async function save() {
       <div class="fields">
         <label v-for="[key, label] in fields" :key="key"
           >{{ label
-          }}<input
+          }}<FinancialInput
+            v-if="key.endsWith('_cny')"
+            v-model="policy[key]"
+            kind="money"
+            required
+            :aria-label="label" />
+          <input
+            v-else
             v-model.number="policy[key]"
             type="number"
             step="any"

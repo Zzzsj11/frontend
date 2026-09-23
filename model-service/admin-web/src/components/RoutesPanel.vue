@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { financialDetails } from '../utils/financial'
 import { onMounted, ref } from 'vue'
 import { api } from '../api/client'
 import EstimatePricingEditor from './EstimatePricingEditor.vue'
@@ -81,7 +82,11 @@ onMounted(load)
             <details>
               <summary>能力与费率快照</summary>
               <pre>{{
-                JSON.stringify({ capabilities: row.capabilities, pricing: row.pricing }, null, 2)
+                JSON.stringify(
+                  financialDetails({ capabilities: row.capabilities, pricing: row.pricing }),
+                  null,
+                  2,
+                )
               }}</pre>
             </details>
           </td>

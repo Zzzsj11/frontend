@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import KeyReveal from './KeyReveal.vue'
 import { usePortal } from '../stores/portal'
 const store = usePortal()
 const name = ref('')
@@ -60,11 +61,11 @@ async function remove(id: string) {
     </button>
   </form>
   <p v-if="store.user?.keys.length === 10" class="muted">已达到 10 个 Key 上限。</p>
-  <div v-if="store.revealedKey" class="revealed" role="status">
-    <p>Key 仅展示一次，请妥善保存，不要放入前端代码。</p>
-    <code>{{ store.revealedKey }}</code>
-    <button class="secondary" @click="store.revealedKey = ''">已保存，隐藏 Key</button>
-  </div>
+  <KeyReveal
+    v-if="store.revealedKey"
+    :api-key="store.revealedKey"
+    @dismiss="store.revealedKey = ''"
+  />
   <p v-if="!store.user?.keys.length">暂无 Key，请创建自己的 API Key。</p>
   <div class="keys">
     <article v-for="key in store.user?.keys" :key="key.id" class="card">
@@ -131,15 +132,5 @@ input[type='number'] {
 form {
   display: grid;
   gap: 12px;
-}
-.revealed {
-  padding: 20px;
-  margin-top: 16px;
-  background: var(--primary-light);
-  overflow-wrap: anywhere;
-}
-.revealed button {
-  display: block;
-  margin-top: 12px;
 }
 </style>

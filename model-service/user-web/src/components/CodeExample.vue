@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
-const props = defineProps<{ code: string }>()
+const props = withDefaults(
+  defineProps<{ code: string; title?: string; copyLabel?: string; codeLabel?: string }>(),
+  { title: 'cURL · Shell', copyLabel: '复制代码', codeLabel: '请求示例代码' },
+)
 const copied = ref(false)
 const copying = ref(false)
 const error = ref('')
@@ -31,7 +34,7 @@ onBeforeUnmount(() => clearTimeout(timer))
 <template>
   <div class="code-example">
     <div class="code-toolbar">
-      <span>cURL · Shell</span>
+      <span>{{ title }}</span>
       <button class="copy-button" :class="{ copied }" :disabled="copying" @click="copy">
         <svg
           v-if="copied"
@@ -56,10 +59,10 @@ onBeforeUnmount(() => clearTimeout(timer))
           <rect x="8" y="8" width="12" height="13" rx="2" />
           <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3" />
         </svg>
-        <span aria-live="polite">{{ copied ? '复制成功' : copying ? '复制中…' : '复制代码' }}</span>
+        <span aria-live="polite">{{ copied ? '复制成功' : copying ? '复制中…' : copyLabel }}</span>
       </button>
     </div>
-    <pre tabindex="0" aria-label="请求示例代码"><code>{{ code }}</code></pre>
+    <pre tabindex="0" :aria-label="codeLabel"><code>{{ code }}</code></pre>
   </div>
   <p v-if="error" class="error" role="alert">{{ error }}</p>
 </template>

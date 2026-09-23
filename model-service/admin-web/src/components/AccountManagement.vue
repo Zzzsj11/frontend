@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { points } from '../utils/financial'
+import FinancialInput from './FinancialInput.vue'
 import { onMounted, ref } from 'vue'
 import { api } from '../api/client'
 import { useControl } from '../stores/control'
@@ -58,7 +60,7 @@ onMounted(() => store.execute(load))
         /><span>@star-net.cn</span></label
       >
       <label
-        >账号月总额度<input
+        >账号月总额度<FinancialInput
           v-model="initialQuota"
           type="number"
           min="0"
@@ -87,14 +89,14 @@ onMounted(() => store.execute(load))
         <tbody>
           <tr v-for="u in users" :key="u.id">
             <td>{{ u.username }}</td>
-            <td>{{ u.quota.key_count }} / 10 · {{ u.quota.allocated_points }}</td>
+            <td>{{ u.quota.key_count }} / 10 · {{ points(u.quota.allocated_points) }}</td>
             <td>
-              {{ u.quota.spent_points }} / {{ u.quota.reserved_points }} /
-              {{ u.quota.available_points }}
+              {{ points(u.quota.spent_points) }} / {{ points(u.quota.reserved_points) }} /
+              {{ points(u.quota.available_points) }}
             </td>
             <td>
               <form @submit.prevent="save(u.id)">
-                <input
+                <FinancialInput
                   v-model="values[u.id]"
                   :aria-label="`${u.username} 账号月总额度`"
                   type="number"

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { points, financialDetails } from '../utils/financial'
 import { useControl } from '../stores/control'
 const store = useControl()
 async function page(delta: number) {
@@ -62,8 +63,11 @@ async function page(delta: number) {
               }}<small>{{ job.agent_name }} {{ job.agent_run_id }}</small>
             </td>
             <td>
-              <p>{{ job.billing.points ?? '待核账' }} 积分 · {{ job.billing.status }}</p>
-              <code>{{ JSON.stringify(job.usage) }}</code>
+              <p>
+                {{ job.billing.points === null ? '待核账' : points(job.billing.points) }} 积分 ·
+                {{ job.billing.status }}
+              </p>
+              <code>{{ JSON.stringify(financialDetails(job.usage)) }}</code>
             </td>
             <td>
               <button class="secondary" @click="store.inspect(job)">详情</button
@@ -91,7 +95,7 @@ async function page(delta: number) {
     </footer>
     <details v-if="store.detail" open>
       <summary>任务详情</summary>
-      <pre>{{ JSON.stringify(store.detail, null, 2) }}</pre>
+      <pre>{{ JSON.stringify(financialDetails(store.detail), null, 2) }}</pre>
     </details>
   </section>
 </template>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import ModelsPanel from './ModelsPanel.vue'
 import RoutesPanel from './RoutesPanel.vue'
 import WalletPanel from './WalletPanel.vue'
 import ChannelBalancesPanel from './ChannelBalancesPanel.vue'
@@ -26,11 +27,6 @@ const requireAgent = ref(false)
 async function createClient() {
   await store.createClient(clientName.value, requireAgent.value)
   clientName.value = ''
-}
-function changeLimit(id: string, event: Event) {
-  const m = store.models.find((m) => m.id === id)
-  if (m)
-    void store.changeModel(m, { concurrency: Number((event.target as HTMLInputElement).value) })
 }
 </script>
 <template>
@@ -65,7 +61,7 @@ function changeLimit(id: string, event: Event) {
       <p v-if="store.error && section !== 'password'" role="alert" class="error">
         {{ store.error }}
       </p>
-      <section class="stats">
+      <section v-if="section === 'jobs'" class="stats">
         <article v-for="item in store.counts" :key="item.status + item.origin" class="card">
           <span>{{ item.status }} · {{ item.origin === 'agent_test' ? 'Agent 测试' : '业务' }}</span
           ><strong>{{ item.count }}</strong>
@@ -78,49 +74,7 @@ function changeLimit(id: string, event: Event) {
       <WalletPanel v-if="section === 'wallets'" />
       <PricingPanel v-if="section === 'pricing'" />
       <JobsPanel v-if="section === 'jobs'" />
-      <section v-if="section === 'models'" class="card table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>模型</th>
-              <th>渠道 / 类型</th>
-              <th>并发上限</th>
-              <th>状态</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="model in store.models" :key="model.id">
-              <td>
-                {{ model.id }}
-                <details>
-                  <summary>能力配置</summary>
-                  <pre>{{ JSON.stringify(model.capabilities, null, 2) }}</pre>
-                </details>
-              </td>
-              <td>{{ model.channel }} / {{ model.kind }}</td>
-              <td>
-                <input
-                  :aria-label="model.id + ' 并发上限'"
-                  type="number"
-                  min="1"
-                  max="200"
-                  :value="model.concurrency"
-                  @change="changeLimit(model.id, $event)"
-                />
-              </td>
-              <td>
-                <button
-                  :disabled="store.loading"
-                  :class="{ secondary: !model.enabled }"
-                  @click="store.changeModel(model, { enabled: !model.enabled })"
-                >
-                  {{ model.enabled ? '已启用' : '已停用' }}
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
+      <ModelsPanel v-if="section === 'models'" />
       <section v-if="section === 'clients'" class="card">
         <form class="filters" @submit.prevent="createClient">
           <label

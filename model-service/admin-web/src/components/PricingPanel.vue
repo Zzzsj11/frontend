@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import FinancialInput from './FinancialInput.vue'
+import { points, money, moneyPoints } from '../utils/financial'
 import { onMounted, ref } from 'vue'
 import { api } from '../api/client'
 import { useControl } from '../stores/control'
@@ -110,12 +112,12 @@ onMounted(() => store.execute(load))
           <tbody>
             <tr v-for="rate in r.rates" :key="rate.path">
               <td>{{ rate.label }}（{{ rate.path }}）</td>
-              <td>¥{{ rate.cny }} / {{ rate.unit }}</td>
-              <td>{{ Number(rate.cny) * 100 }} / {{ rate.unit }}</td>
+              <td>¥{{ money(rate.cny) }} / {{ rate.unit }}</td>
+              <td>{{ moneyPoints(rate.cny) }} / {{ rate.unit }}</td>
             </tr>
           </tbody>
         </table>
-        <p>预占 {{ r.reserve_points }} 积分 · {{ r.source }}</p>
+        <p>预占 {{ points(r.reserve_points) }} 积分 · {{ r.source }}</p>
         <button class="secondary" @click="useRule(r)">以此编辑新版本</button>
       </article>
       <form @submit.prevent="save">
@@ -148,7 +150,7 @@ onMounted(() => store.execute(load))
         <label>规则说明<input v-model="edit.description" required minlength="5" /></label
         ><label>费率来源 / 合同版本<input v-model="edit.source" required minlength="3" /></label
         ><label
-          >单任务预占积分<input
+          >单任务预占积分<FinancialInput
             v-model="edit.reserve_points"
             type="number"
             min="0"
@@ -171,7 +173,8 @@ onMounted(() => store.execute(load))
                 step="any"
                 required /></label
             ><label
-              >人民币单价<input
+              >人民币单价<FinancialInput
+                kind="money"
                 v-model="r.cny"
                 type="number"
                 min="0"

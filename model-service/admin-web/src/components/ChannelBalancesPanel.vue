@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import FinancialInput from './FinancialInput.vue'
+import { points, money } from '../utils/financial'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
   listBalances,
@@ -33,8 +35,8 @@ const labels: Record<Currency, string> = {
 let timer: ReturnType<typeof setInterval> | undefined
 let fetching = false
 
-function amount(value: string | null) {
-  return value === null ? '—' : Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 6 })
+function amount(value: string | null, currency: Currency = 'CNY') {
+  return currency === 'POINTS' ? points(value) : money(value)
 }
 function time(value: string | null) {
   return value
@@ -44,11 +46,11 @@ function time(value: string | null) {
     : '尚未查询'
 }
 function conversion(row: ChannelBalance) {
-  if (row.channel === 'toapis') return '1000 Toapis 积分 = ¥35（每积分 ¥0.035）'
-  if (row.currency === 'CNY') return '1 元 = ¥1'
-  if (row.currency === 'USD') return `US$1 = ¥${amount(row.usd_cny)}`
+  if (row.channel === 'toapis') return '1000 Toapis 积分 = ¥35.00'
+  if (row.currency === 'CNY') return '1.00 元 = ¥1.00'
+  if (row.currency === 'USD') return `US$1.00 = ¥${amount(row.usd_cny)}`
   if (row.currency === 'POINTS' && row.points_per_unit)
-    return `${amount(row.points_per_unit)} 积分 = ${row.points_currency === 'USD' ? 'US$1' : '¥1'}${row.points_currency === 'USD' ? `；US$1 = ¥${amount(row.usd_cny)}` : ''}`
+    return `${points(row.points_per_unit)} 积分 ≈ ${row.points_currency === 'USD' ? 'US$1.00' : '¥1.00'}${row.points_currency === 'USD' ? `；US$1.00 = ¥${amount(row.usd_cny)}` : ''}`
   return '兑换比例待配置'
 }
 async function load() {
@@ -116,7 +118,7 @@ onUnmounted(() => {
       <div>
         <h3>渠道账户余额</h3>
         <p class="muted">
-          原币种保留精度，人民币金额仅作参考折算。商户资金与 Key
+          积分显示整数，金额保留两位小数，人民币金额仅作参考折算。商户资金与 Key
           限额分别展示，不重复汇总共享商户余额。
         </p>
       </div>
@@ -144,7 +146,7 @@ onUnmounted(() => {
               <p class="muted">{{ row.key_masked || '尚未取得 Key 信息' }}</p>
             </td>
             <td>
-              {{ amount(row.balance) }} {{ labels[row.currency] }}
+              {{ amount(row.balance, row.currency) }} {{ labels[row.currency] }}
               <p v-if="row.error" class="error">{{ row.error }}</p>
               <p v-if="row.stale && row.balance !== null" class="error">历史快照，请刷新核对</p>
             </td>
@@ -159,11 +161,15 @@ onUnmounted(() => {
                   {{
                     row.quota.unlimited
                       ? '未设 Key 限额'
-                      : '限额剩余：' + amount(row.quota.remaining) + ' ' + labels[row.currency]
+                      : '限额剩余：' +
+                        amount(row.quota.remaining, row.currency) +
+                        ' ' +
+                        labels[row.currency]
                   }}
                 </p>
                 <p class="muted">
-                  已用：{{ amount(row.quota.used) }} {{ labels[row.currency] }}；不代表商户总消费
+                  已用：{{ amount(row.quota.used, row.currency) }}
+                  {{ labels[row.currency] }}；不代表商户总消费
                 </p></template
               >
               <span v-else>—</span>
@@ -193,7 +199,7 @@ onUnmounted(() => {
   <section v-if="selected" class="card settings">
     <h3>{{ selected.name }} · 币种与兑换配置</h3>
     <p v-if="selected.channel === 'toapis'">
-      1000 Toapis 积分 = ¥35；费用按实扣积分 × ¥0.035 计算。
+      1000 Toapis 积分 = ¥35.00；费用按供应商实际兑换比例计算。
     </p>
     <form v-else class="fields" @submit.prevent="save">
       <label
@@ -210,7 +216,8 @@ onUnmounted(() => {
           policy.currency === 'USD' ||
           (policy.currency === 'POINTS' && policy.points_currency === 'USD')
         "
-        >1 美元对应人民币<input
+        >1 美元对应人民币<FinancialInput
+          kind="money"
           v-model="policy.usd_cny"
           inputmode="decimal"
           required
@@ -218,7 +225,7 @@ onUnmounted(() => {
       /></label>
       <template v-if="policy.currency === 'POINTS'">
         <label
-          >多少积分兑换 1 单位货币<input
+          >多少积分兑换 1 单位货币<FinancialInput
             v-model="policy.points_per_unit"
             inputmode="decimal"
             placeholder="待配置"
@@ -238,7 +245,12 @@ onUnmounted(() => {
     </p>
     <form v-if="!selected.automatic" class="fields" @submit.prevent="record">
       <label
-        >原币种余额<input v-model="manualAmount" inputmode="decimal" required aria-label="人工余额"
+        >原币种余额<FinancialInput
+          :kind="selected.currency === 'POINTS' ? 'points' : 'money'"
+          v-model="manualAmount"
+          inputmode="decimal"
+          required
+          aria-label="人工余额"
       /></label>
       <label
         >核对来源与备注<input

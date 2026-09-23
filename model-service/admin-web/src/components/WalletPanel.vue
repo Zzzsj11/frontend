@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { points, signedPoints, financialDetails } from '../utils/financial'
 import { onMounted, ref } from 'vue'
 import { api } from '../api/client'
 import { useControl } from '../stores/control'
 import AccountManagement from './AccountManagement.vue'
+import FinancialInput from './FinancialInput.vue'
 interface User {
   id: string
   username: string
@@ -119,10 +121,10 @@ onMounted(refresh)
             {{ w.name }} · {{ w.key_prefix }}…
             <p>{{ users.find((u) => u.id === w.user_id)?.username || '未绑定（系统 Key）' }}</p>
           </td>
-          <td>{{ w.billing_enabled ? w.monthly_points : '旧系统 Key：额度控制未启用' }}</td>
-          <td>{{ w.monthly_balance }}</td>
-          <td>{{ w.extra_balance }}</td>
-          <td>{{ w.reserved_points }} / {{ w.available_points }}</td>
+          <td>{{ w.billing_enabled ? points(w.monthly_points) : '旧系统 Key：额度控制未启用' }}</td>
+          <td>{{ points(w.monthly_balance) }}</td>
+          <td>{{ points(w.extra_balance) }}</td>
+          <td>{{ points(w.reserved_points) }} / {{ points(w.available_points) }}</td>
         </tr>
       </tbody>
     </table>
@@ -137,7 +139,7 @@ onMounted(refresh)
     ><template v-if="keyId"
       ><form class="fields" @submit.prevent="saveQuota">
         <label
-          >新的每月重置额度<input
+          >新的每月重置额度<FinancialInput
             v-model="quota"
             type="number"
             min="0"
@@ -151,7 +153,7 @@ onMounted(refresh)
       </p>
       <form class="fields" @submit.prevent="adjust">
         <label
-          >调整积分（正数增加、负数扣减）<input
+          >调整积分（正数增加、负数扣减）<FinancialInput
             v-model="delta"
             type="number"
             step="0.000001"
@@ -197,14 +199,14 @@ onMounted(refresh)
           <td>
             <strong :class="{ error: Number(r.points) < 0 }">{{ labels[r.kind] || r.kind }}</strong>
           </td>
-          <td>{{ Number(r.points) > 0 ? '+' : '' }}{{ r.points }}</td>
+          <td>{{ signedPoints(r.points) }}</td>
           <td>{{ r.actor }}</td>
           <td>
             {{ r.reason }}
             <p>{{ r.job_id }}</p>
             <details>
               <summary>凭据与明细</summary>
-              <pre>{{ JSON.stringify(r.evidence, null, 2) }}</pre>
+              <pre>{{ JSON.stringify(financialDetails(r.evidence), null, 2) }}</pre>
             </details>
           </td>
         </tr>
