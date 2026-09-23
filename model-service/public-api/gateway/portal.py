@@ -28,6 +28,8 @@ from .credits import (
 )
 from .db import Audit, Client, Job, Ledger, Model, Session, User, UserSession, now
 from .passwords import password_hash
+from .portal_activity import activity
+from .portal_content import task_content
 from .status import public_status
 
 router = APIRouter(prefix="/portal", tags=["User portal"])
@@ -308,7 +310,7 @@ async def job_detail(jid: str, user=Depends(current_user)):
         if not job:
             raise HTTPException(404, "任务不存在或无权访问")
         client = await db.get(Client, job.client_id)
-        return portal_job(job, client.name)
+        return {**portal_job(job, client.name), **task_content(job)}
 
 
 @router.get("/ledger")
@@ -326,3 +328,9 @@ async def ledger(page: int = 1, limit: int = 50, client_id: str = "", kind: str 
         rows, metadata = await paginate(db, query, page, limit, Ledger.created_at, Ledger.id)
         names = dict((await db.execute(select(Client.id, Client.name).where(Client.user_id == user.id))).all())
         return {**metadata, "items": [{**ledger_view(row), "key_name": names.get(row.client_id, "已删除 Key")} for row in rows]}
+
+
+@router.get("/activity")
+async def account_activity(page: int = 1, limit: int = 10, client_id: str = "", kind: str = "", user=Depends(current_user)):
+    async with Session() as db:
+        return await activity(db, user.id, page, limit, client_id, kind)

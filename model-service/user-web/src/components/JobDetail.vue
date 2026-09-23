@@ -2,6 +2,7 @@
 import { labels, type Job } from '../stores/portal'
 import { prettyPoints, money, localDate, financialDetails } from '../utils/financial'
 import BaseModal from './base/BaseModal.vue'
+import TaskContent from './TaskContent.vue'
 defineProps<{ open: boolean; job: Job | null; loading: boolean; error: string }>()
 const emit = defineEmits<{ close: [] }>()
 const states: Record<string, string> = {
@@ -12,10 +13,17 @@ const states: Record<string, string> = {
 }
 </script>
 <template>
-  <BaseModal :open="open" title="任务消费详情" @close="emit('close')">
+  <BaseModal :open="open" title="任务详情" @close="emit('close')">
     <p v-if="loading" role="status">正在加载任务详情…</p>
     <p v-else-if="error" role="alert" class="error">{{ error }}</p>
     <template v-else-if="job">
+      <p class="task-type">
+        {{
+          { chat: '文本生成', text: '文本生成', image: '图片生成', video: '视频生成' }[
+            job.kind || ''
+          ] || '生成任务'
+        }}
+      </p>
       <div class="detail-grid">
         <div>
           <span>模型</span><strong>{{ job.model }}</strong>
@@ -43,6 +51,33 @@ const states: Record<string, string> = {
         }}<span v-if="job.billing.cny != null"> · ¥{{ money(job.billing.cny) }}</span>
       </p>
       <p v-if="job.error" class="error">{{ job.error }}</p>
+      <section>
+        <h3>提示词</h3>
+        <TaskContent
+          :content="{ texts: job.request_content?.texts || [], media: [] }"
+          empty="该任务未留存可展示的提示词。"
+        />
+      </section>
+      <section>
+        <h3>参考素材</h3>
+        <TaskContent
+          :content="{ texts: [], media: job.request_content?.media || [] }"
+          empty="无可预览的参考素材；纯文本请求或未留存可访问素材地址。"
+        />
+      </section>
+      <section>
+        <h3>生成结果</h3>
+        <TaskContent
+          :content="job.result_content"
+          :empty="
+            job.status === 'queued' || job.status === 'running'
+              ? '任务尚未完成，完成后刷新查看结果。'
+              : job.status === 'failed'
+                ? '任务未成功完成，暂无可展示结果。'
+                : '该历史任务未留存可展示结果。'
+          "
+        />
+      </section>
       <details>
         <summary>实际用量与计价依据</summary>
         <pre>{{
@@ -53,6 +88,18 @@ const states: Record<string, string> = {
   </BaseModal>
 </template>
 <style scoped>
+section {
+  border-top: 1px solid var(--border);
+  margin-top: 24px;
+  padding-top: 8px;
+}
+h3 {
+  font-size: 16px;
+}
+.task-type {
+  color: var(--primary);
+  font-weight: 600;
+}
 .detail-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

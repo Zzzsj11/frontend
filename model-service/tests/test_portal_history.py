@@ -69,3 +69,42 @@ async def test_history_filters_pagination_and_private_job_details(service):
     assert (await api.get("/portal/jobs/mine", headers=auth)).status_code == 200
     assert (await api.get(f"/portal/ledger?client_id={key['id']}&kind=task_charge", headers=auth)).json()["total"] == 12
     assert (await api.get("/portal/history-keys")).status_code == 401
+    feed = (await api.get("/portal/activity?kind=generation", headers=auth)).json()
+    assert feed["total"] == 1 and len(feed["items"]) == 1
+    assert feed["items"][0]["job_id"] == "mine"
+    assert float(feed["items"][0]["points"]) == -36
+    assert feed["items"][0]["monthly_after"] is not None
+    assert (await api.get(f"/portal/activity?client_id={other['id']}", headers=auth)).json()["total"] == 0
+    assert (await api.get("/portal/activity")).status_code == 401
+    all_rows = (await api.get("/portal/activity?limit=1&page=999", headers=auth)).json()
+    assert all_rows["page"] == all_rows["total"]
+
+    async with Session.begin() as db:
+        for jid, state, task_kind in [("pending-video", "running", "video"), ("failed-image", "failed", "image")]:
+            db.add(
+                Job(
+                    id=jid,
+                    client_id=second["id"],
+                    user_id=uid,
+                    model_id="gpt-5.6-sol",
+                    kind=task_kind,
+                    channel="yinghe",
+                    protocol="unified",
+                    payload={"prompt": "private prompt", "api_key": "never-return"},
+                    request_hash=jid,
+                    idempotency_key=jid,
+                    status=state,
+                    charged_points=None,
+                    reserved_points=2,
+                )
+            )
+    pending = (await api.get("/portal/activity?kind=generation", headers=auth)).json()
+    assert pending["total"] == 3
+    assert len({row["job_id"] for row in pending["items"]}) == 3
+    unbilled = [row for row in pending["items"] if row["job_id"] != "mine"]
+    assert all(row["points"] is None and float(row["reserved_points"]) == 2 for row in unbilled)
+    assert {row["status"] for row in unbilled} == {"running", "failed"}
+    detail = await api.get("/portal/jobs/pending-video", headers=auth)
+    assert detail.json()["request_content"]["texts"][0]["text"] == "private prompt"
+    assert "never-return" not in detail.text
+    assert (await api.get("/portal/jobs/pending-video", headers=other_auth)).status_code == 404

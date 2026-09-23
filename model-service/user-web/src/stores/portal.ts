@@ -45,7 +45,14 @@ interface Bill {
   reserved_points: string
   rule: Price
 }
+export interface TaskContent {
+  texts: { role: string; text: string }[]
+  media: { kind: string; url: string; role: string; thumbnail_url?: string }[]
+}
 export interface Job {
+  kind?: string
+  request_content?: TaskContent
+  result_content?: TaskContent
   key_name: string
   id: string
   client_id: string
@@ -62,9 +69,14 @@ export interface Ledger {
   kind: string
   client_id: string
   job_id: string | null
-  points: string
-  monthly_after: string
-  extra_after: string
+  points: string | null
+  monthly_after: string | null
+  extra_after: string | null
+  task_kind: string
+  status: string
+  model: string
+  reserved_points?: string
+  row_type: string
   reason: string
   created_at: string
   evidence: unknown
@@ -109,11 +121,8 @@ export const usePortal = defineStore('portal', {
       }
     } | null,
     models: [] as Model[],
-    jobs: [] as Job[],
     ledger: [] as Ledger[],
-    total: 0,
     ledgerTotal: 0,
-    page: 1,
     ledgerPage: 1,
     ledgerLimit: 10,
     ledgerKey: '',
@@ -147,7 +156,7 @@ export const usePortal = defineStore('portal', {
       await this.execute(async () => {
         const result = await api<{ access_token: string }>('/login', 'POST', { username, password })
         setToken(result.access_token)
-        this.page = this.ledgerPage = 1
+        this.ledgerPage = 1
         this.ledgerKey = this.ledgerKind = ''
         this.historyKeys = []
         this.message = ''
@@ -157,24 +166,19 @@ export const usePortal = defineStore('portal', {
     async refresh() {
       this.user = await api<NonNullable<typeof this.user>>('/me')
       if (this.user.must_change_password) {
-        this.jobs = []
         this.ledger = []
         this.historyKeys = []
         this.ledgerKey = this.ledgerKind = ''
-        this.page = this.ledgerPage = 1
-        this.total = this.ledgerTotal = 0
+        this.ledgerPage = 1
+        this.ledgerTotal = 0
         return
       }
-      const [jobs, ledger, historyKeys] = await Promise.all([
-        api<{ items: Job[]; total: number; page: number }>(`/jobs?page=${this.page}`),
+      const [ledger, historyKeys] = await Promise.all([
         api<{ items: Ledger[]; total: number; page: number }>(
-          `/ledger?page=${this.ledgerPage}&limit=${this.ledgerLimit}&client_id=${encodeURIComponent(this.ledgerKey)}&kind=${encodeURIComponent(this.ledgerKind)}`,
+          `/activity?page=${this.ledgerPage}&limit=${this.ledgerLimit}&client_id=${encodeURIComponent(this.ledgerKey)}&kind=${encodeURIComponent(this.ledgerKind)}`,
         ),
         api<typeof this.historyKeys>('/history-keys'),
       ])
-      this.jobs = jobs.items
-      this.total = jobs.total
-      this.page = jobs.page
       this.ledger = ledger.items
       this.ledgerTotal = ledger.total
       this.ledgerPage = ledger.page
@@ -213,12 +217,11 @@ export const usePortal = defineStore('portal', {
         setToken('')
         this.revealedKey = ''
         this.user = null
-        this.jobs = []
         this.ledger = []
         this.historyKeys = []
         this.ledgerKey = this.ledgerKind = ''
-        this.page = this.ledgerPage = 1
-        this.total = this.ledgerTotal = 0
+        this.ledgerPage = 1
+        this.ledgerTotal = 0
         this.message = '密码已更新，请使用新密码登录。'
       })
     },
@@ -228,12 +231,10 @@ export const usePortal = defineStore('portal', {
         setToken('')
         this.revealedKey = ''
         this.user = null
-        this.jobs = []
         this.ledger = []
         this.historyKeys = []
         this.ledgerKey = this.ledgerKind = ''
-        this.page = this.ledgerPage = 1
-        this.total = 0
+        this.ledgerPage = 1
         this.ledgerTotal = 0
       })
     },

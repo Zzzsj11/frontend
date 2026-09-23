@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { labels, usePortal, type Job } from '../stores/portal'
-import { prettyPoints, prettySignedPoints, localDate, financialDetails } from '../utils/financial'
+import { prettyPoints, prettySignedPoints, localDate } from '../utils/financial'
 import PointsSummary from './PointsSummary.vue'
 import PaginationControls from './base/PaginationControls.vue'
 import JobDetail from './JobDetail.vue'
@@ -47,10 +47,6 @@ const states: Record<string, string> = {
   succeeded: '已完成',
   failed: '失败',
 }
-async function jobPage(delta: number) {
-  store.page += delta
-  await store.reload()
-}
 </script>
 <template>
   <div class="account-page">
@@ -59,7 +55,9 @@ async function jobPage(delta: number) {
       <div class="heading">
         <div>
           <h2>积分明细</h2>
-          <p class="muted">消费可追溯至任务；下方余额为对应 Key 的记账余额。</p>
+          <p class="muted">
+            每个任务汇总为一条记录，点击任务 ID 查看详情；余额为对应 Key 的记账余额。
+          </p>
         </div>
         <button class="secondary" :disabled="store.loading" @click="store.reload">刷新积分</button>
       </div>
@@ -87,7 +85,7 @@ async function jobPage(delta: number) {
             <option value="">全部类型</option>
             <option
               v-for="kind in [
-                'task_charge',
+                'generation',
                 'reconciliation',
                 'monthly_reset',
                 'quota_adjust',
@@ -97,7 +95,7 @@ async function jobPage(delta: number) {
               :key="kind"
               :value="kind"
             >
-              {{ labels[kind] }}
+              {{ kind === 'generation' ? '生成任务' : labels[kind] }}
             </option>
           </select></label
         >
@@ -115,23 +113,30 @@ async function jobPage(delta: number) {
           <thead>
             <tr>
               <th>时间 / Key</th>
-              <th>类型与说明</th>
-              <th>关联任务</th>
+              <th>类型 / 状态</th>
+              <th>说明</th>
+              <th>任务 ID</th>
               <th>积分变化</th>
               <th>Key 月 / 临时余额</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in store.ledger" :key="row.id">
+            <tr v-for="row in store.ledger" :key="row.row_type + row.id">
               <td>
                 {{ localDate(row.created_at) }}<small>{{ row.key_name }}</small>
               </td>
               <td>
-                {{ labels[row.kind] || row.kind }}<small>{{ row.reason }}</small>
-                <details>
-                  <summary>核算明细</summary>
-                  <pre>{{ JSON.stringify(financialDetails(row.evidence), null, 2) }}</pre>
-                </details>
+                {{
+                  row.job_id
+                    ? { chat: '文本生成', text: '文本生成', image: '图片生成', video: '视频生成' }[
+                        row.task_kind
+                      ] || '生成任务'
+                    : labels[row.kind] || row.kind
+                }}
+                <small v-if="row.status">{{ states[row.status] || row.status }}</small>
+              </td>
+              <td>
+                <small>{{ row.reason }}</small>
               </td>
               <td>
                 <button
@@ -146,10 +151,16 @@ async function jobPage(delta: number) {
                 class="number"
                 :class="{ positive: Number(row.points) > 0, negative: Number(row.points) < 0 }"
               >
-                {{ prettySignedPoints(row.points) }}
+                {{ row.points == null ? '待结算' : prettySignedPoints(row.points) }}
+                <small v-if="row.reserved_points && Number(row.reserved_points) > 0"
+                  >预占 {{ prettyPoints(row.reserved_points) }}</small
+                >
               </td>
               <td class="number">
-                {{ prettyPoints(row.monthly_after) }} / {{ prettyPoints(row.extra_after) }}
+                <template v-if="row.monthly_after != null"
+                  >{{ prettyPoints(row.monthly_after) }} /
+                  {{ prettyPoints(row.extra_after) }}</template
+                ><span v-else>—</span>
               </td>
             </tr>
           </tbody>
@@ -158,59 +169,6 @@ async function jobPage(delta: number) {
       <p v-if="!store.ledger.length" class="empty">
         {{ store.ledgerKey || store.ledgerKind ? '没有符合筛选条件的积分记录' : '暂无积分记录' }}
       </p>
-    </section>
-    <section class="card" aria-label="任务记录">
-      <div class="heading">
-        <h2>任务记录</h2>
-        <span class="muted">包含尚未结算的任务</span>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>模型 / Key</th>
-              <th>时间</th>
-              <th>状态</th>
-              <th>消费积分</th>
-              <th>详情</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="job in store.jobs" :key="job.id">
-              <td>
-                {{ job.model }}<small>{{ job.key_name }}</small>
-              </td>
-              <td>{{ localDate(job.created_at) }}</td>
-              <td>{{ states[job.status] || job.status }}</td>
-              <td>
-                {{ job.billing.points == null ? '待核账' : prettyPoints(job.billing.points) }}
-              </td>
-              <td>
-                <button
-                  class="link-button"
-                  :aria-label="'查看任务 ' + job.id"
-                  @click="showJob(job.id)"
-                >
-                  查看详情
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p v-if="!store.jobs.length" class="empty">暂无任务</p>
-      <div class="heading pager">
-        <button class="secondary" :disabled="store.loading || store.page <= 1" @click="jobPage(-1)">
-          上一页任务</button
-        ><span class="muted">第 {{ store.page }} 页 · 共 {{ store.total }} 条</span
-        ><button
-          class="secondary"
-          :disabled="store.loading || store.page * 30 >= store.total"
-          @click="jobPage(1)"
-        >
-          下一页任务
-        </button>
-      </div>
     </section>
     <JobDetail
       :open="detailOpen"

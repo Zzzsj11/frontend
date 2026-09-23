@@ -187,7 +187,7 @@ async def main():
   j=Job(id='fixture-browser-job',client_id=c.id,user_id=c.user_id,model_id=m.id,kind='chat',channel=m.channel,protocol=m.protocol,payload={'messages':[{'role':'user','content':'Synthetic fixture; no upstream request'}]},request_hash='fixture',idempotency_key='fixture',origin='agent_test',agent_name='code-agent',agent_run_id='portal-browser',test_run_id='portal-browser')
   await reserve(db,c,j,m)
   db.add(j)
- await update('fixture-browser-job',status='succeeded',usage={'completion_tokens':100000})
+ await update('fixture-browser-job',status='succeeded',usage={'completion_tokens':100000},result={'choices':[{'message':{'role':'assistant','content':'Synthetic generated answer'}}]})
 asyncio.run(main())
 `],{PYTHONPATH:path.join(root,'public-api')})
  await user.getByRole('button',{name:'积分账户',exact:true}).click()
@@ -196,11 +196,54 @@ asyncio.run(main())
  await expect(summary.getByText('980',{exact:true})).toBeVisible()
  await expect(summary.getByText('20',{exact:true})).toBeVisible()
  await expect(user.getByRole('cell').filter({hasText:'月上限调整'}).first()).toBeVisible()
- await user.getByLabel('筛选积分类型').selectOption('task_charge')
+ await user.getByLabel('筛选积分类型').selectOption('generation')
  await expect(user.getByRole('region',{name:'积分明细'}).getByRole('row')).toHaveCount(2)
  await user.getByRole('button',{name:'fixture-browser-job',exact:true}).click()
- await expect(user.getByRole('dialog',{name:'任务消费详情'}).getByText('按用量计价')).toBeVisible()
+ await expect(user.getByRole('dialog',{name:'任务详情'}).getByText('按用量计价')).toBeVisible()
+ await expect(user.getByText('Synthetic fixture; no upstream request',{exact:true})).toBeVisible()
+ await expect(user.getByText('Synthetic generated answer',{exact:true})).toBeVisible()
+ await user.getByRole('dialog',{name:'任务详情'}).screenshot({path:path.join(root,'.runtime/task-detail-text.png')})
  await user.getByRole('button',{name:'关闭弹窗'}).click()
+ await expect(user.getByRole('region',{name:'任务记录'})).toHaveCount(0)
+ // Additional archived-content fixtures: no worker, provider credentials or generation requests.
+ const fixtureVideo=path.join(root,'.runtime',`portal-fixture-${run}.mp4`)
+ const rendered=spawnSync('ffmpeg',['-y','-v','error','-f','lavfi','-i','color=c=blue:s=64x64:r=10','-t','1','-c:v','libx264','-pix_fmt','yuv420p','-movflags','+faststart',fixtureVideo])
+ if(rendered.status!==0)throw Error('Synthetic video fixture failed')
+ await user.route('https://media.test/**',route=>route.fulfill({status:200,contentType:route.request().url().endsWith('.mp4')?'video/mp4':'image/png',body:route.request().url().endsWith('.mp4')?fs.readFileSync(fixtureVideo):Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j4F8AAAAASUVORK5CYII=','base64')}))
+ command(['-c', `import asyncio
+from sqlalchemy import select
+from gateway.db import Session, Job, Client
+async def run():
+ async with Session.begin() as db:
+  c=await db.scalar(select(Client).where(Client.name=='浏览器验收 Key'))
+  for kind,state in [('image','succeeded'),('video','succeeded'),('image','failed'),('video','running')]:
+   jid='fixture-'+kind+'-'+state
+   media=[{'url':'https://media.test/output.'+('mp4' if kind=='video' else 'png'),'thumbnail_url':'https://media.test/thumb.png'}] if state=='succeeded' else []
+   db.add(Job(id=jid,client_id=c.id,user_id=c.user_id,model_id='gpt-5.6-sol',kind=kind,channel='fixture',protocol='fixture',payload={'prompt':'Synthetic '+kind+' prompt','image':'https://media.test/reference.png'},result={'media':media},request_hash=jid,idempotency_key=jid,status=state,charged_points=0 if state=='succeeded' else None,billing_status='settled' if state=='succeeded' else 'pending',origin='agent_test',agent_name='code-agent',agent_run_id='portal-browser',test_run_id='portal-browser'))
+asyncio.run(run())`],{PYTHONPATH:path.join(root,'public-api')})
+ await user.getByRole('button',{name:'刷新积分',exact:true}).click()
+ await expect(user.getByRole('region',{name:'积分明细'}).getByRole('row')).toHaveCount(6)
+ for(const kind of ['image','video']){
+  await user.getByRole('button',{name:'fixture-'+kind+'-succeeded',exact:true}).click()
+  const detail=user.getByRole('dialog',{name:'任务详情'})
+  await expect(detail.getByText('Synthetic '+kind+' prompt',{exact:true})).toBeVisible()
+  await expect(detail.getByRole('link',{name:'打开原文件'})).toHaveCount(2)
+  if(kind==='video'){
+   const video=detail.locator('video').last()
+   await video.evaluate(async el=>{el.muted=true;await el.play()})
+   await expect.poll(()=>video.evaluate(el=>el.currentTime)).toBeGreaterThan(0)
+  }else{
+   await expect.poll(()=>detail.locator('img').last().evaluate(el=>el.naturalWidth)).toBeGreaterThan(0)
+  }
+  await detail.screenshot({path:path.join(root,'.runtime/task-detail-'+kind+'.png')})
+  await user.getByRole('button',{name:'关闭弹窗'}).click()
+ }
+ for(const [id,text] of [['fixture-image-failed','任务未成功完成，暂无可展示结果。'],['fixture-video-running','任务尚未完成，完成后刷新查看结果。']]){
+  await user.getByRole('button',{name:id,exact:true}).click()
+  await expect(user.getByRole('dialog').getByText(text,{exact:true})).toBeVisible()
+  await user.getByRole('button',{name:'关闭弹窗'}).click()
+ }
+ fs.unlinkSync(fixtureVideo)
  await user.getByLabel('筛选积分类型').selectOption('manual_debit')
  await expect(user.getByText('没有符合筛选条件的积分记录')).toBeVisible()
  await user.getByLabel('筛选积分类型').selectOption('')
@@ -211,6 +254,12 @@ asyncio.run(main())
  if(await user.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth))throw Error('Account page overflows mobile')
  await expect(user.getByRole('region',{name:'积分明细'}).locator('.table-wrap')).toHaveJSProperty('scrollWidth',700)
  await user.screenshot({path:path.join(root,'.runtime/portal-account-mobile.png'),fullPage:true})
+ await user.getByRole('button',{name:'fixture-video-succeeded',exact:true}).click()
+ const mobileDetail=user.getByRole('dialog',{name:'任务详情'})
+ await expect(mobileDetail.getByRole('heading',{name:'生成结果',exact:true})).toBeVisible()
+ if(await mobileDetail.evaluate(el=>el.scrollWidth>el.clientWidth))throw Error('Task detail overflows mobile')
+ await mobileDetail.screenshot({path:path.join(root,'.runtime/task-detail-mobile.png')})
+ await user.getByRole('button',{name:'关闭弹窗'}).click()
  await user.getByRole('button',{name:'API',exact:true}).click()
  await user.getByRole('region',{name:'API 模型目录'}).getByRole('button',{name:'文本',exact:true}).click()
  await user.getByRole('region',{name:'API 模型目录'}).getByRole('button',{name:'gpt-5.6-sol',exact:true}).click()
