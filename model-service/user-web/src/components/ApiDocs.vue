@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import CodeExample from './CodeExample.vue'
+import ModelSearch from './ModelSearch.vue'
 import CopyButton from './CopyButton.vue'
 import ModelPricing from './ModelPricing.vue'
 import { useApiDocs } from '../composables/useApiDocs'
@@ -21,25 +22,7 @@ const {
 </script>
 <template>
   <section class="card model-browser" aria-label="API 模型目录">
-    <div class="heading">
-      <div class="category-tabs" role="group" aria-label="模型类型">
-        <button
-          v-for="item in categories"
-          :key="item.id"
-          :class="{ active: category === item.id }"
-          :aria-pressed="category === item.id"
-          @click="category = item.id"
-        >
-          {{ item.label }}
-        </button>
-      </div>
-      <input
-        v-model="search"
-        aria-label="搜索模型或公司"
-        placeholder="搜索模型或公司"
-        type="search"
-      />
-    </div>
+    <ModelSearch v-model:category="category" v-model:search="search" :categories="categories" />
     <div class="company-list">
       <section v-for="group in groups" :key="group.vendor" :aria-label="group.vendor + ' 模型'">
         <h3>
@@ -147,25 +130,6 @@ h2 {
   font-size: 23px;
   overflow-wrap: anywhere;
 }
-.category-tabs {
-  display: flex;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  gap: 4px;
-}
-.category-tabs button {
-  background: transparent;
-  color: var(--muted);
-}
-.category-tabs button.active {
-  background: var(--primary-light);
-  color: var(--primary);
-}
-.heading input {
-  width: min(100%, 300px);
-  margin: 0;
-}
 .company-list {
   display: grid;
   gap: 18px;
@@ -243,15 +207,6 @@ h2 {
   }
   .response-grid {
     grid-template-columns: 1fr;
-  }
-  .heading input {
-    width: 100%;
-  }
-  .category-tabs {
-    width: 100%;
-  }
-  .category-tabs button {
-    flex: 1;
   }
 }
 </style>
