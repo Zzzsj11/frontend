@@ -27,6 +27,7 @@ from .routing import resolve, snapshot
 from .schemas import ImageCreate, VideoCreate
 from .security import attribution, authenticate, owner
 from .status import public_status
+from .usage_normalization import normalize_usage
 from .validation import validate
 
 app = FastAPI(title="Company Model API", version="1.0.0")
@@ -311,9 +312,13 @@ async def chat(payload: dict, request: Request, client: Client = Depends(authent
             result = response.json()
             if result.get("error") or result.get("code", 200) not in (0, 200, "200"):
                 reason = describe(result, job.channel)
-                await update(job.id, status="failed", error=reason, usage=result.get("usage", {}), provider_response=result)
+                await update(
+                    job.id, status="failed", error=reason, usage=normalize_usage(result.get("usage", {})), provider_response=result
+                )
                 raise HTTPException(502, {"message": reason, "job_id": job.id})
-            await update(job.id, status="succeeded", result=result, usage=result.get("usage", {}), provider_response=result)
+            await update(
+                job.id, status="succeeded", result=result, usage=normalize_usage(result.get("usage", {})), provider_response=result
+            )
             return result
         finally:
             beat.cancel()
@@ -350,7 +355,7 @@ async def chat(payload: dict, request: Request, client: Client = Depends(authent
             await update(
                 job.id,
                 status="succeeded" if finished else "manual_review",
-                usage=raw_usage,
+                usage=normalize_usage(raw_usage),
                 error=None if finished else "Stream interrupted; usage may be incomplete",
             )
 

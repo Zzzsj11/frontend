@@ -396,7 +396,9 @@ def measured_points(job):
                 other = job.usage or {}
                 for part in subtract.split("."):
                     other = other.get(part) if isinstance(other, dict) else None
-                quantity -= Decimal(str(other or 0))
+                if other is None:
+                    return None
+                quantity -= Decimal(str(other))
             if not quantity.is_finite() or quantity < 0:
                 return None
             price = Decimal(str(rate["cny"]))

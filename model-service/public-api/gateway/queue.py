@@ -14,6 +14,7 @@ from .credits import automatic, lock, reset
 from .db import Client, Job, Model, ModelRoute, Session, now
 from .errors import describe
 from .media import archive, gemini_images, output_urls
+from .usage_normalization import normalize_usage
 
 _worker: ContextVar[str | None] = ContextVar("worker_fence", default=None)
 
@@ -115,12 +116,13 @@ async def heartbeat(jid):
 def usage(body):
     data = unwrap(body)
     nested = data.get("result") if isinstance(data.get("result"), dict) else {}
-    result = dict(data.get("usage") or data.get("tokenUsage") or nested.get("usage") or body.get("usage") or {})
+    generation = data.get("generation") if isinstance(data.get("generation"), dict) else {}
+    result = dict(data.get("usage") or data.get("tokenUsage") or nested.get("usage") or generation.get("usage") or body.get("usage") or {})
     if data.get("billing"):
         result["billing"] = data["billing"]
     if data.get("cost") is not None:
         result["provider_cost"] = data["cost"]
-    return result
+    return normalize_usage(result)
 
 
 async def process(jid):
