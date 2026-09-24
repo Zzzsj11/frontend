@@ -1,0 +1,88 @@
+{
+  "models": [
+    {
+      "id": "seedream-5.0-pro",
+      "channel": "toapis",
+      "provider_model": "doubao-seedream-5-0-pro",
+      "kind": "image",
+      "protocol": "toapis-image",
+      "concurrency": 4,
+      "enabled": false,
+      "capabilities": {
+        "vendor": "Seedream",
+        "source": "user-provided-toapis-price-screenshot",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/images/generations",
+        "unified_catalog": true,
+        "catalog_selected": true,
+        "resolutions": [
+          "1K",
+          "2K"
+        ]
+      }
+    }
+  ],
+  "routes": [
+    {
+      "id": "toapis--seedream-5.0-pro",
+      "model_id": "seedream-5.0-pro",
+      "supplier": "toapis",
+      "channel": "toapis",
+      "provider_model": "doubao-seedream-5-0-pro",
+      "protocol": "toapis-image",
+      "priority": 20,
+      "concurrency": 2,
+      "enabled": false,
+      "verification": "pending",
+      "capabilities": {
+        "vendor": "Seedream",
+        "source": "user-provided-toapis-price-screenshot",
+        "documentation_configured": true,
+        "verification": "not_tested",
+        "native_endpoint": "/v1/images/generations",
+        "resolutions": [
+          "1K",
+          "2K"
+        ]
+      },
+      "pricing": {
+        "estimate_rules": [
+          {
+            "conditions": {
+              "resolution": "1K"
+            },
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.29995",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "用户提供Toapis账户报价截图；按次计费；供应商积分×0.035元"
+          },
+          {
+            "conditions": {
+              "resolution": "2K"
+            },
+            "rates": [
+              {
+                "label": "requests",
+                "path": "requests",
+                "cny": "0.59990",
+                "unit": "1",
+                "optional": false
+              }
+            ],
+            "confirmed": true,
+            "source": "用户提供Toapis账户报价截图；按次计费；供应商积分×0.035元"
+          }
+        ],
+        "release_source": "Seedream 5.0 Pro截图；与普通版独立；尚未实测验收"
+      }
+    }
+  ]
+}

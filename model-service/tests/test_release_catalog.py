@@ -21,12 +21,16 @@ def test_fresh_release_and_replay_preserve_operator_changes(tmp_path):
     assert check.returncode == 1
     readiness = json.loads(check.stdout)
     assert readiness["generation_ready"] is False and readiness["enabled_routes"] == 0
-    assert readiness["routes_with_quotes"] == 38
+    assert readiness["routes_with_quotes"] == 39
     with sqlite3.connect(database) as db:
-        assert db.execute("select count(*) from models").fetchone()[0] == 19
-        assert db.execute("select count(*) from model_routes").fetchone()[0] == 38
+        assert db.execute("select count(*) from models").fetchone()[0] == 20
+        assert db.execute("select count(*) from model_routes").fetchone()[0] == 39
         assert db.execute("select count(*) from model_routes where enabled=1").fetchone()[0] == 0
         assert db.execute("select count(*) from pricing_rules").fetchone()[0] == 0
+        pro = db.execute("select provider_model,pricing from model_routes where id='toapis--seedream-5.0-pro'").fetchone()
+        assert pro[0] == "doubao-seedream-5-0-pro"
+        rules = json.loads(pro[1])["estimate_rules"]
+        assert [(r["conditions"]["resolution"], r["rates"][0]["cny"]) for r in rules] == [("1K", "0.29995"), ("2K", "0.59990")]
         rows = db.execute("select pricing from model_routes").fetchall()
         assert all(json.loads(p)["estimate_rules"] for (p,) in rows)
         db.execute(
