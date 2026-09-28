@@ -487,6 +487,8 @@ export const useProjectStore = defineStore('project', {
       this.activeStoryBible = null
       this.activeStoryboardType = null
       this.activeTaskStatus = null
+      this.outlineProgress = null
+      this.outlineError = null
       this.activeStoryboardConfig = {}
       this.projectAudio = null
       this.audioTrackVisible = false
@@ -514,6 +516,11 @@ export const useProjectStore = defineStore('project', {
       this.activeStoryBible = script.storyBible ?? null
       this.activeStoryboardType = script.storyboardType || null
       this.activeTaskStatus = script.status || null
+      this.outlineProgress = (script.outlineProgress as OutlineProgress | undefined) ?? null
+      this.outlineError =
+        script.status === 'outline_failed'
+          ? String(script.outlineProgress?.error || '大纲生成失败，请重试')
+          : null
       if (taskId && script.status) this._setTaskStatus(taskId, script.status)
       this.activeStoryboardConfig = script.storyboardConfig ?? {}
       this.projectAudio = script.projectAudio ?? null
@@ -1016,6 +1023,7 @@ export const useProjectStore = defineStore('project', {
           if (fresh.status === 'outlining') this._setTaskStatus(id, 'outline_failed')
           this.outlineError =
             // SSE 回调中的赋值对 TS 控制流分析不可见，需显式还原类型
+            String(fresh.outlineProgress?.error || '') ||
             (this.outlineProgress as OutlineProgress | null)?.error ||
             (fresh.status === 'outlining' ? '大纲生成超时，请重试' : '大纲生成失败，请重试')
           return

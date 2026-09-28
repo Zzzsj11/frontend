@@ -368,6 +368,30 @@ describe('sidebar selection persistence (per user)', () => {
     expect(store.activeTaskId).toBe('task-a1')
   })
 
+  it('restores persisted outline failures on reload and clears them on task switch', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/material-exports') || url.endsWith('/generations/active')) return json([])
+      if (url.includes('/api/tasks/'))
+        return json({
+          cast: [],
+          storyboardType: 'general',
+          lines: [],
+          status: url.includes('failed-task') ? 'outline_failed' : 'ready',
+          storyboardConfig: url.includes('failed-task')
+            ? { outlineProgress: { phase: 'failed', error: '文本模型服务繁忙，请稍后重试' } }
+            : {},
+        })
+      return json([])
+    })
+    const store = useProjectStore()
+    await store.selectSongTask('song-a', 'failed-task')
+    expect(store.outlineError).toBe('文本模型服务繁忙，请稍后重试')
+    await store.selectSongTask('song-a', 'ready-task')
+    expect(store.outlineError).toBeNull()
+    expect(store.outlineProgress).toBeNull()
+  })
+
   it('invalidates the previous task before waiting for the new task payload', async () => {
     let resolveTask!: (response: Response) => void
     const pendingTask = new Promise<Response>((resolve) => {

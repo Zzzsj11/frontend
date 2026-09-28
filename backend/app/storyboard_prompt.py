@@ -10,6 +10,7 @@ from typing import Any
 
 from .config import settings
 from .error_logging import log_background_error
+from .llm_policy import TemporaryLlmError, check_provider_text, completion_options, is_transient_error, outline_contract, retry_delay
 from .media_constraints import normalize_video_duration
 from .model_gateway import AsyncOpenAI
 from .model_gateway import enabled as gateway_enabled
@@ -549,7 +550,7 @@ async def generate_ass_story_outline(
         structural_notes.append(f"{position}有 {duration} 秒的{label}（无人空镜素材）")
     lyric_count = len(lyric_lines)
     expected_scenes = 5 if lyric_count >= 15 else (4 if lyric_count >= 9 else max(2, min(3, lyric_count)))
-    client, usage_records = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url), []
+    client, usage_records = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url, timeout=120, max_retries=0), []
     if on_progress:
         progress = {"phase": "planning", "segmentsDone": 0, "segmentsTotal": 0}
         if settings.outline_protocol_version == "v2":
@@ -690,7 +691,7 @@ async def regenerate_ass_scene_segment(
     role_ids = [item["id"] for item in selected_humans]
     lyric_total = sum(1 for segment in segments if segment.get("segmentType", "lyric") == "lyric")
     scene_groups = _assign_scene_segments(segments, scene_plan)
-    client, usage_records = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url), []
+    client, usage_records = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url, timeout=120, max_retries=0), []
     result = await _generate_scene_shots(
         client,
         scene=scene_plan[scene_index],
@@ -808,49 +809,64 @@ async def _call(
     prompt_key: str = "",
     prompt_version: int = 0,
 ) -> str:
-    """发起一次 LLM 调用并留痕：无论成功失败都向 usage_records 追加记录，
-    携带请求消息快照（调用时点，后续重试追加的消息不会污染）、返回原文、耗时与用量。"""
+    """Bounded transient retries; every response (including overload text) is accounted for."""
     snapshot = [dict(message) for message in messages]
-    started = time.perf_counter()
-    try:
-        response = await client.chat.completions.create(model=settings.llm_model, messages=messages, temperature=0.2, max_tokens=max_tokens)
-    except Exception as exc:
+    model = (settings.general_outline_llm_model or settings.llm_model) if operation.startswith("general_story_outline") else settings.llm_model
+    max_attempts = 3
+    if operation.startswith("general_story_outline"):
+        # Share the budget with structural repair rounds; never multiply 3 transport x 3 schema retries.
+        remaining = 5 - sum(str(record.get("operation", "")).startswith("general_story_outline") for record in usage_records)
+        if remaining <= 0:
+            raise TemporaryLlmError("大纲生成已达到 5 次调用上限，请稍后重试")
+        max_attempts = min(max_attempts, remaining)
+    for attempt in range(max_attempts):
+        started = time.perf_counter()
+        text, usage, request_id = "", {}, None
+        try:
+            response = await client.chat.completions.create(model=model, messages=messages, **completion_options(model, max_tokens))
+            usage = _usage_dict(response)
+            request_id = getattr(response, "id", None)
+            text = response.choices[0].message.content or ""
+            check_provider_text(text)
+        except Exception as exc:
+            usage_records.append(
+                {
+                    "operation": operation,
+                    "model": model,
+                    "status": "error",
+                    "error": str(exc)[:2000],
+                    "durationMs": round((time.perf_counter() - started) * 1000),
+                    "requestMessages": snapshot,
+                    "responseText": text,
+                    "usage": usage,
+                    "requestId": request_id or getattr(exc, "request_id", None),
+                    "promptKey": prompt_key,
+                    "promptVersion": prompt_version,
+                }
+            )
+            if is_transient_error(exc) and attempt < max_attempts - 1:
+                await retry_delay(exc, attempt)
+                continue
+            if is_transient_error(exc):
+                raise TemporaryLlmError("文本模型服务繁忙、超时或连接异常，自动重试后仍未恢复，请稍后重试") from exc
+            await log_background_error(path=f"/llm/{operation}", status_code=502, error_type="LLMCallError", message=f"LLM 调用失败（{operation}）：{exc}")
+            raise
         usage_records.append(
             {
                 "operation": operation,
-                "status": "error",
-                "error": str(exc)[:2000],
+                "model": model,
+                "status": "ok",
                 "durationMs": round((time.perf_counter() - started) * 1000),
                 "requestMessages": snapshot,
-                "responseText": "",
-                "usage": {},
-                "requestId": getattr(exc, "request_id", None),
+                "responseText": text,
+                "usage": usage,
+                "requestId": request_id,
                 "promptKey": prompt_key,
                 "promptVersion": prompt_version,
             }
         )
-        await log_background_error(
-            path=f"/llm/{operation}",
-            status_code=502,
-            error_type="LLMCallError",
-            message=f"LLM 调用失败（{operation}）：{exc}",
-        )
-        raise
-    text = response.choices[0].message.content or ""
-    usage_records.append(
-        {
-            "operation": operation,
-            "status": "ok",
-            "durationMs": round((time.perf_counter() - started) * 1000),
-            "requestMessages": snapshot,
-            "responseText": text,
-            "usage": _usage_dict(response),
-            "requestId": getattr(response, "id", None),
-            "promptKey": prompt_key,
-            "promptVersion": prompt_version,
-        }
-    )
-    return text
+        return text
+    raise AssertionError("Unreachable retry state")
 
 
 async def generate_storyboard_line(*, source: str, current: dict[str, Any], full_context: dict[str, Any], allowed_humans: list[dict[str, Any]]) -> dict[str, Any]:
@@ -891,7 +907,7 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
         {"role": "system", "content": system},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + suffix_prompt.render()},
     ]
-    client, usage_records = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url), []
+    client, usage_records = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url, timeout=120, max_retries=0), []
     try:
         text = await _call(client, messages, 1400, usage_records=usage_records, operation="storyboard_line", prompt_key=system_prompt.key, prompt_version=system_prompt.version)
     except Exception as exc:
@@ -1007,8 +1023,13 @@ def _check_general_outline(body: dict[str, Any], *, expected_count: int, empty_c
 
 def _check_general_outline_v2(body: dict[str, Any], *, expected_count: int, empty_count: int, character_count: int, role_ids: list[str]) -> dict[str, Any]:
     expected_fields = {"shots", "wardrobeGroups"} if role_ids else {"shots"}
-    if set(body) != expected_fields or not isinstance(body["shots"], list) or len(body["shots"]) != expected_count:
-        raise ValueError(f"shots 必须严格包含 {expected_count} 条")
+    if set(body) != expected_fields:
+        missing, extra = sorted(expected_fields - set(body)), sorted(set(body) - expected_fields)
+        raise ValueError(f"大纲顶层字段不正确：缺少 {missing}；多余 {extra}。必须包含 {sorted(expected_fields)}")
+    if not isinstance(body["shots"], list):
+        raise ValueError("shots 必须是数组")
+    if len(body["shots"]) != expected_count:
+        raise ValueError(f"shots 必须严格包含 {expected_count} 条，实际 {len(body['shots'])} 条")
     allowed = set(role_ids)
     normalized: list[dict[str, Any]] = []
     required_fields = {"i", "t", "s", "b", "c", "a", "e", "m"}
@@ -1041,7 +1062,9 @@ def _check_general_outline_v2(body: dict[str, Any], *, expected_count: int, empt
         )
     actual_empty = sum(item["shotType"] == "empty" for item in normalized)
     if actual_empty != empty_count or len(normalized) - actual_empty != character_count:
-        raise ValueError(f"镜头类型配额不一致：要求空镜 {empty_count} 条、人物镜 {character_count} 条")
+        raise ValueError(
+            f"镜头类型配额不一致：要求空镜 {empty_count} 条、人物镜 {character_count} 条，实际为空镜 {actual_empty} 条、人物镜 {len(normalized) - actual_empty} 条；请调整镜头内容与 t/c 字段，保持总数和连续序号"
+        )
     return {"shots": _apply_general_wardrobe_groups(normalized, body.get("wardrobeGroups"), role_ids)}
 
 
@@ -1144,12 +1167,12 @@ async def _generate_general_story_outline_v2(
             for index in range(wardrobe_group_count)
         ]
     messages = [
-        {"role": "system", "content": system_prompt.render()},
+        {"role": "system", "content": system_prompt.render() + outline_contract(payload)},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + suffix_prompt.render()},
     ]
-    client, usage_records = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url), []
+    client, usage_records = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url, timeout=120, max_retries=0), []
     last_error: Exception | None = None
-    for attempt in range(2):
+    for attempt in range(3):
         operation = "general_story_outline_v2" if attempt == 0 else "general_story_outline_v2_retry"
         try:
             call = call_override or _call
@@ -1261,7 +1284,7 @@ async def generate_general_story_outline(
         {"role": "system", "content": system},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + suffix_prompt.render()},
     ]
-    client, usage_records = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url), []
+    client, usage_records = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url, timeout=120, max_retries=0), []
     last_error: Exception | None = None
     for attempt in range(3):
         operation = "general_story_outline" if attempt == 0 else "general_story_outline_retry"

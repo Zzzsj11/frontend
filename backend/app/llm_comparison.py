@@ -9,6 +9,7 @@ import httpx
 
 from . import model_gateway
 from .config import settings
+from .llm_policy import completion_options
 from .model_gateway import AsyncOpenAI
 from .model_gateway import enabled as gateway_enabled
 from .token_usage import normalize_usage
@@ -22,6 +23,7 @@ class ChatTestModel:
 
 
 CHAT_TEST_MODELS = (
+    ChatTestModel("gpt-6-astra", "GPT 6 Astra"),
     ChatTestModel("gpt-5.5", "GPT 5.5"),
     ChatTestModel("gpt-5.6-sol", "GPT 5.6 Sol"),
     ChatTestModel("gpt-5.6-terra", "GPT 5.6 Terra"),
@@ -43,8 +45,9 @@ def _anthropic_messages_url() -> str:
 
 async def _call_openai(model: str, messages: list[dict[str, str]], temperature: float, max_tokens: int) -> tuple[str, Any, str | None]:
     client = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url, timeout=120)
-    response = await client.chat.completions.create(model=model, messages=messages, temperature=temperature, max_tokens=max_tokens)
-    return response.choices[0].message.content or "", response.usage, response.id
+    response = await client.chat.completions.create(model=model, messages=messages, **completion_options(model, max_tokens, temperature))
+    text = response.choices[0].message.content or ""
+    return text, response.usage, response.id
 
 
 async def _call_anthropic(model: str, messages: list[dict[str, str]], temperature: float, max_tokens: int) -> tuple[str, Any, str | None]:

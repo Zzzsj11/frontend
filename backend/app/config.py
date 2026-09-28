@@ -97,6 +97,7 @@ class Settings:
     llm_base_url: str = LLM_BASE_URL
     llm_api_key: str = LLM_API_KEY
     llm_model: str = LLM_MODEL
+    general_outline_llm_model: str = os.getenv("GENERAL_OUTLINE_LLM_MODEL", "gpt-6-astra").strip()
     llm_api_mode: str = os.getenv("LLM_API_MODE", "openai").lower()
     storyboard_generation_concurrency: int = max(1, min(200, int(os.getenv("STORYBOARD_GENERATION_CONCURRENCY", "64"))))
     storyboard_line_timeout_seconds: int = max(
