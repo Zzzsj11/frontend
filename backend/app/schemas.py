@@ -173,7 +173,7 @@ class GeneralStoryboardCreate(BaseModel):
     @model_validator(mode="after")
     def validate_shot_count(self):
         if self.empty_shot_count + self.character_shot_count > GENERAL_STORYBOARD_MAX_SHOTS:
-            raise ValueError("每组通用分镜最多生成 17 个镜头")
+            raise ValueError(f"每组通用分镜最多生成 {GENERAL_STORYBOARD_MAX_SHOTS} 个镜头")
         return self
 
 
@@ -193,7 +193,7 @@ class RandomGeneralStoryboardCreate(BaseModel):
     @model_validator(mode="after")
     def validate_shot_count(self):
         if self.empty_shot_count + self.character_shot_count > GENERAL_STORYBOARD_MAX_SHOTS:
-            raise ValueError("每组通用分镜最多生成 17 个镜头")
+            raise ValueError(f"每组通用分镜最多生成 {GENERAL_STORYBOARD_MAX_SHOTS} 个镜头")
         return self
 
 

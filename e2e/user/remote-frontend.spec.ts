@@ -86,6 +86,27 @@ test('deployed frontend login, project and storyboard configuration journey', as
     await expect(general.getByLabel('图片模型')).toBeEnabled()
     await general.getByLabel('图片模型').selectOption('gpt-image-2.5-flare')
     await expect(general.getByLabel('图片模型')).toHaveValue('gpt-image-2.5-flare')
+    for (const mode of ['定制通用分镜', '随机通用分镜']) {
+      if (mode === '随机通用分镜') {
+        await general.getByRole('button', { name: '取消', exact: true }).click()
+        await page
+          .locator('.script-editor .header-actions')
+          .getByRole('button', { name: mode, exact: true })
+          .click()
+      }
+      const dialog = page.locator('.modal').filter({ hasText: mode })
+      await expect(dialog.getByLabel('空镜数量')).toHaveAttribute('max', '30')
+      await expect(dialog.getByLabel('人物镜数量')).toHaveAttribute('max', '30')
+      await dialog.getByLabel('空镜数量').fill('5')
+      await dialog.getByLabel('人物镜数量').fill('25')
+      await dialog.getByLabel('总时长（秒）').fill('300')
+      await expect(dialog.locator('.estimate')).toContainText('30 个视频（上限 30）')
+      await expect(dialog.locator('.estimate')).not.toHaveClass(/invalid/)
+      await dialog.getByLabel('人物镜数量').fill('26')
+      await expect(dialog.locator('.estimate')).toHaveClass(/invalid/)
+      await expect(dialog.locator('.modal-footer .btn-primary')).toBeDisabled()
+      await dialog.getByLabel('人物镜数量').fill('25')
+    }
     await page.screenshot({ path: join(output, '04-general-dialog.png'), fullPage: true })
     await expect(page.locator('[role="alertdialog"]')).toHaveCount(0)
     await page.screenshot({ path: join(output, '05-final-state.png'), fullPage: true })

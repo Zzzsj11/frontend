@@ -6,6 +6,7 @@ import {
   type ChatComparisonModel,
   type GeneralOutlineComparisonResult,
 } from '../api/adminChatComparison'
+import { GENERAL_STORYBOARD_MAX_SHOTS } from '../generationConstraints'
 import AdminGeneralOutlineResults from './AdminGeneralOutlineResults.vue'
 
 const models = ref<ChatComparisonModel[]>([])
@@ -37,7 +38,7 @@ const canRun = computed(
     selectedModels.value.length > 0 &&
     form.genre.trim() &&
     form.empty_shot_count + form.character_shot_count > 0 &&
-    form.empty_shot_count + form.character_shot_count <= 17 &&
+    form.empty_shot_count + form.character_shot_count <= GENERAL_STORYBOARD_MAX_SHOTS &&
     !loading.value,
 )
 const toggleModel = (code: string) => {
@@ -88,14 +89,18 @@ onMounted(async () => {
         <label>性别<input v-model="form.gender" /></label>
         <label>年龄段<input v-model="form.age_group" /></label>
         <label
-          >空镜数量<input v-model.number="form.empty_shot_count" type="number" min="0" max="17"
+          >空镜数量<input
+            v-model.number="form.empty_shot_count"
+            type="number"
+            min="0"
+            :max="GENERAL_STORYBOARD_MAX_SHOTS"
         /></label>
         <label
           >人物镜数量<input
             v-model.number="form.character_shot_count"
             type="number"
             min="0"
-            max="17"
+            :max="GENERAL_STORYBOARD_MAX_SHOTS"
         /></label>
         <label
           >总时长（秒）<input v-model.number="form.total_duration" type="number" min="1" max="600"

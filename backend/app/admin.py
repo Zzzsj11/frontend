@@ -214,7 +214,7 @@ async def run_general_outline_comparison(payload: GeneralOutlineComparisonIn, re
     if payload.empty_shot_count + payload.character_shot_count < 1:
         raise HTTPException(422, "镜头总数至少为 1")
     if payload.empty_shot_count + payload.character_shot_count > GENERAL_STORYBOARD_MAX_SHOTS:
-        raise HTTPException(422, "通用分镜最多生成 17 个镜头")
+        raise HTTPException(422, f"通用分镜最多生成 {GENERAL_STORYBOARD_MAX_SHOTS} 个镜头")
     models = list(dict.fromkeys(payload.models))
     allowed = {item.code for item in CHAT_TEST_MODELS}
     unknown = [model for model in models if model not in allowed]

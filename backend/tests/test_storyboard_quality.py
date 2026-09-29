@@ -801,15 +801,15 @@ def test_random_general_storyboard_creates_ten_child_tasks_concurrently(client) 
     assert all(len(task["lines"]) == 2 for task in result["tasks"])
 
 
-def test_general_storyboard_rejects_more_than_seventeen_shots(client) -> None:
+def test_general_storyboard_rejects_more_than_thirty_shots(client) -> None:
     project = client.post("/api/projects", json={"name": "Too many shots"}).json()
     response = client.post(
         f"/api/projects/{project['id']}/storyboards/general/random",
         json={
             "genre": "流行歌曲",
             "empty_shot_count": 4,
-            "character_shot_count": 14,
-            "total_duration": 90,
+            "character_shot_count": 27,
+            "total_duration": 310,
         },
     )
     assert response.status_code == 422
@@ -1092,3 +1092,14 @@ async def test_general_story_bible_logline_joins_present_categories() -> None:
         durations=[],
     )
     assert bible["logline"].startswith("流行歌曲 / 爱情消极 风格的完整 MV 视觉弧光")
+
+
+@pytest.mark.parametrize("random_mode", [False, True])
+def test_general_storyboard_accepts_30_shots_but_rejects_31(random_mode):
+    from app.schemas import RandomGeneralStoryboardCreate
+
+    schema = RandomGeneralStoryboardCreate if random_mode else GeneralStoryboardCreate
+    payload = dict(genre="流行", season="秋", gender="女", age_group="青年", visual_style="写实", empty_shot_count=5, character_shot_count=25, total_duration=300)
+    assert schema(**payload).character_shot_count == 25
+    with pytest.raises(ValidationError, match="最多生成 30"):
+        schema(**{**payload, "character_shot_count": 26})

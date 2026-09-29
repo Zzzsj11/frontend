@@ -445,10 +445,11 @@ const submit = async () => {
             }"
           >
             将创建 <strong>{{ groupCount }}</strong> 个子项目，每组生成
-            <strong>{{ totalShots }}</strong> 个视频（上限 17）：{{ emptyShotCount }} 个空镜、{{
-              characterShotCount
+            <strong>{{ totalShots }}</strong> 个视频（上限 {{ GENERAL_STORYBOARD_MAX_SHOTS }}）：{{
+              emptyShotCount
             }}
-            个人物镜，平均每镜约 <strong>{{ averageDuration }} 秒</strong>；允许总时长
+            个空镜、{{ characterShotCount }} 个人物镜，平均每镜约
+            <strong>{{ averageDuration }} 秒</strong>；允许总时长
             <strong>{{ minimumTotalDuration }}–{{ maximumTotalDuration }} 秒</strong>（每镜 4–15
             秒）
           </p>
