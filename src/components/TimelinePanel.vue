@@ -262,21 +262,29 @@ const onAudioTrackDown = (event: MouseEvent) => {
   gap: 8px;
 }
 .timeline-body {
+  --timeline-row-height: 68px;
+  --timeline-ruler-height: 28px;
+  --timeline-row-gap: 8px;
   display: flex;
   gap: 10px;
 }
+.track-labels,
+.track-content {
+  display: grid;
+  grid-auto-rows: var(--timeline-row-height);
+  grid-template-rows: var(--timeline-ruler-height);
+  row-gap: var(--timeline-row-gap);
+  align-content: start;
+}
 .track-labels {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
   flex-shrink: 0;
 }
 .track-label-spacer {
-  height: 28px;
+  height: var(--timeline-ruler-height);
 }
 .track-label {
   width: 110px;
-  height: 68px;
+  height: var(--timeline-row-height);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: #fff;
@@ -304,7 +312,7 @@ const onAudioTrackDown = (event: MouseEvent) => {
 }
 .ruler {
   position: relative;
-  height: 28px;
+  height: var(--timeline-ruler-height);
 }
 .tick {
   position: absolute;
@@ -320,8 +328,7 @@ const onAudioTrackDown = (event: MouseEvent) => {
 }
 .track {
   position: relative;
-  height: 68px;
-  margin-bottom: 8px;
+  height: var(--timeline-row-height);
 }
 .clip {
   position: absolute;
@@ -368,12 +375,7 @@ const onAudioTrackDown = (event: MouseEvent) => {
   color: #fff;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }
-.audio-track {
-  border-top: 1px solid var(--border);
-  padding-top: 8px;
-}
 .audio-clip {
-  height: calc(100% - 8px);
   flex-direction: row;
   justify-content: flex-start;
   padding: 0 12px;
