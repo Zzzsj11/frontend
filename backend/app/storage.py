@@ -27,6 +27,7 @@ class Storage(Protocol):
         path: str | Path,
         content_type: str | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
+        content_disposition: str | None = None,
     ) -> str: ...
 
 
@@ -123,6 +124,7 @@ class TosStorage:
         path: str | Path,
         content_type: str | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
+        content_disposition: str | None = None,
     ) -> str:
         bucket, object_key = self._bucket_for(key)
         file_path = str(path)
@@ -143,6 +145,7 @@ class TosStorage:
                 task_num=settings.export_upload_concurrency,
                 enable_checkpoint=False,
                 data_transfer_listener=listener,
+                **({"content_disposition": content_disposition} if content_disposition else {}),
             )
 
         await asyncio.to_thread(upload)

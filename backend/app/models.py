@@ -93,7 +93,7 @@ class ProjectTaskModel(LifecycleMixin, Base):
 
 
 class ProjectAudioAssetModel(LifecycleMixin, Base):
-    """项目级整首审核音轨；不参与模型生成或导出混音。"""
+    """项目级歌曲音轨；用于试听和用户主动发起的 MV 成片导出。"""
 
     __tablename__ = "project_audio_assets"
     __table_args__ = (
@@ -311,6 +311,9 @@ class MaterialExportModel(LifecycleMixin, Base):
     status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
     progress: Mapped[int] = mapped_column(Integer, default=0)
     stage: Mapped[str] = mapped_column(String(120), default="等待导出")
+    export_kind: Mapped[str] = mapped_column(String(24), default="materials", server_default="materials")
+    input_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, server_default="{}")
+    result_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, server_default="{}")
     total_assets: Mapped[int] = mapped_column(Integer, default=0)
     processed_assets: Mapped[int] = mapped_column(Integer, default=0)
     total_bytes: Mapped[int] = mapped_column(BigInteger, default=0)

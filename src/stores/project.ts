@@ -223,6 +223,8 @@ export const useProjectStore = defineStore('project', {
     /** 编辑弹窗中正在重新生成形象的数字人 id（null 表示空闲） */
     dhRegeneratingId: null as string | null,
     exportsByTaskId: {} as Record<string, MaterialExport[]>,
+    exportSubmitting: {} as Record<string, boolean>,
+    exportConnectionIssues: {} as Record<string, boolean>,
   }),
 
   getters: {
@@ -327,7 +329,9 @@ export const useProjectStore = defineStore('project', {
     },
 
     synthesis(state): SynthesisState {
-      const latest = state.activeTaskId ? state.exportsByTaskId[state.activeTaskId]?.[0] : undefined
+      const latest = state.activeTaskId
+        ? state.exportsByTaskId[state.activeTaskId]?.find((item) => item.kind !== 'video')
+        : undefined
       if (!latest) return { status: 'idle', progress: 0 }
       return {
         status: latest.status,
@@ -2306,36 +2310,57 @@ export const useProjectStore = defineStore('project', {
     },
 
     async _watchMaterialExport(item: MaterialExport) {
-      if (!item.jobId || exportStreams.has(item.id) || ['ready', 'failed'].includes(item.status))
+      if (
+        !item.jobId ||
+        (exportStreams.has(item.id) && !exportStreams.get(item.id)!.signal.aborted) ||
+        ['ready', 'failed'].includes(item.status)
+      )
         return
       // 注册到任务 watcher：切换/删除子项目时导出进度 SSE 随任务取消
       const controller = registerTaskWatcher(item.taskId)
       exportStreams.set(item.id, controller)
       try {
-        for (let attempt = 0; attempt < 4 && !controller.signal.aborted; attempt += 1) {
+        let failures = 0
+        while (!controller.signal.aborted) {
           try {
-            await api.streamMaterialExport(
-              item.id,
-              (update) => this._upsertMaterialExport(update),
-              controller.signal,
-            )
-          } catch (error) {
+            if (failures === 0) {
+              await api.streamMaterialExport(
+                item.id,
+                (update) => {
+                  this.exportConnectionIssues[item.id] = false
+                  this._upsertMaterialExport(update)
+                },
+                controller.signal,
+              )
+            }
             if (controller.signal.aborted) return
-            if (attempt === 3) throw error
-            await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)))
+            const latest = await api.fetchMaterialExport(item.id)
+            this._upsertMaterialExport(latest)
+            this.exportConnectionIssues[item.id] = false
+            if (['ready', 'failed'].includes(latest.status)) {
+              if (latest.jobId)
+                await api.acknowledgeGenerationResults([latest.jobId]).catch(() => undefined)
+              return
+            }
+            // SSE 不可用时保持轮询；周期性重试实时连接。
+            failures = failures > 0 ? (failures + 1) % 12 : 0
+          } catch {
+            if (controller.signal.aborted) return
+            failures += 1
+            this.exportConnectionIssues[item.id] = true
           }
-          const latest = await api.fetchMaterialExport(item.id)
-          this._upsertMaterialExport(latest)
-          if (['ready', 'failed'].includes(latest.status)) {
-            if (latest.jobId)
-              await api.acknowledgeGenerationResults([latest.jobId]).catch(() => undefined)
-            return
-          }
+          await new Promise<void>((resolve) => {
+            const finish = () => {
+              clearTimeout(timer)
+              controller.signal.removeEventListener('abort', finish)
+              resolve()
+            }
+            const timer = setTimeout(finish, Math.min(10000, 2000 + failures * 500))
+            controller.signal.addEventListener('abort', finish, { once: true })
+          })
         }
-      } catch (error) {
-        reportApiError(error, '导出进度连接失败，可刷新页面恢复')
       } finally {
-        exportStreams.delete(item.id)
+        if (exportStreams.get(item.id) === controller) exportStreams.delete(item.id)
       }
     },
 
@@ -2352,19 +2377,28 @@ export const useProjectStore = defineStore('project', {
     },
 
     async runSynthesize() {
-      if (
-        ['queued', 'running'].includes(this.synthesis.status) ||
-        !this.hasVideoAssets ||
-        !this.activeTaskId
-      )
-        return
+      await this.runExport('materials')
+    },
+
+    async runExport(kind: 'materials' | 'video') {
       const taskId = this.activeTaskId
+      if (!taskId) return
+      const key = `${taskId}:${kind}`
+      const active = this.exportsByTaskId[taskId]?.some(
+        (item) =>
+          (item.kind || 'materials') === kind && ['queued', 'running'].includes(item.status),
+      )
+      if (active || this.exportSubmitting[key]) return
+      this.exportSubmitting[key] = true
       try {
-        const item = await api.exportMaterials(taskId)
+        const item =
+          kind === 'video' ? await api.exportVideo(taskId) : await api.exportMaterials(taskId)
         this._upsertMaterialExport(item)
         void this._watchMaterialExport(item)
       } catch (error) {
-        throw reportApiError(error, '导出素材失败')
+        reportApiError(error, kind === 'video' ? '合并导出失败' : '导出素材失败')
+      } finally {
+        this.exportSubmitting[key] = false
       }
     },
 

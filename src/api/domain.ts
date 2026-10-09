@@ -332,6 +332,8 @@ export async function uploadDataUrl(
     body: form,
   })
 }
+export const exportVideo = (taskId: string) =>
+  apiRequest<MaterialExport>(`/tasks/${taskId}/video-exports`, { method: 'POST' })
 export const exportMaterials = (taskId: string) =>
   apiRequest<MaterialExport>(`/tasks/${taskId}/material-exports`, { method: 'POST' })
 export const fetchMaterialExports = (taskId: string) =>

@@ -23,7 +23,7 @@ export interface SongProject {
   tasks: SongTask[]
 }
 
-/** 项目级整首审核音轨，不参与模型生成或导出。 */
+/** 项目级歌曲音轨，用于试听和成片导出。 */
 export interface ProjectAudio {
   id: string
   projectId: string
@@ -444,6 +444,14 @@ export interface SynthesisState {
 }
 
 export interface MaterialExport {
+  kind?: 'materials' | 'video'
+  metadata?: {
+    width?: number
+    height?: number
+    duration?: number
+    fps?: number
+    thumbnailUrl?: string
+  }
   id: string
   taskId: string
   jobId?: string

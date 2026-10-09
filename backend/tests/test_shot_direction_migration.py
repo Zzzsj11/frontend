@@ -20,7 +20,8 @@ def test_shot_direction_migration_preserves_history_and_is_idempotent():
     config.set_main_option("script_location", str(root / "migrations"))
     scripts = ScriptDirectory.from_config(config)
     migration = scripts.get_revision("a8c4e2f6b109").module
-    assert scripts.get_heads() == [migration.revision]
+    assert len(scripts.get_heads()) == 1
+    assert migration.revision in {revision.revision for revision in scripts.walk_revisions()}
     assert migration.down_revision == "e7a3b9c2f104"
     assert migration.DATA["policy"] == CHARACTER_DIRECTION_RULE
     templates, versions = PromptTemplateModel.__table__, PromptVersionModel.__table__

@@ -2563,6 +2563,8 @@ def material_export_public(item: MaterialExportModel) -> dict:
         "id": item.id,
         "taskId": item.project_task_id,
         "jobId": item.generation_job_id,
+        "kind": item.export_kind,
+        "metadata": item.result_metadata,
         "status": item.status,
         "progress": item.progress,
         "stage": item.stage,
@@ -2878,6 +2880,7 @@ async def create_material_export(task_id: str, user: CurrentUser, db: AsyncSessi
                 select(MaterialExportModel).where(
                     MaterialExportModel.user_id == user.id,
                     MaterialExportModel.project_task_id == task.id,
+                    MaterialExportModel.export_kind == "materials",
                     MaterialExportModel.status.in_(("queued", "running")),
                     MaterialExportModel.deleted_at.is_(None),
                 )
@@ -2894,6 +2897,7 @@ async def create_material_export(task_id: str, user: CurrentUser, db: AsyncSessi
                 await db.execute(
                     select(MaterialExportModel.id).where(
                         MaterialExportModel.user_id == user.id,
+                        MaterialExportModel.export_kind == "materials",
                         MaterialExportModel.status.in_(("queued", "running")),
                         MaterialExportModel.deleted_at.is_(None),
                     )
@@ -2909,6 +2913,7 @@ async def create_material_export(task_id: str, user: CurrentUser, db: AsyncSessi
         update(MaterialExportModel)
         .where(
             MaterialExportModel.project_task_id == task.id,
+            MaterialExportModel.export_kind == "materials",
             MaterialExportModel.deleted_at.is_(None),
             MaterialExportModel.status.in_(("ready", "failed", "cancelled")),
         )

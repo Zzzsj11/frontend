@@ -22,7 +22,7 @@ from .redis_store import close_redis, wait_for_worker_wakeup
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
 
 logger = logging.getLogger("mvagent.worker")
-REPLAYABLE_INTERNAL_KINDS = {"ass_outline", "general_outline", "ass_segment_retry", "storyboard_line", "billing_reconcile", "prompt_optimization"}
+REPLAYABLE_INTERNAL_KINDS = {"ass_outline", "general_outline", "ass_segment_retry", "storyboard_line", "billing_reconcile", "prompt_optimization", "mv_export"}
 MAX_INTERNAL_ATTEMPTS = 3
 
 
@@ -61,6 +61,15 @@ async def _claim(kinds: tuple[str, ...], providers: tuple[str, ...], worker_id: 
             .with_for_update(skip_locked=True)
             .limit(100)
         )
+        if "mv_export" in kinds:
+            # 成片编码只占一个 Worker 槽位，其余槽位继续处理素材 ZIP。
+            rendering = await session.scalar(
+                select(GenerationJobModel.id)
+                .where(GenerationJobModel.kind == "mv_export", GenerationJobModel.status == "running", GenerationJobModel.deleted_at.is_(None))
+                .limit(1)
+            )
+            if rendering:
+                query = query.where(GenerationJobModel.kind != "mv_export")
         rows = list((await session.execute(query)).scalars())
         supported = [row for row in rows if not _reject_unsupported_media_job(row)]
         candidates = [row for row in supported if not providers or str((row.request or {}).get("_provider") or "internal") in providers]
@@ -137,6 +146,12 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
                 model.phase = "queued"
                 model.started_at = None
                 model.attempt += 1
+                if model.kind == "mv_export":
+                    from .models import MaterialExportModel
+
+                    export = await session.get(MaterialExportModel, (model.request or {}).get("export_id", ""))
+                    if export and export.deleted_at is None:
+                        export.status, export.stage = "queued", "任务中断，正在自动恢复"
                 resumed += 1
             elif model.provider_task_id:
                 model.status = "queued"
@@ -168,6 +183,13 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
                     if line and line.deleted_at is None:
                         line.generation_status = "failed"
                         line.generation_error = model.error
+                elif model.kind == "mv_export":
+                    from .models import MaterialExportModel
+
+                    export = await session.get(MaterialExportModel, (model.request or {}).get("export_id", ""))
+                    if export and export.deleted_at is None:
+                        export.status, export.stage, export.error = "failed", "合成中断，请重试", model.error
+                        export.finished_at = utcnow()
                 elif model.kind == "prompt_optimization":
                     from .models import PromptOptimizationTaskModel
 
@@ -208,6 +230,10 @@ def _runner(job: Job):
     if job.kind == "video":
         payload = VideoGenerationCreate.model_validate(public_request)
         return lambda item: generate_video(payload, item)
+    if job.kind == "mv_export":
+        from .mv_export import run_video_export
+
+        return lambda item: run_video_export(str(request.get("export_id") or ""), item)
     if job.kind == "export":
         export_id = str(request.get("export_id") or "")
         return lambda item: _run_material_export(export_id, item)

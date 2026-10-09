@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ExportActions from './ExportActions.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatTime, useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
@@ -336,42 +337,7 @@ const toggleFullscreen = () => {
           <small>到达末尾后自动重新开始</small>
         </span>
       </label>
-      <div class="export-group">
-        <button
-          v-if="['queued', 'running'].includes(store.synthesis.status)"
-          class="btn-outline synth-btn"
-          disabled
-        >
-          {{ store.synthesis.stage || '正在导出' }} {{ store.synthesis.progress }}%
-        </button>
-        <button
-          v-else-if="store.synthesis.status === 'failed'"
-          class="btn-outline synth-btn"
-          @click="store.runSynthesize()"
-        >
-          <AppIcon name="movie" :size="15" />
-          导出失败，重试
-        </button>
-        <button
-          v-else
-          class="btn-outline synth-btn"
-          :disabled="!store.hasVideoAssets"
-          @click="store.runSynthesize()"
-        >
-          <AppIcon name="movie" :size="15" />
-          导出素材
-        </button>
-        <a
-          v-if="store.synthesis.status === 'ready' && store.synthesis.videoUrl"
-          class="btn-outline synth-dl"
-          :href="store.synthesis.videoUrl"
-          download
-          title="下载最新导出"
-        >
-          <AppIcon name="download" :size="15" />
-          下载
-        </a>
-      </div>
+      <ExportActions />
     </footer>
   </section>
 </template>
@@ -381,6 +347,7 @@ const toggleFullscreen = () => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow-y: auto;
 }
 .panel-header {
   margin-bottom: 12px;
@@ -534,6 +501,7 @@ const toggleFullscreen = () => {
 }
 .player-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 24px;
   border-top: 1px solid var(--border);
@@ -562,39 +530,5 @@ const toggleFullscreen = () => {
 .check-text small {
   font-size: var(--font-sm);
   color: var(--text-secondary);
-}
-.synth-btn {
-  margin-left: auto;
-}
-.synth-btn:disabled {
-  border-color: var(--primary);
-  background: var(--primary-light);
-  color: var(--primary);
-  font-weight: 600;
-  opacity: 1;
-  cursor: wait;
-}
-.export-group {
-  display: flex;
-  gap: 8px;
-  margin-left: auto;
-}
-.synth-dl {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 13px;
-  border: 1px solid var(--primary);
-  border-radius: var(--radius-sm);
-  background: var(--primary-light);
-  color: var(--primary);
-  font-size: var(--font-sm);
-  font-weight: 600;
-  cursor: pointer;
-  text-decoration: none;
-  font-family: inherit;
-}
-.synth-dl:hover {
-  background: rgba(255, 90, 44, 0.14);
 }
 </style>

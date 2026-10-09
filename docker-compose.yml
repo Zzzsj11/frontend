@@ -102,7 +102,7 @@ services:
   worker-export:
     extends: worker-media
     stop_grace_period: 30m
-    command: ['--kinds', 'export', '--concurrency', '${EXPORT_WORKER_CONCURRENCY:-3}']
+    command: ['--kinds', 'export,mv_export', '--concurrency', '${EXPORT_WORKER_CONCURRENCY:-3}']
 
   worker-chat:
     extends: worker-media

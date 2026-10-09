@@ -63,6 +63,7 @@ from .models import (
     UserModel,
     utcnow,
 )
+from .mv_export import router as mv_export_router
 from .prompts import get_prompt
 from .providers import ProviderError, generate_image, generate_video, kling_image_inputs, resume_generation
 from .redis_store import clear_login_attempts, close_redis, login_attempt_count, record_login_failure, redis_ok
@@ -185,6 +186,7 @@ app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), al
 # 测试流量耗时采集：仅带 X-Test-Run-Id 头或 API_REQUEST_LOG_ALL=true 时入库
 app.middleware("http")(api_request_log_middleware)
 app.middleware("http")(agent_attribution_middleware)
+app.include_router(mv_export_router)
 app.include_router(domain_router)
 app.include_router(creative_router)
 app.include_router(admin_router)
