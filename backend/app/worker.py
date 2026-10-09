@@ -122,7 +122,8 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
         rows = list(
             (
                 await session.execute(
-                    select(GenerationJobModel).where(
+                    select(GenerationJobModel)
+                    .where(
                         GenerationJobModel.kind.in_(kinds),
                         GenerationJobModel.status == "running",
                         or_(
@@ -131,6 +132,7 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
                         ),
                         GenerationJobModel.deleted_at.is_(None),
                     )
+                    .with_for_update(skip_locked=True)
                 )
             ).scalars()
         )
@@ -150,7 +152,7 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
                     from .models import MaterialExportModel
 
                     export = await session.get(MaterialExportModel, (model.request or {}).get("export_id", ""))
-                    if export and export.deleted_at is None:
+                    if export and export.deleted_at is None and export.status != "ready":
                         export.status, export.stage = "queued", "任务中断，正在自动恢复"
                 resumed += 1
             elif model.provider_task_id:
@@ -313,7 +315,7 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
                 while True:
                     await asyncio.sleep(heartbeat_interval)
                     await jobs.heartbeat(job)
-                    if job.kind in REPLAYABLE_INTERNAL_KINDS and job.project_task_id:
+                    if job.kind in REPLAYABLE_INTERNAL_KINDS - {"mv_export"} and job.project_task_id:
                         async with session_factory() as session:
                             task = await session.get(ProjectTaskModel, job.project_task_id)
                             if task and task.deleted_at is None:
@@ -331,8 +333,13 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
                 heartbeat_task.cancel()
                 await asyncio.gather(heartbeat_task, return_exceptions=True)
 
+    next_export_recovery = loop.time() + 15
     try:
         while not stop.is_set():
+            # 重启当刻租约可能尚未过期，不能只在启动时扫描一次。
+            if "mv_export" in kinds and loop.time() >= next_export_recovery:
+                await _recover_stale(("mv_export",), providers)
+                next_export_recovery = loop.time() + 15
             if len(active) < concurrency:
                 job = await _claim(kinds, providers, worker_id)
                 if job:
