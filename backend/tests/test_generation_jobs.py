@@ -786,7 +786,7 @@ async def test_general_random_seedance_retries_output_moderation_once(monkeypatc
         nonlocal polls
         polls += 1
         if polls == 1:
-            raise providers.ProviderError("内容未通过平台安全合规校验，请调整画面内容或提示词后重试")
+            raise providers._task_failure({"error": {"code": "OutputVideoSensitiveContentDetected", "message": "The output video may contain sensitive information"}}, "FAILED")
         return {"status": "succeeded", "content": {"video_url": "https://source.test/result.mp4"}}
 
     async def store(_job, task_id, _data, _created):
@@ -2932,3 +2932,51 @@ def test_video_submission_appends_quality_by_line_type_without_repeating(client,
             assert ("人物表情自然不僵硬" in request["prompt"]) == (line["shotType"] == "character")
     assert len(captured) == 4
     assert all(prompt.count("视频整体画质类似实拍视频") == 1 for prompt in captured)
+
+
+@pytest.mark.parametrize(
+    ("code", "reason", "stage", "label"),
+    [
+        ("InputTextSensitiveContentDetected", "The input text 'content[0]' may contain sensitive information. Request id: req-123", "input", "输入提示词"),
+        ("OutputVideoSensitiveContentDetected", "The output video may contain sensitive information. Request id: req-123", "output", "生成结果"),
+        ("InputImageSensitiveContentDetected", "Sensitive information. Request id: req-123", "input", "输入提示词或素材"),
+        ("", "The output video may contain sensitive information. Request id: req-123", "output", "生成结果"),
+    ],
+)
+def test_task_moderation_preserves_stage_and_diagnostics(code, reason, stage, label):
+    from app.providers import ProviderModerationError, _task_failure
+
+    error = _task_failure({"error": {"code": code, "message": reason}}, "FAILED")
+    assert isinstance(error, ProviderModerationError)
+    assert error.stage == stage
+    assert label in str(error)
+    assert "请求ID：req-123" in str(error)
+    if code:
+        assert code in str(error)
+
+
+def test_generic_safety_failure_is_not_output_moderation():
+    from app.providers import ProviderModerationError, _task_failure
+
+    error = _task_failure({"error": {"message": "Content violated our usage policy"}}, "FAILED")
+    assert not isinstance(error, ProviderModerationError)
+
+
+@pytest.mark.parametrize("code", ["InputTextSensitiveContentDetected", ""])
+def test_input_or_unknown_moderation_never_resubmits(monkeypatch, code):
+    from unittest.mock import AsyncMock
+
+    from app import providers
+    from app.jobs import Job
+    from app.schemas import VideoGenerationCreate
+
+    submit = AsyncMock(return_value=("supplier-task", {}, "https://example.test", {}))
+    failure = providers._task_failure({"error": {"code": code, "message": "Content violated our usage policy"}}, "FAILED")
+    monkeypatch.setattr(providers, "_submit_seedance_video", submit)
+    monkeypatch.setattr(providers, "_poll_scheduled", AsyncMock(side_effect=failure))
+    job = Job(id="moderation-test", kind="video", request={"_allowContentSafetyRetry": True})
+    request = VideoGenerationCreate(prompt="普通音乐场景", model="doubao-seedance-2.0")
+    with pytest.raises(providers.ProviderError):
+        asyncio.run(providers.generate_video(request, job))
+    assert submit.await_count == 1
+    assert not job.request.get("_contentSafetyRetry")

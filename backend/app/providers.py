@@ -126,6 +126,42 @@ def _provider_error_message(body: Any) -> str:
     return ""
 
 
+class ProviderModerationError(ProviderError):
+    """Keep supplier moderation stage independent from translated display text."""
+
+    def __init__(self, message: str, code: str, stage: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.stage = stage
+
+
+def _task_failure(data: dict[str, Any], status: str) -> ProviderError:
+    error = data.get("error") if isinstance(data.get("error"), dict) else {}
+    code = str(error.get("code") or "")
+    reason = str(data.get("failReason") or error.get("message") or f"生成任务状态：{status}")
+    stage = ""
+    if code.startswith("Input") and "SensitiveContentDetected" in code:
+        stage = "input"
+    elif code.startswith("Output") and "SensitiveContentDetected" in code:
+        stage = "output"
+    elif not code and re.search(r"input (?:text|image|video|audio).*sensitive", reason, re.I):
+        stage = "input"
+    elif not code and re.search(r"output video.*sensitive", reason, re.I):
+        stage = "output"
+    message = translate_provider_error(reason)
+    if stage:
+        label = "输入提示词或素材" if stage == "input" else "生成结果"
+        if code == "InputTextSensitiveContentDetected":
+            label = "输入提示词"
+        message = f"{label}未通过平台安全合规校验，请检查内容后再提交"
+        match = _REQUEST_ID_RE.search(reason)
+        if match:
+            message += f"（请求ID：{match.group(1)}）"
+    if code:
+        message += f"（供应商错误码：{code}）"
+    return ProviderModerationError(message, code, stage) if stage else ProviderError(message)
+
+
 def translate_provider_error(msg: str) -> str:
     """把上游返回的英文错误翻译为中文友好提示；request id 单独保留，便于排查问题。"""
     if not msg:
@@ -305,9 +341,7 @@ async def _poll(
         if status in {"SUCCESS", "SUCCEEDED"}:
             return data
         if status in {"FAILED", "CANCELLED"} or "FAIL" in status:
-            error = data.get("error") if isinstance(data.get("error"), dict) else {}
-            reason = data.get("failReason") or error.get("message") or f"生成任务状态：{status}"
-            raise ProviderError(translate_provider_error(reason))
+            raise _task_failure(data, status)
     raise ProviderError("生成任务超时，请稍后查询")
 
 
@@ -429,9 +463,7 @@ class ProviderPollScheduler:
             self._finish_result(job_id, data)
             return
         if status in {"FAILED", "CANCELLED"} or "FAIL" in status:
-            error = data.get("error") if isinstance(data.get("error"), dict) else {}
-            reason = data.get("failReason") or error.get("message") or f"生成任务状态：{status}"
-            self._finish_error(job_id, ProviderError(translate_provider_error(reason)))
+            self._finish_error(job_id, _task_failure(data, status))
             return
         self._queue.append(job_id)
 
@@ -1078,13 +1110,7 @@ async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, 
         )
     except ProviderError as exc:
         message = str(exc)
-        output_sensitive = bool(
-            re.search(
-                r"output video may contain sensitive information|内容未通过平台安全合规校验",
-                message,
-                re.IGNORECASE,
-            )
-        )
+        output_sensitive = isinstance(exc, ProviderModerationError) and exc.stage == "output"
         allow_safety_retry = bool((job.request or {}).get("_allowContentSafetyRetry"))
         safety_retry_attempted = bool((job.request or {}).get("_contentSafetyRetry"))
         if allow_safety_retry and not safety_retry_attempted and output_sensitive:
