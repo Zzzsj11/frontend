@@ -600,3 +600,21 @@ export const submitVideoGenerationsBatch = (items: VideoBatchItem[]) =>
     method: 'POST',
     body: JSON.stringify({ items }),
   })
+
+export interface TaskVideoModelPlan {
+  taskId: string
+  model: string
+  modelName: string
+  count: number
+  adjustments: string[]
+  blockers: string[]
+  previewToken: string
+  lines: Array<{ id: string; shotOptions: ShotGenOptions }>
+  applied: boolean
+  task?: { storyboardConfig: Record<string, unknown> }
+}
+export const changeTaskVideoModel = (taskId: string, model: string, previewToken?: string) =>
+  apiRequest<TaskVideoModelPlan>(`/tasks/${taskId}/video-model`, {
+    method: 'POST',
+    body: JSON.stringify({ model, apply: Boolean(previewToken), preview_token: previewToken }),
+  })

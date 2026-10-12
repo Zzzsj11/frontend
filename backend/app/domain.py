@@ -2026,7 +2026,11 @@ async def replace_cast(task_id: str, payload: CastUpdate, user: CurrentUser, db:
 
 @router.post("/tasks/{task_id}/storyboard/lines", status_code=201)
 async def create_line(task_id: str, payload: StoryboardLineCreate, user: CurrentUser, db: AsyncSession = Db) -> dict:
-    await owned_task(db, user.id, task_id)
+    task = await owned_task(db, user.id, task_id)
+    from .task_video_model import lock_video_task
+
+    await lock_video_task(db, task_id)
+    await db.refresh(task)
     if payload.source == "creative":
         if payload.shot_type != "creative" or not payload.original_prompt.strip() or not payload.optimized_prompt.strip():
             raise HTTPException(422, "创意分镜必须包含原始提示词和优化提示词")
@@ -2043,6 +2047,8 @@ async def create_line(task_id: str, payload: StoryboardLineCreate, user: Current
         raise HTTPException(422, "包含不可用角色")
     count = len((await db.execute(select(StoryboardLineModel.id).where(StoryboardLineModel.project_task_id == task_id, StoryboardLineModel.deleted_at.is_(None)))).all())
     data = payload.model_dump(exclude={"digital_human_ids"})
+    if payload.source != "creative":
+        data["shot_options"] = {**((task.storyboard_config or {}).get("videoModelDefaults") or {}), **data.get("shot_options", {})}
     line = StoryboardLineModel(id=uid("line"), project_task_id=task_id, sort_order=count, generation_status="succeeded", generated_at=utcnow(), **data)
     db.add(line)
     await db.flush()

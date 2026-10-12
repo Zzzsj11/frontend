@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { DEFAULT_SHOT_OPTIONS, useProjectStore } from '../stores/project'
+import TaskVideoModelPicker from './TaskVideoModelPicker.vue'
 import ScriptLineItem from './ScriptLine.vue'
 import ShotDetailModal from './ShotDetailModal.vue'
 import MagicScriptModal from './MagicScriptModal.vue'
@@ -271,11 +272,13 @@ const confirmBatchGenerate = async () => {
         </span>
       </div>
       <div class="header-actions">
+        <TaskVideoModelPicker :disabled="checkingBatchCost" />
         <button
           class="btn-outline"
           :disabled="
             !batchGeneratableCount ||
             store.batchShooting ||
+            store.taskVideoModelEditing ||
             store.songSwitching ||
             checkingBatchCost
           "
@@ -552,6 +555,8 @@ const confirmBatchGenerate = async () => {
 }
 .header-actions {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
 }
 .header-actions button {

@@ -83,6 +83,8 @@ from .schemas import (
 )
 from .seed import recover_stale_storyboard_generation, seed_system_data
 from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
+from .task_video_model import lock_video_task
+from .task_video_model import router as task_video_model_router
 from .usage_quota import consume_daily_quota
 from .video_prompt_policy import append_shot_quality_requirements, compile_general_random_provider_prompt, compile_identity_safe_video_prompt
 
@@ -188,6 +190,7 @@ app.middleware("http")(api_request_log_middleware)
 app.middleware("http")(agent_attribution_middleware)
 app.include_router(mv_export_router)
 app.include_router(domain_router)
+app.include_router(task_video_model_router)
 app.include_router(creative_router)
 app.include_router(admin_router)
 app.include_router(model_options_router)
@@ -785,8 +788,16 @@ async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str], *,
 async def create_video_generation(payload: VideoGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
     model, provider = await require_active_model(db, payload.model or settings.video_model, "video")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
+    if task_id:
+        await lock_video_task(db, task_id)
     task = await db.get(ProjectTaskModel, task_id) if task_id else None
     line = await db.get(StoryboardLineModel, line_id) if line_id else None
+    if task:
+        await db.refresh(task)
+    if line:
+        await db.refresh(line)
+    if task and (task.storyboard_config or {}).get("videoModelRevision") and line and (line.shot_options or {}).get("videoModel") != payload.model:
+        raise HTTPException(409, "该分镜的视频模型已更新，请刷新页面后再生成")
     validate_video_references(payload, dict(model.capabilities or {}))
     is_h3 = bool((model.capabilities or {}).get("h3Modes"))
     if is_h3:
@@ -799,6 +810,14 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
         except ProviderError as exc:
             raise HTTPException(422, str(exc)) from exc
     await consume_daily_quota(db, user_id=user.id, category="video")
+    # 日额度消费会提交事务，重新取得配置锁直到工单落库。
+    if task_id:
+        await lock_video_task(db, task_id)
+        await db.refresh(task)
+        if line:
+            await db.refresh(line)
+        if (task.storyboard_config or {}).get("videoModelRevision") and line and (line.shot_options or {}).get("videoModel") != payload.model:
+            raise HTTPException(409, "该分镜的视频模型已更新，请刷新页面后再生成")
     if identity_indices:
         wardrobe = dict((line.shot_options or {}).get("wardrobeByCharacter") or {}) if line else {}
         task_config = dict(task.storyboard_config or {}) if task else {}

@@ -200,6 +200,7 @@ export const useProjectStore = defineStore('project', {
     /** 当前任务状态（parsed/outlining/outline_failed/generating/ready/partial/failed） */
     activeTaskStatus: null as string | null,
     activeStoryboardConfig: {} as Record<string, unknown>,
+    taskVideoModelEditing: false,
     /** 当前歌曲项目的整首审核音轨。 */
     projectAudio: null as ProjectAudio | null,
     audioTrackVisible: false,
@@ -1260,6 +1261,8 @@ export const useProjectStore = defineStore('project', {
 
     // ---------- 分镜行编辑 ----------
     addLine() {
+      const defaults = this.activeStoryboardConfig.videoModelDefaults as
+        Partial<ShotGenOptions> | undefined
       const line: ScriptLine = {
         id: nextId(),
         source: 'manual',
@@ -1271,6 +1274,7 @@ export const useProjectStore = defineStore('project', {
         scene: { status: 'none' },
         shot: { status: 'none', assets: [] },
         manual: true,
+        shotOptions: normalizeShotOptions({ ...DEFAULT_SHOT_OPTIONS, ...defaults }),
       }
       this.lines.push(line)
       this.selectedLineId = line.id
@@ -1282,6 +1286,7 @@ export const useProjectStore = defineStore('project', {
             scene_prompt: '',
             shot_prompt: '',
             digital_human_ids: [],
+            shot_options: line.shotOptions,
           })
           .then((saved) => {
             line.id = saved.id
@@ -1379,6 +1384,21 @@ export const useProjectStore = defineStore('project', {
         line.shotOptions = normalized
         void api.updateStoryboardLine(lineId, { shot_options: normalized })
       }
+    },
+
+    async applyTaskVideoModel(plan: api.TaskVideoModelPlan) {
+      const result = await api.changeTaskVideoModel(plan.taskId, plan.model, plan.previewToken)
+      if (this.activeTaskId === plan.taskId) {
+        for (const item of result.lines) {
+          const line = this.lines.find((line) => line.id === item.id)
+          if (line) line.shotOptions = normalizeShotOptions(item.shotOptions)
+        }
+        this.activeStoryboardConfig = result.task?.storyboardConfig ?? this.activeStoryboardConfig
+        this.taskScripts[plan.taskId] = { cast: [...this.castIds], lines: this.lines }
+      } else {
+        delete this.taskScripts[plan.taskId]
+      }
+      return result
     },
 
     /** 切换某分镜的出演角色（只能选全局阵容内的数字人，可多选/可全不选） */
@@ -2139,6 +2159,7 @@ export const useProjectStore = defineStore('project', {
 
     /** 生成/重新生成分镜视频片段（场景 × 分镜提示词 × 出演角色 × 生成参数）；新片段作为资产追加并选中 */
     async generateShotFor(lineId: string, shotPrompt?: string, options?: ShotGenOptions) {
+      if (this.taskVideoModelEditing) return
       const idx = this.lines.findIndex((l) => l.id === lineId)
       if (idx < 0 || this.lines[idx].shot.status === 'generating') return
       const line = this.lines[idx]
