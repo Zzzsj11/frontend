@@ -272,66 +272,70 @@ const confirmBatchGenerate = async () => {
         </span>
       </div>
       <div class="header-actions">
-        <TaskVideoModelPicker :disabled="checkingBatchCost" />
-        <button
-          class="btn-outline"
-          :disabled="
-            !batchGeneratableCount ||
-            store.batchShooting ||
-            store.taskVideoModelEditing ||
-            store.songSwitching ||
-            checkingBatchCost
-          "
-          title="批量生成全部「提示词就绪但视频未生成/失败」分镜的视频片段（最多同时生成 200 个）"
-          @click="confirmBatchGenerate"
-        >
-          <span v-if="store.batchShooting || checkingBatchCost" class="spinner" />
-          <AppIcon v-else name="sparkles" :size="15" />
-          {{ checkingBatchCost ? '正在核算费用…' : '批量生成'
-          }}{{ batchGeneratableCount ? `（${batchGeneratableCount}）` : '' }}
-        </button>
-        <button class="btn-outline" @click="store.openLibrary()">
-          <AppIcon name="users" :size="15" />
-          角色阵容
-          <span v-if="store.castHumans.length" class="cast-count">{{
-            store.castHumans.length
-          }}</span>
-        </button>
-        <button
-          class="btn-outline"
-          :disabled="!store.activeStoryBible"
-          @click="store.openOutline()"
-        >
-          <AppIcon name="file" :size="13" />
-          查看大纲
-        </button>
-        <button
-          class="btn-primary"
-          :disabled="store.magicLoading || store.songSwitching"
-          @click="store.openMagic()"
-        >
-          <span v-if="store.magicLoading" class="spinner light" />
-          <AppIcon v-else name="sparkles" :size="15" />
-          ASS 视频
-        </button>
-        <button
-          class="btn-primary"
-          :disabled="store.generalStoryboardLoading || store.songSwitching"
-          @click="store.openGeneralStoryboard()"
-        >
-          <span v-if="store.generalStoryboardLoading" class="spinner light" />
-          <AppIcon v-else name="movie" :size="15" />
-          定制通用分镜
-        </button>
-        <button
-          class="btn-primary"
-          :disabled="store.randomGeneralStoryboardLoading || store.songSwitching"
-          @click="store.openRandomGeneralStoryboard()"
-        >
-          <span v-if="store.randomGeneralStoryboardLoading" class="spinner light" />
-          <AppIcon v-else name="movie" :size="15" />
-          随机通用分镜
-        </button>
+        <div class="action-row">
+          <TaskVideoModelPicker :disabled="checkingBatchCost" />
+          <button
+            class="btn-outline"
+            :disabled="
+              !batchGeneratableCount ||
+              store.batchShooting ||
+              store.taskVideoModelEditing ||
+              store.songSwitching ||
+              checkingBatchCost
+            "
+            title="批量生成全部「提示词就绪但视频未生成/失败」分镜的视频片段（最多同时生成 200 个）"
+            @click="confirmBatchGenerate"
+          >
+            <span v-if="store.batchShooting || checkingBatchCost" class="spinner" />
+            <AppIcon v-else name="sparkles" :size="15" />
+            {{ checkingBatchCost ? '正在核算费用…' : '批量生成'
+            }}{{ batchGeneratableCount ? `（${batchGeneratableCount}）` : '' }}
+          </button>
+          <button class="btn-outline" @click="store.openLibrary()">
+            <AppIcon name="users" :size="15" />
+            角色阵容
+            <span v-if="store.castHumans.length" class="cast-count">{{
+              store.castHumans.length
+            }}</span>
+          </button>
+          <button
+            class="btn-outline"
+            :disabled="!store.activeStoryBible"
+            @click="store.openOutline()"
+          >
+            <AppIcon name="file" :size="13" />
+            查看大纲
+          </button>
+        </div>
+        <div class="action-row">
+          <button
+            class="btn-primary"
+            :disabled="store.magicLoading || store.songSwitching"
+            @click="store.openMagic()"
+          >
+            <span v-if="store.magicLoading" class="spinner light" />
+            <AppIcon v-else name="sparkles" :size="15" />
+            ASS 视频
+          </button>
+          <button
+            class="btn-primary"
+            :disabled="store.generalStoryboardLoading || store.songSwitching"
+            @click="store.openGeneralStoryboard()"
+          >
+            <span v-if="store.generalStoryboardLoading" class="spinner light" />
+            <AppIcon v-else name="movie" :size="15" />
+            定制通用分镜
+          </button>
+          <button
+            class="btn-primary"
+            :disabled="store.randomGeneralStoryboardLoading || store.songSwitching"
+            @click="store.openRandomGeneralStoryboard()"
+          >
+            <span v-if="store.randomGeneralStoryboardLoading" class="spinner light" />
+            <AppIcon v-else name="movie" :size="15" />
+            随机通用分镜
+          </button>
+        </div>
       </div>
     </header>
 
@@ -554,6 +558,13 @@ const confirmBatchGenerate = async () => {
   gap: 10px;
 }
 .header-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 1 1 100%;
+  gap: 6px;
+}
+.action-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;

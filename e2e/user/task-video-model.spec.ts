@@ -96,6 +96,13 @@ for (const kind of ['ass', 'general', 'general_random']) {
     const picker = page.getByRole('button', { name: /视频模型：/ })
     const batch = page.getByRole('button', { name: /批量生成（2）/ })
     expect((await picker.boundingBox())!.x).toBeLessThan((await batch.boundingBox())!.x)
+    const creators = ['ASS 视频', '定制通用分镜', '随机通用分镜']
+    const positions = await Promise.all(
+      creators.map((name) => page.getByRole('button', { name, exact: true }).boundingBox()),
+    )
+    expect(positions[0]!.y).toBeGreaterThan((await picker.boundingBox())!.y)
+    expect(positions[1]!.y).toBe(positions[0]!.y)
+    expect(positions[2]!.y).toBe(positions[0]!.y)
     await picker.click()
     await expect(page.getByRole('dialog', { name: '修改子项目视频模型' })).toBeVisible()
     await expect(page.getByLabel('目标视频模型').locator('option')).toHaveCount(3)
