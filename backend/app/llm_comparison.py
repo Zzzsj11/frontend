@@ -23,6 +23,9 @@ class ChatTestModel:
 
 
 CHAT_TEST_MODELS = (
+    ChatTestModel("gpt-6.1-sol-all-in-one", "GPT 6.1 Sol（all in one）"),
+    ChatTestModel("gpt-6-astra-all-in-one", "GPT 6 Astra（all in one）"),
+    ChatTestModel("gpt-6-sol-all-in-one", "GPT 6.0 Sol（all in one）"),
     ChatTestModel("gpt-6-astra", "GPT 6 Astra"),
     ChatTestModel("gpt-5.5", "GPT 5.5"),
     ChatTestModel("gpt-5.6-sol", "GPT 5.6 Sol"),
@@ -44,10 +47,18 @@ def _anthropic_messages_url() -> str:
 
 
 async def _call_openai(model: str, messages: list[dict[str, str]], temperature: float, max_tokens: int) -> tuple[str, Any, str | None]:
-    client = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url, timeout=120)
-    response = await client.chat.completions.create(model=model, messages=messages, **completion_options(model, max_tokens, temperature))
-    text = response.choices[0].message.content or ""
-    return text, response.usage, response.id
+    from . import all_in_one
+
+    if model.endswith(all_in_one.SUFFIX):
+        client = all_in_one.chat_client(user_id=model_gateway.current_owner())
+        upstream = all_in_one.upstream_model(model)
+    else:
+        client = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url, timeout=120)
+        upstream = model
+    async with client:
+        response = await client.chat.completions.create(model=upstream, messages=messages, **completion_options(model, max_tokens, temperature))
+        text = response.choices[0].message.content or ""
+        return text, response.usage, response.id
 
 
 async def _call_anthropic(model: str, messages: list[dict[str, str]], temperature: float, max_tokens: int) -> tuple[str, Any, str | None]:
@@ -77,7 +88,7 @@ async def call_chat_model(*, model: str, protocol: str, messages: list[dict[str,
 
 
 async def compare_chat_models(*, models: list[str], system_prompt: str, prompt: str, temperature: float, max_tokens: int) -> list[dict[str, Any]]:
-    if not settings.llm_api_key and not gateway_enabled():
+    if not settings.llm_api_key and not gateway_enabled() and not settings.all_in_one_api_key:
         raise RuntimeError("LLM_API_KEY 未配置")
     semaphore = asyncio.Semaphore(3)
     messages = ([{"role": "system", "content": system_prompt}] if system_prompt else []) + [{"role": "user", "content": prompt}]
@@ -99,6 +110,7 @@ async def compare_chat_models(*, models: list[str], system_prompt: str, prompt: 
                 "model": model,
                 "name": profile.name,
                 "protocol": profile.protocol,
+                "provider": "all-in-one" if model.endswith("-all-in-one") else profile.protocol,
                 "status": "ok",
                 "text": text,
                 "error": "",
@@ -111,6 +123,7 @@ async def compare_chat_models(*, models: list[str], system_prompt: str, prompt: 
                 "model": model,
                 "name": profile.name,
                 "protocol": profile.protocol,
+                "provider": "all-in-one" if model.endswith("-all-in-one") else profile.protocol,
                 "status": "error",
                 "text": "",
                 "error": str(exc)[:2000],

@@ -812,7 +812,7 @@ async def _call(
     """Bounded transient retries; every response (including overload text) is accounted for."""
     snapshot = [dict(message) for message in messages]
     model = (settings.general_outline_llm_model or settings.llm_model) if operation.startswith("general_story_outline") else settings.llm_model
-    max_attempts = 3
+    max_attempts = 1 if model.endswith("-all-in-one") else 3
     if operation.startswith("general_story_outline"):
         # Share the budget with structural repair rounds; never multiply 3 transport x 3 schema retries.
         remaining = 5 - sum(str(record.get("operation", "")).startswith("general_story_outline") for record in usage_records)
@@ -823,10 +823,16 @@ async def _call(
         started = time.perf_counter()
         text, usage, request_id = "", {}, None
         try:
-            response = await client.chat.completions.create(model=model, messages=messages, **completion_options(model, max_tokens))
-            usage = _usage_dict(response)
-            request_id = getattr(response, "id", None)
-            text = response.choices[0].message.content or ""
+            if model.endswith("-all-in-one"):
+                from .llm_comparison import call_chat_model
+
+                text, raw_usage, request_id = await call_chat_model(model=model, protocol="openai", messages=messages, temperature=0.2, max_tokens=max_tokens)
+                usage = raw_usage.model_dump() if hasattr(raw_usage, "model_dump") else (raw_usage or {})
+            else:
+                response = await client.chat.completions.create(model=model, messages=messages, **completion_options(model, max_tokens))
+                usage = _usage_dict(response)
+                request_id = getattr(response, "id", None)
+                text = response.choices[0].message.content or ""
             check_provider_text(text)
         except Exception as exc:
             usage_records.append(

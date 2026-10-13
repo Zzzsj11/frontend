@@ -976,7 +976,7 @@ def _persist_llm_calls(
         add_token_usage(
             db,
             operation=operation,
-            provider="openai-compatible",
+            provider="all-in-one" if str(call.get("model") or settings.llm_model).endswith("-all-in-one") else "openai-compatible",
             model=call.get("model") or settings.llm_model,
             usage=call.get("usage"),
             user_id=user_id,
@@ -989,7 +989,7 @@ def _persist_llm_calls(
         add_llm_call_log(
             db,
             operation=operation,
-            provider="openai-compatible",
+            provider="all-in-one" if str(call.get("model") or settings.llm_model).endswith("-all-in-one") else "openai-compatible",
             model=call.get("model") or settings.llm_model,
             usage=call.get("usage"),
             user_id=user_id,

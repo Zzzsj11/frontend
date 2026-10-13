@@ -25,6 +25,9 @@ SUPPORTED_VIDEO_MODELS = frozenset(
         "wan3.0-video-prime",
         "minimax-h3",
         "minimax-h3-runninghub",
+        "doubao-seedance-2.0-all-in-one",
+        "wan3.0-video-all-in-one",
+        "minimax-h3-all-in-one",
     }
 )
 

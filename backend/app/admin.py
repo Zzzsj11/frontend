@@ -183,7 +183,7 @@ async def run_chat_comparison(payload: ChatComparisonIn, request: Request, user:
         add_token_usage(
             db,
             operation="admin_chat_comparison",
-            provider=result["protocol"],
+            provider=result.get("provider") or result["protocol"],
             model=result["model"],
             usage=usage,
             user_id=user.id,
@@ -192,7 +192,7 @@ async def run_chat_comparison(payload: ChatComparisonIn, request: Request, user:
         add_llm_call_log(
             db,
             operation="admin_chat_comparison",
-            provider=result["protocol"],
+            provider=result.get("provider") or result["protocol"],
             model=result["model"],
             usage=usage,
             user_id=user.id,
@@ -238,7 +238,7 @@ async def run_general_outline_comparison(payload: GeneralOutlineComparisonIn, re
             add_token_usage(
                 db,
                 operation="admin_general_outline_comparison",
-                provider=result["protocol"],
+                provider=result.get("provider") or result["protocol"],
                 model=result["model"],
                 usage=call.get("usage"),
                 user_id=user.id,
@@ -247,7 +247,7 @@ async def run_general_outline_comparison(payload: GeneralOutlineComparisonIn, re
             add_llm_call_log(
                 db,
                 operation="admin_general_outline_comparison",
-                provider=result["protocol"],
+                provider=result.get("provider") or result["protocol"],
                 model=result["model"],
                 usage=call.get("usage"),
                 user_id=user.id,

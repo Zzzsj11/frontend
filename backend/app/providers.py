@@ -41,9 +41,23 @@ class ProviderError(RuntimeError):
 
 
 SUPPORTED_MEDIA_PROVIDERS = frozenset(
-    {"yinghe", "yinghe-h3", "yinghe-wan", "yinghe-kling", "yinghe-happyhorse", "runninghub", "yseeai", "yseeai-omni", "yseeai-unified", "toapis", "toapis-grok", "toapis-viduq3"}
+    {
+        "all-in-one",
+        "yinghe",
+        "yinghe-h3",
+        "yinghe-wan",
+        "yinghe-kling",
+        "yinghe-happyhorse",
+        "runninghub",
+        "yseeai",
+        "yseeai-omni",
+        "yseeai-unified",
+        "toapis",
+        "toapis-grok",
+        "toapis-viduq3",
+    }
 )
-SUPPORTED_VIDEO_PROTOCOLS = frozenset({"wan-native", "kling-native", "happyhorse-native", "veo-unified", "gemini-omni-unified", "grok-toapis", "viduq3-toapis"})
+SUPPORTED_VIDEO_PROTOCOLS = frozenset({"all-in-one", "wan-native", "kling-native", "happyhorse-native", "veo-unified", "gemini-omni-unified", "grok-toapis", "viduq3-toapis"})
 
 
 def validate_media_provider(provider: str | None) -> None:
@@ -550,6 +564,10 @@ async def list_video_models() -> list[dict[str, Any]]:
 
 async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, Any]:
     validate_media_job_source(job)
+    if (job.request or {}).get("_provider") == "all-in-one":
+        from .all_in_one import generate
+
+        return await generate(request, job)
     base, headers = _image_config()
     # 供应商以 Header 中的 Idempotency-Key 去重创建。键必须在发请求前由
     # 本地持久化工单 ID 确定，不能使用 _headers() 的随机默认值，否则进程
@@ -1081,6 +1099,10 @@ async def _archive_h3_video_to_tos(source_url: str, owner_prefix: str, filename:
 
 async def generate_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
     validate_media_job_source(job)
+    if (job.request or {}).get("_provider") == "all-in-one":
+        from .all_in_one import generate
+
+        return await generate(request, job)
     if (job.request or {}).get("_provider") == "runninghub":
         return await generate_h3_video(request, job)
     if (job.request or {}).get("_providerModelId") == "MiniMax-H3":
@@ -1750,6 +1772,10 @@ async def resume_generation(job: Job) -> dict[str, Any]:
     validate_media_job_source(job)
     if not job.provider_task_id:
         raise ProviderError("缺少供应商任务ID，无法恢复")
+    if job.provider == "all-in-one" or (job.request or {}).get("_provider") == "all-in-one":
+        from .all_in_one import resume
+
+        return await resume(job)
     if (job.request or {}).get("_provider") == "runninghub":
         return await _store_h3_video_result(job, await _poll_runninghub(job))
     if job.provider == "yinghe-h3" or (job.request or {}).get("_providerModelId") == "MiniMax-H3":
@@ -1788,6 +1814,10 @@ async def resume_generation(job: Job) -> dict[str, Any]:
 async def query_provider_task(kind: str, task_id: str, provider: str | None = None) -> dict[str, Any]:
     """单次查询供应商任务状态（管理后台对账用）"""
     validate_media_provider(provider)
+    if provider == "all-in-one":
+        from .all_in_one import query_task
+
+        return await query_task(kind, task_id, user_id=model_gateway.current_owner())
     if provider == "runninghub":
         try:
             return await runninghub_query_task(task_id)
@@ -1830,6 +1860,10 @@ async def query_provider_task(kind: str, task_id: str, provider: str | None = No
 async def store_provider_result(job: Job, data: dict[str, Any]) -> dict[str, Any]:
     """供应商成功结果下载落库（重启恢复与对账同步共用）"""
     validate_media_job_source(job)
+    if job.provider == "all-in-one" or (job.request or {}).get("_provider") == "all-in-one":
+        from .all_in_one import store_result
+
+        return await store_result(job, data)
     if (job.request or {}).get("_provider") == "runninghub":
         return await _store_h3_video_result(job, data)
     if job.provider == "yinghe-h3" or (job.request or {}).get("_providerModelId") == "MiniMax-H3":

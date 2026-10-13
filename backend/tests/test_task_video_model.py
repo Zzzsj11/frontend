@@ -50,7 +50,8 @@ def change(client, headers, task, **kwargs):
 
 
 @pytest.mark.parametrize("kind", ["ass", "general", "general_random"])
-def test_atomic_apply_all_sources_preserves_assets_timeline_and_defaults(client, model_case, kind):
+@pytest.mark.parametrize("target", ["minimax-h3", "minimax-h3-all-in-one"])
+def test_atomic_apply_all_sources_preserves_assets_timeline_and_defaults(client, model_case, kind, target):
     _, headers, task_id = model_case
 
     async def set_kind():
@@ -60,14 +61,14 @@ def test_atomic_apply_all_sources_preserves_assets_timeline_and_defaults(client,
             await db.commit()
 
     asyncio.run(set_kind())
-    preview = change(client, headers, task_id)
+    preview = change(client, headers, task_id, model=target)
     assert preview.status_code == 200, preview.text
     plan = preview.json()
     assert plan["count"] == 2 and len(plan["adjustments"]) == 2
     assert not plan["applied"]
-    result = change(client, headers, task_id, apply=True, preview_token=plan["previewToken"])
+    result = change(client, headers, task_id, model=target, apply=True, preview_token=plan["previewToken"])
     assert result.status_code == 200, result.text
-    assert all(line["shotOptions"]["videoModel"] == "minimax-h3" for line in result.json()["lines"])
+    assert all(line["shotOptions"]["videoModel"] == target for line in result.json()["lines"])
 
     async def verify():
         async with session_factory() as db:
@@ -79,12 +80,12 @@ def test_atomic_apply_all_sources_preserves_assets_timeline_and_defaults(client,
             asset = await db.get(ShotAssetModel, "asset-" + task_id)
             assert asset.video_url and asset.model_code == "doubao-seedance-2.0"
             task = await db.get(ProjectTaskModel, task_id)
-            assert task.storyboard_config["video_model"] == "minimax-h3"
+            assert task.storyboard_config["video_model"] == target
             assert task.storyboard_config["season"] == "春"
 
     asyncio.run(verify())
     line = client.post(f"/api/tasks/{task_id}/storyboard/lines", headers=headers, json={"source": "manual"}).json()
-    assert line["shotOptions"]["videoModel"] == "minimax-h3"
+    assert line["shotOptions"]["videoModel"] == target
 
 
 def test_foreign_user_disabled_unsupported_and_active_jobs(client, model_case):

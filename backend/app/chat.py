@@ -169,6 +169,7 @@ class ChatManager:
         usage: Any = {}
         request_id: str | None = None
         usage_recorded = False
+        openai_client = None
         try:
             if not settings.llm_api_key and not gateway_enabled():
                 raise RuntimeError("LLM_API_KEY 未配置")
@@ -198,9 +199,20 @@ class ChatManager:
                     chunks.append(text)
                     await append_chat_event(session.id, "assistant_delta", {"text": text})
             else:
-                client = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url)
+                if settings.llm_model.endswith("-all-in-one"):
+                    from .all_in_one import chat_client, upstream_model
+                    from .llm_policy import completion_options
+
+                    client = chat_client(user_id=session.user_id)
+                    model = upstream_model(settings.llm_model)
+                    options = completion_options(model, 2048)
+                else:
+                    client = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url)
+                    model, options = settings.llm_model, {}
+                openai_client = client
                 stream = await client.chat.completions.create(
-                    model=settings.llm_model,
+                    model=model,
+                    **options,
                     messages=[{"role": "system", "content": session.system_prompt}, *session.messages],
                     stream=True,
                     stream_options={"include_usage": True},
@@ -221,7 +233,7 @@ class ChatManager:
                 _, normalized_usage = add_token_usage(
                     db,
                     operation="chat",
-                    provider=settings.llm_api_mode,
+                    provider="all-in-one" if settings.llm_model.endswith("-all-in-one") else settings.llm_api_mode,
                     model=settings.llm_model,
                     usage=usage,
                     user_id=session.user_id,
@@ -237,7 +249,7 @@ class ChatManager:
                     add_token_usage(
                         db,
                         operation="chat_cancelled",
-                        provider=settings.llm_api_mode,
+                        provider="all-in-one" if settings.llm_model.endswith("-all-in-one") else settings.llm_api_mode,
                         model=settings.llm_model,
                         usage=usage,
                         user_id=session.user_id,
@@ -252,7 +264,7 @@ class ChatManager:
                     add_token_usage(
                         db,
                         operation="chat_failed",
-                        provider=settings.llm_api_mode,
+                        provider="all-in-one" if settings.llm_model.endswith("-all-in-one") else settings.llm_api_mode,
                         model=settings.llm_model,
                         usage=usage,
                         user_id=session.user_id,
@@ -262,6 +274,8 @@ class ChatManager:
                     await db.commit()
             await append_chat_event(session.id, "error", {"text": str(exc)})
         finally:
+            if openai_client is not None:
+                await openai_client.close()
             async with session_factory() as db:
                 model = await db.get(ChatSessionModel, session.id)
                 if model:

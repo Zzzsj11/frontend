@@ -97,6 +97,9 @@ class Settings:
     llm_base_url: str = LLM_BASE_URL
     llm_api_key: str = LLM_API_KEY
     llm_model: str = LLM_MODEL
+    all_in_one_base_url: str = os.getenv("ALL_IN_ONE_BASE_URL", "https://mg.epaipix.com").rstrip("/")
+    all_in_one_api_key: str = os.getenv("ALL_IN_ONE_API_KEY", "")
+    all_in_one_system_key: bool = os.getenv("ALL_IN_ONE_SYSTEM_KEY", "false").lower() == "true"
     general_outline_llm_model: str = os.getenv("GENERAL_OUTLINE_LLM_MODEL", "gpt-6-astra").strip()
     llm_api_mode: str = os.getenv("LLM_API_MODE", "openai").lower()
     storyboard_generation_concurrency: int = max(1, min(200, int(os.getenv("STORYBOARD_GENERATION_CONCURRENCY", "64"))))

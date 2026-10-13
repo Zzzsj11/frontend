@@ -37,6 +37,14 @@ def set_owner(user_id: str) -> None:
     _owner.set(user_id)
 
 
+def current_owner() -> str:
+    return _owner.get()
+
+
+def current_agent() -> tuple[str, str] | None:
+    return _agent.get()
+
+
 def request_headers() -> dict[str, str]:
     key = os.getenv("MODEL_GATEWAY_API_KEY", "")
     user_id = _owner.get()
@@ -63,14 +71,19 @@ async def run_with_context(job: Any, runner: Any) -> Any:
     if not enabled():
         if snapshot.get("_modelGateway") and job.provider_task_id:
             raise RuntimeError("该工单属于模型网关；恢复前须保留 MODEL_GATEWAY_URL 配置")
-        return await runner(job)
+        from .config import settings
+
+        all_in_one = snapshot.get("_provider") == "all-in-one" or str(snapshot.get("model") or "").endswith("-all-in-one")
+        all_in_one = all_in_one or (job.kind not in {"image", "video"} and any(model.endswith("-all-in-one") for model in (settings.llm_model, settings.general_outline_llm_model)))
+        if not all_in_one:
+            return await runner(job)
     from .database import session_factory
     from .models import GenerationJobModel
 
     async with session_factory() as db:
         row = await db.get(GenerationJobModel, job.id)
         attrs = (row.agent_name or "", row.agent_run_id or "") if row else ("", "")
-        if job.kind in {"image", "video"} and not job.provider_task_id:
+        if enabled() and job.kind in {"image", "video"} and not job.provider_task_id:
             job.request = {**snapshot, "_modelGateway": True}
             if row:
                 row.request = dict(job.request)

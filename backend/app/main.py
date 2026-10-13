@@ -260,6 +260,8 @@ async def require_active_model(db: AsyncSession, code: str, modality: str) -> tu
     if not row:
         label = {"chat": "文本", "image": "图片", "video": "视频", "audio": "音频"}.get(modality, "生成")
         raise HTTPException(422, f"不支持或已停用的{label}模型：{code}")
+    if row[1].code == "all-in-one" and not settings.all_in_one_api_key:
+        raise HTTPException(422, "all in one 渠道尚未配置 API Key，请联系管理员")
     return row
 
 

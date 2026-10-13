@@ -200,6 +200,10 @@ async def seed_system_data() -> None:
                 status="active",
             )
             session.add(toapis_provider)
+        all_in_one_provider = await session.get(AiProviderModel, "provider-all-in-one")
+        if not all_in_one_provider:
+            all_in_one_provider = AiProviderModel(id="provider-all-in-one", code="all-in-one", name="all in one", base_url=settings.all_in_one_base_url, status="active")
+            session.add(all_in_one_provider)
         defaults = [
             ("model-chat-default", provider.id, "chat-default", "默认 Chat 模型", "chat", "", {"structuredOutput": True}, True),
             ("model-img2", provider.id, "gpt-image-2", "Img2", "image", "gpt-image-2", {"ratios": ["16:9", "9:16", "4:3", "1:1"], "imageToImage": True}, True),
@@ -695,6 +699,13 @@ async def seed_system_data() -> None:
                 False,
             ),
         ]
+        from .all_in_one_catalog import rows as all_in_one_rows
+
+        source_caps = {item[2]: item[6] for item in defaults}
+        defaults.extend(
+            ("model-" + row["code"], all_in_one_provider.id, row["code"], row["name"], row["modality"], row["provider_model_id"], row["capabilities"], False)
+            for row in all_in_one_rows(source_caps)
+        )
         for mid, model_provider_id, code, name, modality, provider_id, capabilities, is_default in defaults:
             if code in {
                 "doubao-seedance-2.0",
