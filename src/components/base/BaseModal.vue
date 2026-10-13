@@ -38,6 +38,10 @@ const requestClose = () => {
   if (props.loading) return
   emit('close')
 }
+// 在按下阶段处理遮罩，避免表单控件焦点或拖动影响后续 click 的派发。
+const onBackdropPointerDown = (event: PointerEvent) => {
+  if (event.button === 0) requestClose()
+}
 const onKeydown = (event: KeyboardEvent) => {
   if (event.key === 'Escape') requestClose()
 }
@@ -57,7 +61,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       v-if="open"
       class="modal-mask"
       :class="[`level-${level}`, `mask-${maskVariant}`]"
-      @click.self="requestClose"
+      @pointerdown.self="onBackdropPointerDown"
     >
       <section
         class="modal"
