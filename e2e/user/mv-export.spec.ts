@@ -122,5 +122,13 @@ test('MV export shows progress, survives reload, retries and keeps ZIP separate'
   await page.getByRole('button', { name: '合并并导出重试' }).click()
   await expect(page.getByRole('link', { name: '下载成片' })).toHaveAttribute('href', '/final.mp4')
   await expect(page.getByRole('link', { name: '下载素材' })).toBeVisible()
+  await expect(page.getByRole('progressbar', { name: '合并并导出完成百分比' })).toHaveCount(0, {
+    timeout: 8000,
+  })
+  await expect(page.getByRole('link', { name: '下载成片' })).toBeVisible()
+  await page.getByRole('button', { name: '查看进度', exact: true }).first().click()
+  await expect(page.getByRole('progressbar', { name: '合并并导出完成百分比' })).toBeVisible()
+  await page.getByRole('button', { name: '隐藏合并并导出进度' }).click()
+  await expect(page.getByRole('progressbar', { name: '合并并导出完成百分比' })).toHaveCount(0)
   expect(posts).toBe(2)
 })

@@ -1,9 +1,17 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useAuthStore } from '../stores/auth'
+import AppIcon from './AppIcon.vue'
 import { useProjectStore } from '../stores/project'
 import type { MaterialExport } from '../types'
 
 const store = useProjectStore()
+const auth = useAuthStore()
+const hidden = ref<Record<string, boolean>>({})
+const deadlines = ref<Record<string, number>>({})
+const now = ref(Date.now())
+const noticeKey = (id: string) => `mv_export_notice_${auth.user?.id || 'guest'}_${id}`
+
 const kinds = computed<Array<'video' | 'materials'>>(() =>
   store.activeStoryboardType === 'ass' && store.projectAudio
     ? ['video', 'materials']
@@ -26,6 +34,53 @@ const submitting = (kind: string) => store.exportSubmitting[`${store.activeTaskI
 const label = (kind: string) => (kind === 'video' ? '合并并导出' : '导出素材')
 const unavailable = (kind: string) =>
   kind === 'video' ? !store.lines.length || missing.value > 0 : !store.hasVideoAssets
+const visible = (kind: string) => {
+  const item = latest(kind)
+  return Boolean(item && !hidden.value[item.id])
+}
+const hide = (item: MaterialExport) => {
+  hidden.value[item.id] = true
+  delete deadlines.value[item.id]
+  sessionStorage.setItem(noticeKey(item.id), 'hidden')
+}
+const show = (item: MaterialExport) => {
+  hidden.value[item.id] = false
+  sessionStorage.removeItem(noticeKey(item.id))
+  now.value = Date.now()
+  if (item.status === 'ready') deadlines.value[item.id] = now.value + 5000
+}
+const countdown = (item: MaterialExport) =>
+  Math.max(0, Math.ceil(((deadlines.value[item.id] || now.value) - now.value) / 1000))
+watch(
+  () => kinds.value.map((kind) => latest(kind)),
+  (items) => {
+    for (const item of items) {
+      if (!item) continue
+      if (!(item.id in hidden.value))
+        hidden.value[item.id] = sessionStorage.getItem(noticeKey(item.id)) === 'hidden'
+      if (item.status === 'ready' && !hidden.value[item.id] && !deadlines.value[item.id]) {
+        now.value = Date.now()
+        deadlines.value[item.id] = now.value + 5000
+      }
+      if (item.status !== 'ready') delete deadlines.value[item.id]
+    }
+  },
+  { immediate: true, deep: true },
+)
+// 隐藏只收起提示卡，不取消后台导出；新工单仍会自动显示进度。
+const timer = window.setInterval(() => {
+  now.value = Date.now()
+  for (const kind of kinds.value) {
+    const item = latest(kind)
+    if (
+      item?.status === 'ready' &&
+      deadlines.value[item.id] &&
+      now.value >= deadlines.value[item.id]!
+    )
+      hide(item)
+  }
+}, 1000)
+onBeforeUnmount(() => window.clearInterval(timer))
 const stages = ['排队', '下载', '合成', '校验', '上传', '完成']
 const stageIndex = (item: MaterialExport) =>
   item.status === 'ready'
@@ -69,16 +124,37 @@ const stageIndex = (item: MaterialExport) =>
           rel="noopener"
           >{{ kind === 'video' ? '下载成片' : '下载素材' }}</a
         >
+        <button
+          v-if="latest(kind) && !visible(kind)"
+          class="btn-outline"
+          @click="show(latest(kind)!)"
+        >
+          查看进度
+        </button>
       </div>
       <small v-if="kind === 'video' && unavailable(kind)" class="hint">{{
         store.lines.length ? `还有 ${missing} 段视频未完成` : '暂无可合成分镜'
       }}</small>
       <div
-        v-if="latest(kind)"
+        v-if="visible(kind)"
         class="export-progress"
         :class="{ failed: latest(kind)?.status === 'failed' }"
         :aria-label="`${label(kind)}进度`"
       >
+        <div class="progress-heading">
+          <small v-if="latest(kind)?.status === 'ready'" class="hint"
+            >{{ countdown(latest(kind)!) }} 秒后自动隐藏</small
+          >
+          <span v-else>{{ label(kind) }}进度</span>
+          <button
+            class="hide-progress"
+            :aria-label="`隐藏${label(kind)}进度`"
+            title="隐藏进度，不取消任务"
+            @click="hide(latest(kind)!)"
+          >
+            <AppIcon name="close" :size="12" />
+          </button>
+        </div>
         <div v-if="kind === 'video'" class="stages" aria-hidden="true">
           <span
             v-for="(stage, index) in stages"
@@ -134,6 +210,29 @@ const stageIndex = (item: MaterialExport) =>
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-size: var(--font-sm);
+}
+.progress-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.progress-heading .hint {
+  margin: 0;
+}
+.hide-progress {
+  display: grid;
+  place-items: center;
+  border: 0;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.hide-progress:hover {
+  background: var(--border);
 }
 .export-progress p {
   margin: 6px 0;
