@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import ExportActions from './ExportActions.vue'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatTime, useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
 
@@ -156,38 +156,23 @@ const onProgressDown = (e: MouseEvent) => {
   window.addEventListener('mouseup', onUp)
 }
 
-// 全屏时进度条只对应“当前选中分镜”的局部时间（相对片段 0..duration），且只播放该分镜
-const fsClip = computed(() => store.currentClip)
-const fsElapsed = computed(() => {
-  const clip = fsClip.value
-  if (!clip) return 0
-  return Math.min(Math.max(store.currentTime - clip.start, 0), clip.duration)
-})
-const fsProgressPercent = computed(() => {
-  const clip = fsClip.value
-  return clip && clip.duration > 0 ? (fsElapsed.value / clip.duration) * 100 : 0
-})
-// 全屏进度条 seek：映射到选中片段内的局部时间
-const seekFsByEvent = (e: MouseEvent, el: HTMLElement) => {
-  const clip = fsClip.value
-  if (!clip) return
-  const rect = el.getBoundingClientRect()
-  const ratio = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1)
-  store.seek(clip.start + ratio * clip.duration)
-}
-const onFsProgressDown = (e: MouseEvent) => {
-  const el = e.currentTarget as HTMLElement
-  store.scrubbing = true
-  seekFsByEvent(e, el)
-  const onMove = (ev: MouseEvent) => seekFsByEvent(ev, el)
-  const onUp = (ev: MouseEvent) => {
-    seekFsByEvent(ev, el)
-    store.scrubbing = false
-    window.removeEventListener('mousemove', onMove)
-    window.removeEventListener('mouseup', onUp)
-  }
-  window.addEventListener('mousemove', onMove)
-  window.addEventListener('mouseup', onUp)
+// 真实视频播完时按统一时间轴接续下一镜；末尾遵循循环播放设置。
+const onVideoEnded = () => {
+  const video = videoRef.value
+  const clip = store.currentClip
+  if (!video || !clip || !store.isPlaying || store.scrubbing || !currentVideoUrl.value) return
+  // 切换 src 时迟到的旧片段事件不能跳过新片段。
+  if (video.currentSrc !== new URL(currentVideoUrl.value, window.location.href).href) return
+  const end = clip.start + clip.duration
+  const range = store.playRange
+  if (end >= range.end) {
+    if (store.playMode.loop) store.seek(range.start)
+    else {
+      store.seek(range.end)
+      store.pause()
+    }
+  } else store.seek(end)
+  void nextTick(() => syncVideo(true))
 }
 
 // 全屏状态：全屏元素是 .preview，外部控制条不可见，需在画面内叠加悬浮控制条
@@ -195,13 +180,11 @@ const isFullscreen = ref(false)
 // 记录进入全屏前的“单个分镜”模式，退出时还原
 let prevSingle = store.playMode.single
 const onFsChange = () => {
-  const nowFs = !!document.fullscreenElement
+  const nowFs = document.fullscreenElement === previewRef.value
   if (nowFs && !isFullscreen.value) {
-    // 进入全屏：强制只播当前选中分镜，并把指针对齐到该片段起点
+    // 全屏始终连续播放整个子项目，保持当前位置和播放/暂停状态。
     prevSingle = store.playMode.single
-    if (!store.playMode.single) store.setPlayMode('single', true)
-    const clip = store.selectedClip
-    if (clip) store.seek(clip.start)
+    store.setPlayMode('single', false)
   } else if (!nowFs && isFullscreen.value) {
     // 退出全屏：还原原播放模式
     store.setPlayMode('single', prevSingle)
@@ -212,7 +195,7 @@ onMounted(() => document.addEventListener('fullscreenchange', onFsChange))
 onBeforeUnmount(() => {
   document.removeEventListener('fullscreenchange', onFsChange)
   store.registerVideoEl(null)
-  // 若卸载时仍在全屏，恢复播放模式，避免残留强制单分镜
+  // 若卸载时仍在全屏，恢复播放模式，避免残留全屏播放模式
   if (isFullscreen.value) store.setPlayMode('single', prevSingle)
 })
 
@@ -243,6 +226,7 @@ const toggleFullscreen = () => {
         playsinline
         muted
         @loadeddata="syncVideo()"
+        @ended="onVideoEnded"
       />
       <img v-else-if="currentImage" :src="currentImage" alt="视频预览" class="preview-img" />
       <p v-else class="preview-placeholder">生成视频后在此查看预览</p>
@@ -267,11 +251,11 @@ const toggleFullscreen = () => {
           <AppIcon :name="store.isPlaying ? 'pause' : 'play'" :size="20" />
         </button>
         <span class="fs-time">
-          {{ formatTime(fsElapsed) }} / {{ formatTime(fsClip?.duration ?? 0) }}
+          {{ formatTime(store.currentTime) }} / {{ formatTime(store.totalDuration) }}
         </span>
-        <div class="progress-bar fs-progress" @mousedown="onFsProgressDown">
-          <div class="progress-fill" :style="{ width: fsProgressPercent + '%' }" />
-          <div class="progress-thumb" :style="{ left: fsProgressPercent + '%' }" />
+        <div class="progress-bar fs-progress" @mousedown="onProgressDown">
+          <div class="progress-fill" :style="{ width: progressPercent + '%' }" />
+          <div class="progress-thumb" :style="{ left: progressPercent + '%' }" />
         </div>
         <button
           class="fs-btn"
