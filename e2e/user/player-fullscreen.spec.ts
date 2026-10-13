@@ -82,6 +82,14 @@ test('fullscreen plays both real clips, keeps the timeline and returns to the pr
   })
   await page.locator('.controls button[title="全屏"]').click()
   await expect(page.locator('.fs-controls')).toBeVisible()
+  await page.mouse.move(20, 20)
+  await expect(page.locator('.fs-controls')).toBeHidden({ timeout: 4500 })
+  await page.locator('.fs-control-zone').hover()
+  await expect(page.locator('.fs-controls')).toBeVisible()
+  await expect(page.locator('.fs-controls button[title="退出全屏"] svg path')).toHaveAttribute(
+    'd',
+    'M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z',
+  )
   await expect(page.locator('.fs-time')).toHaveText('00:00 / 00:02')
   expect(
     await page.evaluate(
@@ -120,6 +128,7 @@ test('fullscreen plays both real clips, keeps the timeline and returns to the pr
       () => (window as unknown as { playerStore: { currentTime: number } }).playerStore.currentTime,
     ),
   ).toBeCloseTo(2.4)
+  await page.locator('.fs-control-zone').hover()
   await page.locator('.fs-controls button[title="退出全屏"]').click()
   await expect(page.locator('.fs-controls')).toHaveCount(0)
   expect(
@@ -153,5 +162,6 @@ test('fullscreen plays both real clips, keeps the timeline and returns to the pr
   await page.evaluate(() =>
     (window as unknown as { playerStore: { pause: () => void } }).playerStore.pause(),
   )
+  await page.locator('.fs-control-zone').hover()
   await page.locator('.fs-controls button[title="退出全屏"]').click()
 })

@@ -177,6 +177,46 @@ const onVideoEnded = () => {
 
 // 全屏状态：全屏元素是 .preview，外部控制条不可见，需在画面内叠加悬浮控制条
 const isFullscreen = ref(false)
+const fsControlsVisible = ref(true)
+let fsHideTimer: ReturnType<typeof window.setTimeout> | undefined
+let pointerInControls = false
+const clearFsHideTimer = () => {
+  if (fsHideTimer !== undefined) window.clearTimeout(fsHideTimer)
+  fsHideTimer = undefined
+}
+const showFsControls = () => {
+  clearFsHideTimer()
+  fsControlsVisible.value = true
+}
+const scheduleFsControlsHide = () => {
+  clearFsHideTimer()
+  if (!isFullscreen.value || store.scrubbing) return
+  fsHideTimer = window.setTimeout(() => {
+    fsControlsVisible.value = false
+    fsHideTimer = undefined
+  }, 3000)
+}
+const onControlsEnter = () => {
+  pointerInControls = true
+  showFsControls()
+}
+const onControlsLeave = () => {
+  pointerInControls = false
+  scheduleFsControlsHide()
+}
+const onControlsFocusOut = () => {
+  if (!pointerInControls) scheduleFsControlsHide()
+}
+// 拖动进度条跨出底部区域时，先保留控制条，松手后再计时。
+watch(
+  () => store.scrubbing,
+  (scrubbing) => {
+    if (!isFullscreen.value) return
+    if (scrubbing) showFsControls()
+    else if (!pointerInControls) scheduleFsControlsHide()
+  },
+)
+
 // 记录进入全屏前的“单个分镜”模式，退出时还原
 let prevSingle = store.playMode.single
 const onFsChange = () => {
@@ -190,9 +230,13 @@ const onFsChange = () => {
     store.setPlayMode('single', prevSingle)
   }
   isFullscreen.value = nowFs
+  pointerInControls = false
+  showFsControls()
+  if (nowFs) scheduleFsControlsHide()
 }
 onMounted(() => document.addEventListener('fullscreenchange', onFsChange))
 onBeforeUnmount(() => {
+  clearFsHideTimer()
   document.removeEventListener('fullscreenchange', onFsChange)
   store.registerVideoEl(null)
   // 若卸载时仍在全屏，恢复播放模式，避免残留全屏播放模式
@@ -234,7 +278,7 @@ const toggleFullscreen = () => {
       <div
         v-if="store.currentLine?.lyrics"
         class="preview-lyrics"
-        :class="{ 'fs-lift': isFullscreen }"
+        :class="{ 'fs-lift': isFullscreen && fsControlsVisible }"
       >
         <p class="lyric-line">{{ store.currentLine.lyrics }}</p>
         <p v-if="store.translationOf(store.currentLine)" class="lyric-zh">
@@ -242,31 +286,43 @@ const toggleFullscreen = () => {
         </p>
       </div>
       <!-- 全屏时的悬浮控制条 -->
-      <div v-if="isFullscreen" class="fs-controls">
-        <button
-          class="fs-btn"
-          :title="store.isPlaying ? '暂停' : '播放'"
-          @click="store.togglePlay()"
-        >
-          <AppIcon :name="store.isPlaying ? 'pause' : 'play'" :size="20" />
-        </button>
-        <span class="fs-time">
-          {{ formatTime(store.currentTime) }} / {{ formatTime(store.totalDuration) }}
-        </span>
-        <div class="progress-bar fs-progress" @mousedown="onProgressDown">
-          <div class="progress-fill" :style="{ width: progressPercent + '%' }" />
-          <div class="progress-thumb" :style="{ left: progressPercent + '%' }" />
+      <div
+        v-if="isFullscreen"
+        class="fs-control-zone"
+        tabindex="0"
+        aria-label="显示播放控制栏"
+        @pointerenter="onControlsEnter"
+        @pointerleave="onControlsLeave"
+        @focusin="showFsControls"
+        @focusout="onControlsFocusOut"
+        @pointerdown="showFsControls"
+      >
+        <div v-show="fsControlsVisible" class="fs-controls">
+          <button
+            class="fs-btn"
+            :title="store.isPlaying ? '暂停' : '播放'"
+            @click="store.togglePlay()"
+          >
+            <AppIcon :name="store.isPlaying ? 'pause' : 'play'" :size="20" />
+          </button>
+          <span class="fs-time">
+            {{ formatTime(store.currentTime) }} / {{ formatTime(store.totalDuration) }}
+          </span>
+          <div class="progress-bar fs-progress" @mousedown="onProgressDown">
+            <div class="progress-fill" :style="{ width: progressPercent + '%' }" />
+            <div class="progress-thumb" :style="{ left: progressPercent + '%' }" />
+          </div>
+          <button
+            class="fs-btn"
+            :title="store.muted ? '取消静音' : '静音'"
+            @click="store.muted = !store.muted"
+          >
+            <AppIcon :name="store.muted ? 'volume-off' : 'volume-on'" :size="17" />
+          </button>
+          <button class="fs-btn" title="退出全屏" @click="toggleFullscreen">
+            <AppIcon name="fullscreen-exit" :size="17" />
+          </button>
         </div>
-        <button
-          class="fs-btn"
-          :title="store.muted ? '取消静音' : '静音'"
-          @click="store.muted = !store.muted"
-        >
-          <AppIcon :name="store.muted ? 'volume-off' : 'volume-on'" :size="17" />
-        </button>
-        <button class="fs-btn" title="退出全屏" @click="toggleFullscreen">
-          <AppIcon name="fullscreen" :size="17" />
-        </button>
       </div>
       <audio ref="audioRef" />
     </div>
@@ -387,6 +443,15 @@ const toggleFullscreen = () => {
 /* 全屏时字幕上移，避免被底部悬浮控制条遮挡 */
 .preview-lyrics.fs-lift {
   bottom: 76px;
+}
+/* 隐藏后保留底部感应区，鼠标返回或键盘聚焦即可重新显示。 */
+.fs-control-zone {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 100px;
+  z-index: 2;
 }
 /* 全屏悬浮控制条 */
 .fs-controls {

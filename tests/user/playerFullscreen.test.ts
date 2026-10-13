@@ -15,6 +15,7 @@ afterEach(() => {
   Object.defineProperty(document, 'fullscreenElement', { configurable: true, value: null })
 })
 it('uses the full timeline in fullscreen without resetting the current position and restores single mode', async () => {
+  vi.useFakeTimers()
   const store = useProjectStore()
   store.lines = ['one', 'two'].map((id) => ({
     id,
@@ -38,6 +39,31 @@ it('uses the full timeline in fullscreen without resetting the current position 
     expect(store.currentTime).toBe(3)
     expect(wrapper.get('.fs-time').text()).toBe('00:03 / 00:10')
     expect(store.playRange.end).toBe(10)
+    const zone = wrapper.get('.fs-control-zone')
+    await zone.trigger('pointerenter')
+    vi.advanceTimersByTime(4000)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.fs-controls').isVisible()).toBe(true)
+    await zone.trigger('pointerleave')
+    vi.advanceTimersByTime(2000)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.fs-controls').isVisible()).toBe(true)
+    vi.advanceTimersByTime(1000)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.fs-controls').isVisible()).toBe(false)
+    await zone.trigger('pointerenter')
+    expect(wrapper.get('.fs-controls').isVisible()).toBe(true)
+    store.scrubbing = true
+    await wrapper.vm.$nextTick()
+    await zone.trigger('pointerleave')
+    vi.advanceTimersByTime(4000)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.fs-controls').isVisible()).toBe(true)
+    store.scrubbing = false
+    await wrapper.vm.$nextTick()
+    vi.advanceTimersByTime(3000)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.fs-controls').isVisible()).toBe(false)
     Object.defineProperty(document, 'fullscreenElement', { configurable: true, value: null })
     document.dispatchEvent(new Event('fullscreenchange'))
     await wrapper.vm.$nextTick()
@@ -45,5 +71,6 @@ it('uses the full timeline in fullscreen without resetting the current position 
     expect(wrapper.find('.fs-controls').exists()).toBe(false)
   } finally {
     wrapper.unmount()
+    vi.useRealTimers()
   }
 })
