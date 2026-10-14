@@ -73,9 +73,9 @@ The request failed because the input image 'content[1]' 'content[2]' may contain
 ### 4.2 兜底体系（两层，注册失败不阻断）
 
 1. **入库时同步注册**：创建/换图时立即注册；失败只记错误日志（`api_error_logs`，error_type=AssetError），人物正常入库，`asset_avatar_url` 留空，生成视频降级用 TOS 路径（可能撞人脸校验）
-2. **cron 每分钟补扫**：独立脚本 `backend/scripts/ensure_asset_avatars.py`，每分钟补齐英合缺失资产（复用 `seed.py::ensure_pending_asset_avatars()`），使临时注册失败可自动恢复
+2. **线上 cron 每分钟补扫**：独立脚本 `backend/scripts/ensure_asset_avatars.py`，每分钟补齐英合缺失资产（复用 `seed.py::ensure_pending_asset_avatars()`），使临时注册失败可自动恢复
 
-> 注：曾有过"服务启动时再扫一次"的第三层，与 cron 功能重复且无防重入锁（可能与 cron 并发导致同一人物重复注册资产），已移除。补注册统一由 cron 负责，部署新环境时务必同步配置 crontab（见 §5）。
+> 注：曾有过"服务启动时再扫一次"的第三层，与 cron 功能重复且无防重入锁（可能与 cron 并发导致同一人物重复注册资产），已移除。补注册统一由 cron 负责，仅部署线上环境时配置 crontab，本机禁止配置（见 §5）。
 
 ## 5. cron 脚本部署详情
 
@@ -84,14 +84,17 @@ The request failed because the input image 'content[1]' 'content[2]' may contain
 - 逻辑：统计活跃且 `asset_avatar_url IS NULL` 的数字人 → 有缺失就逐个注册 → 打印 `handled N pending human(s)`
 - 幂等 + 防重入（fcntl 文件锁 `/tmp/mvagent-asset-sync.lock`，同一时刻只允许一个同步进程）
 
-crontab 配置（**宿主机**上，每分钟）：
+**运行范围：仅线上服务器。本机（macOS）禁止配置或恢复此补扫任务，包括 cron、launchd 及其他周期调度。开发初始化、重启 Docker 和部署操作不得自动安装本机任务。**
 
-| 环境           | 命令                                                                                                         | 日志                                                            |
-| -------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| 本地（macOS）  | `/usr/local/bin/docker exec mv-agent-frontend-backend-1 python /srv/mvagent/scripts/ensure_asset_avatars.py` | `/tmp/mvagent-asset-sync.log`                                   |
-| 线上（Ubuntu） | `PROJECT_DIR=/opt/mv-agent-frontend /opt/mv-agent-frontend/scripts/sync-digital-human-assets.sh`             | `/var/lib/docker/mv-agent-maintenance/logs/asset-sync-cron.log` |
+2026-09-29 已移除本机每分钟调用 `docker exec mv-agent-frontend-backend-1 python /srv/mvagent/scripts/ensure_asset_avatars.py` 的旧 crontab。旧入口在 Docker 无响应时会累积 Docker 客户端进程；脚本内的文件锁只有进入容器后才生效，不能防止宿主机调用积压。本次停用仅作用于本机，线上既有调度保持不变。
 
-容器内脚本路径：`/srv/mvagent/scripts/ensure_asset_avatars.py`（容器内无 scripts 目录时需要先 `mkdir -p`）。手动执行：`docker exec mv-agent-frontend-backend-1 python /srv/mvagent/scripts/ensure_asset_avatars.py`。
+线上宿主机每分钟调用的入口：
+
+```sh
+PROJECT_DIR=/opt/mv-agent-frontend /opt/mv-agent-frontend/scripts/sync-digital-human-assets.sh
+```
+
+线上日志：`/var/lib/docker/mv-agent-maintenance/logs/asset-sync-cron.log`。维护时复用线上现有调度，不重复安装。容器内脚本路径为 `/srv/mvagent/scripts/ensure_asset_avatars.py`，由版本化镜像交付。
 
 ## 6. 生成视频时的 URL 映射（前端零改动）
 
@@ -132,18 +135,18 @@ crontab 配置（**宿主机**上，每分钟）：
 
 1. **asset 跨环境通用**：asset 由平台托管，同一平台账号（VIDEO_API_KEY 同一 group）下本地/线上注册的链接通用，可固化进 seed
 2. **换图必须清旧 asset**：asset 绑定具体图片，形象重新生成后旧链接失效，update_human 已处理
-3. **注册失败只降级不阻断**：人物照常入库；期间生成视频可能重新出现"may contain real person"报错，cron 最多 1 分钟内补上
+3. **注册失败只降级不阻断**：人物照常入库；期间生成视频可能重新出现"may contain real person"报错，线上 cron 每分钟尝试补齐，实际完成时间取决于供应商审核与服务可用性；本机不运行周期补扫
 4. **seed 补缺行为**：已存在系统人物的原图、缩略图和 `asset_avatar_url` 仅在为空时由 seed 补齐，不覆盖已迁移地址；名称、身份描述等种子元数据仍会刷新。新环境从内置 TOS 路径及 `SYSTEM_HUMAN_ASSET_URLS` 初始化，换图后必须同步固化匹配的新原图、缩略图与英和资产映射，不能只改其中一个。换 key 时须另外制定经批准的 Alembic 数据迁移、注册和固化流程，禁止直接 SQL 清库。
 5. **macOS 打包坑**：tar 打包部署会混入 `._*` AppleDouble 文件（含 null 字节），导致容器内 python 编译报 `SyntaxError: source code string cannot contain null bytes`；部署后执行 `find app migrations -name '._*' -delete`
 6. **容器无 scripts 目录**：首次部署脚本需先 `docker exec ... mkdir -p /srv/mvagent/scripts`
-7. **cron 环境**：crontab 里 docker 需用绝对路径（本地 `/usr/local/bin/docker`，线上 `/usr/bin/docker`）
+7. **cron 环境**：只在线上维护调度，使用上述线上包装入口；本机禁止配置资产补扫定时任务
 
 ## 10. 当前部署状态（2026-08-17）
 
 - 已全量迁移至 V3 接口（素材 `/v3/assets*`、视频 `/v3/video/tasks`），key 切换为 `yh-ftbq...`（素材通道已授权），素材组 `group-20260817142427-1cfe75`
 - 本地 32 个系统人物 + 5 个用户数字人已全部用 V3 重新注册，`SYSTEM_HUMAN_ASSET_URLS` 已固化新链接（线上部署后 seed 自动同步）
 - V3 端到端实测通过：创建任务 `id` → 轮询 `succeeded` → `content.video_url` 落 TOS → `last_frame_url` 直接做封面（免 ffmpeg 抽帧）
-- 本地 crontab 已配置；线上发布时需同步线上 `.env` 的 `VIDEO_API_KEY`/`IMAGE_API_KEY`/`AIGC_ASSET_GROUP_ID` 三项
+- 历史上曾配置本地 crontab，已于 2026-09-29 移除，现行规则为仅线上定时补扫（见 §5）；线上发布时需同步线上 `.env` 的 `VIDEO_API_KEY`/`IMAGE_API_KEY`/`AIGC_ASSET_GROUP_ID` 三项
 
 ## 11. 系统人物大头照迁移（待单独批准执行）
 

@@ -27,3 +27,7 @@ make docker-build
 ```
 
 不要通过本任务修改 Docker Desktop 全局 registry mirror；全局设置会影响本机所有项目，且难以保证与生产构建隔离。
+
+## 数字人资产补扫
+
+资产定时补扫仅在线上服务器运行，本机不配置 cron、launchd 或其他周期调度。2026-09-29 已移除本机每分钟执行 `docker exec ... ensure_asset_avatars.py` 的旧 crontab；开发初始化和部署操作不得重新安装。Docker 不可用时该入口可能累积客户端进程，容器内的文件锁无法保护尚未进入容器的调用。线上入口与规则见 [数字人资产链路](ASSET-AVATAR.md#5-cron-脚本部署详情)。
