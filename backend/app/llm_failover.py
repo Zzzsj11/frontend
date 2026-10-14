@@ -10,7 +10,7 @@ from .redis_store import redis
 PRIMARY_MODEL = "gpt-6.1-sol"
 FALLBACK_MODEL = "gpt-6-sol"
 FAILURE_LIMIT = 5
-COOLDOWN_SECONDS = 600
+COOLDOWN_SECONDS = 2 * 60 * 60
 FAILURES_KEY = "llm:failover:yseeai:gpt-6.1-sol:failures"
 logger = logging.getLogger("mvagent.llm_failover")
 

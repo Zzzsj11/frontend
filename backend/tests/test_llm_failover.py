@@ -10,12 +10,14 @@ from app import llm_failover, storyboard_prompt
 class RedisState:
     def __init__(self):
         self.value = 0
+        self.ttl = None
 
     async def get(self, _key):
         return str(self.value) if self.value else None
 
     async def eval(self, _script, _count, _key, _ttl):
         self.value += 1
+        self.ttl = _ttl
         return self.value
 
     async def delete(self, _key):
@@ -42,6 +44,7 @@ async def test_five_primary_failures_switch_later_storyboard_calls_to_fallback(m
         with pytest.raises(RuntimeError, match="supplier failed"):
             await storyboard_prompt._call(client, [], 1400, usage_records=records, operation="storyboard_line")
     assert redis.value == 5
+    assert redis.ttl == 2 * 60 * 60
     assert await storyboard_prompt._call(client, [], 1400, usage_records=records, operation="storyboard_line")
     assert [call.kwargs["model"] for call in create.await_args_list] == ["gpt-6.1-sol"] * 5 + ["gpt-6-sol"]
     assert records[-1]["model"] == "gpt-6-sol"
