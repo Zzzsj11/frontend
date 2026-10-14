@@ -27,11 +27,11 @@ interface GenerationModelOption {
   label: string
   capabilities?: GenerationModelCapabilities
 }
-export const DEFAULT_IMAGE_MODEL: ImageModelId = 'gpt-image-2'
+export const DEFAULT_IMAGE_MODEL: ImageModelId = 'gemini-nano-banana-2.1'
 export const DEFAULT_VIDEO_MODEL: VideoModelId = 'doubao-seedance-2.0'
 export const DEFAULT_VIDEO_RESOLUTIONS = ['480p', '720p', '1080p'] as const
 export const IMAGE_MODEL_OPTIONS = reactive<Array<GenerationModelOption>>([
-  { value: DEFAULT_IMAGE_MODEL, label: 'Img2' },
+  { value: DEFAULT_IMAGE_MODEL, label: 'Nano Banana 2.1' },
 ])
 export const VIDEO_MODEL_OPTIONS = reactive<Array<GenerationModelOption>>([
   { value: DEFAULT_VIDEO_MODEL, label: 'SD2.0' },

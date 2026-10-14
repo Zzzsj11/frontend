@@ -283,7 +283,7 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
             visual_style: 'cinematic',
             ratio: '9:16',
             resolution: '720p',
-            image_model: 'gpt-image-2',
+            image_model: 'gemini-nano-banana-2.1',
             video_model: 'doubao-seedance-2.0',
             empty_shot_count: 1,
             character_shot_count: 1,
@@ -308,7 +308,7 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
             digital_human_ids: JSON.stringify([humanId]),
             ratio: '16:9',
             resolution: '720p',
-            image_model: 'gpt-image-2',
+            image_model: 'gemini-nano-banana-2.1',
             video_model: 'doubao-seedance-2.0',
             ass_file: {
               name: '10012204-remote-e2e.ass',

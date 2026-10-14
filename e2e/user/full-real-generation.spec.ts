@@ -185,7 +185,7 @@ test('ASS and general storyboard complete real frontend journeys through generat
   await general.getByLabel('人物镜数量').fill(smokeMode ? '0' : '1')
   await general.getByLabel('总时长（秒）').fill(smokeMode ? '5' : '10')
   await general.getByLabel('画幅').selectOption('9:16')
-  if (smokeMode) await general.getByLabel('图片模型').selectOption('gpt-image-2.5-flare')
+  if (smokeMode) await general.getByLabel('图片模型').selectOption('gemini-nano-banana-2.1')
   await general.getByLabel('额外要求（可选）').fill('同一秋夜城市街区，从孤独到相遇，电影写实')
   await capture(page, 'general-parameters-and-cast-selected')
   await general.getByRole('button', { name: '批量生成' }).click()

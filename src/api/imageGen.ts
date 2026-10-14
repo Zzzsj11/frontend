@@ -4,10 +4,11 @@ import { apiRequest } from './client'
 import { watchGenerationJob, type GenerationJobSnapshot } from '../utils/generationPoller'
 
 export interface ImageTaskOptions {
-  /** WIDTHxHEIGHT，宽 × 高必须小于 8,294,400，默认 1024x1024 */
+  /** WIDTHxHEIGHT；后端转换为 ToAPIs 支持的画幅比例。 */
   size?: string
   quality?: 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-  /** 生成图片数量 1-4 */
+  resolution?: '1K' | '2K' | '4K'
+  /** 每次生成 1 张图片。 */
   n?: number
   /** 图片 URL（或数组）：传入即按图生图处理，不传为文生图 */
   image?: string | string[]
@@ -40,6 +41,7 @@ export async function createImageTask(
       prompt,
       size: options.size ?? '1024x1024',
       quality: options.quality ?? 'auto',
+      resolution: options.resolution ?? '1K',
       n: options.n ?? 1,
       purpose: 'digital_human',
       ...(options.portrait ? { portrait: options.portrait } : {}),

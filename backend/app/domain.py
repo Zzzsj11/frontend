@@ -637,6 +637,7 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
                     "ratio": payload.ratio,
                     "resolution": payload.resolution,
                     "imageModel": payload.image_model,
+                    "imageResolution": payload.image_resolution,
                     "videoModel": payload.video_model,
                     "duration": normalize_video_duration(duration),
                     "outlineStatus": "pending",

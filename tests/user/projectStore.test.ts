@@ -1402,7 +1402,7 @@ describe('batch shot video generation', () => {
           resolution: '720p' as const,
           duration: 5,
           ratio: '16:9' as const,
-          imageModel: 'gpt-image-2',
+          imageModel: 'gemini-nano-banana-2.1',
           videoModel: 'minimax-h3-runninghub',
         },
       }))

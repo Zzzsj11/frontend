@@ -17,6 +17,8 @@ os.environ["REDIS_URL"] = "fakeredis://"
 
 @pytest.fixture(scope="session")
 def client():
+    import dataclasses
+
     from fastapi.testclient import TestClient
 
     from app.database import engine
@@ -28,7 +30,10 @@ def client():
 
     # SQLite is an isolated test database; deployed databases remain Alembic-only.
     asyncio.run(create_test_schema())
-    from app.main import app
+    from app import main
+
+    main.settings = dataclasses.replace(main.settings, toapis_api_key="test-only-toapis-key")
+    app = main.app
 
     with TestClient(app) as test_client:
         # 统一打上测试批次头，每次全量测试的 API 耗时自动入库（管理后台「接口耗时」可见）

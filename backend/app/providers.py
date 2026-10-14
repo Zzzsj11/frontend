@@ -20,6 +20,7 @@ import httpx
 from PIL import Image, UnidentifiedImageError
 
 from . import model_gateway
+from .agent_attribution import current_agent_attribution
 from .config import settings
 from .error_logging import _redact
 from .jobs import Job, jobs
@@ -57,7 +58,9 @@ SUPPORTED_MEDIA_PROVIDERS = frozenset(
         "toapis-viduq3",
     }
 )
-SUPPORTED_VIDEO_PROTOCOLS = frozenset({"all-in-one", "wan-native", "kling-native", "happyhorse-native", "veo-unified", "gemini-omni-unified", "grok-toapis", "viduq3-toapis"})
+SUPPORTED_VIDEO_PROTOCOLS = frozenset(
+    {"all-in-one", "toapis-image", "wan-native", "kling-native", "happyhorse-native", "veo-unified", "gemini-omni-unified", "grok-toapis", "viduq3-toapis"}
+)
 
 
 def validate_media_provider(provider: str | None) -> None:
@@ -222,7 +225,13 @@ def _raise_for_status(response: httpx.Response) -> None:
 
 def _headers(api_key: str, *, x_api_key: bool = False) -> dict[str, str]:
     auth = {"x-api-key": api_key} if x_api_key else {"Authorization": f"Bearer {api_key}"}
-    return {**auth, "Content-Type": "application/json", "Idempotency-Key": str(uuid.uuid4())}
+    headers = {**auth, "Content-Type": "application/json", "Idempotency-Key": str(uuid.uuid4())}
+    _, name, run = current_agent_attribution()
+    if model_gateway.current_agent() is not None:
+        name, run = model_gateway.current_agent() or ("", "")
+    if run:
+        headers.update({"X-Agent-Name": name or "code-agent", "X-Agent-Run-Id": run, "X-Test-Run-Id": run})
+    return headers
 
 
 def _unwrap(body: dict[str, Any]) -> dict[str, Any]:
@@ -352,7 +361,7 @@ async def _poll(
         status = str(data.get("status", "")).upper()
         await jobs.update_progress(job, int(data.get("progress") or job.progress + 2))
         # 旧版任务报文成功为 SUCCESS，V3 Seedance 报文为 succeeded；失败原因分别在 failReason / error.message
-        if status in {"SUCCESS", "SUCCEEDED"}:
+        if status in {"SUCCESS", "SUCCEEDED", "COMPLETED"}:
             return data
         if status in {"FAILED", "CANCELLED"} or "FAIL" in status:
             raise _task_failure(data, status)
@@ -473,7 +482,7 @@ class ProviderPollScheduler:
         entry.consecutive_errors = 0
         status = str(data.get("status", "")).upper()
         await jobs.update_progress(entry.job, int(data.get("progress") or entry.job.progress + 2))
-        if status in {"SUCCESS", "SUCCEEDED"}:
+        if status in {"SUCCESS", "SUCCEEDED", "COMPLETED"}:
             self._finish_result(job_id, data)
             return
         if status in {"FAILED", "CANCELLED"} or "FAIL" in status:
@@ -568,6 +577,8 @@ async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, 
         from .all_in_one import generate
 
         return await generate(request, job)
+    if (job.request or {}).get("_provider") == "toapis":
+        return await _generate_toapis_image(request, job)
     base, headers = _image_config()
     # 供应商以 Header 中的 Idempotency-Key 去重创建。键必须在发请求前由
     # 本地持久化工单 ID 确定，不能使用 _headers() 的随机默认值，否则进程
@@ -600,6 +611,73 @@ async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, 
         timeout_error="gpt-image-2 生成超过10分钟，已判定失败",
     )
     return await _store_image_result(job, task_id, data, created)
+
+
+def _toapis_image_ratio(size: str) -> str:
+    allowed = {"1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "5:4", "4:5", "21:9", "1:4", "4:1", "1:8", "8:1"}
+    if size in allowed:
+        return size
+    try:
+        width, height = (int(part) for part in size.lower().split("x", 1))
+        if width <= 0 or height <= 0:
+            raise ValueError
+    except ValueError as exc:
+        raise ProviderError("不支持的图片尺寸；请选择有效画幅") from exc
+    return min(allowed, key=lambda ratio: abs(width / height - int(ratio.split(":")[0]) / int(ratio.split(":")[1])))
+
+
+async def _store_toapis_image_result(job: Job, data: dict[str, Any]) -> dict[str, Any]:
+    items = (data.get("result") or {}).get("data") or []
+    urls = [item.get("url") for item in items if isinstance(item, dict) and item.get("url")]
+    if not urls:
+        raise ProviderError("ToAPIs 图片任务成功但未返回 result.data[].url")
+    async with _result_semaphore("image"):
+        stored = [await import_remote_image(url, f"users/{job.user_id}/generated/images") for url in urls]
+    return {
+        "provider": "toapis",
+        "providerTaskId": job.provider_task_id,
+        "model": (job.request or {}).get("model") or settings.image_model,
+        "urls": [item[0] for item in stored],
+        "thumbnailUrls": [item[1] for item in stored],
+        "sourceUrls": urls,
+        "usage": {**_usage(data), "platformBilling": data.get("billing")},
+    }
+
+
+async def _generate_toapis_image(request: ImageGenerationCreate, job: Job) -> dict[str, Any]:
+    if request.n != 1 or len(request.images) > 14:
+        raise ProviderError("Nano Banana 2.1 每次仅生成 1 张图片，最多支持 14 张参考图")
+    base, headers = _toapis_config()
+    endpoint = f"{base}/v1/images/generations"
+    job.idempotency_key = f"{job.id}:image"
+    headers["Idempotency-Key"] = job.idempotency_key
+    payload: dict[str, Any] = {
+        "model": (job.request or {}).get("_providerModelId") or "gemini-nano-banana-2.1",
+        "prompt": request.prompt,
+        "size": _toapis_image_ratio(request.size),
+        "n": 1,
+        "metadata": {"resolution": request.resolution},
+        "client_business_id": job.id,
+    }
+    if request.images:
+        payload["image_urls"] = request.images
+    await jobs.mark_provider_submitting(job)
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(endpoint, headers=headers, json=payload)
+        _raise_for_status(response)
+        created = response.json()
+    task_id = created.get("id")
+    if not task_id:
+        raise ProviderError("ToAPIs 生图接口未返回任务 ID")
+    await jobs.set_provider_task(job, "toapis", task_id, idempotency_key=job.idempotency_key)
+    data = await _poll_scheduled(
+        f"{endpoint}/{task_id}",
+        headers,
+        job,
+        timeout_seconds=_remaining_provider_timeout(job, IMAGE_POLL_TIMEOUT_SECONDS),
+        timeout_error="Nano Banana 2.1 图片生成超过10分钟，已判定失败",
+    )
+    return await _store_toapis_image_result(job, data)
 
 
 async def _store_image_result(job: Job, task_id: str, data: dict[str, Any], created: dict[str, Any]) -> dict[str, Any]:
@@ -1776,6 +1854,16 @@ async def resume_generation(job: Job) -> dict[str, Any]:
         from .all_in_one import resume
 
         return await resume(job)
+    if job.kind == "image" and (job.provider == "toapis" or (job.request or {}).get("_provider") == "toapis"):
+        base, headers = _toapis_config()
+        data = await _poll_scheduled(
+            f"{base}/v1/images/generations/{job.provider_task_id}",
+            headers,
+            job,
+            timeout_seconds=_remaining_provider_timeout(job, IMAGE_POLL_TIMEOUT_SECONDS),
+            timeout_error="Nano Banana 2.1 图片生成超过10分钟，已判定失败",
+        )
+        return await _store_toapis_image_result(job, data)
     if (job.request or {}).get("_provider") == "runninghub":
         return await _store_h3_video_result(job, await _poll_runninghub(job))
     if job.provider == "yinghe-h3" or (job.request or {}).get("_providerModelId") == "MiniMax-H3":
@@ -1814,6 +1902,10 @@ async def resume_generation(job: Job) -> dict[str, Any]:
 async def query_provider_task(kind: str, task_id: str, provider: str | None = None) -> dict[str, Any]:
     """单次查询供应商任务状态（管理后台对账用）"""
     validate_media_provider(provider)
+    if kind == "image" and provider == "toapis":
+        base, headers = _toapis_config()
+        async with httpx.AsyncClient(timeout=60) as client:
+            return await _query_task(client, f"{base}/v1/images/generations/{task_id}", headers)
     if provider == "all-in-one":
         from .all_in_one import query_task
 
@@ -1860,6 +1952,8 @@ async def query_provider_task(kind: str, task_id: str, provider: str | None = No
 async def store_provider_result(job: Job, data: dict[str, Any]) -> dict[str, Any]:
     """供应商成功结果下载落库（重启恢复与对账同步共用）"""
     validate_media_job_source(job)
+    if job.kind == "image" and (job.provider == "toapis" or (job.request or {}).get("_provider") == "toapis"):
+        return await _store_toapis_image_result(job, data)
     if job.provider == "all-in-one" or (job.request or {}).get("_provider") == "all-in-one":
         from .all_in_one import store_result
 

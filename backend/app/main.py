@@ -260,6 +260,8 @@ async def require_active_model(db: AsyncSession, code: str, modality: str) -> tu
     if not row:
         label = {"chat": "文本", "image": "图片", "video": "视频", "audio": "音频"}.get(modality, "生成")
         raise HTTPException(422, f"不支持或已停用的{label}模型：{code}")
+    if row[1].code == "toapis" and modality == "image" and not settings.toapis_api_key:
+        raise HTTPException(422, "ToAPIs 图片渠道尚未配置 API Key，请联系管理员")
     if row[1].code == "all-in-one" and not settings.all_in_one_api_key:
         raise HTTPException(422, "all in one 渠道尚未配置 API Key，请联系管理员")
     return row
@@ -478,7 +480,8 @@ async def create_ass_storyboard(
     extra_requirement: str = Form(""),
     ratio: Literal["16:9", "9:16", "4:3", "1:1"] = Form("16:9"),
     resolution: Literal["480p", "720p", "1080p"] = Form("480p"),
-    image_model: str = Form("gpt-image-2"),
+    image_model: str = Form("gemini-nano-banana-2.1"),
+    image_resolution: Literal["1K", "2K", "4K"] = Form("1K"),
     video_model: str = Form("doubao-seedance-2.0"),
     db: AsyncSession = Depends(database_session),
 ) -> dict:
@@ -589,6 +592,7 @@ async def create_ass_storyboard(
             "ratio": ratio,
             "resolution": resolution,
             "imageModel": image_model,
+            "imageResolution": image_resolution,
             "videoModel": video_model,
             "audioTrackVisible": bool(project_audio),
             "audioOffsetSeconds": 0,
@@ -609,6 +613,7 @@ async def create_ass_storyboard(
             "ratio": ratio,
             "resolution": resolution,
             "imageModel": image_model,
+            "imageResolution": image_resolution,
             "videoModel": video_model,
             "duration": normalize_video_duration(source_duration),
             "materialDuration": source_duration,
@@ -718,7 +723,7 @@ async def create_image_generation(payload: ImageGenerationCreate, user: CurrentU
         payload.prompt = await _portrait_prompt(payload.portrait.description, payload.portrait.style)
     if not payload.prompt.strip():
         raise HTTPException(422, "prompt 与 portrait 至少提供其一")
-    # 人物身份卡默认使用已验收的英和 2.5 精细版，并固化实际模型供 Worker 和用量对账。
+    # 人物身份卡与场景图统一使用 ToAPIs Nano Banana 2.1，并固化实际模型供 Worker 和用量对账。
     if not payload.model and (payload.portrait is not None or payload.purpose == "digital_human"):
         payload.model = settings.digital_human_image_model
     model, provider = await require_active_model(db, payload.model or settings.image_model, "image")

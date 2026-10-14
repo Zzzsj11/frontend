@@ -29,7 +29,7 @@ def test_personal_and_system_identity(configured, monkeypatch):
 
 def test_catalog_scope_does_not_clone_yinghe_billing():
     result = rows({"minimax-h3": {"billing": {"currency": "CNY"}, "h3Modes": ["reference"]}})
-    assert len(result) == 9
+    assert len(result) == 6
     assert len([m for m in result if m["modality"] == "chat"]) == 3
     h3 = next(m for m in result if m["provider_model_id"] == "MiniMax-H3")
     assert "billing" not in h3["capabilities"]
@@ -161,8 +161,9 @@ def test_aio_models_are_available_in_catalog_and_comparison(client):
     import json
 
     encoded = json.dumps(options)
-    for code in ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-image-2", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare", "doubao-seedance-2.0", "wan3.0-video", "minimax-h3"]:
+    for code in ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "doubao-seedance-2.0", "wan3.0-video", "minimax-h3"]:
         assert code + "-all-in-one" in encoded
+    assert any(item["id"] == "gemini-nano-banana-2.1" for item in options)
     comparison = client.get("/api/admin/chat-comparison/models").json()
     assert all(any(item["code"] == code + "-all-in-one" for item in comparison) for code in ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol"])
 

@@ -29,8 +29,10 @@ const root = ref<HTMLElement | null>(null)
 const popover = ref<HTMLElement | null>(null)
 const open = ref(false)
 const popoverStyle = ref<Record<string, string>>({})
-const resolutionChoices = computed<ShotGenOptions['resolution'][]>(() => {
-  return videoResolutionChoices(props.modelValue.videoModel) as ShotGenOptions['resolution'][]
+const resolutionChoices = computed<string[]>(() => {
+  return props.mode === 'scene'
+    ? ['1K', '2K', '4K']
+    : videoResolutionChoices(props.modelValue.videoModel)
 })
 const ratioChoices: ShotGenOptions['ratio'][] = ['16:9', '9:16', '4:3', '1:1']
 const durationChoices = computed(() => {
@@ -42,7 +44,9 @@ const isH3 = computed(() => props.mode === 'shot' && isH3VideoModel(props.modelV
 const summary = computed(() => {
   const parts = [
     props.modelValue.ratio,
-    videoResolutionLabel(props.modelValue.videoModel, props.modelValue.resolution),
+    props.mode === 'scene'
+      ? (props.modelValue.imageResolution ?? '1K')
+      : videoResolutionLabel(props.modelValue.videoModel, props.modelValue.resolution),
   ]
   if (props.mode === 'shot') parts.push(`${props.modelValue.duration}s`)
   const models = props.mode === 'shot' ? VIDEO_MODEL_OPTIONS : IMAGE_MODEL_OPTIONS
@@ -54,6 +58,11 @@ const summary = computed(() => {
 })
 const updateOption = <K extends keyof ShotGenOptions>(key: K, value: ShotGenOptions[K]) => {
   emit('update:modelValue', { ...props.modelValue, [key]: value })
+}
+const updateResolution = (value: string) => {
+  if (props.mode === 'scene')
+    updateOption('imageResolution', value as NonNullable<ShotGenOptions['imageResolution']>)
+  else updateOption('resolution', value as ShotGenOptions['resolution'])
 }
 const updateVideoModel = (model: string) => {
   const allowed = videoResolutionChoices(model) as ShotGenOptions['resolution'][]
@@ -74,7 +83,9 @@ const restoreDefaults = () => {
   emit('update:modelValue', {
     ...props.modelValue,
     ratio: '16:9',
-    resolution: '480p',
+    ...(props.mode === 'scene'
+      ? { imageResolution: '1K' as const }
+      : { resolution: '480p' as const }),
     ...(props.mode === 'shot'
       ? {
           duration: DEFAULT_VIDEO_DURATION,
@@ -215,11 +226,24 @@ onBeforeUnmount(close)
                 :key="resolution"
                 type="button"
                 class="segment-option text-only"
-                :class="{ active: modelValue.resolution === resolution }"
-                :aria-pressed="modelValue.resolution === resolution"
-                @click="updateOption('resolution', resolution)"
+                :class="{
+                  active:
+                    (mode === 'scene'
+                      ? (modelValue.imageResolution ?? '1K')
+                      : modelValue.resolution) === resolution,
+                }"
+                :aria-pressed="
+                  (mode === 'scene'
+                    ? (modelValue.imageResolution ?? '1K')
+                    : modelValue.resolution) === resolution
+                "
+                @click="updateResolution(resolution)"
               >
-                {{ videoResolutionLabel(modelValue.videoModel, resolution) }}
+                {{
+                  mode === 'scene'
+                    ? resolution
+                    : videoResolutionLabel(modelValue.videoModel, resolution)
+                }}
               </button>
             </div>
           </fieldset>

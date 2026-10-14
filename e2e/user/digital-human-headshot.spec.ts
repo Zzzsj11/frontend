@@ -99,9 +99,13 @@ async function mockApp(page: Page) {
       updatedAt: '2026-09-21T00:00:00Z',
     },
     '/api/model-options': [
-      { id: 'gpt-image-2.5-sunburst', name: '精细', modality: 'image', sortOrder: 10 },
-      { id: 'gpt-image-2.5-flare', name: '快速', modality: 'image', sortOrder: 20 },
-      { id: 'gpt-image-2', name: 'Img2', modality: 'image', sortOrder: 100 },
+      {
+        id: 'gemini-nano-banana-2.1',
+        name: 'Nano Banana 2.1',
+        modality: 'image',
+        sortOrder: 10,
+        capabilities: { resolutions: ['1K', '2K', '4K'] },
+      },
       { id: 'doubao-seedance-2.0', name: 'SD2.0', modality: 'video' },
     ],
     '/api/storyboards/general/options': {

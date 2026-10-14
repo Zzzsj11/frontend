@@ -1,22 +1,22 @@
 import { mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it } from 'vitest'
 import ShotGenerationOptionsPopover from '../../src/components/ShotGenerationOptionsPopover.vue'
-import { IMAGE_MODEL_OPTIONS } from '../../src/generationModels'
+import { DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from '../../src/generationModels'
 import type { ShotGenOptions } from '../../src/types'
 
 const options: ShotGenOptions = {
   resolution: '480p',
   duration: 5,
   ratio: '16:9',
-  imageModel: 'gpt-image-2',
+  imageModel: DEFAULT_IMAGE_MODEL,
   videoModel: 'doubao-seedance-2.0',
 }
 
 describe('ShotGenerationOptionsPopover', () => {
   afterEach(() => {
     IMAGE_MODEL_OPTIONS.splice(0, IMAGE_MODEL_OPTIONS.length, {
-      value: 'gpt-image-2',
-      label: 'Img2',
+      value: DEFAULT_IMAGE_MODEL,
+      label: 'Nano Banana 2.1',
     })
   })
   it('summarizes video options and emits changed segmented choices', async () => {
@@ -49,8 +49,8 @@ describe('ShotGenerationOptionsPopover', () => {
       props: { modelValue: options, mode: 'scene' },
     })
 
-    expect(wrapper.get('[aria-label="调整生成参数"]').text()).toContain('16:9 · 480P')
-    expect(wrapper.get('[aria-label="调整生成参数"]').text()).toContain('Img2')
+    expect(wrapper.get('[aria-label="调整生成参数"]').text()).toContain('16:9 · 1K')
+    expect(wrapper.get('[aria-label="调整生成参数"]').text()).toContain('Nano Banana 2.1')
     expect(wrapper.get('[aria-label="调整生成参数"]').text()).not.toContain('5s')
     await wrapper.get('[aria-label="调整生成参数"]').trigger('click')
 
@@ -63,16 +63,10 @@ describe('ShotGenerationOptionsPopover', () => {
     wrapper.unmount()
   })
 
-  it('shows both GPT Image 2.5 choices with product-facing names', async () => {
-    IMAGE_MODEL_OPTIONS.splice(
-      0,
-      IMAGE_MODEL_OPTIONS.length,
-      { value: 'gpt-image-2.5-sunburst', label: '精细' },
-      { value: 'gpt-image-2.5-flare', label: '快速' },
-    )
+  it('shows the unified image model and image-only resolution choices', async () => {
     const wrapper = mount(ShotGenerationOptionsPopover, {
       props: {
-        modelValue: { ...options, imageModel: 'gpt-image-2.5-sunburst' },
+        modelValue: { ...options, imageModel: DEFAULT_IMAGE_MODEL },
         mode: 'scene',
       },
     })
@@ -80,9 +74,11 @@ describe('ShotGenerationOptionsPopover', () => {
     await wrapper.get('[aria-label="调整生成参数"]').trigger('click')
     const select = document.querySelector('[aria-label="图片模型"]') as HTMLSelectElement
     expect(Array.from(select.options).map((option) => [option.value, option.text])).toEqual([
-      ['gpt-image-2.5-sunburst', '精细'],
-      ['gpt-image-2.5-flare', '快速'],
+      [DEFAULT_IMAGE_MODEL, 'Nano Banana 2.1'],
     ])
+    expect(document.body.textContent).toContain('1K')
+    expect(document.body.textContent).toContain('2K')
+    expect(document.body.textContent).toContain('4K')
     wrapper.unmount()
   })
 

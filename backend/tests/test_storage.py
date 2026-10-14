@@ -45,3 +45,21 @@ async def test_remote_import_rejects_http_host_that_only_looks_like_allowlisted_
 
     with pytest.raises(ValueError, match="HTTPS"):
         await _validate_public_url("http://store.vod-qcloud.com@evil.example/generated/video.mp4")
+
+
+@pytest.mark.asyncio
+async def test_toapis_file_host_accepts_proxy_dns_but_not_private_addresses(monkeypatch) -> None:
+    def proxy_address(_host, port, *_args, **_kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("198.18.0.57", port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", proxy_address)
+    await _validate_public_url("https://files.toapis.cn/generated/image.png")
+    with pytest.raises(ValueError, match="禁止访问内网"):
+        await _validate_public_url("https://files.toapis.cn:8443/generated/image.png")
+
+    def private_address(_host, port, *_args, **_kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", private_address)
+    with pytest.raises(ValueError, match="禁止访问内网"):
+        await _validate_public_url("https://files.toapis.cn/generated/image.png")

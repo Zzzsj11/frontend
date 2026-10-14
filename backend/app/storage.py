@@ -202,6 +202,8 @@ async def import_remote_image(url: str, category: str, filename: str | None = No
 
 
 _HTTP_PUBLIC_URL_ALLOWLIST = frozenset({"store.vod-qcloud.com"})
+_TRUSTED_PROXY_DNS_HOSTS = frozenset({"files.toapis.cn"})
+_PROXY_DNS_RANGE = ipaddress.ip_network("198.18.0.0/15")
 
 
 async def _validate_public_url(url: str) -> None:
@@ -214,6 +216,8 @@ async def _validate_public_url(url: str) -> None:
     addresses = await asyncio.get_running_loop().getaddrinfo(hostname, parsed.port or default_port, type=socket.SOCK_STREAM)
     for entry in addresses:
         address = ipaddress.ip_address(entry[4][0])
+        if hostname in _TRUSTED_PROXY_DNS_HOSTS and parsed.scheme == "https" and (parsed.port is None or parsed.port == 443) and address in _PROXY_DNS_RANGE:
+            continue
         if not address.is_global:
             raise ValueError("禁止访问内网、回环或链路本地地址")
 

@@ -227,7 +227,7 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     assert line["shotOptions"]["ratio"] == "16:9"
     # 生图/视频默认清晰度已下调为 480p（ASS 上传 Form 默认值）
     assert line["shotOptions"]["resolution"] == "480p"
-    assert line["shotOptions"]["imageModel"] == "gpt-image-2"
+    assert line["shotOptions"]["imageModel"] == "gemini-nano-banana-2.1"
     assert line["shotOptions"]["videoModel"] == "doubao-seedance-2.0"
 
     image_created = client.post(

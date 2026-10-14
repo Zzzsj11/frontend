@@ -225,6 +225,7 @@ export interface MagicScriptRequest {
   ratio: ShotGenOptions['ratio']
   resolution: ShotGenOptions['resolution']
   imageModel: ShotGenOptions['imageModel']
+  imageResolution?: NonNullable<ShotGenOptions['imageResolution']>
   videoModel: ShotGenOptions['videoModel']
 }
 
@@ -244,6 +245,7 @@ export async function generateMagicScript(
   form.append('ratio', req.ratio)
   form.append('resolution', req.resolution)
   form.append('image_model', req.imageModel)
+  form.append('image_resolution', req.imageResolution ?? '1K')
   form.append('video_model', req.videoModel)
   return apiRequest<MagicScript & { taskId: string }>('/storyboards/ass', {
     method: 'POST',
@@ -486,6 +488,7 @@ export async function generateGeneralStoryboard(
       ratio: req.ratio,
       resolution: req.resolution,
       image_model: req.imageModel,
+      image_resolution: req.imageResolution ?? '1K',
       video_model: req.videoModel,
       empty_shot_count: req.emptyShotCount,
       character_shot_count: req.characterShotCount,
@@ -532,7 +535,7 @@ export async function generateSceneImage(
   storyboardLineId?: string,
   ratio: ShotGenOptions['ratio'] = '16:9',
   imageModel?: ShotGenOptions['imageModel'],
-  resolution: ShotGenOptions['resolution'] = '720p',
+  resolution: NonNullable<ShotGenOptions['imageResolution']> = '1K',
   signal?: AbortSignal,
 ): Promise<{ imageUrl: string; thumbnailUrl?: string }> {
   return mediaGen.generateScene(

@@ -153,8 +153,8 @@ class Settings:
     video_result_processing_concurrency: int = max(1, min(100, int(os.getenv("VIDEO_RESULT_PROCESSING_CONCURRENCY", "20"))))
     image_api_base_url: str = os.getenv("IMAGE_API_BASE_URL", "https://api-aigc.fzyinghe.com")
     image_api_key: str = os.getenv("IMAGE_API_KEY") or SHARED_PROVIDER_KEY
-    image_model: str = os.getenv("IMAGE_MODEL", "gpt-image-2")
-    digital_human_image_model: str = os.getenv("DIGITAL_HUMAN_IMAGE_MODEL", "gpt-image-2.5-sunburst")
+    image_model: str = os.getenv("IMAGE_MODEL", "gemini-nano-banana-2.1")
+    digital_human_image_model: str = os.getenv("DIGITAL_HUMAN_IMAGE_MODEL", "gemini-nano-banana-2.1")
     video_api_base_url: str = os.getenv("VIDEO_API_BASE_URL", "https://api-aigc.fzyinghe.com")
     video_api_key: str = os.getenv("VIDEO_API_KEY") or SHARED_PROVIDER_KEY
     video_model: str = os.getenv("VIDEO_MODEL", "doubao-seedance-2.0")

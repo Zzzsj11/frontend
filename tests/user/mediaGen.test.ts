@@ -32,8 +32,8 @@ describe('media generation API client', () => {
       '/api/generations/images',
       expect.objectContaining({ method: 'POST' }),
     )
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).size).toBe('1024x1536')
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).quality).toBe('medium')
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).size).toBe('9:16')
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).resolution).toBe('1K')
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).model).toBe(DEFAULT_IMAGE_MODEL)
   })
 

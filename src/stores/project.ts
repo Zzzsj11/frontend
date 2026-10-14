@@ -78,6 +78,7 @@ export const DEFAULT_CLIP_DURATION = 5
 /** 分镜视频生成参数默认值（清晰度 / 时长 / 画幅） */
 export const DEFAULT_SHOT_OPTIONS: ShotGenOptions = {
   resolution: '480p',
+  imageResolution: '1K',
   duration: DEFAULT_VIDEO_DURATION,
   ratio: '16:9',
   imageModel: DEFAULT_IMAGE_MODEL,
@@ -2133,7 +2134,7 @@ export const useProjectStore = defineStore('project', {
           lineId,
           options.ratio,
           options.imageModel,
-          options.resolution,
+          options.imageResolution ?? '1K',
           watcher?.signal ?? undefined,
         )
         const still = this.lines.find((l) => l.id === lineId)

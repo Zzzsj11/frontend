@@ -50,6 +50,7 @@ const visualStyle = ref('电影写实')
 const ratio = ref<ShotGenOptions['ratio']>('16:9')
 const resolution = ref<ShotGenOptions['resolution']>('720p')
 const imageModel = ref(DEFAULT_IMAGE_MODEL)
+const imageResolution = ref<NonNullable<ShotGenOptions['imageResolution']>>('1K')
 const videoModel = ref(DEFAULT_VIDEO_MODEL)
 const emptyShotCount = ref(4)
 const characterShotCount = ref(13)
@@ -119,6 +120,7 @@ const reset = () => {
   ratio.value = options?.ratios[0] ?? '16:9'
   resolution.value = '720p'
   imageModel.value = DEFAULT_IMAGE_MODEL
+  imageResolution.value = '1K'
   videoModel.value = DEFAULT_VIDEO_MODEL
   gender.value = '女'
   emptyShotCount.value = props.random ? 3 : 4
@@ -277,6 +279,7 @@ const submit = async () => {
     ratio: ratio.value,
     resolution: resolution.value,
     imageModel: imageModel.value,
+    imageResolution: imageResolution.value,
     videoModel: videoModel.value,
     emptyShotCount: Math.max(0, Math.round(emptyShotCount.value)),
     characterShotCount: Math.max(0, Math.round(characterShotCount.value)),
@@ -483,6 +486,14 @@ const submit = async () => {
               ><select v-model="imageModel" aria-label="图片模型">
                 <option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">
                   {{ item.label }}
+                </option>
+              </select></label
+            >
+            <label v-if="!random"
+              ><span>图片清晰度 *</span
+              ><select v-model="imageResolution" aria-label="图片清晰度">
+                <option v-for="item in ['1K', '2K', '4K']" :key="item" :value="item">
+                  {{ item }}
                 </option>
               </select></label
             >

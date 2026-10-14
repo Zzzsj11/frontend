@@ -27,6 +27,7 @@ const extraRequirement = ref('')
 const ratio = ref<ShotGenOptions['ratio']>('16:9')
 const resolution = ref<ShotGenOptions['resolution']>('480p')
 const imageModel = ref(DEFAULT_IMAGE_MODEL)
+const imageResolution = ref<NonNullable<ShotGenOptions['imageResolution']>>('1K')
 const videoModel = ref(DEFAULT_VIDEO_MODEL)
 
 const assInputRef = ref<HTMLInputElement>()
@@ -46,6 +47,7 @@ const resetForm = () => {
   ratio.value = '16:9'
   resolution.value = '480p'
   imageModel.value = DEFAULT_IMAGE_MODEL
+  imageResolution.value = '1K'
   videoModel.value = DEFAULT_VIDEO_MODEL
 }
 
@@ -115,6 +117,7 @@ const submit = () => {
     ratio: ratio.value,
     resolution: resolution.value,
     imageModel: imageModel.value,
+    imageResolution: imageResolution.value,
     videoModel: videoModel.value,
   })
 }
@@ -179,6 +182,14 @@ const cancel = () => {
             ><select v-model="imageModel" aria-label="图片模型">
               <option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">
                 {{ item.label }}
+              </option>
+            </select></label
+          >
+          <label
+            ><span>图片清晰度 *</span
+            ><select v-model="imageResolution" aria-label="图片清晰度">
+              <option v-for="item in ['1K', '2K', '4K']" :key="item" :value="item">
+                {{ item }}
               </option>
             </select></label
           >

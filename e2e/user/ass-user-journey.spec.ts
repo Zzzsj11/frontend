@@ -60,18 +60,12 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
       contentType: 'application/json',
       body: JSON.stringify([
         {
-          id: 'gpt-image-2.5-sunburst',
-          name: '精细',
+          id: 'gemini-nano-banana-2.1',
+          name: 'Nano Banana 2.1',
           modality: 'image',
           sortOrder: 10,
+          capabilities: { resolutions: ['1K', '2K', '4K'] },
         },
-        {
-          id: 'gpt-image-2.5-flare',
-          name: '快速',
-          modality: 'image',
-          sortOrder: 20,
-        },
-        { id: 'gpt-image-2', name: 'Img2', modality: 'image', sortOrder: 100 },
         { id: 'doubao-seedance-2.0', name: 'SD2.0', modality: 'video' },
         {
           id: 'minimax-h3-runninghub',
@@ -188,7 +182,7 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
               resolution: '720p',
               duration: 4,
               ratio: '16:9',
-              imageModel: 'gpt-image-2',
+              imageModel: 'gemini-nano-banana-2.1',
               videoModel: 'minimax-h3-runninghub',
               segmentType: 'lyric',
               timelineLabel: '自动化测试歌词',
@@ -256,7 +250,7 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
               resolution: '720p',
               duration: 4,
               ratio: '16:9',
-              imageModel: 'gpt-image-2',
+              imageModel: 'gemini-nano-banana-2.1',
               videoModel: 'minimax-h3-runninghub',
               segmentType: 'lyric',
               timelineLabel: '自动化测试歌词',
@@ -313,10 +307,12 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await page.getByLabel('视频模型').selectOption('minimax-h3-runninghub')
   await expect(page.getByLabel('视频模型')).toHaveValue('minimax-h3-runninghub')
   await expect(page.getByLabel('视频模型')).toBeEnabled()
-  await expect(page.getByLabel('图片模型')).toHaveValue('gpt-image-2')
+  await expect(page.getByLabel('图片模型')).toHaveValue('gemini-nano-banana-2.1')
   await expect(page.getByLabel('图片模型')).toBeEnabled()
-  await page.getByLabel('图片模型').selectOption('gpt-image-2.5-sunburst')
-  await expect(page.getByLabel('图片模型')).toHaveValue('gpt-image-2.5-sunburst')
+  await page.getByLabel('图片模型').selectOption('gemini-nano-banana-2.1')
+  await expect(page.getByLabel('图片模型')).toHaveValue('gemini-nano-banana-2.1')
+  await page.getByLabel('图片清晰度').selectOption('2K')
+  await expect(page.getByLabel('图片清晰度')).toHaveValue('2K')
   await page.getByRole('button', { name: '生成', exact: true }).click()
 
   await expect(page.getByText('自动化测试歌词').first()).toBeVisible()
@@ -349,10 +345,12 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await expect(scaleInputs.nth(2)).toHaveValue('210')
   await expect(general.getByLabel('视频模型')).toHaveValue('doubao-seedance-2.0')
   await expect(general.getByLabel('视频模型')).toBeEnabled()
-  await expect(general.getByLabel('图片模型')).toHaveValue('gpt-image-2')
+  await expect(general.getByLabel('图片模型')).toHaveValue('gemini-nano-banana-2.1')
   await expect(general.getByLabel('图片模型')).toBeEnabled()
-  await general.getByLabel('图片模型').selectOption('gpt-image-2.5-flare')
-  await expect(general.getByLabel('图片模型')).toHaveValue('gpt-image-2.5-flare')
+  await general.getByLabel('图片模型').selectOption('gemini-nano-banana-2.1')
+  await expect(general.getByLabel('图片模型')).toHaveValue('gemini-nano-banana-2.1')
+  await general.getByLabel('图片清晰度').selectOption('4K')
+  await expect(general.getByLabel('图片清晰度')).toHaveValue('4K')
   const generate = general.getByRole('button', { name: '批量生成', exact: true })
   await expect(generate).toBeDisabled()
   await general.getByLabel('二级分类 *').selectOption('通用积极')

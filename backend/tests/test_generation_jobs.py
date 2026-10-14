@@ -1609,6 +1609,61 @@ async def test_generate_image_uses_stable_job_idempotency_key(client, monkeypatc
     assert _job_row("job-image-idem")["idempotency_key"] == "job-image-idem:image"
 
 
+async def test_toapis_banana_image_contract_and_tos_result(client, monkeypatch) -> None:
+    import httpx
+
+    from app import providers
+    from app.jobs import jobs as job_manager
+    from app.schemas import ImageGenerationCreate
+
+    submitted = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            submitted.update(url=url, headers=headers, payload=json)
+            return httpx.Response(200, json={"id": "tsk_img_1", "status": "pending"}, request=httpx.Request("POST", url))
+
+    async def fake_poll(*args, **kwargs):
+        return {"status": "completed", "result": {"data": [{"url": "https://files.toapis.cn/result.png"}]}, "usage": {"total_tokens": 10}}
+
+    async def fake_import(url, prefix):
+        assert url == "https://files.toapis.cn/result.png"
+        return ("https://tos.test/original.png", "https://tos.test/thumb.png")
+
+    monkeypatch.setattr(providers, "_toapis_config", lambda: ("https://toapis.cn", {"Authorization": "Bearer test"}))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(providers, "_poll_scheduled", fake_poll)
+    monkeypatch.setattr(providers, "import_remote_image", fake_import)
+    _insert_job("job-banana-image")
+    job = await job_manager.get("job-banana-image")
+    assert job is not None
+    job.request = {"_provider": "toapis", "_providerModelId": "gemini-nano-banana-2.1", "model": "gemini-nano-banana-2.1"}
+    job.user_id = "u1"
+    result = await providers.generate_image(ImageGenerationCreate(prompt="portrait", size="1024x1536", resolution="2K", images=["https://tos.test/reference.png"]), job)
+    assert submitted["url"] == "https://toapis.cn/v1/images/generations"
+    assert submitted["payload"] == {
+        "model": "gemini-nano-banana-2.1",
+        "prompt": "portrait",
+        "size": "2:3",
+        "n": 1,
+        "metadata": {"resolution": "2K"},
+        "client_business_id": job.id,
+        "image_urls": ["https://tos.test/reference.png"],
+    }
+    assert result["provider"] == "toapis"
+    assert result["urls"] == ["https://tos.test/original.png"]
+    assert _job_row(job.id)["provider_task_id"] == "tsk_img_1"
+
+
 async def test_generate_video_v3_seedance_flow(client, monkeypatch) -> None:
     """V3 视频全链路：创建返回官方报文 id，轮询 succeeded 后从 content.video_url 落库，last_frame_url 做封面。"""
     import httpx

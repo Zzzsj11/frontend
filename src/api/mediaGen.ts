@@ -45,24 +45,15 @@ export async function generateScene(
   storyboardLineId?: string,
   ratio: ShotGenOptions['ratio'] = '16:9',
   model?: ImageModelId,
-  resolution: ShotGenOptions['resolution'] = '720p',
+  resolution: NonNullable<ShotGenOptions['imageResolution']> = '1K',
   signal?: AbortSignal,
 ): Promise<{ imageUrl: string; thumbnailUrl?: string }> {
-  const size =
-    ratio === '9:16'
-      ? '1024x1536'
-      : ratio === '1:1'
-        ? '1024x1024'
-        : ratio === '4:3'
-          ? '1365x1024'
-          : '1536x1024'
-  const quality = resolution === '480p' ? 'low' : resolution === '1080p' ? 'high' : 'medium'
   const job = await request<GenerationJob>('/generations/images', {
     method: 'POST',
     body: JSON.stringify({
       prompt,
-      size,
-      quality,
+      size: ratio,
+      resolution,
       n: 1,
       model,
       purpose: 'scene',

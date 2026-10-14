@@ -6,9 +6,6 @@ from copy import deepcopy
 
 TEXT_MODELS = (("gpt-6.1-sol", "GPT 6.1 Sol"), ("gpt-6-astra", "GPT 6 Astra"), ("gpt-6-sol", "GPT 6.0 Sol"))
 MEDIA_MODELS = (
-    ("gpt-image-2", "gpt-image-2", "Img2", "image"),
-    ("gpt-image-2.5-sunburst", "gpt-image-2.5-sunburst", "精细", "image"),
-    ("gpt-image-2.5-flare", "gpt-image-2.5-flare", "快速", "image"),
     ("doubao-seedance-2.0", "seedance-2.0", "SD2.0", "video"),
     ("wan3.0-video", "wan3.0-video", "Wan3.0", "video"),
     ("minimax-h3", "MiniMax-H3", "H3", "video"),

@@ -30,7 +30,7 @@ test('administrator can inspect dashboard, models, errors and audit logs', async
   await expect(page.getByRole('button', { name: '保存日限额' }).first()).toBeVisible()
   await page.getByRole('button', { name: '模型管理' }).click()
   await expect(
-    page.locator('tbody').getByText('gpt-image-2', { exact: true }).first(),
+    page.locator('tbody').getByText('gemini-nano-banana-2.1', { exact: true }).first(),
   ).toBeVisible()
   await expect(
     page.locator('tbody').getByText('doubao-seedance-2.0', { exact: true }).first(),

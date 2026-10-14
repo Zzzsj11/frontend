@@ -159,9 +159,14 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
                 model.status = "queued"
                 model.phase = "provider_running"
                 resumed += 1
-            elif model.phase == "submitting_provider" and model.idempotency_key and (model.kind == "image" or (model.kind == "video" and provider != "runninghub")):
-                # gpt-image-2 与 Seedance 创建均使用已持久化的稳定幂等键。
-                # 即使上次请求已被供应商受理，重放也只会取回原任务 ID。
+            elif (
+                model.phase == "submitting_provider"
+                and model.idempotency_key
+                and provider != "toapis"
+                and (model.kind == "image" or (model.kind == "video" and provider != "runninghub"))
+            ):
+                # Only replay suppliers with proven idempotent creation. ToAPIs
+                # supports business-ID lookup, but does not promise deduplication.
                 model.status = "queued"
                 model.phase = "queued"
                 model.started_at = None

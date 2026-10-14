@@ -486,10 +486,10 @@ def test_portrait_publish_rejects_missing_headshot_safety_fragment(fragment) -> 
 @pytest.mark.parametrize(
     ("payload", "expected_model"),
     [
-        ({"portrait": {"description": "", "style": "女"}}, "gpt-image-2.5-sunburst"),
-        ({"prompt": "身份参考卡", "purpose": "digital_human"}, "gpt-image-2.5-sunburst"),
-        ({"portrait": {}, "model": "gpt-image-2"}, "gpt-image-2"),
-        ({"prompt": "清晨空镜", "purpose": "scene", "model": "gpt-image-2"}, "gpt-image-2"),
+        ({"portrait": {"description": "", "style": "女"}}, "gemini-nano-banana-2.1"),
+        ({"prompt": "身份参考卡", "purpose": "digital_human"}, "gemini-nano-banana-2.1"),
+        ({"portrait": {}, "model": "gemini-nano-banana-2.1"}, "gemini-nano-banana-2.1"),
+        ({"prompt": "清晨空镜", "purpose": "scene", "model": "gemini-nano-banana-2.1"}, "gemini-nano-banana-2.1"),
     ],
 )
 def test_portrait_default_model_is_persisted_without_overriding_explicit_models(client, monkeypatch, payload, expected_model) -> None:
@@ -506,7 +506,7 @@ def test_portrait_default_model_is_persisted_without_overriding_explicit_models(
     assert response.status_code == 202
     assert captured[0]["model"] == expected_model
     assert captured[0]["_providerModelId"] == expected_model
-    assert captured[0]["_provider"] == "yinghe"
+    assert captured[0]["_provider"] == "toapis"
     assert "画面风格" not in captured[0]["prompt"]
 
 

@@ -67,8 +67,8 @@ test('deployed frontend login, project and storyboard configuration journey', as
     await expect(assDialog.getByLabel('清晰度')).toHaveValue('480p')
     await expect(assDialog.getByLabel('视频模型')).toBeEnabled()
     await expect(assDialog.getByLabel('图片模型')).toBeEnabled()
-    await assDialog.getByLabel('图片模型').selectOption('gpt-image-2.5-sunburst')
-    await expect(assDialog.getByLabel('图片模型')).toHaveValue('gpt-image-2.5-sunburst')
+    await assDialog.getByLabel('图片模型').selectOption('gemini-nano-banana-2.1')
+    await expect(assDialog.getByLabel('图片模型')).toHaveValue('gemini-nano-banana-2.1')
     await page.screenshot({ path: join(output, '03-ass-dialog.png'), fullPage: true })
     await page.reload()
     await expect(page.getByRole('heading', { name: '视频编辑器' })).toBeVisible()
@@ -84,8 +84,8 @@ test('deployed frontend login, project and storyboard configuration journey', as
     await expect(general.getByLabel('画幅')).toHaveValue('9:16')
     await expect(general.getByLabel('视频模型')).toBeEnabled()
     await expect(general.getByLabel('图片模型')).toBeEnabled()
-    await general.getByLabel('图片模型').selectOption('gpt-image-2.5-flare')
-    await expect(general.getByLabel('图片模型')).toHaveValue('gpt-image-2.5-flare')
+    await general.getByLabel('图片模型').selectOption('gemini-nano-banana-2.1')
+    await expect(general.getByLabel('图片模型')).toHaveValue('gemini-nano-banana-2.1')
     for (const mode of ['定制通用分镜', '随机通用分镜']) {
       if (mode === '随机通用分镜') {
         await general.getByRole('button', { name: '取消', exact: true }).click()
