@@ -227,7 +227,43 @@ async def test_overdue_video_jobs_fail_after_twenty_minutes(client) -> None:
         assert row.status == "failed"
         assert row.phase == "failed"
         assert row.finished_at is not None
-        assert row.error == "视频生成超过20分钟，已判定失败，请重新生成"
+    assert row.error == "视频生成超过20分钟，已判定失败，请重新生成"
+
+
+@pytest.mark.asyncio
+async def test_all_in_one_video_queue_has_two_hour_deadline() -> None:
+    from app.database import session_factory
+    from app.jobs import jobs
+    from app.models import GenerationJobModel, utcnow
+
+    job_id = "job-all-in-one-long-queue"
+    async with session_factory() as db:
+        db.add(
+            GenerationJobModel(
+                id=job_id,
+                kind="video",
+                status="running",
+                phase="provider_running",
+                provider="all-in-one",
+                request={"model": "doubao-seedance-2.0-all-in-one"},
+                user_id="user-admin",
+                created_at=utcnow() - timedelta(minutes=21),
+            )
+        )
+        await db.commit()
+
+    assert await jobs.expire_overdue_video_jobs() == 0
+    async with session_factory() as db:
+        row = await db.get(GenerationJobModel, job_id)
+        assert row is not None and row.status == "running"
+        row.created_at = utcnow() - timedelta(hours=2, minutes=1)
+        await db.commit()
+
+    assert await jobs.expire_overdue_video_jobs() == 1
+    async with session_factory() as db:
+        row = await db.get(GenerationJobModel, job_id)
+        assert row is not None and row.status == "failed"
+        assert "2小时" in row.error
 
 
 def test_job_manager_applies_independent_model_execution_pools(monkeypatch) -> None:

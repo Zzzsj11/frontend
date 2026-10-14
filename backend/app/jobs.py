@@ -15,6 +15,7 @@ from .agent_attribution import current_agent_attribution
 from .config import settings
 from .database import session_factory
 from .error_logging import _redact, redact_error_text
+from .generation_constraints import video_job_timeout_seconds
 from .models import GenerationJobModel, SceneAssetModel, ShotAssetModel, TokenUsageModel, utcnow
 from .redis_store import acquire_execution_lease, cache_job, get_cached_job, notify_worker, release_execution_lease, renew_execution_lease
 from .token_usage import add_token_usage, normalize_usage
@@ -456,7 +457,7 @@ class JobManager:
             await session.commit()
 
     async def expire_overdue_video_jobs(self) -> int:
-        """Fail video jobs 20 minutes after creation, including queue time."""
+        """Fail video jobs after their channel's end-to-end deadline, including queue time."""
         threshold = utcnow() - timedelta(seconds=VIDEO_JOB_TIMEOUT_SECONDS)
         expired: list[Job] = []
         async with session_factory() as session:
@@ -473,9 +474,15 @@ class JobManager:
                 ).scalars()
             )
             for model in rows:
+                if time.time() - _timestamp(model.created_at) < video_job_timeout_seconds(model.provider, model.request):
+                    continue
                 model.status = "failed"
                 model.phase = "failed"
-                model.error = "视频生成超过20分钟，已判定失败，请重新生成"
+                model.error = (
+                    "视频生成超过2小时，已判定失败，请核查原任务"
+                    if video_job_timeout_seconds(model.provider, model.request) > VIDEO_JOB_TIMEOUT_SECONDS
+                    else "视频生成超过20分钟，已判定失败，请重新生成"
+                )
                 model.finished_at = utcnow()
                 expired.append(self._from_model(model))
             await session.commit()

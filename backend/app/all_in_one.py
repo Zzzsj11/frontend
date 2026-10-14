@@ -188,4 +188,4 @@ async def resume(job: Any) -> dict[str, Any]:
             raise ProviderError(data["failReason"] or "all in one 生成失败")
         await jobs.update_progress(job, min(90, job.progress + 2))
         await asyncio.sleep(POLL_INTERVAL_SECONDS)
-    raise ProviderError("all in one 生成等待超时，请核查原任务；未重新提交")
+    raise ProviderError("all in one 生成等待超过2小时，请核查原任务；未重新提交")

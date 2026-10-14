@@ -535,9 +535,12 @@ def _remaining_provider_timeout(job: Job, timeout_seconds: int) -> float:
 
 def _remaining_video_job_timeout(job: Job) -> float:
     """Video SLA is end-to-end from local job creation, not provider acceptance."""
+    from .generation_constraints import video_job_timeout_seconds
+
+    timeout_seconds = video_job_timeout_seconds(job.provider, job.request)
     if job.created_at <= 0:
-        return float(VIDEO_POLL_TIMEOUT_SECONDS)
-    return max(0.0, VIDEO_POLL_TIMEOUT_SECONDS - (time.time() - job.created_at))
+        return float(timeout_seconds)
+    return max(0.0, timeout_seconds - (time.time() - job.created_at))
 
 
 def _result_semaphore(kind: str) -> asyncio.Semaphore:
