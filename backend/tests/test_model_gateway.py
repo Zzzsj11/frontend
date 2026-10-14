@@ -26,7 +26,8 @@ def test_gateway_disabled_keeps_direct_config(monkeypatch):
     assert str(client.base_url) == "https://upstream.example/v1/"
 
 
-def test_overseas_text_keeps_direct_route_and_agent_headers_with_gateway_enabled(monkeypatch):
+@pytest.mark.parametrize("channel,base_url", [("yseeai", "https://ai-aigc.yseeai.com/v1"), ("toapis", "https://toapis.com/v1")])
+def test_text_channel_keeps_direct_route_and_agent_headers_with_gateway_enabled(monkeypatch, channel, base_url):
     from dataclasses import replace
 
     from app.config import settings
@@ -36,16 +37,17 @@ def test_overseas_text_keeps_direct_route_and_agent_headers_with_gateway_enabled
     monkeypatch.setattr(
         __import__("app.config", fromlist=["settings"]),
         "settings",
-        replace(settings, llm_channel="yseeai", llm_base_url="https://ai-aigc.yseeai.com/v1"),
+        replace(settings, llm_channel=channel, llm_base_url=base_url),
     )
-    client = model_gateway.AsyncOpenAI(api_key="overseas-key", base_url="https://ai-aigc.yseeai.com/v1")
-    assert str(client.base_url) == "https://ai-aigc.yseeai.com/v1/"
+    client = model_gateway.AsyncOpenAI(api_key="text-key", base_url=base_url)
+    assert str(client.base_url) == base_url + "/"
     assert client.default_headers["X-Agent-Name"] == "code-agent"
     assert client.default_headers["X-Agent-Run-Id"] == client.default_headers["X-Test-Run-Id"] == "overseas-run"
 
 
 @pytest.mark.asyncio
-async def test_overseas_storyboard_job_restores_persisted_agent_attribution(monkeypatch):
+@pytest.mark.parametrize("channel,base_url", [("yseeai", "https://ai-aigc.yseeai.com/v1"), ("toapis", "https://toapis.com/v1")])
+async def test_text_storyboard_job_restores_persisted_agent_attribution(monkeypatch, channel, base_url):
     from dataclasses import replace
     from types import SimpleNamespace
 
@@ -67,12 +69,12 @@ async def test_overseas_storyboard_job_restores_persisted_agent_attribution(monk
     monkeypatch.setattr(
         __import__("app.config", fromlist=["settings"]),
         "settings",
-        replace(settings, llm_channel="yseeai", llm_base_url="https://ai-aigc.yseeai.com/v1"),
+        replace(settings, llm_channel=channel, llm_base_url=base_url),
     )
     job = SimpleNamespace(id="job-1", kind="storyboard_line", user_id="user-1", provider_task_id="", request={})
 
     async def runner(_job):
-        client = model_gateway.AsyncOpenAI(api_key="overseas-key", base_url="https://ai-aigc.yseeai.com/v1")
+        client = model_gateway.AsyncOpenAI(api_key="text-key", base_url=base_url)
         try:
             assert client.default_headers["X-Agent-Name"] == "code-agent"
             assert client.default_headers["X-Agent-Run-Id"] == client.default_headers["X-Test-Run-Id"] == "persisted-overseas-run"

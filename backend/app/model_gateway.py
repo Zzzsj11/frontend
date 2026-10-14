@@ -75,7 +75,7 @@ async def run_with_context(job: Any, runner: Any) -> Any:
 
         all_in_one = snapshot.get("_provider") == "all-in-one" or str(snapshot.get("model") or "").endswith("-all-in-one")
         all_in_one = all_in_one or (job.kind not in {"image", "video"} and any(model.endswith("-all-in-one") for model in (settings.llm_model, settings.general_outline_llm_model)))
-        text_job = settings.llm_channel == "yseeai" and job.kind in {"chat", "ass_outline", "general_outline", "ass_segment_retry", "storyboard_line"}
+        text_job = settings.llm_channel in {"yseeai", "toapis"} and job.kind in {"chat", "ass_outline", "general_outline", "ass_segment_retry", "storyboard_line"}
         if not all_in_one and not text_job:
             return await runner(job)
     from .database import session_factory
@@ -109,8 +109,8 @@ class AsyncOpenAI(OpenAIClient):
     def __init__(self, **kwargs: Any):
         from .config import settings
 
-        direct_yseeai = settings.llm_channel == "yseeai" and str(kwargs.get("base_url") or "").rstrip("/") == settings.llm_base_url.rstrip("/")
-        if enabled() and not direct_yseeai:
+        direct_text = settings.llm_channel in {"yseeai", "toapis"} and str(kwargs.get("base_url") or "").rstrip("/") == settings.llm_base_url.rstrip("/")
+        if enabled() and not direct_text:
 
             async def enrich(request: httpx.Request) -> None:
                 request.headers.update(request_headers())
@@ -122,7 +122,7 @@ class AsyncOpenAI(OpenAIClient):
                 max_retries=0,
                 http_client=httpx.AsyncClient(timeout=kwargs.get("timeout", 300), event_hooks={"request": [enrich]}),
             )
-        elif direct_yseeai:
+        elif direct_text:
             _, name, run = current_agent_attribution()
             if _agent.get() is not None:
                 name, run = _agent.get() or ("", "")

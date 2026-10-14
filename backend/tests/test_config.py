@@ -26,6 +26,22 @@ def test_overseas_text_channel_uses_its_own_key_without_changing_media(monkeypat
     )
 
 
+def test_toapis_text_channel_uses_separate_key_or_existing_toapis_key(monkeypatch) -> None:
+    monkeypatch.setattr(config, "LLM_CHANNEL", "toapis")
+    monkeypatch.setenv("TOAPIS_LLM_MODEL", "gpt-6.1-sol")
+    monkeypatch.delenv("TOAPIS_LLM_BASE_URL", raising=False)
+    values = {"TOAPIS_LLM_API_KEY": "text-key", "TOAPIS_API_KEY": "video-key"}
+    monkeypatch.setattr(config, "_read_provider_value", lambda name: values.get(name, ""))
+
+    assert config._resolve_llm_settings("domestic-key", "https://domestic.example/v1", "domestic-model") == (
+        "https://toapis.com/v1",
+        "text-key",
+        "gpt-6.1-sol",
+    )
+    values.pop("TOAPIS_LLM_API_KEY")
+    assert config._resolve_llm_settings("domestic-key", "https://domestic.example/v1", "domestic-model")[1] == "video-key"
+
+
 def test_material_export_downloads_allow_twenty_parallel_files() -> None:
     assert config.settings.export_download_concurrency == 20
     assert config.settings.export_upload_part_size_mb == 5

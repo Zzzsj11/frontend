@@ -1,4 +1,4 @@
-"""Shared circuit breaker for Yinghe Overseas text generation."""
+"""Per-channel circuit breaker for the primary text model."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ PRIMARY_MODEL = "gpt-6.1-sol"
 FALLBACK_MODEL = "gpt-6-sol"
 FAILURE_LIMIT = 5
 COOLDOWN_SECONDS = 2 * 60 * 60
-FAILURES_KEY = "llm:failover:yseeai:gpt-6.1-sol:failures"
+TEXT_CHANNELS = frozenset({"yseeai", "toapis"})
 logger = logging.getLogger("mvagent.llm_failover")
 
 _RECORD_FAILURE = """
@@ -22,14 +22,18 @@ return count
 
 
 def applies(model: str) -> bool:
-    return settings.llm_channel == "yseeai" and model == PRIMARY_MODEL
+    return settings.llm_channel in TEXT_CHANNELS and model == PRIMARY_MODEL
+
+
+def failures_key() -> str:
+    return f"llm:failover:{settings.llm_channel}:{PRIMARY_MODEL}:failures"
 
 
 async def choose_model(model: str) -> str:
     if not applies(model):
         return model
     try:
-        failures = int(await redis.get(FAILURES_KEY) or 0)
+        failures = int(await redis.get(failures_key()) or 0)
     except Exception:
         logger.warning("Unable to read text-model failover state", exc_info=True)
         return model
@@ -40,7 +44,7 @@ async def record_success(model: str) -> None:
     if not applies(model):
         return
     try:
-        await redis.delete(FAILURES_KEY)
+        await redis.delete(failures_key())
     except Exception:
         logger.warning("Unable to reset text-model failover state", exc_info=True)
 
@@ -49,8 +53,8 @@ async def record_failure(model: str) -> None:
     if not applies(model):
         return
     try:
-        failures = int(await redis.eval(_RECORD_FAILURE, 1, FAILURES_KEY, COOLDOWN_SECONDS))
+        failures = int(await redis.eval(_RECORD_FAILURE, 1, failures_key(), COOLDOWN_SECONDS))
         if failures == FAILURE_LIMIT:
-            logger.error("Yinghe Overseas primary text model failed five consecutive calls; switching to %s for %s seconds", FALLBACK_MODEL, COOLDOWN_SECONDS)
+            logger.error("%s primary text model failed five consecutive calls; switching to %s for %s seconds", settings.llm_channel, FALLBACK_MODEL, COOLDOWN_SECONDS)
     except Exception:
         logger.warning("Unable to update text-model failover state", exc_info=True)

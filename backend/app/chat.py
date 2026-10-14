@@ -212,7 +212,7 @@ class ChatManager:
                 else:
                     client = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url)
                     model = await choose_model(settings.llm_model)
-                    options = completion_options(model, 2048) if settings.llm_channel == "yseeai" else {}
+                    options = completion_options(model, 2048) if settings.llm_channel in {"yseeai", "toapis"} else {}
                 model_used = model
                 openai_client = client
                 provider_started = True

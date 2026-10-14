@@ -58,8 +58,8 @@ SHARED_PROVIDER_KEY = _read_provider_value("AIGC_TOKEN")
 SHARED_LLM_BASE_URL = _read_provider_value("CHAT_COMPLETIONS_BASE_URL") or "https://ai-aigc.fzyinghe.com/v1"
 SHARED_LLM_MODEL = _read_provider_value("CHAT_DEFAULT_MODEL") or os.getenv("AIGC_CHAT_MODEL", "gpt-5.6-sol")
 LLM_CHANNEL = os.getenv("LLM_CHANNEL", "").strip().lower()
-if LLM_CHANNEL not in {"", "yseeai"}:
-    raise ValueError("LLM_CHANNEL 仅支持留空或 yseeai")
+if LLM_CHANNEL not in {"", "yseeai", "toapis"}:
+    raise ValueError("LLM_CHANNEL 仅支持留空、yseeai 或 toapis")
 
 
 def _resolve_llm_settings(shared_key: str, shared_base_url: str, shared_model: str) -> tuple[str, str, str]:
@@ -69,6 +69,12 @@ def _resolve_llm_settings(shared_key: str, shared_base_url: str, shared_model: s
             "https://ai-aigc.yseeai.com/v1",
             _read_provider_value("YSEEAI_LLM_API_KEY"),
             os.getenv("YSEEAI_LLM_MODEL") or os.getenv("AIGC_CHAT_MODEL") or "gpt-6.1-sol",
+        )
+    if LLM_CHANNEL == "toapis":
+        return (
+            os.getenv("TOAPIS_LLM_BASE_URL", "https://toapis.com/v1").rstrip("/"),
+            _read_provider_value("TOAPIS_LLM_API_KEY") or _read_provider_value("TOAPIS_API_KEY"),
+            os.getenv("TOAPIS_LLM_MODEL") or os.getenv("AIGC_CHAT_MODEL") or "gpt-6.1-sol",
         )
     if shared_key:
         return shared_base_url, shared_key, shared_model
@@ -80,8 +86,8 @@ def _resolve_llm_settings(shared_key: str, shared_base_url: str, shared_model: s
 
 
 LLM_BASE_URL, LLM_API_KEY, LLM_MODEL = _resolve_llm_settings(SHARED_PROVIDER_KEY, SHARED_LLM_BASE_URL, SHARED_LLM_MODEL)
-if LLM_CHANNEL == "yseeai" and not LLM_API_KEY:
-    raise ValueError("LLM_CHANNEL=yseeai 时必须配置 YSEEAI_LLM_API_KEY")
+if LLM_CHANNEL in {"yseeai", "toapis"} and not LLM_API_KEY:
+    raise ValueError(f"LLM_CHANNEL={LLM_CHANNEL} 时必须配置对应渠道的文本 API Key")
 
 
 @dataclass(frozen=True)
@@ -113,7 +119,7 @@ class Settings:
     all_in_one_base_url: str = os.getenv("ALL_IN_ONE_BASE_URL", "https://mg.epaipix.com").rstrip("/")
     all_in_one_api_key: str = os.getenv("ALL_IN_ONE_API_KEY", "")
     all_in_one_system_key: bool = os.getenv("ALL_IN_ONE_SYSTEM_KEY", "false").lower() == "true"
-    general_outline_llm_model: str = os.getenv("GENERAL_OUTLINE_LLM_MODEL", "").strip() or (LLM_MODEL if LLM_CHANNEL == "yseeai" else "gpt-6-astra")
+    general_outline_llm_model: str = os.getenv("GENERAL_OUTLINE_LLM_MODEL", "").strip() or (LLM_MODEL if LLM_CHANNEL in {"yseeai", "toapis"} else "gpt-6-astra")
     llm_api_mode: str = os.getenv("LLM_API_MODE", "openai").lower()
     storyboard_generation_concurrency: int = max(1, min(200, int(os.getenv("STORYBOARD_GENERATION_CONCURRENCY", "64"))))
     storyboard_line_timeout_seconds: int = max(

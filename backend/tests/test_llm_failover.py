@@ -11,12 +11,14 @@ class RedisState:
     def __init__(self):
         self.value = 0
         self.ttl = None
+        self.key = None
 
     async def get(self, _key):
         return str(self.value) if self.value else None
 
     async def eval(self, _script, _count, _key, _ttl):
         self.value += 1
+        self.key = _key
         self.ttl = _ttl
         return self.value
 
@@ -25,11 +27,12 @@ class RedisState:
 
 
 @pytest.mark.asyncio
-async def test_five_primary_failures_switch_later_storyboard_calls_to_fallback(monkeypatch):
+@pytest.mark.parametrize("channel", ["yseeai", "toapis"])
+async def test_five_primary_failures_switch_later_storyboard_calls_to_fallback(monkeypatch, channel):
     redis = RedisState()
     monkeypatch.setattr(llm_failover, "redis", redis)
-    monkeypatch.setattr(llm_failover, "settings", replace(llm_failover.settings, llm_channel="yseeai"))
-    monkeypatch.setattr(storyboard_prompt, "settings", replace(storyboard_prompt.settings, llm_channel="yseeai", llm_model="gpt-6.1-sol"))
+    monkeypatch.setattr(llm_failover, "settings", replace(llm_failover.settings, llm_channel=channel))
+    monkeypatch.setattr(storyboard_prompt, "settings", replace(storyboard_prompt.settings, llm_channel=channel, llm_model="gpt-6.1-sol"))
     monkeypatch.setattr(storyboard_prompt, "log_background_error", AsyncMock())
     success = SimpleNamespace(
         id="fallback-response",
@@ -44,6 +47,7 @@ async def test_five_primary_failures_switch_later_storyboard_calls_to_fallback(m
         with pytest.raises(RuntimeError, match="supplier failed"):
             await storyboard_prompt._call(client, [], 1400, usage_records=records, operation="storyboard_line")
     assert redis.value == 5
+    assert redis.key == f"llm:failover:{channel}:gpt-6.1-sol:failures"
     assert redis.ttl == 2 * 60 * 60
     assert await storyboard_prompt._call(client, [], 1400, usage_records=records, operation="storyboard_line")
     assert [call.kwargs["model"] for call in create.await_args_list] == ["gpt-6.1-sol"] * 5 + ["gpt-6-sol"]

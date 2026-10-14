@@ -23,8 +23,8 @@ class ChatTestModel:
 
 
 CHAT_TEST_MODELS = (
-    ChatTestModel("gpt-6.1-sol", "GPT 6.1 Sol（英和海外）"),
-    ChatTestModel("gpt-6-sol", "GPT 6 Sol（英和海外）"),
+    ChatTestModel("gpt-6.1-sol", "GPT 6.1 Sol（当前文本渠道）"),
+    ChatTestModel("gpt-6-sol", "GPT 6 Sol（当前文本渠道）"),
     ChatTestModel("gpt-6.1-sol-all-in-one", "GPT 6.1 Sol（all in one）"),
     ChatTestModel("gpt-6-astra-all-in-one", "GPT 6 Astra（all in one）"),
     ChatTestModel("gpt-6-sol-all-in-one", "GPT 6.0 Sol（all in one）"),
