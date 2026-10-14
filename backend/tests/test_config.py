@@ -34,7 +34,7 @@ def test_toapis_text_channel_uses_separate_key_or_existing_toapis_key(monkeypatc
     monkeypatch.setattr(config, "_read_provider_value", lambda name: values.get(name, ""))
 
     assert config._resolve_llm_settings("domestic-key", "https://domestic.example/v1", "domestic-model") == (
-        "https://toapis.com/v1",
+        "https://toapis.cn/v1",
         "text-key",
         "gpt-6.1-sol",
     )

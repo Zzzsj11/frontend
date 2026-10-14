@@ -72,7 +72,7 @@ def _resolve_llm_settings(shared_key: str, shared_base_url: str, shared_model: s
         )
     if LLM_CHANNEL == "toapis":
         return (
-            os.getenv("TOAPIS_LLM_BASE_URL", "https://toapis.com/v1").rstrip("/"),
+            os.getenv("TOAPIS_LLM_BASE_URL", "https://toapis.cn/v1").rstrip("/"),
             _read_provider_value("TOAPIS_LLM_API_KEY") or _read_provider_value("TOAPIS_API_KEY"),
             os.getenv("TOAPIS_LLM_MODEL") or os.getenv("AIGC_CHAT_MODEL") or "gpt-6.1-sol",
         )

@@ -26,7 +26,7 @@ def test_gateway_disabled_keeps_direct_config(monkeypatch):
     assert str(client.base_url) == "https://upstream.example/v1/"
 
 
-@pytest.mark.parametrize("channel,base_url", [("yseeai", "https://ai-aigc.yseeai.com/v1"), ("toapis", "https://toapis.com/v1")])
+@pytest.mark.parametrize("channel,base_url", [("yseeai", "https://ai-aigc.yseeai.com/v1"), ("toapis", "https://toapis.cn/v1")])
 def test_text_channel_keeps_direct_route_and_agent_headers_with_gateway_enabled(monkeypatch, channel, base_url):
     from dataclasses import replace
 
@@ -46,7 +46,7 @@ def test_text_channel_keeps_direct_route_and_agent_headers_with_gateway_enabled(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("channel,base_url", [("yseeai", "https://ai-aigc.yseeai.com/v1"), ("toapis", "https://toapis.com/v1")])
+@pytest.mark.parametrize("channel,base_url", [("yseeai", "https://ai-aigc.yseeai.com/v1"), ("toapis", "https://toapis.cn/v1")])
 async def test_text_storyboard_job_restores_persisted_agent_attribution(monkeypatch, channel, base_url):
     from dataclasses import replace
     from types import SimpleNamespace
