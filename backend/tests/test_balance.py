@@ -30,6 +30,40 @@ FAKE_SETTINGS = SimpleNamespace(
 KEY_ITEM = {"apiKey": CURRENT_KEY, "name": "gpt-image-dev", "quotaAmt": "1000.0000", "usedAmt": "751.30744"}
 
 
+@pytest.mark.asyncio
+async def test_all_in_one_credits_uses_configured_key_without_exposing_it(monkeypatch):
+    monkeypatch.setattr(
+        balance,
+        "settings",
+        SimpleNamespace(all_in_one_api_key="ms_private", all_in_one_base_url="https://platform.test"),
+    )
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://platform.test/v1/account/credits"
+        assert request.headers["Authorization"] == "Bearer ms_private"
+        return httpx.Response(
+            200,
+            json={
+                "available_points": "123.500000",
+                "monthly_points": "200.000000",
+                "spent_points": "76.500000",
+                "reserved_points": "0.000000",
+                "key_prefix": "ms_public",
+            },
+        )
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        balance.httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(respond), **kwargs),
+    )
+    result = await balance.query_all_in_one_credits()
+    assert result["remainingDisplay"] == "123.50"
+    assert result["keyMasked"] == "ms_public***"
+    assert "ms_private" not in str(result)
+
+
 class FakeResponse:
     def __init__(self, body):
         self._body = body

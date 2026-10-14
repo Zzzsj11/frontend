@@ -45,6 +45,18 @@ test('发现新版本后由用户点击版本条刷新页面', async ({ page }) 
           updatedAt: '',
         },
       })
+    if (path === '/api/account/all-in-one-credits')
+      return route.fulfill({
+        json: {
+          available: true,
+          remaining: '10000.000000',
+          remainingDisplay: '10,000.00',
+          monthlyPoints: '10000.000000',
+          spentPoints: '0.000000',
+          reservedPoints: '0.000000',
+          keyMasked: 'ms_test***',
+        },
+      })
     return route.fulfill({ status: 404, json: { detail: 'not mocked' } })
   })
 
@@ -52,6 +64,8 @@ test('发现新版本后由用户点击版本条刷新页面', async ({ page }) 
   await page.getByLabel('用户名').fill('admin')
   await page.getByLabel('密码').fill('123456')
   await page.getByRole('button', { name: '登录' }).click()
+
+  await expect(page.locator('.balance-pill.all-in-one')).toContainText('10,000.00')
 
   const updateButton = page.getByRole('button', { name: '发现新版本，点击刷新页面' })
   await expect(updateButton).toBeVisible()

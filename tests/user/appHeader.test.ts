@@ -9,7 +9,7 @@ describe('AppHeader provider balances', () => {
   beforeEach(() => setActivePinia(createPinia()))
   afterEach(() => vi.useRealTimers())
 
-  it('仅展示英和余额胶囊及当前 Key 额度', () => {
+  it('并列展示英和余额和 all in one Key 剩余积分', () => {
     const auth = useAuthStore()
     auth.user = {
       id: 'u1',
@@ -50,18 +50,31 @@ describe('AppHeader provider balances', () => {
         },
       },
     }
+    auth.allInOneCredits = {
+      available: true,
+      remaining: '123.5',
+      remainingDisplay: '123.50',
+      monthlyPoints: '200',
+      spentPoints: '76.5',
+      reservedPoints: '0',
+      keyMasked: 'ms_test***',
+    }
     const wrapper = mount(AppHeader, {
       global: {
         stubs: { RouterLink: { template: '<a><slot /></a>' }, DeploymentBadge: true },
       },
     })
     const balance = wrapper.get('.balance-pill.yinghe')
-    expect(wrapper.findAll('.balance-pill')).toHaveLength(1)
+    expect(wrapper.findAll('.balance-pill')).toHaveLength(2)
     expect(balance.text()).toContain('英和')
     expect(balance.get('.balance-value').text()).toBe('2626.47')
     expect(balance.get('[data-test="key-quota"]').text()).toBe('yh-test*** 余 658.96')
     expect(balance.attributes('title')).toContain('当前 Key yh-test***（视频 Key）')
     expect(balance.attributes('title')).toContain('月度已用 341.04 / 限额 1000')
+    const allInOne = wrapper.get('.balance-pill.all-in-one')
+    expect(allInOne.text()).toContain('all in one')
+    expect(allInOne.text()).toContain('123.50')
+    expect(allInOne.attributes('title')).toContain('当前 Key ms_test***')
     wrapper.unmount()
   })
 

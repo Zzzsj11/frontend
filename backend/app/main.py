@@ -39,7 +39,7 @@ from .auth import (
     user_public,
     verify_password,
 )
-from .balance import ensure_video_batch_balance, query_provider_balances
+from .balance import ensure_video_batch_balance, query_all_in_one_credits, query_provider_balances
 from .chat import chat_manager
 from .config import settings, validate_runtime_security
 from .creative import router as creative_router
@@ -362,6 +362,11 @@ async def release_info() -> dict:
 @app.get("/api/account/balance")
 async def account_balance(_user: CurrentUser, force: bool = False) -> dict:
     return await query_provider_balances(force=force)
+
+
+@app.get("/api/account/all-in-one-credits")
+async def all_in_one_credits(_user: CurrentUser) -> dict:
+    return await query_all_in_one_credits()
 
 
 @app.post("/api/auth/login")

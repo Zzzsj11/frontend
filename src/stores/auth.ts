@@ -31,6 +31,17 @@ export interface AccountBalance {
     yinghe: AccountBalance
   }
 }
+export interface AllInOneCredits {
+  available: boolean
+  remaining?: string
+  remainingDisplay?: string
+  monthlyPoints?: string
+  spentPoints?: string
+  reservedPoints?: string
+  keyMasked?: string
+  updatedAt?: string
+  message?: string
+}
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null as AuthUser | null,
@@ -38,6 +49,7 @@ export const useAuthStore = defineStore('auth', {
     loading: false,
     balance: null as AccountBalance | null,
     balanceLoading: false,
+    allInOneCredits: null as AllInOneCredits | null,
   }),
   getters: { authenticated: (state) => Boolean(state.user) },
   actions: {
@@ -45,14 +57,20 @@ export const useAuthStore = defineStore('auth', {
       if (!this.ready) {
         this.user = await restoreSession().catch(() => null)
         this.ready = true
-        if (this.user && !this.user.mustChangePassword) void this.loadBalance()
+        if (this.user && !this.user.mustChangePassword) {
+          void this.loadBalance()
+          void this.loadAllInOneCredits()
+        }
       }
     },
     async login(username: string, password: string) {
       this.loading = true
       try {
         this.user = (await loginRequest(username, password)).user
-        if (!this.user.mustChangePassword) void this.loadBalance()
+        if (!this.user.mustChangePassword) {
+          void this.loadBalance()
+          void this.loadAllInOneCredits()
+        }
       } finally {
         this.loading = false
         this.ready = true
@@ -69,11 +87,21 @@ export const useAuthStore = defineStore('auth', {
         this.balanceLoading = false
       }
     },
+    async loadAllInOneCredits() {
+      if (!this.user) return
+      this.allInOneCredits = await apiRequest<AllInOneCredits>(
+        '/account/all-in-one-credits',
+        {},
+        true,
+        [404],
+      ).catch(() => ({ available: false, message: 'all in one 积分暂不可用' }))
+    },
     async logout() {
       const uid = this.user?.id
       await logoutRequest()
       this.user = null
       this.balance = null
+      this.allInOneCredits = null
       // 清空用户相关的 localStorage
       if (uid) {
         localStorage.removeItem(`mv_sidebar_song_${uid}`)

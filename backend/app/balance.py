@@ -292,6 +292,34 @@ async def query_provider_balances(*, force: bool = False, providers: set[str] | 
     return {"providers": {"yinghe": yinghe}, **yinghe}
 
 
+async def query_all_in_one_credits() -> dict[str, Any]:
+    """Read the quota of the same key used for all-in-one generation."""
+    if not settings.all_in_one_api_key:
+        return {"available": False, "message": "未配置 all in one API Key"}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                settings.all_in_one_base_url.rstrip("/") + "/v1/account/credits",
+                headers={"Authorization": f"Bearer {settings.all_in_one_api_key}"},
+            )
+            response.raise_for_status()
+            data = response.json()
+        remaining = str(data["available_points"])
+        return {
+            "available": True,
+            "remaining": remaining,
+            "remainingDisplay": f"{float(remaining):,.2f}",
+            "monthlyPoints": str(data["monthly_points"]),
+            "spentPoints": str(data["spent_points"]),
+            "reservedPoints": str(data["reserved_points"]),
+            "keyMasked": str(data["key_prefix"]) + "***",
+            "updatedAt": datetime.now(UTC).isoformat(),
+        }
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        logger.warning("all in one 积分查询失败：%s", type(exc).__name__)
+        return {"available": False, "message": "all in one 积分暂不可用"}
+
+
 def estimate_item_cost(item: Any) -> tuple[str, float]:
     model = str(item.model or "")
     policy = video_estimate_policy(model)
