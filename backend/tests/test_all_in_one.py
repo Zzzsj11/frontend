@@ -27,6 +27,15 @@ def test_personal_and_system_identity(configured, monkeypatch):
     assert aio.headers(user_id="owner")["X-User-Id"] == "owner"
 
 
+@pytest.mark.asyncio
+async def test_chat_timeout_allows_long_outline_stage(configured):
+    client = aio.chat_client()
+    try:
+        assert client.timeout == 600
+    finally:
+        await client.close()
+
+
 def test_catalog_scope_does_not_clone_yinghe_billing():
     result = rows({"minimax-h3": {"billing": {"currency": "CNY"}, "h3Modes": ["reference"]}})
     assert len(result) == 6
@@ -235,7 +244,7 @@ async def test_resume_uses_original_job_without_creation(configured, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_seedance_reviews_original_images_and_rejects_other_account_assets(configured, monkeypatch):
+async def test_seedance_uses_public_original_images_without_private_review(configured, monkeypatch):
     from app.providers import ProviderError
 
     original = httpx.AsyncClient
@@ -250,12 +259,14 @@ async def test_seedance_reviews_original_images_and_rejects_other_account_assets
     monkeypatch.setattr(aio.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handle), **kw))
     submitting = AsyncMock()
     monkeypatch.setattr(jobs, "mark_provider_submitting", submitting)
+    monkeypatch.setattr(jobs, "record_provider_request", AsyncMock())
+    monkeypatch.setattr(jobs, "record_provider_response", AsyncMock())
     monkeypatch.setattr(jobs, "set_provider_task", AsyncMock())
     monkeypatch.setattr(aio, "resume", AsyncMock(return_value={"done": True}))
     job = Job(id="sd-aio", kind="video", user_id="owner", request={"_providerModelId": "seedance-2.0"})
     request = VideoGenerationCreate(model="doubao-seedance-2.0-all-in-one", prompt="scene", image_urls=["https://tos.example/original.png"], resolution="480p", duration=4)
     await aio.generate(request, job)
-    assert payloads[0]["private_asset_review"] is True
+    assert "private_asset_review" not in payloads[0]
     assert payloads[0]["images"] == ["https://tos.example/original.png"]
     submitting.reset_mock()
     request.image_urls = ["asset://another-account"]

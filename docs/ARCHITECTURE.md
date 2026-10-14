@@ -16,6 +16,8 @@
 
 `LLM_CHANNEL=all-in-one` 使用平台 Key 的 `gpt-6.1-sol-all-in-one` 作为 Chat、大纲和逐镜提示词默认模型，连续五次供应商失败后在同一平台切换到 `gpt-6-sol-all-in-one`，两小时后重试主模型。ASS、通用分镜和直接视频生成的新任务默认使用 `doubao-seedance-2.0-all-in-one`；`wan3.0-video-all-in-one` 与 `minimax-h3-all-in-one` 可逐镜选择。三个视频型号的项目侧执行池上限为 500，实际并发还受平台 Key、Worker 和用户限额约束。图片模型暂继续使用 ToAPIs `gemini-nano-banana-2.1`。all in one 视频工单保存上游请求、受理响应、终态响应和平台积分结算，批量预检不误用英和余额。
 
+all in one 文本请求允许最多等待 10 分钟，ASS 两阶段大纲发生异常时仍把已完成阶段的请求、响应和用量写入日志。RunningHub 路由的视频人物参考图使用可公开读取的 TOS 原图 URL；不提交该路由不支持的 `private_asset_review` 参数，也不提交英和账户专属的 `asset://` URL。
+
 用户场景图与私有数字人身份图统一使用 ToAPIs `gemini-nano-banana-2.1`。文生图和最多 14 张公开 URL 参考图均调用 `/v1/images/generations`，用 `metadata.resolution` 选择 `1K`、`2K`、`4K`，任务结果轮询后将原图与缩略图归档到 TOS。用户界面单独保存图片清晰度，不改变视频清晰度。旧英和与 all-in-one 图片模型保留历史工单归因，新任务不可选。
 
 所选文本渠道的 `gpt-6.1-sol` 供应商调用连续失败 5 次时，Redis 按渠道分别计数，让后续 Chat、大纲和逐镜提示词请求改用同渠道的 `gpt-6-sol`；冷却 2 小时后自动重新试用主模型，主模型成功即清零。仅实际供应商调用错误或供应商返回的繁忙文本计入失败，结构校验失败不计入。请求日志、用量账本与 LLM 调用记录保存实际调用的模型；Redis 不可用时保持主模型，不误切换到备用模型。

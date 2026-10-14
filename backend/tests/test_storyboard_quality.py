@@ -415,6 +415,38 @@ async def test_ass_outline_v2_has_one_plan_and_one_full_song_shot_stage(monkeypa
     ]
 
 
+@pytest.mark.asyncio
+async def test_ass_outline_timeout_preserves_completed_stage_usage(monkeypatch) -> None:
+    from app import storyboard_prompt
+
+    monkeypatch.setattr(storyboard_prompt, "settings", dataclasses.replace(settings, outline_protocol_version="v2", llm_api_key="test"))
+    completed_call = {"operation": "ass_scene_plan", "model": "gpt-6.1-sol-all-in-one", "usage": {"input_tokens": 42, "output_tokens": 8}}
+
+    async def fake_plan(*_args, **kwargs):
+        kwargs["usage_records"].append(completed_call)
+        return {"globalVisual": {}, "scenes": [make_scene(0, 0, "海边", {"human-1": "白色风衣"}), make_scene(1, 1, "公路", {"human-1": "蓝色夹克"})]}
+
+    async def fake_shots(*_args, **kwargs):
+        kwargs["usage_records"].append({"operation": "ass_shots_v2", "status": "error", "requestMessages": [{"role": "user", "content": "请求"}]})
+        raise TimeoutError("平台响应晚于客户端等待上限")
+
+    monkeypatch.setattr(storyboard_prompt, "_plan_ass_scenes", fake_plan)
+    monkeypatch.setattr(storyboard_prompt, "_generate_ass_shots_v2", fake_shots)
+    with pytest.raises(storyboard_prompt.StoryboardPromptError) as error:
+        await generate_ass_story_outline(
+            segments=[
+                {"index": 0, "start": 0, "end": 5, "lyrics": "第一句", "segmentType": "lyric"},
+                {"index": 1, "start": 5, "end": 10, "lyrics": "第二句", "segmentType": "lyric"},
+            ],
+            emotion={},
+            selected_humans=[{"id": "human-1", "name": "女主"}],
+            extra_requirement="",
+        )
+    assert error.value.usage_records[0] == completed_call
+    assert error.value.usage_records[1]["operation"] == "ass_shots_v2"
+    assert error.value.usage == {"input_tokens": 42, "output_tokens": 8}
+
+
 def test_ass_timeline_splits_gaps_with_two_part_rule_and_chinese_labels() -> None:
     segments = group_cues([AssCue(21.88, 25.0, "第一句"), AssCue(50.0, 53.0, "第二句")])
     assert [item["segmentType"] for item in segments] == ["intro", "intro", "lyric", "interlude", "interlude", "lyric", "outro"]

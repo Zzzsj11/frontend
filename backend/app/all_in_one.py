@@ -39,7 +39,7 @@ def headers(*, user_id: str | None = None, idempotency_key: str | None = None) -
     return result
 
 
-def chat_client(*, user_id: str | None = None, timeout: float = 120) -> AsyncOpenAI:
+def chat_client(*, user_id: str | None = None, timeout: float = 600) -> AsyncOpenAI:
     return AsyncOpenAI(
         base_url=settings.all_in_one_base_url.rstrip("/") + "/v1",
         api_key=settings.all_in_one_api_key,
@@ -113,7 +113,6 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
         if model == "seedance-2.0" and request.image_urls:
             if any(url.startswith("asset://") for url in request.image_urls):
                 raise ProviderError("all in one 须使用原始 TOS 参考图，不能复用英和账户的 asset://")
-            payload["private_asset_review"] = True
         payload.update(
             duration=int(request.duration),
             aspect_ratio=request.ratio,

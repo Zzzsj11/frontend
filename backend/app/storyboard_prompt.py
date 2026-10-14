@@ -557,31 +557,37 @@ async def generate_ass_story_outline(
         if settings.outline_protocol_version == "v2":
             progress.update(stagesDone=0, stagesTotal=2)
         await on_progress(progress)
-    plan = await _plan_ass_scenes(
-        client,
-        lyric_lines=lyric_lines,
-        structural_notes=structural_notes,
-        emotion=emotion,
-        selected_humans=selected_humans,
-        extra_requirement=extra_requirement,
-        expected_scenes=expected_scenes,
-        usage_records=usage_records,
-    )
+    try:
+        plan = await _plan_ass_scenes(
+            client,
+            lyric_lines=lyric_lines,
+            structural_notes=structural_notes,
+            emotion=emotion,
+            selected_humans=selected_humans,
+            extra_requirement=extra_requirement,
+            expected_scenes=expected_scenes,
+            usage_records=usage_records,
+        )
+    except Exception as exc:
+        raise StoryboardPromptError(str(exc), usage_records=usage_records) from exc
     scenes = [{**scene, "locationId": f"loc-{position + 1}"} for position, scene in enumerate(plan["scenes"])]
     scene_groups = _assign_scene_segments(segments, scenes)
     if settings.outline_protocol_version == "v2":
         progress = {"phase": "shots", "stagesDone": 1, "stagesTotal": 2}
         if on_progress:
             await on_progress(dict(progress))
-        all_shots = await _generate_ass_shots_v2(
-            client,
-            segments=segments,
-            scenes=scenes,
-            emotion=emotion,
-            selected_humans=selected_humans,
-            extra_requirement=extra_requirement,
-            usage_records=usage_records,
-        )
+        try:
+            all_shots = await _generate_ass_shots_v2(
+                client,
+                segments=segments,
+                scenes=scenes,
+                emotion=emotion,
+                selected_humans=selected_humans,
+                extra_requirement=extra_requirement,
+                usage_records=usage_records,
+            )
+        except Exception as exc:
+            raise StoryboardPromptError(str(exc), usage_records=usage_records) from exc
         progress["stagesDone"] = 2
         if on_progress:
             await on_progress(dict(progress))
