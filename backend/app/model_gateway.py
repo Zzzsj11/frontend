@@ -75,7 +75,8 @@ async def run_with_context(job: Any, runner: Any) -> Any:
 
         all_in_one = snapshot.get("_provider") == "all-in-one" or str(snapshot.get("model") or "").endswith("-all-in-one")
         all_in_one = all_in_one or (job.kind not in {"image", "video"} and any(model.endswith("-all-in-one") for model in (settings.llm_model, settings.general_outline_llm_model)))
-        if not all_in_one:
+        text_job = settings.llm_channel == "yseeai" and job.kind in {"chat", "ass_outline", "general_outline", "ass_segment_retry", "storyboard_line"}
+        if not all_in_one and not text_job:
             return await runner(job)
     from .database import session_factory
     from .models import GenerationJobModel
@@ -106,7 +107,10 @@ class AsyncOpenAI(OpenAIClient):
     """Route every OpenAI-compatible MV call through the service when opted in."""
 
     def __init__(self, **kwargs: Any):
-        if enabled():
+        from .config import settings
+
+        direct_yseeai = settings.llm_channel == "yseeai" and str(kwargs.get("base_url") or "").rstrip("/") == settings.llm_base_url.rstrip("/")
+        if enabled() and not direct_yseeai:
 
             async def enrich(request: httpx.Request) -> None:
                 request.headers.update(request_headers())
@@ -118,4 +122,15 @@ class AsyncOpenAI(OpenAIClient):
                 max_retries=0,
                 http_client=httpx.AsyncClient(timeout=kwargs.get("timeout", 300), event_hooks={"request": [enrich]}),
             )
+        elif direct_yseeai:
+            _, name, run = current_agent_attribution()
+            if _agent.get() is not None:
+                name, run = _agent.get() or ("", "")
+            if run:
+                kwargs["default_headers"] = {
+                    **kwargs.get("default_headers", {}),
+                    "X-Agent-Name": name or "code-agent",
+                    "X-Agent-Run-Id": run,
+                    "X-Test-Run-Id": run,
+                }
         super().__init__(**kwargs)

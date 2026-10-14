@@ -12,6 +12,10 @@
 
 统一供应商配置通过 Docker Secret `provider_config` 挂载。检测到其中的 `AIGC_TOKEN` 时，文本模型 Token、聊天 API 地址和默认模型作为同一个配置组生效，优先于遗留的 `LLM_*` 环境变量，避免共享 Token 被误发往其他供应商；只有未配置统一供应商 Secret 时才启用独立 `LLM_*` 配置。
 
+英和海外文本模型可单独设置 `LLM_CHANNEL=yseeai`、`YSEEAI_LLM_API_KEY` 和 `YSEEAI_LLM_MODEL=gpt-6.1-sol`；大纲默认使用同一模型，也可由 `GENERAL_OUTLINE_LLM_MODEL` 单独指定。该显式渠道选择使用固定的 `https://ai-aigc.yseeai.com/v1`，优先于国内共享 Token，仅改变 Chat、大纲及逐镜提示词调用；图片和视频仍用各自渠道配置。模型网关开启时，该文本渠道仍直连英和海外，媒体继续按网关设置路由。Token 账本及 LLM 调用记录将供应商记为 `yseeai`。
+
+英和海外 `gpt-6.1-sol` 的供应商调用连续失败 5 次时，Redis 中的共享熔断状态让后续 Chat、大纲和逐镜提示词请求改用 `gpt-6-sol`；冷却 10 分钟后自动重新试用主模型，主模型成功即清零。仅实际供应商调用错误或供应商返回的繁忙文本计入失败，结构校验失败不计入。请求日志、用量账本与 LLM 调用记录保存实际调用的模型；Redis 不可用时保持主模型，不误切换到备用模型。
+
 模型调用可整体切换到独立模型服务（`model-service/`，对外 API + 管理 API + 双前端，独立数据库与部署）：配置 `MODEL_GATEWAY_URL` 与 `MODEL_GATEWAY_API_KEY` 后，`backend/app/model_gateway.py` 将 LLM、图片、视频、Kling/RunningHub 及提示词优化调用路由到该服务；留空则保持现有直连供应商行为。迁移按渠道灰度——`MIGRATED_CHANNELS` 已承接 yinghe、yseeai、toapis、runninghub 与两个提示词优化渠道；PPIO 与 BFL 已移除支持，不属于待迁移渠道，也不允许旁路直连。网关请求携带内部 Key、`X-User-Id` 用户归因与 Agent 三头；工单上下文内 `Idempotency-Key` 由工单 ID 派生稳定键（媒体创建另由 providers 以 `{job_id}:{variant}` 覆盖），Worker 崩溃重放由网关按 (client, user, key) 去重，不会重复创建上游任务。仍受支持渠道的旧直连工单恢复时按原来源直连查询；已退役渠道仅保留历史记录，不恢复调用。网关工单在 `MODEL_GATEWAY_URL` 缺失时禁止静默回退，避免来源丢失。model-service 自身架构、API 协议与部署见 `model-service/README.md` 及 `model-service/docs/`。
 
 ASS 与定制通用分镜默认使用 `OUTLINE_PROTOCOL_VERSION=v2` 的紧凑大纲协议。定制通用一次输出全片导演决策骨架；ASS 固定为一次大场景规划加一次全曲镜头骨架，不再按大场景并行重复提交人物长描述。后续逐镜提示词仍消费兼容的标准大纲字段，因此无需改动下游图片、视频和导出链路。紧急回滚可将该变量设为 `v1`，恢复旧提示词和旧调用编排。

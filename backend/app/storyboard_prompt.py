@@ -10,6 +10,7 @@ from typing import Any
 
 from .config import settings
 from .error_logging import log_background_error
+from .llm_failover import choose_model, record_failure, record_success
 from .llm_policy import TemporaryLlmError, check_provider_text, completion_options, is_transient_error, outline_contract, retry_delay
 from .media_constraints import normalize_video_duration
 from .model_gateway import AsyncOpenAI
@@ -811,8 +812,8 @@ async def _call(
 ) -> str:
     """Bounded transient retries; every response (including overload text) is accounted for."""
     snapshot = [dict(message) for message in messages]
-    model = (settings.general_outline_llm_model or settings.llm_model) if operation.startswith("general_story_outline") else settings.llm_model
-    max_attempts = 1 if model.endswith("-all-in-one") else 3
+    configured_model = (settings.general_outline_llm_model or settings.llm_model) if operation.startswith("general_story_outline") else settings.llm_model
+    max_attempts = 1 if configured_model.endswith("-all-in-one") else 3
     if operation.startswith("general_story_outline"):
         # Share the budget with structural repair rounds; never multiply 3 transport x 3 schema retries.
         remaining = 5 - sum(str(record.get("operation", "")).startswith("general_story_outline") for record in usage_records)
@@ -820,6 +821,7 @@ async def _call(
             raise TemporaryLlmError("大纲生成已达到 5 次调用上限，请稍后重试")
         max_attempts = min(max_attempts, remaining)
     for attempt in range(max_attempts):
+        model = await choose_model(configured_model)
         started = time.perf_counter()
         text, usage, request_id = "", {}, None
         try:
@@ -835,6 +837,7 @@ async def _call(
                 text = response.choices[0].message.content or ""
             check_provider_text(text)
         except Exception as exc:
+            await record_failure(model)
             usage_records.append(
                 {
                     "operation": operation,
@@ -857,6 +860,7 @@ async def _call(
                 raise TemporaryLlmError("文本模型服务繁忙、超时或连接异常，自动重试后仍未恢复，请稍后重试") from exc
             await log_background_error(path=f"/llm/{operation}", status_code=502, error_type="LLMCallError", message=f"LLM 调用失败（{operation}）：{exc}")
             raise
+        await record_success(model)
         usage_records.append(
             {
                 "operation": operation,

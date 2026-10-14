@@ -39,7 +39,28 @@ async def test_transport_retries_are_bounded(monkeypatch):
 
 def test_astra_completion_parameters():
     assert completion_options("gpt-6-astra", 3400) == {"max_completion_tokens": 8192, "reasoning_effort": "low"}
+    assert completion_options("gpt-6.1-sol", 3400) == {"max_completion_tokens": 8192, "reasoning_effort": "low"}
     assert completion_options("gpt-5.5", 3400) == {"max_tokens": 3400, "temperature": 0.2}
+
+
+def test_overseas_storyboard_usage_records_provider(monkeypatch):
+    from dataclasses import replace
+
+    from app import domain
+
+    recorded = []
+    monkeypatch.setattr(domain, "settings", replace(domain.settings, llm_channel="yseeai", llm_model="gpt-6.1-sol"))
+    monkeypatch.setattr(domain, "add_token_usage", lambda _db, **kwargs: recorded.append(("usage", kwargs)))
+    monkeypatch.setattr(domain, "add_llm_call_log", lambda _db, **kwargs: recorded.append(("log", kwargs)))
+    domain._persist_llm_calls(
+        object(),
+        [{"operation": "storyboard_line", "model": "gpt-6.1-sol", "usage": {"total_tokens": 12}}],
+        default_operation="storyboard_line",
+        user_id="user-1",
+        project_id="project-1",
+        project_task_id="task-1",
+    )
+    assert [item[1]["provider"] for item in recorded] == ["yseeai", "yseeai"]
 
 
 def test_missing_wardrobe_does_not_report_wrong_shot_count():

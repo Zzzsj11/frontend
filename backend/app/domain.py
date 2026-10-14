@@ -973,10 +973,11 @@ def _persist_llm_calls(
     """把一次 LLM 编排的调用记录同时落 token 账本与 llm_call_logs 全量留痕（请求快照、返回原文、耗时）。"""
     for call in calls or []:
         operation = f"{call.get('operation') or default_operation}{operation_suffix}"
+        provider = "all-in-one" if str(call.get("model") or settings.llm_model).endswith("-all-in-one") else (settings.llm_channel or "openai-compatible")
         add_token_usage(
             db,
             operation=operation,
-            provider="all-in-one" if str(call.get("model") or settings.llm_model).endswith("-all-in-one") else "openai-compatible",
+            provider=provider,
             model=call.get("model") or settings.llm_model,
             usage=call.get("usage"),
             user_id=user_id,
@@ -989,7 +990,7 @@ def _persist_llm_calls(
         add_llm_call_log(
             db,
             operation=operation,
-            provider="all-in-one" if str(call.get("model") or settings.llm_model).endswith("-all-in-one") else "openai-compatible",
+            provider=provider,
             model=call.get("model") or settings.llm_model,
             usage=call.get("usage"),
             user_id=user_id,

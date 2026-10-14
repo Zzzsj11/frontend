@@ -2,6 +2,7 @@ from app import config
 
 
 def test_shared_provider_configuration_is_kept_as_one_group(monkeypatch) -> None:
+    monkeypatch.setattr(config, "LLM_CHANNEL", "")
     monkeypatch.setenv("LLM_API_KEY", "stale-token")
     monkeypatch.setenv("LLM_BASE_URL", "https://wrong.example/v1")
     monkeypatch.setenv("LLM_MODEL", "wrong-model")
@@ -11,6 +12,18 @@ def test_shared_provider_configuration_is_kept_as_one_group(monkeypatch) -> None
     assert api_key == "shared-token"
     assert base_url == "https://shared.example/v1"
     assert model == "shared-model"
+
+
+def test_overseas_text_channel_uses_its_own_key_without_changing_media(monkeypatch) -> None:
+    monkeypatch.setattr(config, "LLM_CHANNEL", "yseeai")
+    monkeypatch.setenv("YSEEAI_LLM_MODEL", "gpt-6.1-sol")
+    monkeypatch.setattr(config, "_read_provider_value", lambda name: "overseas-key" if name == "YSEEAI_LLM_API_KEY" else "")
+
+    assert config._resolve_llm_settings("domestic-key", "https://ai-aigc.fzyinghe.com/v1", "gpt-5.6-sol") == (
+        "https://ai-aigc.yseeai.com/v1",
+        "overseas-key",
+        "gpt-6.1-sol",
+    )
 
 
 def test_material_export_downloads_allow_twenty_parallel_files() -> None:

@@ -13,6 +13,8 @@ from sqlalchemy.orm import selectinload
 from .config import settings
 from .database import session_factory
 from .jobs import Job, jobs
+from .llm_failover import choose_model, record_failure, record_success
+from .llm_policy import completion_options
 from .model_gateway import AsyncOpenAI
 from .model_gateway import enabled as gateway_enabled
 from .models import ChatMessageModel, ChatSessionModel
@@ -170,6 +172,8 @@ class ChatManager:
         request_id: str | None = None
         usage_recorded = False
         openai_client = None
+        model_used = settings.llm_model
+        provider_started = provider_completed = False
         try:
             if not settings.llm_api_key and not gateway_enabled():
                 raise RuntimeError("LLM_API_KEY 未配置")
@@ -201,15 +205,17 @@ class ChatManager:
             else:
                 if settings.llm_model.endswith("-all-in-one"):
                     from .all_in_one import chat_client, upstream_model
-                    from .llm_policy import completion_options
 
                     client = chat_client(user_id=session.user_id)
                     model = upstream_model(settings.llm_model)
                     options = completion_options(model, 2048)
                 else:
                     client = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url)
-                    model, options = settings.llm_model, {}
+                    model = await choose_model(settings.llm_model)
+                    options = completion_options(model, 2048) if settings.llm_channel == "yseeai" else {}
+                model_used = model
                 openai_client = client
+                provider_started = True
                 stream = await client.chat.completions.create(
                     model=model,
                     **options,
@@ -227,14 +233,16 @@ class ChatManager:
                     if text:
                         chunks.append(text)
                         await append_chat_event(session.id, "assistant_delta", {"text": text})
+                provider_completed = True
+                await record_success(model_used)
             answer = "".join(chunks)
             async with session_factory() as db:
                 db.add(ChatMessageModel(session_id=session.id, role="assistant", content=answer))
                 _, normalized_usage = add_token_usage(
                     db,
                     operation="chat",
-                    provider="all-in-one" if settings.llm_model.endswith("-all-in-one") else settings.llm_api_mode,
-                    model=settings.llm_model,
+                    provider="all-in-one" if settings.llm_model.endswith("-all-in-one") else (settings.llm_channel or settings.llm_api_mode),
+                    model=model_used,
                     usage=usage,
                     user_id=session.user_id,
                     chat_session_id=session.id,
@@ -249,8 +257,8 @@ class ChatManager:
                     add_token_usage(
                         db,
                         operation="chat_cancelled",
-                        provider="all-in-one" if settings.llm_model.endswith("-all-in-one") else settings.llm_api_mode,
-                        model=settings.llm_model,
+                        provider="all-in-one" if settings.llm_model.endswith("-all-in-one") else (settings.llm_channel or settings.llm_api_mode),
+                        model=model_used,
                         usage=usage,
                         user_id=session.user_id,
                         chat_session_id=session.id,
@@ -259,13 +267,15 @@ class ChatManager:
                     await db.commit()
             await append_chat_event(session.id, "interrupted", {})
         except Exception as exc:
+            if provider_started and not provider_completed:
+                await record_failure(model_used)
             if not usage_recorded:
                 async with session_factory() as db:
                     add_token_usage(
                         db,
                         operation="chat_failed",
-                        provider="all-in-one" if settings.llm_model.endswith("-all-in-one") else settings.llm_api_mode,
-                        model=settings.llm_model,
+                        provider="all-in-one" if settings.llm_model.endswith("-all-in-one") else (settings.llm_channel or settings.llm_api_mode),
+                        model=model_used,
                         usage=usage,
                         user_id=session.user_id,
                         chat_session_id=session.id,

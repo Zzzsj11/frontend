@@ -26,6 +26,63 @@ def test_gateway_disabled_keeps_direct_config(monkeypatch):
     assert str(client.base_url) == "https://upstream.example/v1/"
 
 
+def test_overseas_text_keeps_direct_route_and_agent_headers_with_gateway_enabled(monkeypatch):
+    from dataclasses import replace
+
+    from app.config import settings
+
+    monkeypatch.setenv("MODEL_GATEWAY_URL", "http://model-service:8011")
+    monkeypatch.setattr(model_gateway, "current_agent_attribution", lambda: ("agent_test", "code-agent", "overseas-run"))
+    monkeypatch.setattr(
+        __import__("app.config", fromlist=["settings"]),
+        "settings",
+        replace(settings, llm_channel="yseeai", llm_base_url="https://ai-aigc.yseeai.com/v1"),
+    )
+    client = model_gateway.AsyncOpenAI(api_key="overseas-key", base_url="https://ai-aigc.yseeai.com/v1")
+    assert str(client.base_url) == "https://ai-aigc.yseeai.com/v1/"
+    assert client.default_headers["X-Agent-Name"] == "code-agent"
+    assert client.default_headers["X-Agent-Run-Id"] == client.default_headers["X-Test-Run-Id"] == "overseas-run"
+
+
+@pytest.mark.asyncio
+async def test_overseas_storyboard_job_restores_persisted_agent_attribution(monkeypatch):
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from app import database
+    from app.config import settings
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        async def get(self, *_args):
+            return SimpleNamespace(agent_name="code-agent", agent_run_id="persisted-overseas-run")
+
+    monkeypatch.setattr(database, "session_factory", Session)
+    monkeypatch.delenv("MODEL_GATEWAY_URL", raising=False)
+    monkeypatch.setattr(
+        __import__("app.config", fromlist=["settings"]),
+        "settings",
+        replace(settings, llm_channel="yseeai", llm_base_url="https://ai-aigc.yseeai.com/v1"),
+    )
+    job = SimpleNamespace(id="job-1", kind="storyboard_line", user_id="user-1", provider_task_id="", request={})
+
+    async def runner(_job):
+        client = model_gateway.AsyncOpenAI(api_key="overseas-key", base_url="https://ai-aigc.yseeai.com/v1")
+        try:
+            assert client.default_headers["X-Agent-Name"] == "code-agent"
+            assert client.default_headers["X-Agent-Run-Id"] == client.default_headers["X-Test-Run-Id"] == "persisted-overseas-run"
+        finally:
+            await client.close()
+        return "ok"
+
+    assert await model_gateway.run_with_context(job, runner) == "ok"
+
+
 def test_unmigrated_channels_fall_back_to_direct(monkeypatch):
     monkeypatch.setenv("MODEL_GATEWAY_URL", "http://model-service:8011")
     monkeypatch.setenv("MODEL_GATEWAY_API_KEY", "internal-key")

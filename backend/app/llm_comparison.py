@@ -23,6 +23,8 @@ class ChatTestModel:
 
 
 CHAT_TEST_MODELS = (
+    ChatTestModel("gpt-6.1-sol", "GPT 6.1 Sol（英和海外）"),
+    ChatTestModel("gpt-6-sol", "GPT 6 Sol（英和海外）"),
     ChatTestModel("gpt-6.1-sol-all-in-one", "GPT 6.1 Sol（all in one）"),
     ChatTestModel("gpt-6-astra-all-in-one", "GPT 6 Astra（all in one）"),
     ChatTestModel("gpt-6-sol-all-in-one", "GPT 6.0 Sol（all in one）"),
@@ -95,6 +97,7 @@ async def compare_chat_models(*, models: list[str], system_prompt: str, prompt: 
 
     async def run(model: str) -> dict[str, Any]:
         profile = CHAT_TEST_MODEL_MAP[model]
+        provider = "all-in-one" if model.endswith("-all-in-one") else (settings.llm_channel if model in {"gpt-6.1-sol", "gpt-6-sol"} and settings.llm_channel else profile.protocol)
         started = time.perf_counter()
         try:
             async with semaphore:
@@ -110,7 +113,7 @@ async def compare_chat_models(*, models: list[str], system_prompt: str, prompt: 
                 "model": model,
                 "name": profile.name,
                 "protocol": profile.protocol,
-                "provider": "all-in-one" if model.endswith("-all-in-one") else profile.protocol,
+                "provider": provider,
                 "status": "ok",
                 "text": text,
                 "error": "",
@@ -123,7 +126,7 @@ async def compare_chat_models(*, models: list[str], system_prompt: str, prompt: 
                 "model": model,
                 "name": profile.name,
                 "protocol": profile.protocol,
-                "provider": "all-in-one" if model.endswith("-all-in-one") else profile.protocol,
+                "provider": provider,
                 "status": "error",
                 "text": "",
                 "error": str(exc)[:2000],
