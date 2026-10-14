@@ -48,9 +48,9 @@ def rows(source_capabilities: dict[str, dict]) -> list[dict]:
             )
         elif code == "wan3.0-video":
             caps.update(referenceImage={"min": 0, "max": 10}, referenceVideo={"min": 0, "max": 5}, referenceAudio={"min": 0, "max": 5})
-        caps.update(providerCode="all-in-one", providerProtocol="all-in-one", executionPool=f"all-in-one:{code}", executionConcurrency=2)
+        caps.update(providerCode="all-in-one", providerProtocol="all-in-one", executionPool=f"all-in-one:{code}", executionConcurrency=500)
         # Yinghe asset:// belongs to its own account; this channel receives original TOS URLs.
-        caps.pop("billing", None)
+        caps["billing"] = {"provider": "all-in-one", "balanceCheck": False, "billingMode": "platform_points", "currency": "points"}
         if code != "minimax-h3":
             caps.pop("providerResolutionMap", None)
         caps.pop("systemManaged", None)

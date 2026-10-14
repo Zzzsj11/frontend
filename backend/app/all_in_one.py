@@ -127,6 +127,7 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
         )
     job.idempotency_key = f"{job.id}:{job.kind}"
     request_headers = headers(user_id=job.user_id, idempotency_key=job.idempotency_key)
+    await jobs.record_provider_request(job, payload)
     await jobs.mark_provider_submitting(job)
     try:
         async with httpx.AsyncClient(timeout=60) as client:
@@ -145,6 +146,7 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
                 raise error
             _raise_for_status(response)
             body = response.json()
+            await jobs.record_provider_response(job, "submission", body)
     except ProviderError as exc:
         exc.provider = PROVIDER
         raise
@@ -180,8 +182,10 @@ async def resume(job: Any) -> dict[str, Any]:
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
             continue
         if data["status"] == "SUCCEEDED":
+            await jobs.record_provider_response(job, "terminal", data)
             return await store_result(job, data)
         if data["status"] in {"FAILED", "CANCELLED"}:
+            await jobs.record_provider_response(job, "terminal", data)
             raise ProviderError(data["failReason"] or "all in one 生成失败")
         await jobs.update_progress(job, min(90, job.progress + 2))
         await asyncio.sleep(POLL_INTERVAL_SECONDS)

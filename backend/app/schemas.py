@@ -162,7 +162,7 @@ class GeneralStoryboardCreate(BaseModel):
     resolution: Literal["480p", "540p", "720p", "1080p", "4k"] = "720p"
     image_model: str = Field(default="gemini-nano-banana-2.1", min_length=1, max_length=160)
     image_resolution: Literal["1K", "2K", "4K"] = "1K"
-    video_model: str = Field(default="doubao-seedance-2.0", min_length=1, max_length=160)
+    video_model: str = Field(default="doubao-seedance-2.0-all-in-one", min_length=1, max_length=160)
     empty_shot_count: int = Field(ge=0, le=GENERAL_STORYBOARD_MAX_SHOTS)
     character_shot_count: int = Field(ge=0, le=GENERAL_STORYBOARD_MAX_SHOTS)
     group_count: int = Field(default=1, ge=1, le=GENERAL_STORYBOARD_MAX_GROUPS)
@@ -184,7 +184,7 @@ class RandomGeneralStoryboardCreate(BaseModel):
     tertiary_category: str | None = None
     ratio: Literal["16:9", "9:16", "1:1", "4:3"] = "16:9"
     resolution: Literal["480p", "540p", "720p", "1080p", "4k"] = "720p"
-    video_model: str = Field(default="doubao-seedance-2.0", min_length=1, max_length=160)
+    video_model: str = Field(default="doubao-seedance-2.0-all-in-one", min_length=1, max_length=160)
     empty_shot_count: int = Field(default=3, ge=0, le=GENERAL_STORYBOARD_MAX_SHOTS)
     character_shot_count: int = Field(default=14, ge=0, le=GENERAL_STORYBOARD_MAX_SHOTS)
     group_count: int = Field(default=1, ge=1, le=GENERAL_STORYBOARD_MAX_GROUPS)

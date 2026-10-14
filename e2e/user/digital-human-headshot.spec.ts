@@ -98,6 +98,11 @@ async function mockApp(page: Page) {
       currency: 'credits',
       updatedAt: '2026-09-21T00:00:00Z',
     },
+    '/api/account/all-in-one-credits': {
+      available: true,
+      remaining: '100000.000000',
+      remainingDisplay: '100,000.00',
+    },
     '/api/model-options': [
       {
         id: 'gemini-nano-banana-2.1',

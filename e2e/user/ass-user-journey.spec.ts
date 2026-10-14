@@ -55,6 +55,16 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
       }),
     }),
   )
+  await page.route('**/api/account/all-in-one-credits*', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        available: true,
+        remaining: '100000.000000',
+        remainingDisplay: '100,000.00',
+      }),
+    }),
+  )
   await page.route('**/api/model-options', (route) =>
     route.fulfill({
       contentType: 'application/json',

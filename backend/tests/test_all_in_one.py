@@ -32,7 +32,13 @@ def test_catalog_scope_does_not_clone_yinghe_billing():
     assert len(result) == 6
     assert len([m for m in result if m["modality"] == "chat"]) == 3
     h3 = next(m for m in result if m["provider_model_id"] == "MiniMax-H3")
-    assert "billing" not in h3["capabilities"]
+    assert h3["capabilities"]["billing"] == {
+        "provider": "all-in-one",
+        "balanceCheck": False,
+        "billingMode": "platform_points",
+        "currency": "points",
+    }
+    assert h3["capabilities"]["executionConcurrency"] == 500
     assert "reference" in h3["capabilities"]["h3Modes"]
     assert next(m for m in result if m["code"].startswith("doubao-seedance"))["provider_model_id"] == "seedance-2.0"
 
@@ -65,6 +71,10 @@ async def test_create_maps_payload_and_durable_identity(configured, monkeypatch,
     original = httpx.AsyncClient
     monkeypatch.setattr(aio.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handle), **kw))
     monkeypatch.setattr(jobs, "mark_provider_submitting", AsyncMock())
+    provider_request = AsyncMock()
+    provider_response = AsyncMock()
+    monkeypatch.setattr(jobs, "record_provider_request", provider_request)
+    monkeypatch.setattr(jobs, "record_provider_response", provider_response)
     persist = AsyncMock()
     monkeypatch.setattr(jobs, "set_provider_task", persist)
     monkeypatch.setattr(aio, "resume", AsyncMock(return_value={"done": True}))
@@ -88,6 +98,8 @@ async def test_create_maps_payload_and_durable_identity(configured, monkeypatch,
     assert body["images"] == ["https://media.example/input.png"]
     if kind == "video":
         assert body["resolution"] == "768P"
+    provider_request.assert_awaited_once_with(job, body)
+    provider_response.assert_awaited_once_with(job, "submission", {"id": "upstream-job", "status": "queued"})
     persist.assert_awaited_once()
 
 
@@ -102,6 +114,7 @@ async def test_uncertain_submission_is_never_reposted(configured, monkeypatch):
     original = httpx.AsyncClient
     monkeypatch.setattr(aio.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handle), **kw))
     monkeypatch.setattr(jobs, "mark_provider_submitting", AsyncMock())
+    monkeypatch.setattr(jobs, "record_provider_request", AsyncMock())
     job = Job(id="test-uncertain", kind="image", user_id="owner", request={"_providerModelId": "gpt-image-2"})
     with pytest.raises(ProviderSubmissionUncertainError):
         await aio.generate(ImageGenerationCreate(model="gpt-image-2-all-in-one", prompt="cup"), job)
@@ -179,6 +192,7 @@ async def test_known_job_on_5xx_restores_without_posting_again(configured, monke
 
     monkeypatch.setattr(aio.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handle), **kw))
     monkeypatch.setattr(jobs, "mark_provider_submitting", AsyncMock())
+    monkeypatch.setattr(jobs, "record_provider_request", AsyncMock())
     persist = AsyncMock()
     monkeypatch.setattr(jobs, "set_provider_task", persist)
     resume = AsyncMock(return_value={"restored": True})
@@ -209,12 +223,15 @@ async def test_resume_uses_original_job_without_creation(configured, monkeypatch
     stored = AsyncMock(return_value={"urls": ["https://tos.example/user-result"]})
     monkeypatch.setattr(aio, "store_result", stored)
     monkeypatch.setattr(jobs, "update_progress", AsyncMock())
+    terminal = AsyncMock()
+    monkeypatch.setattr(jobs, "record_provider_response", terminal)
     monkeypatch.setattr("asyncio.sleep", AsyncMock())
     job = Job(id="resume-only", kind="image", provider_task_id="original-id", user_id="owner")
     assert await aio.resume(job) == {"urls": ["https://tos.example/user-result"]}
     assert query.await_count == 3
     assert all(c.args[1] == "original-id" for c in query.call_args_list)
     stored.assert_awaited_once()
+    terminal.assert_awaited_once()
 
 
 @pytest.mark.asyncio

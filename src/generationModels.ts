@@ -28,7 +28,7 @@ interface GenerationModelOption {
   capabilities?: GenerationModelCapabilities
 }
 export const DEFAULT_IMAGE_MODEL: ImageModelId = 'gemini-nano-banana-2.1'
-export const DEFAULT_VIDEO_MODEL: VideoModelId = 'doubao-seedance-2.0'
+export const DEFAULT_VIDEO_MODEL: VideoModelId = 'doubao-seedance-2.0-all-in-one'
 export const PROJECT_VIDEO_MODEL_GROUPS = [
   {
     label: 'Seedance 系列',

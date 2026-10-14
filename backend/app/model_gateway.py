@@ -75,7 +75,7 @@ async def run_with_context(job: Any, runner: Any) -> Any:
 
         all_in_one = snapshot.get("_provider") == "all-in-one" or str(snapshot.get("model") or "").endswith("-all-in-one")
         all_in_one = all_in_one or (job.kind not in {"image", "video"} and any(model.endswith("-all-in-one") for model in (settings.llm_model, settings.general_outline_llm_model)))
-        text_job = settings.llm_channel in {"yseeai", "toapis"} and job.kind in {"chat", "ass_outline", "general_outline", "ass_segment_retry", "storyboard_line"}
+        text_job = settings.llm_channel in {"yseeai", "toapis", "all-in-one"} and job.kind in {"chat", "ass_outline", "general_outline", "ass_segment_retry", "storyboard_line"}
         if not all_in_one and not text_job:
             return await runner(job)
     from .database import session_factory

@@ -11,7 +11,7 @@ PRIMARY_MODEL = "gpt-6.1-sol"
 FALLBACK_MODEL = "gpt-6-sol"
 FAILURE_LIMIT = 5
 COOLDOWN_SECONDS = 2 * 60 * 60
-TEXT_CHANNELS = frozenset({"yseeai", "toapis"})
+TEXT_CHANNELS = frozenset({"yseeai", "toapis", "all-in-one"})
 logger = logging.getLogger("mvagent.llm_failover")
 
 _RECORD_FAILURE = """
@@ -22,7 +22,7 @@ return count
 
 
 def applies(model: str) -> bool:
-    return settings.llm_channel in TEXT_CHANNELS and model == PRIMARY_MODEL
+    return settings.llm_channel in TEXT_CHANNELS and model == PRIMARY_MODEL + ("-all-in-one" if settings.llm_channel == "all-in-one" else "")
 
 
 def failures_key() -> str:
@@ -37,7 +37,7 @@ async def choose_model(model: str) -> str:
     except Exception:
         logger.warning("Unable to read text-model failover state", exc_info=True)
         return model
-    return FALLBACK_MODEL if failures >= FAILURE_LIMIT else model
+    return FALLBACK_MODEL + ("-all-in-one" if settings.llm_channel == "all-in-one" else "") if failures >= FAILURE_LIMIT else model
 
 
 async def record_success(model: str) -> None:

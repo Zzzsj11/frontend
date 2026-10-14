@@ -487,7 +487,7 @@ async def create_ass_storyboard(
     resolution: Literal["480p", "720p", "1080p"] = Form("480p"),
     image_model: str = Form("gemini-nano-banana-2.1"),
     image_resolution: Literal["1K", "2K", "4K"] = Form("1K"),
-    video_model: str = Form("doubao-seedance-2.0"),
+    video_model: str = Form("doubao-seedance-2.0-all-in-one"),
     db: AsyncSession = Depends(database_session),
 ) -> dict:
     await owned_project(db, user.id, project_id)

@@ -45,6 +45,11 @@ VIDEO_ESTIMATE_POLICIES = {
     "viduq3": VideoEstimatePolicy("toapis", 0.3085704, balance_check=False, billing_mode="supplier_usd_estimate"),
     "minimax-h3": VideoEstimatePolicy("yinghe", 0.425),
     "minimax-h3-runninghub": VideoEstimatePolicy("runninghub", 0, balance_check=False, billing_mode="excluded"),
+    # ALL IN ONE reserves and settles points on its own key. Never query the
+    # Yinghe balance for these jobs or present a CNY guess as actual spend.
+    "doubao-seedance-2.0-all-in-one": VideoEstimatePolicy("all-in-one", 0, balance_check=False, billing_mode="platform_points"),
+    "wan3.0-video-all-in-one": VideoEstimatePolicy("all-in-one", 0, balance_check=False, billing_mode="platform_points"),
+    "minimax-h3-all-in-one": VideoEstimatePolicy("all-in-one", 0, balance_check=False, billing_mode="platform_points"),
 }
 
 

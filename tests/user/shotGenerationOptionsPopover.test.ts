@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import ShotGenerationOptionsPopover from '../../src/components/ShotGenerationOptionsPopover.vue'
 import {
   DEFAULT_IMAGE_MODEL,
+  DEFAULT_VIDEO_MODEL,
   IMAGE_MODEL_OPTIONS,
   VIDEO_MODEL_OPTIONS,
 } from '../../src/generationModels'
@@ -134,7 +135,7 @@ describe('ShotGenerationOptionsPopover', () => {
       ratio: '16:9',
       resolution: '480p',
       duration: 5,
-      videoModel: 'doubao-seedance-2.0',
+      videoModel: DEFAULT_VIDEO_MODEL,
       generateAudio: false,
       watermark: false,
     })

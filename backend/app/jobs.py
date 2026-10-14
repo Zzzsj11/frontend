@@ -492,6 +492,18 @@ class JobManager:
                 model.request = job.request
                 await session.commit()
 
+    async def record_provider_response(self, job: Job, stage: str, payload: dict[str, Any]) -> None:
+        """Keep the upstream response with the durable job, including failed tasks."""
+        if stage not in {"submission", "terminal"}:
+            raise ValueError("invalid provider response stage")
+        key = "_providerSubmissionResponse" if stage == "submission" else "_providerTerminalResponse"
+        job.request = {**(job.request or {}), key: _redact(payload)}
+        async with session_factory() as session:
+            model = await session.get(GenerationJobModel, job.id)
+            if model and (not job.worker_id or model.worker_id == job.worker_id):
+                model.request = job.request
+                await session.commit()
+
     async def set_provider_task(self, job: Job, provider: str, task_id: str, *, idempotency_key: str | None = None) -> None:
         """供应商 taskId 即时落库：重启恢复与后台对账都依赖它，成功失败都要保留"""
         job.provider, job.provider_task_id, job.phase = provider, task_id, "provider_running"

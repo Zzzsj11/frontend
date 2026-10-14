@@ -207,13 +207,14 @@ class ChatManager:
                     from .all_in_one import chat_client, upstream_model
 
                     client = chat_client(user_id=session.user_id)
-                    model = upstream_model(settings.llm_model)
+                    model_used = await choose_model(settings.llm_model)
+                    model = upstream_model(model_used)
                     options = completion_options(model, 2048)
                 else:
                     client = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url)
                     model = await choose_model(settings.llm_model)
                     options = completion_options(model, 2048) if settings.llm_channel in {"yseeai", "toapis"} else {}
-                model_used = model
+                    model_used = model
                 openai_client = client
                 provider_started = True
                 stream = await client.chat.completions.create(

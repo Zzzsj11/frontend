@@ -228,7 +228,7 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     # 生图/视频默认清晰度已下调为 480p（ASS 上传 Form 默认值）
     assert line["shotOptions"]["resolution"] == "480p"
     assert line["shotOptions"]["imageModel"] == "gemini-nano-banana-2.1"
-    assert line["shotOptions"]["videoModel"] == "doubao-seedance-2.0"
+    assert line["shotOptions"]["videoModel"] == "doubao-seedance-2.0-all-in-one"
 
     image_created = client.post(
         "/api/generations/images", json={"prompt": line["scenePrompt"], "project_task_id": storyboard.json()["taskId"], "storyboard_line_id": line["id"], "purpose": "scene"}

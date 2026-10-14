@@ -42,6 +42,18 @@ def test_toapis_text_channel_uses_separate_key_or_existing_toapis_key(monkeypatc
     assert config._resolve_llm_settings("domestic-key", "https://domestic.example/v1", "domestic-model")[1] == "video-key"
 
 
+def test_all_in_one_text_channel_uses_its_own_key(monkeypatch) -> None:
+    monkeypatch.setattr(config, "LLM_CHANNEL", "all-in-one")
+    monkeypatch.setenv("ALL_IN_ONE_API_KEY", "platform-key")
+    monkeypatch.setenv("ALL_IN_ONE_BASE_URL", "https://platform.example")
+    monkeypatch.delenv("ALL_IN_ONE_LLM_MODEL", raising=False)
+    assert config._resolve_llm_settings("domestic-key", "https://domestic.example/v1", "domestic-model") == (
+        "https://platform.example/v1",
+        "platform-key",
+        "gpt-6.1-sol-all-in-one",
+    )
+
+
 def test_material_export_downloads_allow_twenty_parallel_files() -> None:
     assert config.settings.export_download_concurrency == 20
     assert config.settings.export_upload_part_size_mb == 5
