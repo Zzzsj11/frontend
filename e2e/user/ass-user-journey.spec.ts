@@ -67,12 +67,21 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
           capabilities: { resolutions: ['1K', '2K', '4K'] },
         },
         { id: 'doubao-seedance-2.0', name: 'SD2.0', modality: 'video' },
+        { id: 'doubao-seedance-2.0-mini', name: 'SD2.0 Mini', modality: 'video' },
+        { id: 'doubao-seedance-2.0-fast', name: 'SD2.0 Fast', modality: 'video' },
+        { id: 'doubao-seedance-2.0-all-in-one', name: 'SD2.0 (all in one)', modality: 'video' },
+        { id: 'wan3.0-video', name: 'Wan3.0', modality: 'video' },
+        { id: 'wan3.0-video-prime', name: 'Wan3.0 Prime', modality: 'video' },
+        { id: 'wan3.0-video-all-in-one', name: 'Wan3.0 (all in one)', modality: 'video' },
+        { id: 'minimax-h3', name: 'H3（英和）', modality: 'video' },
         {
           id: 'minimax-h3-runninghub',
           name: 'H3',
           modality: 'video',
           capabilities: { h3Modes: ['auto', 'text'], executionConcurrency: 2 },
         },
+        { id: 'minimax-h3-all-in-one', name: 'H3 (all in one)', modality: 'video' },
+        { id: 'veo-3.1', name: 'Veo 3.1', modality: 'video' },
       ]),
     }),
   )
@@ -304,8 +313,12 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await expect(page.locator('.song-input')).toHaveValue('10012204')
   await expect(page.getByLabel('画幅 *')).toHaveValue('16:9')
   await expect(page.getByLabel('清晰度 *')).toHaveValue('480p')
-  await page.getByLabel('视频模型').selectOption('minimax-h3-runninghub')
-  await expect(page.getByLabel('视频模型')).toHaveValue('minimax-h3-runninghub')
+  await page.getByLabel('视频模型').click()
+  await expect(page.getByRole('option')).toHaveCount(10)
+  await expect(page.getByRole('option', { name: 'Veo 3.1' })).toHaveCount(0)
+  await page.screenshot({ path: test.info().outputPath('video-model-select.png') })
+  await page.getByRole('option', { name: 'H3（RunningHub，2并发，仅测试时用）' }).click()
+  await expect(page.getByLabel('视频模型')).toContainText('H3（RunningHub，2并发，仅测试时用）')
   await expect(page.getByLabel('视频模型')).toBeEnabled()
   await expect(page.getByLabel('图片模型')).toHaveValue('gemini-nano-banana-2.1')
   await expect(page.getByLabel('图片模型')).toBeEnabled()
@@ -325,6 +338,16 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
     'https://tos.test/luoli.png',
   )
   await expect(detail.locator('.pcard-avatars .character-portrait')).not.toHaveClass(/legacy-sheet/)
+  await detail.getByRole('button', { name: '视频', exact: true }).click()
+  await detail.getByRole('button', { name: '调整生成参数' }).click()
+  await page.locator('.options-popover button[aria-label="视频模型"]').click()
+  await expect(page.getByRole('option')).toHaveCount(10)
+  await expect(page.getByRole('option', { name: 'Veo 3.1' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await page
+    .getByRole('dialog', { name: '视频生成参数' })
+    .getByRole('button', { name: '确定' })
+    .click()
   await page.screenshot({ path: test.info().outputPath('headshot-in-shot-detail.png') })
   await detail.locator('.modal-header').getByRole('button', { name: '关闭' }).click()
   await expect(page.getByText('10012204').last()).toBeVisible()
@@ -343,8 +366,11 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await expect(scaleInputs.nth(0)).toHaveValue('4')
   await expect(scaleInputs.nth(1)).toHaveValue('13')
   await expect(scaleInputs.nth(2)).toHaveValue('210')
-  await expect(general.getByLabel('视频模型')).toHaveValue('doubao-seedance-2.0')
+  await expect(general.getByLabel('视频模型')).toContainText('SD2.0')
   await expect(general.getByLabel('视频模型')).toBeEnabled()
+  await general.getByLabel('视频模型').click()
+  await expect(page.getByRole('option')).toHaveCount(10)
+  await page.keyboard.press('Escape')
   await expect(general.getByLabel('图片模型')).toHaveValue('gemini-nano-banana-2.1')
   await expect(general.getByLabel('图片模型')).toBeEnabled()
   await general.getByLabel('图片模型').selectOption('gemini-nano-banana-2.1')
@@ -367,6 +393,13 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await expect(random.getByText('生成规模')).toBeVisible()
   await expect(random.getByText('空镜数量')).toBeVisible()
   await expect(random.getByText('人物镜数量')).toBeVisible()
+  await random.getByLabel('视频模型').click()
+  await expect(page.getByRole('option')).toHaveCount(10)
+  await expect(page.getByText('Seedance 系列')).toBeVisible()
+  await expect(page.getByText('Wan3.0 系列')).toBeVisible()
+  await expect(page.getByText('H3', { exact: true })).toBeVisible()
+  await expect(page.getByRole('option', { name: 'Veo 3.1' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
   await expect(random.getByText('视觉与人物设定')).toHaveCount(0)
   await expect(random.getByText(/人物素材/)).toHaveCount(0)
   await expect(random.getByLabel('图片模型 *')).toHaveCount(0)

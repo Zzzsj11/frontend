@@ -112,8 +112,14 @@ for (const kind of ['ass', 'general', 'general_random']) {
       expect(positions[2]!.y).toBe(positions[0]!.y)
       await picker.click()
       await expect(page.getByRole('dialog', { name: '修改子项目视频模型' })).toBeVisible()
-      await expect(page.getByLabel('目标视频模型').locator('option')).toHaveCount(4)
-      await page.getByLabel('目标视频模型').selectOption(target)
+      await page.getByLabel('目标视频模型').click()
+      await expect(page.getByRole('option')).toHaveCount(4)
+      await expect(page.getByRole('option', { name: 'Veo' })).toHaveCount(0)
+      await page
+        .getByRole('option', {
+          name: target.endsWith('all-in-one') ? 'H3（all in one）' : 'H3（英和）',
+        })
+        .click()
       await expect(page.getByText('第 1 镜：清晰度 480P → 720P')).toBeVisible()
       await page.getByRole('button', { name: '应用到全部分镜' }).click()
       await expect(picker).toHaveText(

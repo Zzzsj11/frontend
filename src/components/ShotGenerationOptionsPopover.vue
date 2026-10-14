@@ -4,6 +4,7 @@ import {
   DEFAULT_IMAGE_MODEL,
   DEFAULT_VIDEO_MODEL,
   IMAGE_MODEL_OPTIONS,
+  PROJECT_VIDEO_MODEL_IDS,
   VIDEO_MODEL_OPTIONS,
   generationModelLabel,
   isH3VideoModel,
@@ -18,6 +19,7 @@ import {
 } from '../mediaConstraints'
 import type { ShotGenOptions } from '../types'
 import H3GenerationModeFields from './H3GenerationModeFields.vue'
+import VideoModelSelect from './VideoModelSelect.vue'
 
 const props = defineProps<{
   modelValue: ShotGenOptions
@@ -40,6 +42,9 @@ const durationChoices = computed(() => {
   return configured.length ? configured : VIDEO_DURATION_CHOICES
 })
 const isH3 = computed(() => props.mode === 'shot' && isH3VideoModel(props.modelValue.videoModel))
+const projectVideoModels = computed(() =>
+  VIDEO_MODEL_OPTIONS.filter((model) => PROJECT_VIDEO_MODEL_IDS.has(model.value)),
+)
 
 const summary = computed(() => {
   const parts = [
@@ -111,6 +116,8 @@ const close = () => {
 }
 const onDocumentClick = (event: MouseEvent) => {
   const target = event.target as Node
+  // Reka 的 Portal 打开时会向 document 派发一次以 html 为目标的 click。
+  if (document.querySelector('.video-model-menu')) return
   if (root.value && !root.value.contains(target) && !popover.value?.contains(target)) close()
 }
 const updatePopoverPosition = () => {
@@ -137,6 +144,10 @@ const updatePopoverPosition = () => {
 const toggle = () => {
   open.value = !open.value
   if (open.value) {
+    if (props.mode === 'shot' && !PROJECT_VIDEO_MODEL_IDS.has(props.modelValue.videoModel)) {
+      const firstAvailable = projectVideoModels.value[0]
+      if (firstAvailable) updateVideoModel(firstAvailable.value)
+    }
     document.addEventListener('click', onDocumentClick)
     window.addEventListener('resize', updatePopoverPosition)
     window.addEventListener('scroll', updatePopoverPosition, true)
@@ -173,20 +184,14 @@ onBeforeUnmount(close)
         >
           <fieldset class="option-group">
             <legend>{{ mode === 'shot' ? '选择视频模型' : '选择图片模型' }}</legend>
-            <label class="model-select-wrap">
+            <VideoModelSelect
+              v-if="mode === 'shot'"
+              :model-value="modelValue.videoModel"
+              compact
+              @update:model-value="updateVideoModel"
+            />
+            <label v-else class="model-select-wrap">
               <select
-                v-if="mode === 'shot'"
-                class="model-select"
-                :value="modelValue.videoModel"
-                aria-label="视频模型"
-                @change="updateVideoModel(($event.target as HTMLSelectElement).value)"
-              >
-                <option v-for="item in VIDEO_MODEL_OPTIONS" :key="item.value" :value="item.value">
-                  {{ generationModelLabel(item) }}
-                </option>
-              </select>
-              <select
-                v-else
                 class="model-select"
                 :value="modelValue.imageModel"
                 aria-label="图片模型"

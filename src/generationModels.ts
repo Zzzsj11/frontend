@@ -29,6 +29,28 @@ interface GenerationModelOption {
 }
 export const DEFAULT_IMAGE_MODEL: ImageModelId = 'gemini-nano-banana-2.1'
 export const DEFAULT_VIDEO_MODEL: VideoModelId = 'doubao-seedance-2.0'
+export const PROJECT_VIDEO_MODEL_GROUPS = [
+  {
+    label: 'Seedance 系列',
+    ids: [
+      'doubao-seedance-2.0',
+      'doubao-seedance-2.0-mini',
+      'doubao-seedance-2.0-fast',
+      'doubao-seedance-2.0-all-in-one',
+    ],
+  },
+  {
+    label: 'Wan3.0 系列',
+    ids: ['wan3.0-video', 'wan3.0-video-prime', 'wan3.0-video-all-in-one'],
+  },
+  {
+    label: 'H3',
+    ids: ['minimax-h3', 'minimax-h3-runninghub', 'minimax-h3-all-in-one'],
+  },
+] as const
+export const PROJECT_VIDEO_MODEL_IDS = new Set<string>(
+  PROJECT_VIDEO_MODEL_GROUPS.flatMap((group) => group.ids),
+)
 export const DEFAULT_VIDEO_RESOLUTIONS = ['480p', '720p', '1080p'] as const
 export const IMAGE_MODEL_OPTIONS = reactive<Array<GenerationModelOption>>([
   { value: DEFAULT_IMAGE_MODEL, label: 'Nano Banana 2.1' },

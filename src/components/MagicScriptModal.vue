@@ -4,13 +4,12 @@ import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
 import BaseModal from './base/BaseModal.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
+import VideoModelSelect from './VideoModelSelect.vue'
 import type { ShotGenOptions } from '../types'
 import {
   DEFAULT_IMAGE_MODEL,
   DEFAULT_VIDEO_MODEL,
   IMAGE_MODEL_OPTIONS,
-  VIDEO_MODEL_OPTIONS,
-  generationModelLabel,
   loadGenerationModels,
   videoResolutionChoices,
   videoResolutionLabel,
@@ -169,14 +168,7 @@ const cancel = () => {
               </option>
             </select></label
           >
-          <label
-            ><span>视频模型 *</span
-            ><select v-model="videoModel" aria-label="视频模型">
-              <option v-for="item in VIDEO_MODEL_OPTIONS" :key="item.value" :value="item.value">
-                {{ generationModelLabel(item) }}
-              </option>
-            </select></label
-          >
+          <VideoModelSelect v-model="videoModel" label="视频模型 *" />
           <label
             ><span>图片模型 *</span
             ><select v-model="imageModel" aria-label="图片模型">

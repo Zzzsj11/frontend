@@ -40,8 +40,8 @@ describe('general storyboard defaults', () => {
     expect(resolutionSelect, '未找到清晰度下拉框').toBeDefined()
     expect(resolutionSelect!.value).toBe('720p')
     const videoModelSelect = document.body.querySelector(
-      'select[aria-label="视频模型"]',
-    ) as HTMLSelectElement
+      'button[aria-label="视频模型"]',
+    ) as HTMLButtonElement
     expect(videoModelSelect).toBeTruthy()
     expect(videoModelSelect.disabled).toBe(false)
     const imageModelSelect = document.body.querySelector(

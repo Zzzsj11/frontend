@@ -21,6 +21,7 @@ import {
 import AppIcon from './AppIcon.vue'
 import BaseModal from './base/BaseModal.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
+import VideoModelSelect from './VideoModelSelect.vue'
 import { MAX_VIDEO_DURATION, MIN_VIDEO_DURATION } from '../mediaConstraints'
 import {
   GENERAL_STORYBOARD_MAX_GROUPS,
@@ -31,7 +32,6 @@ import {
   DEFAULT_VIDEO_MODEL,
   IMAGE_MODEL_OPTIONS,
   VIDEO_MODEL_OPTIONS,
-  generationModelLabel,
   loadGenerationModels,
   videoResolutionChoices,
   videoResolutionLabel,
@@ -473,14 +473,7 @@ const submit = async () => {
                 </option>
               </select></label
             >
-            <label
-              ><span>视频模型 *</span
-              ><select v-model="videoModel" aria-label="视频模型">
-                <option v-for="item in VIDEO_MODEL_OPTIONS" :key="item.value" :value="item.value">
-                  {{ generationModelLabel(item) }}
-                </option>
-              </select></label
-            >
+            <VideoModelSelect v-model="videoModel" label="视频模型 *" />
             <label v-if="!random"
               ><span>图片模型 *</span
               ><select v-model="imageModel" aria-label="图片模型">

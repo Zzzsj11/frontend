@@ -2,13 +2,14 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { changeTaskVideoModel, type TaskVideoModelPlan } from '../api/domain'
 import {
-  generationModelLabel,
   loadGenerationModels,
+  PROJECT_VIDEO_MODEL_IDS,
   VIDEO_MODEL_OPTIONS,
 } from '../generationModels'
 import { useProjectStore, DEFAULT_SHOT_OPTIONS } from '../stores/project'
 import BaseModal from './base/BaseModal.vue'
 import AppIcon from './AppIcon.vue'
+import VideoModelSelect from './VideoModelSelect.vue'
 
 const props = withDefaults(defineProps<{ disabled?: boolean }>(), { disabled: false })
 const store = useProjectStore()
@@ -19,38 +20,6 @@ const plan = ref<TaskVideoModelPlan | null>(null)
 const error = ref('')
 const saved = ref('')
 let requestVersion = 0
-const supported = new Set([
-  'doubao-seedance-2.0',
-  'doubao-seedance-2.0-mini',
-  'doubao-seedance-2.0-fast',
-  'wan3.0-video',
-  'wan3.0-video-prime',
-  'minimax-h3',
-  'minimax-h3-runninghub',
-  'doubao-seedance-2.0-all-in-one',
-  'wan3.0-video-all-in-one',
-  'minimax-h3-all-in-one',
-])
-const groups = computed(() => [
-  {
-    label: 'Seedance 系列',
-    items: VIDEO_MODEL_OPTIONS.filter(
-      (m) => supported.has(m.value) && m.value.startsWith('doubao-seedance'),
-    ),
-  },
-  {
-    label: 'Wan3.0 系列',
-    items: VIDEO_MODEL_OPTIONS.filter(
-      (m) => supported.has(m.value) && m.value.startsWith('wan3.0'),
-    ),
-  },
-  {
-    label: 'H3',
-    items: VIDEO_MODEL_OPTIONS.filter(
-      (m) => supported.has(m.value) && m.value.startsWith('minimax-h3'),
-    ),
-  },
-])
 const visible = computed(
   () =>
     Boolean(store.activeTaskId) &&
@@ -106,6 +75,10 @@ async function preview() {
     if (version === requestVersion) loading.value = false
   }
 }
+function selectModel(value: string) {
+  selected.value = value
+  void preview()
+}
 async function show() {
   saved.value = ''
   loading.value = true
@@ -115,9 +88,10 @@ async function show() {
   try {
     await loadGenerationModels(true, { required: true })
     selected.value =
-      supported.has(current.value) && VIDEO_MODEL_OPTIONS.some((m) => m.value === current.value)
+      PROJECT_VIDEO_MODEL_IDS.has(current.value) &&
+      VIDEO_MODEL_OPTIONS.some((m) => m.value === current.value)
         ? current.value
-        : groups.value.flatMap((g) => g.items)[0]?.value || ''
+        : VIDEO_MODEL_OPTIONS.find((m) => PROJECT_VIDEO_MODEL_IDS.has(m.value))?.value || ''
     await preview()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '模型目录加载失败'
@@ -178,20 +152,13 @@ onBeforeUnmount(() => {
       <p>
         当前模型：<strong>{{ currentLabel }}</strong> · 全部 {{ store.lines.length }} 条分镜
       </p>
-      <label for="task-video-model">目标视频模型</label>
-      <select
-        id="task-video-model"
-        v-model="selected"
-        :disabled="loading"
+      <VideoModelSelect
+        :model-value="selected"
+        label="目标视频模型"
         aria-label="目标视频模型"
-        @change="preview"
-      >
-        <optgroup v-for="group in groups" :key="group.label" :label="group.label">
-          <option v-for="item in group.items" :key="item.value" :value="item.value">
-            {{ generationModelLabel(item) }}
-          </option>
-        </optgroup>
-      </select>
+        :disabled="loading"
+        @update:model-value="selectModel"
+      />
       <p class="hint">
         应用到当前子项目的全部分镜，包括单独修改过模型的镜头。已有视频继续保留；后续生成和重新生成使用新模型。
       </p>
