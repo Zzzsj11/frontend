@@ -284,7 +284,7 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
             ratio: '9:16',
             resolution: '720p',
             image_model: 'nano-banana-2.1-all-in-one',
-            video_model: 'doubao-seedance-2.0',
+            video_model: 'doubao-seedance-2.0-all-in-one',
             empty_shot_count: 1,
             character_shot_count: 1,
             total_duration: 10,
@@ -309,7 +309,7 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
             ratio: '16:9',
             resolution: '720p',
             image_model: 'nano-banana-2.1-all-in-one',
-            video_model: 'doubao-seedance-2.0',
+            video_model: 'doubao-seedance-2.0-all-in-one',
             ass_file: {
               name: '10012204-remote-e2e.ass',
               mimeType: 'text/plain',

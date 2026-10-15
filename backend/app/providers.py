@@ -555,23 +555,17 @@ def _result_semaphore(kind: str) -> asyncio.Semaphore:
     return slots[kind]
 
 
-async def list_video_models() -> list[dict[str, Any]]:
-    """查询 AIGC 平台当前账号可见的模型列表（OpenAI 风格 /v1/models）。
+async def list_video_models(*, user_id: str | None = None) -> list[dict[str, Any]]:
+    """查询 all in one 当前 Key 可见的视频模型，不暴露历史供应商目录。"""
+    from .all_in_one import headers
 
-    key 从环境变量读取：VIDEO_API_KEY 优先，缺省回退 AIGC_TOKEN（与生成链路同一账号），
-    保证列表展示的模型就是实际可用于生成（视频/图像/文本）的模型。
-    """
-    base, headers = _video_config()
     async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.get(f"{base}/v1/models", headers=headers)
+        response = await client.get(settings.all_in_one_base_url + "/v1/models", headers=headers(user_id=user_id))
         _raise_for_status(response)
         body = response.json()
-    if not isinstance(body, dict):
-        raise ProviderError("模型列表接口返回格式异常")
-    data = body.get("data")
-    if not isinstance(data, list):
+    if not isinstance(body, dict) or not isinstance(body.get("data"), list):
         raise ProviderError("模型列表接口未返回 data 数组")
-    return [item for item in data if isinstance(item, dict)]
+    return [item for item in body["data"] if isinstance(item, dict) and item.get("kind") == "video"]
 
 
 async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, Any]:

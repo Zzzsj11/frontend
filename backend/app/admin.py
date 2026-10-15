@@ -30,7 +30,6 @@ from .kling import MAX_DURATION as KLING_MAX_DURATION
 from .kling import MIN_DURATION as KLING_MIN_DURATION
 from .kling import MODES as KLING_MODES
 from .kling import KlingError
-from .kling import create_task as kling_create_task
 from .kling import query_task as kling_query_task
 from .llm_comparison import CHAT_TEST_MODELS, compare_chat_models
 from .models import (
@@ -90,10 +89,6 @@ from .runninghub import (
     RunningHubError,
 )
 from .runninghub import query_task as rh_query_task
-from .runninghub import submit_first_frame_task as rh_submit_first_frame_task
-from .runninghub import submit_first_last_frame_task as rh_submit_first_last_frame_task
-from .runninghub import submit_reference_task as rh_submit_reference_task
-from .runninghub import submit_text_task as rh_submit_text_task
 from .runninghub import upload_media as rh_upload_media
 from .server_monitoring import monitoring_summary
 from .storage import get_storage, import_remote, is_user_owned_tos_url, put_image_with_thumbnail, safe_key
@@ -1363,28 +1358,27 @@ async def prompt_delete_draft(key: str, version_id: str, request: Request, user:
 
 @public_router.get("/model-options")
 async def model_options(user: CurrentUser, modality: str | None = None, db: AsyncSession = Db):
+    from .all_in_one_catalog import VIDEO_MODEL_CODES
+
     query = select(AiModelModel).where(AiModelModel.deleted_at.is_(None), AiModelModel.status == "active", AiModelModel.user_visible.is_(True))
     if modality:
         query = query.where(AiModelModel.modality == modality)
+    query = query.where(or_(AiModelModel.modality != "video", AiModelModel.code.in_(VIDEO_MODEL_CODES)))
     rows = (await db.execute(query.order_by(AiModelModel.modality, AiModelModel.sort_order))).scalars()
     return [{"id": x.code, "name": x.name, "modality": x.modality, "capabilities": x.capabilities, "isDefault": x.is_default} for x in rows]
 
 
 @public_router.get("/aigc/models")
 async def aigc_provider_models(user: CurrentUser):
-    """工具：实时查询上游 AIGC 平台当前账号可见的模型列表（/v1/models）。
-
-    用途：核对环境变量（VIDEO_API_KEY/AIGC_TOKEN）指向的账号在平台侧实际开放了哪些
-    模型，排查“模型名不存在/不可用”类问题；key 与生成链路同一来源，不做缓存。
-    """
+    """实时查询 all in one 当前生成 Key 可见的视频模型；不做缓存。"""
     try:
-        models = await list_video_models()
+        models = await list_video_models(user_id=user.id)
     except ProviderError as exc:
         raise HTTPException(502, f"上游模型列表查询失败：{exc}") from exc
     return {
-        "provider": "yinghe",
-        "baseUrl": settings.video_api_base_url,
-        "apiKeySuffix": settings.video_api_key[-6:],
+        "provider": "all-in-one",
+        "baseUrl": settings.all_in_one_base_url,
+        "apiKeySuffix": settings.all_in_one_api_key[-6:],
         "count": len(models),
         "models": models,
     }
@@ -2275,167 +2269,8 @@ async def runninghub_comparison_create(
     user: CurrentUser,
     db: AsyncSession = Db,
 ):
-    """复用现有 Seedance 镜头的提示词和参考图创建 H3 对比任务。"""
     require_admin(user)
-    _runninghub_guard()
-    row = (
-        await db.execute(
-            select(UserModel, ProjectModel, ProjectTaskModel, StoryboardLineModel, ShotAssetModel)
-            .join(ProjectModel, ProjectModel.user_id == UserModel.id)
-            .join(ProjectTaskModel, ProjectTaskModel.project_id == ProjectModel.id)
-            .join(StoryboardLineModel, StoryboardLineModel.project_task_id == ProjectTaskModel.id)
-            .join(ShotAssetModel, ShotAssetModel.storyboard_line_id == StoryboardLineModel.id)
-            .where(
-                StoryboardLineModel.id == payload.line_id,
-                UserModel.deleted_at.is_(None),
-                ProjectModel.deleted_at.is_(None),
-                ProjectTaskModel.deleted_at.is_(None),
-                ProjectTaskModel.storyboard_type == "general",
-                StoryboardLineModel.deleted_at.is_(None),
-                ShotAssetModel.deleted_at.is_(None),
-                ShotAssetModel.is_current.is_(True),
-            )
-            .order_by(ShotAssetModel.created_at.desc())
-            .limit(1)
-        )
-    ).one_or_none()
-    if not row:
-        raise HTTPException(404, "没有找到可对比的通用分镜视频")
-    owner, project, task, line, asset = row
-    if (line.shot_options or {}).get("videoModel") != "doubao-seedance-2.0" or not asset.cover_url or not asset.video_url:
-        raise HTTPException(422, "该镜头不是具备首帧的 Seedance 2.0 成片")
-    prompt = f"{line.scene_prompt.strip()}\n\n{line.shot_prompt.strip()}"
-    duration = min(MAX_DURATION, max(MIN_DURATION, asset.duration))
-    aspect_ratio = _h3_first_frame_ratio((line.shot_options or {}).get("ratio", "16:9"))
-    references: list[dict[str, Any]] = [
-        {
-            "type": "image",
-            "url": asset.cover_url,
-            "name": "Seedance 首帧",
-            "role": "comparison_cover",
-        }
-    ]
-    cast_rows = (
-        (
-            await db.execute(
-                select(DigitalHumanModel)
-                .join(ProjectCastModel, ProjectCastModel.digital_human_id == DigitalHumanModel.id)
-                .where(
-                    ProjectCastModel.project_task_id == task.id,
-                    ProjectCastModel.deleted_at.is_(None),
-                    DigitalHumanModel.deleted_at.is_(None),
-                    DigitalHumanModel.avatar_url.isnot(None),
-                    DigitalHumanModel.avatar_url != "",
-                )
-                .order_by(ProjectCastModel.sort_order, DigitalHumanModel.created_at.desc())
-            )
-        )
-        .scalars()
-        .all()
-    )
-    for human in cast_rows:
-        if len(references) >= 3:
-            break
-        references.append(
-            {
-                "type": "image",
-                "url": human.asset_avatar_url or human.avatar_url,
-                "name": human.name,
-                "role": "cast_reference",
-                "humanId": human.id,
-                "assetAvatarUrl": human.asset_avatar_url,
-                "avatarUrl": human.avatar_url,
-            }
-        )
-    selected_urls = [url.strip() for url in payload.reference_urls if url.strip()]
-    if selected_urls:
-        lookup = {item["url"]: item for item in references}
-        ordered: list[dict[str, Any]] = []
-        for url in selected_urls:
-            item = lookup.get(url)
-            if item and item not in ordered:
-                ordered.append(item)
-        references = ordered or references[:1]
-    if payload.comparison_mode == "first_frame":
-        references = references[:1]
-    if not references:
-        raise HTTPException(422, "没有可用于对比的参考图")
-    mode = "first_frame" if len(references) == 1 else "reference"
-    prompt_with_refs = "\n".join(
-        ["请严格参考下列图片并保持人物、场景和镜头风格一致："] + [f"<Picture {index + 1}> {item['name']}" for index, item in enumerate(references)] + [""] + [prompt]
-    )
-    submission_prompt = prompt if mode == "first_frame" else prompt_with_refs
-    try:
-        if mode == "first_frame":
-            result = await rh_submit_first_frame_task(
-                prompt=submission_prompt,
-                duration=duration,
-                aspect_ratio=aspect_ratio,
-                image=references[0]["url"],
-                seed=None,
-                megapixels=DEFAULT_FIRST_FRAME_MEGAPIXELS,
-            )
-        else:
-            result = await rh_submit_reference_task(
-                prompt=prompt_with_refs,
-                duration=duration,
-                aspect_ratio=aspect_ratio,
-                images=[item["url"] for item in references],
-                seed=None,
-                stage1_megapixels=DEFAULT_STAGE1_MEGAPIXELS,
-                stage2_megapixels=DEFAULT_STAGE2_MEGAPIXELS,
-            )
-    except RunningHubError as exc:
-        raise _runninghub_error(exc) from exc
-    task_id = str(result.get("taskId"))
-    preset = H3TestPresetModel(
-        id=f"h3test-{uuid.uuid4().hex}",
-        user_id=user.id,
-        name=f"对比 · {owner.username} · {task.title} · 镜头 {line.sort_order + 1} · {mode}",
-        mode=mode,
-        prompt=submission_prompt,
-        duration=duration,
-        aspect_ratio=aspect_ratio,
-        input_media=references
-        + [
-            {
-                "type": "video",
-                "url": asset.video_url,
-                "name": "Seedance 2.0 原视频",
-                "role": "seedance_source",
-                "lineId": line.id,
-                "lineOrder": line.sort_order,
-                "shotType": line.shot_type or ("empty" if line.shot_prompt.strip().startswith(("无人", "空镜")) else "character"),
-                "username": owner.username,
-                "projectId": project.id,
-                "projectName": project.name,
-                "taskId": task.id,
-                "taskTitle": task.title,
-            },
-        ],
-        output_media=[],
-        task_id=task_id,
-        task_status=result.get("status", "QUEUED"),
-        usage_data={
-            "comparison": True,
-            "comparisonMode": mode,
-            "referenceCount": len(references),
-            "referenceUrls": [item["url"] for item in references],
-        },
-    )
-    db.add(preset)
-    await audit(
-        db,
-        request,
-        user,
-        "runninghub_comparison.submit",
-        "h3_test_preset",
-        preset.id,
-        None,
-        {"lineId": line.id, "sourceUserId": owner.id, "runningHubTaskId": task_id},
-    )
-    await db.commit()
-    return _h3_preset_json(preset)
+    raise HTTPException(410, "该视频渠道已退役，请使用 all in one 视频模型")
 
 
 @router.post("/runninghub/upload")
@@ -2476,99 +2311,8 @@ class RunningHubTaskIn(BaseModel):
 
 @router.post("/runninghub/tasks", status_code=201)
 async def runninghub_task_create(payload: RunningHubTaskIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
-    """提交 MiniMax H3 工作流任务（nodeInfoList 覆盖提示词/时长/宽高比/参考图/种子）。"""
     require_admin(user)
-    _runninghub_guard()
-    try:
-        if payload.mode == "first_frame":
-            if not payload.images:
-                raise RunningHubError("首帧生视频至少需要 1 张图片")
-            result = await rh_submit_first_frame_task(
-                prompt=payload.prompt,
-                duration=payload.duration,
-                aspect_ratio=payload.aspect_ratio,
-                image=payload.images[0],
-                seed=payload.seed,
-                megapixels=payload.first_frame_megapixels,
-            )
-        elif payload.mode == "first_last":
-            if len(payload.images) != 2:
-                raise RunningHubError("首尾帧生视频必须提供首帧和尾帧两张图片")
-            result = await rh_submit_first_last_frame_task(
-                prompt=payload.prompt,
-                duration=payload.duration,
-                aspect_ratio=payload.aspect_ratio,
-                first_image=payload.images[0],
-                last_image=payload.images[1],
-                seed=payload.seed,
-                megapixels=payload.first_frame_megapixels,
-            )
-        elif payload.mode == "text":
-            result = await rh_submit_text_task(
-                prompt=payload.prompt,
-                duration=payload.duration,
-                aspect_ratio=payload.aspect_ratio,
-                seed=payload.seed,
-                megapixels=payload.text_megapixels,
-            )
-        else:
-            result = await rh_submit_reference_task(
-                prompt=payload.prompt,
-                duration=payload.duration,
-                aspect_ratio=payload.aspect_ratio,
-                images=payload.images,
-                videos=payload.videos,
-                audios=payload.audios,
-                seed=payload.seed,
-                stage1_megapixels=payload.stage1_megapixels,
-                stage2_megapixels=payload.stage2_megapixels,
-            )
-    except RunningHubError as exc:
-        raise _runninghub_error(exc) from exc
-    task_id = str(result.get("taskId"))
-    await audit(
-        db,
-        request,
-        user,
-        "runninghub_task.submit",
-        "runninghub_task",
-        task_id,
-        None,
-        {
-            "mode": payload.mode,
-            "duration": payload.duration,
-            "aspectRatio": payload.aspect_ratio,
-            "imageCount": len(payload.images),
-            "videoCount": len(payload.videos),
-            "audioCount": len(payload.audios),
-            "stage1Megapixels": payload.stage1_megapixels,
-            "stage2Megapixels": payload.stage2_megapixels,
-            "textMegapixels": payload.text_megapixels,
-            "firstFrameMegapixels": payload.first_frame_megapixels,
-        },
-    )
-    db.add(
-        H3TestPresetModel(
-            id=f"h3test-{uuid.uuid4().hex}",
-            user_id=user.id,
-            name={"reference": "多参考生成", "text": "纯文本生成", "first_frame": "首帧生成", "first_last": "首尾帧生成"}[payload.mode],
-            mode=payload.mode,
-            prompt=payload.prompt,
-            duration=payload.duration,
-            aspect_ratio=payload.aspect_ratio,
-            input_media=[
-                *[{"type": "image", "runningHubFileName": value, "url": value if value.startswith("https://") else ""} for value in payload.images],
-                *[{"type": "video", "runningHubFileName": value, "url": value if value.startswith("https://") else ""} for value in payload.videos],
-                *[{"type": "audio", "runningHubFileName": value, "url": value if value.startswith("https://") else ""} for value in payload.audios],
-            ],
-            output_media=[],
-            task_id=task_id,
-            task_status=result.get("status", "QUEUED"),
-            usage_data={},
-        )
-    )
-    await db.commit()
-    return {"taskId": task_id, "status": result.get("status", "")}
+    raise HTTPException(410, "该视频渠道已退役，请使用 all in one 视频模型")
 
 
 class RunningHubQueryIn(BaseModel):
@@ -2676,43 +2420,8 @@ class KlingTaskIn(BaseModel):
 
 @router.post("/kling/tasks", status_code=201)
 async def kling_task_create(payload: KlingTaskIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
-    """创建 Kling V3 Omni 生成任务（文生/图生/首尾帧/多模态参考）。"""
     require_admin(user)
-    _kling_guard()
-    try:
-        result = await kling_create_task(
-            prompt=payload.prompt,
-            negative_prompt=payload.negative_prompt,
-            images=[item.model_dump(by_alias=True) for item in payload.images],
-            videos=[item.model_dump(by_alias=True, exclude_none=True) for item in payload.videos],
-            element_ids=payload.element_ids,
-            duration=payload.duration,
-            mode=payload.mode,
-            aspect_ratio=payload.aspect_ratio,
-            sound=payload.sound,
-            cfg_scale=payload.cfg_scale,
-        )
-    except KlingError as exc:
-        raise _kling_error(exc) from exc
-    await audit(
-        db,
-        request,
-        user,
-        "kling_task.submit",
-        "kling_task",
-        result["taskId"],
-        None,
-        {
-            "duration": payload.duration,
-            "mode": payload.mode,
-            "aspectRatio": payload.aspect_ratio,
-            "sound": payload.sound,
-            "imageCount": len(payload.images),
-            "videoCount": len(payload.videos),
-        },
-    )
-    await db.commit()
-    return result
+    raise HTTPException(410, "该视频渠道已退役，请使用 all in one 视频模型")
 
 
 @router.get("/kling/tasks/{task_id}")

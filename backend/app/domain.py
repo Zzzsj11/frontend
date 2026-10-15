@@ -574,6 +574,16 @@ async def _create_general_task(
     return task
 
 
+def _validate_video_selection(model: AiModelModel, ratio: str, resolution: str) -> None:
+    from .all_in_one_catalog import VIDEO_MODEL_CODES
+
+    caps = model.capabilities or {}
+    if model.code not in VIDEO_MODEL_CODES:
+        raise HTTPException(422, "该视频模型已退役，请选择当前视频目录中的模型")
+    if ratio not in (caps.get("ratios") or [ratio]) or resolution not in (caps.get("resolutions") or [resolution]):
+        raise HTTPException(422, "所选视频模型不支持当前画幅或清晰度")
+
+
 @router.post("/projects/{project_id}/storyboards/general", status_code=201)
 async def create_general_storyboard(project_id: str, payload: GeneralStoryboardCreate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     await owned_project(db, user.id, project_id)
@@ -588,6 +598,8 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
             raise HTTPException(422, f"不支持或已停用的{label}模型：{code}")
         if modality == "image":
             validate_image_selection(code, model.capabilities or {}, size=payload.ratio, resolution=payload.image_resolution)
+        else:
+            _validate_video_selection(model, payload.ratio, payload.resolution)
     total = payload.empty_shot_count + payload.character_shot_count
     if total < 1:
         raise HTTPException(422, "至少需要一个分镜")
@@ -642,7 +654,7 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
                     "imageModel": payload.image_model,
                     "imageResolution": payload.image_resolution,
                     "videoModel": payload.video_model,
-                    "duration": normalize_video_duration(duration),
+                    "duration": normalize_video_duration(duration, model.capabilities or {}),
                     "outlineStatus": "pending",
                 },
                 generation_status="pending",
@@ -693,6 +705,7 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
     ).scalar_one_or_none()
     if not model:
         raise HTTPException(422, f"不支持或已停用的视频模型：{payload.video_model}")
+    _validate_video_selection(model, payload.ratio, payload.resolution)
     total = payload.empty_shot_count + payload.character_shot_count
     if total < 1:
         raise HTTPException(422, "至少需要一个分镜")
@@ -750,7 +763,7 @@ async def create_random_general_storyboard(project_id: str, payload: RandomGener
                 "ratio": payload.ratio,
                 "resolution": payload.resolution,
                 "videoModel": payload.video_model,
-                "duration": normalize_video_duration(duration),
+                "duration": normalize_video_duration(duration, model.capabilities or {}),
             }
             line = StoryboardLineModel(
                 id=uid("line"),
@@ -933,10 +946,10 @@ async def _apply_story_bible_to_lines(db: AsyncSession, lines: list[StoryboardLi
     )
     for line, plan in zip(lines, plans, strict=True):
         line.shot_type = plan["shotType"]
-        line.planned_duration = float(plan["generationDuration"])
+        line.planned_duration = float(normalize_video_duration(plan["materialDuration"], (line.shot_options or {}).get("videoModel")))
         line.shot_options = {
             **(line.shot_options or {}),
-            "duration": normalize_video_duration(line.planned_duration),
+            "duration": normalize_video_duration(line.planned_duration, (line.shot_options or {}).get("videoModel")),
             "sourceDuration": plan["sourceDuration"],
             "gapBefore": plan["gapBefore"],
             "gapAfter": plan["gapAfter"],
@@ -1170,7 +1183,7 @@ async def _apply_general_outline_to_lines(
         line.planned_duration = duration
         line.shot_options = {
             **(line.shot_options or {}),
-            "duration": normalize_video_duration(duration),
+            "duration": normalize_video_duration(duration, config.get("video_model")),
             "outlineScene": shot["outlineScene"],
             "outlineShot": shot["outlineShot"],
             "outlineIntent": shot["intent"],

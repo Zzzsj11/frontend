@@ -244,6 +244,11 @@ def sse(payload: dict) -> str:
 
 
 async def require_active_model(db: AsyncSession, code: str, modality: str) -> tuple[AiModelModel, AiProviderModel]:
+    if modality == "video":
+        from .all_in_one_catalog import VIDEO_MODEL_CODES
+
+        if code not in VIDEO_MODEL_CODES:
+            raise HTTPException(422, "该视频模型已退役，请选择当前视频模型")
     row = (
         await db.execute(
             select(AiModelModel, AiProviderModel)
@@ -282,21 +287,28 @@ def generation_request_snapshot(payload: BaseModel, model: AiModelModel, provide
 
 
 def validate_video_references(payload: VideoGenerationCreate, capabilities: dict) -> None:
+    limits = capabilities.get("durations") or {}
+    allowed_durations = capabilities.get("durationOptions")
+    if allowed_durations and payload.duration not in allowed_durations:
+        raise HTTPException(422, f"该视频模型仅支持时长：{allowed_durations}")
+    if limits and not limits.get("min", 1) <= payload.duration <= limits.get("max", 30):
+        raise HTTPException(422, f"该视频模型时长须在 {limits.get('min')}–{limits.get('max')} 秒之间")
+    modes = capabilities.get("referenceModes")
+    if modes and payload.h3_mode not in modes:
+        raise HTTPException(422, "该视频模型不支持当前参考模式")
+    if payload.generate_audio and capabilities.get("audioToggle") is False:
+        raise HTTPException(422, "该视频模型不支持背景音开关")
+    if payload.watermark and capabilities.get("watermarkToggle") is False:
+        raise HTTPException(422, "该视频模型不支持水印开关")
     resolutions = capabilities.get("resolutions")
     if isinstance(resolutions, list) and resolutions and payload.resolution not in resolutions:
         raise HTTPException(422, f"该视频模型不支持 {payload.resolution}，可选：{'、'.join(map(str, resolutions))}")
+    reference_resolutions = capabilities.get("referenceResolutions")
+    if reference_resolutions and payload.image_urls and payload.h3_mode in {"auto", "reference"} and payload.resolution not in reference_resolutions:
+        raise HTTPException(422, "该视频模型的参考图模式仅支持：" + "、".join(reference_resolutions))
     ratios = capabilities.get("ratios")
     if isinstance(ratios, list) and ratios and payload.ratio not in ratios:
         raise HTTPException(422, f"该视频模型不支持画幅 {payload.ratio}")
-    durations = capabilities.get("durations")
-    if isinstance(durations, dict):
-        minimum = int(durations.get("min") or 0)
-        maximum = int(durations.get("max") or 0)
-        if minimum and payload.duration < minimum or maximum and payload.duration > maximum:
-            raise HTTPException(422, f"该视频模型仅支持 {minimum}–{maximum} 秒")
-    duration_options = capabilities.get("durationOptions")
-    if isinstance(duration_options, list) and duration_options and payload.duration not in duration_options:
-        raise HTTPException(422, f"该视频模型仅支持 {'、'.join(f'{value} 秒' for value in duration_options)}")
     for field, capability_key, label in (
         (payload.image_urls, "referenceImage", "图片"),
         (payload.video_urls, "referenceVideo", "视频"),
@@ -485,7 +497,7 @@ async def create_ass_storyboard(
     digital_human_ids: str = Form("[]"),
     extra_requirement: str = Form(""),
     ratio: Literal["16:9", "9:16", "4:3", "1:1"] = Form("16:9"),
-    resolution: Literal["480p", "720p", "1080p"] = Form("480p"),
+    resolution: Literal["480p", "720p", "1080p", "4k"] = Form("480p"),
     image_model: str = Form("nano-banana-2.1-all-in-one"),
     image_resolution: Literal["1K", "1.5K", "2K", "4K"] = Form("1K"),
     video_model: str = Form("doubao-seedance-2.0-all-in-one"),
@@ -494,7 +506,11 @@ async def create_ass_storyboard(
     await owned_project(db, user.id, project_id)
     selected_image_model, _ = await require_active_model(db, image_model, "image")
     validate_image_selection(image_model, selected_image_model.capabilities or {}, size=ratio, resolution=image_resolution)
-    await require_active_model(db, video_model, "video")
+    selected_video_model, _ = await require_active_model(db, video_model, "video")
+    video_caps = selected_video_model.capabilities or {}
+    validate_video_references(
+        VideoGenerationCreate(model=video_model, prompt="ASS configuration", ratio=ratio, resolution=resolution, duration=normalize_video_duration(5, video_caps)), video_caps
+    )
     if not ass_file.filename or not ass_file.filename.lower().endswith(".ass"):
         raise HTTPException(422, "仅支持 .ass 文件")
     number_candidates = list(dict.fromkeys(re.findall(r"(?<!\d)\d{5,}(?!\d)", ass_file.filename)))
@@ -615,14 +631,14 @@ async def create_ass_storyboard(
         source_duration = round(max(0.0, float(value.get("end") or 0) - float(value.get("start") or 0)), 2)
         gap_before = round(max(0.0, float(value.get("start") or 0) - float(segments[index - 1].get("end") or value.get("start") or 0)), 2) if index else 0.0
         gap_after = round(max(0.0, float(segments[index + 1].get("start") or value.get("end") or 0) - float(value.get("end") or 0)), 2) if index + 1 < len(segments) else 0.0
-        planned_duration = float(normalize_video_duration(source_duration))
+        planned_duration = float(normalize_video_duration(source_duration, video_model))
         shot_options = {
             "ratio": ratio,
             "resolution": resolution,
             "imageModel": image_model,
             "imageResolution": image_resolution,
             "videoModel": video_model,
-            "duration": normalize_video_duration(source_duration),
+            "duration": normalize_video_duration(source_duration, video_model),
             "materialDuration": source_duration,
             "segmentType": value.get("segmentType", "lyric"),
             "timelineLabel": value.get("timelineLabel") or value.get("lyrics", ""),

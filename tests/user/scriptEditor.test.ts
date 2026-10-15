@@ -11,7 +11,7 @@ import * as confirmDialogModule from '../../src/composables/useConfirmDialog'
 function mockBalanceApi(balance: unknown) {
   return vi.spyOn(apiClient, 'apiRequest').mockImplementation(async <T>(path: string) => {
     if (path === '/model-options') {
-      return [{ id: 'doubao-seedance-2.0', name: 'SD2.0', modality: 'video' }] as T
+      return [{ id: 'doubao-seedance-2.0-all-in-one', name: 'SD2.0', modality: 'video' }] as T
     }
     if (path === '/account/balance') return balance as T
     throw new Error(`Unexpected API request: ${path}`)
@@ -30,7 +30,7 @@ const pendingLine = (id: string): ScriptLine =>
       duration: 5,
       ratio: '16:9',
       resolution: '720p',
-      videoModel: 'doubao-seedance-2.0',
+      videoModel: 'doubao-seedance-2.0-all-in-one',
     },
     voice: { status: 'none' },
     scene: { status: 'none' },
@@ -65,6 +65,32 @@ describe('ScriptEditor batch generation confirmation', () => {
     expect(options.message).toContain('英和预计 ¥8.30，余额 ¥20.00')
     expect(options.message).toContain('【余额充足，可以开始批量生成任务】')
     expect(generate).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('平台积分模型不显示旧渠道的人民币估价', async () => {
+    const store = useProjectStore()
+    store.lines = [pendingLine('platform-line')]
+    const generate = vi.spyOn(store, 'generateAllShots').mockResolvedValue()
+    const api = vi.spyOn(apiClient, 'apiRequest').mockResolvedValue([
+      {
+        id: 'doubao-seedance-2.0-all-in-one',
+        name: 'SD2.0',
+        modality: 'video',
+        capabilities: {
+          billing: { provider: 'all-in-one', billingMode: 'platform_points', balanceCheck: false },
+        },
+      },
+    ])
+    const confirm = vi.spyOn(confirmDialogModule, 'confirmDialog').mockResolvedValue(true)
+    const wrapper = mount(ScriptEditor)
+    await wrapper.get('.header-actions .btn-outline').trigger('click')
+    await vi.waitFor(() => expect(confirm).toHaveBeenCalled())
+    const message = confirm.mock.calls[0][0].message
+    expect(message).toContain('将按平台积分计费')
+    expect(message).not.toMatch(/预计总费用|英和|RunningHub/)
+    expect(api.mock.calls.some(([path]) => path === '/account/balance')).toBe(false)
+    expect(generate).toHaveBeenCalledOnce()
     wrapper.unmount()
   })
 

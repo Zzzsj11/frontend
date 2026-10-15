@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from .generation_constraints import GENERAL_STORYBOARD_MAX_GROUPS, GENERAL_STORYBOARD_MAX_SHOTS
-from .media_constraints import DEFAULT_VIDEO_DURATION, MAX_VIDEO_DURATION, MIN_VIDEO_DURATION
+from .media_constraints import DEFAULT_VIDEO_DURATION
 
 
 class LoginCreate(BaseModel):
@@ -241,12 +241,12 @@ class ImageGenerationCreate(BaseModel):
 
 class VideoGenerationCreate(BaseModel):
     prompt: str = Field(min_length=1, max_length=30_000)
-    duration: int = Field(default=DEFAULT_VIDEO_DURATION, ge=MIN_VIDEO_DURATION, le=MAX_VIDEO_DURATION)
+    duration: int = Field(default=DEFAULT_VIDEO_DURATION, ge=1, le=30)
     ratio: Literal["16:9", "9:16", "1:1", "4:3"] = "16:9"
     resolution: Literal["480p", "540p", "720p", "1080p", "4k"] = "720p"
-    image_urls: list[str] = Field(default_factory=list, max_length=10)
-    video_urls: list[str] = Field(default_factory=list, max_length=1)
-    audio_urls: list[str] = Field(default_factory=list, max_length=3)
+    image_urls: list[str] = Field(default_factory=list, max_length=30)
+    video_urls: list[str] = Field(default_factory=list, max_length=10)
+    audio_urls: list[str] = Field(default_factory=list, max_length=10)
     h3_mode: Literal["auto", "text", "first_frame", "first_last", "reference"] = "auto"
     h3_audio_usage: Literal["reference", "reuse", "generated", "mute"] = "reference"
     generate_audio: bool = False

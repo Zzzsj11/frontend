@@ -17,6 +17,7 @@ import {
   assertGenerationModelAvailable,
   loadGenerationModels,
   VIDEO_MODEL_OPTIONS,
+  videoModelCapabilities,
 } from '../generationModels'
 import { estimateVideoBatchCost, estimateVideoBatchCostByProvider } from '../utils/videoBatchCost'
 
@@ -226,7 +227,12 @@ const confirmBatchGenerate = async () => {
         : sufficient
           ? '【余额充足，可以开始批量生成任务】'
           : '【余额不足，请联系负责人进行充值】'
-    const message = `本次将生成总计：${items.length} 条，共：${totalSeconds} 秒，${modelText || '视频模型'} 视频，预计总费用为：${estimatedCost.toFixed(2)} 元。\n${balanceLines.join('\n')}\n\n${conclusion}`
+    const platformPoints = items.every(
+      (item) => videoModelCapabilities(item.model).billing?.billingMode === 'platform_points',
+    )
+    const message = platformPoints
+      ? `本次将生成总计：${items.length} 条，共：${totalSeconds} 秒，${modelText || '视频模型'} 视频。将按平台积分计费，实际扣减以各模型任务最终结算为准。`
+      : `本次将生成总计：${items.length} 条，共：${totalSeconds} 秒，${modelText || '视频模型'} 视频，预计总费用为：${estimatedCost.toFixed(2)} 元。\n${balanceLines.join('\n')}\n\n${conclusion}`
     const confirmed = await confirmDialog({
       title: balanceUnavailable
         ? '余额查询失败'
@@ -283,7 +289,7 @@ const confirmBatchGenerate = async () => {
               store.songSwitching ||
               checkingBatchCost
             "
-            title="批量生成全部「提示词就绪但视频未生成/失败」分镜的视频片段（最多同时生成 200 个）"
+            title="批量生成全部「提示词就绪但视频未生成/失败」分镜的视频片段，按所选模型并发上限自动排队"
             @click="confirmBatchGenerate"
           >
             <span v-if="store.batchShooting || checkingBatchCost" class="spinner" />

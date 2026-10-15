@@ -14,6 +14,7 @@ import {
   imageResolutionChoices,
   loadGenerationModels,
   videoResolutionChoices,
+  videoRatioChoices,
   videoResolutionLabel,
 } from '../generationModels'
 
@@ -39,6 +40,7 @@ const resolutionChoices = computed<ShotGenOptions['resolution'][]>(() => {
   return videoResolutionChoices(videoModel.value) as ShotGenOptions['resolution'][]
 })
 
+const videoRatios = computed(() => videoRatioChoices(videoModel.value))
 const imageResolutions = computed(() => imageResolutionChoices(imageModel.value))
 
 const resetForm = () => {
@@ -67,6 +69,7 @@ watch(
   { immediate: true },
 )
 watch(videoModel, () => {
+  if (!videoRatios.value.includes(ratio.value)) ratio.value = videoRatios.value[0] ?? '16:9'
   if (!resolutionChoices.value.includes(resolution.value)) {
     resolution.value = resolutionChoices.value[0] ?? '720p'
   }
@@ -166,10 +169,7 @@ const cancel = () => {
           <label
             ><span>画幅 *</span
             ><select v-model="ratio">
-              <option value="16:9">16:9</option>
-              <option value="9:16">9:16</option>
-              <option value="4:3">4:3</option>
-              <option value="1:1">1:1</option>
+              <option v-for="item in videoRatios" :key="item" :value="item">{{ item }}</option>
             </select></label
           >
           <label
@@ -191,7 +191,7 @@ const cancel = () => {
             </select></label
           >
         </div>
-        <p class="model-hint">H3 同时执行上限为 2 个任务，超出的任务会自动排队。</p>
+        <p class="model-hint">超出所选模型并发上限的任务会自动排队。</p>
       </section>
 
       <!-- 完整角色库横向多选 -->

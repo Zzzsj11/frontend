@@ -14,7 +14,7 @@ const options: ShotGenOptions = {
   duration: 5,
   ratio: '16:9',
   imageModel: DEFAULT_IMAGE_MODEL,
-  videoModel: 'doubao-seedance-2.0',
+  videoModel: 'doubao-seedance-2.0-all-in-one',
 }
 
 describe('ShotGenerationOptionsPopover', () => {
@@ -24,7 +24,7 @@ describe('ShotGenerationOptionsPopover', () => {
       label: 'Nano Banana 2.1',
     })
     VIDEO_MODEL_OPTIONS.splice(0, VIDEO_MODEL_OPTIONS.length, {
-      value: 'doubao-seedance-2.0',
+      value: 'doubao-seedance-2.0-all-in-one',
       label: 'SD2.0',
     })
   })
@@ -32,7 +32,7 @@ describe('ShotGenerationOptionsPopover', () => {
     VIDEO_MODEL_OPTIONS.splice(
       0,
       VIDEO_MODEL_OPTIONS.length,
-      { value: 'doubao-seedance-2.0', label: 'SD2.0' },
+      { value: 'doubao-seedance-2.0-all-in-one', label: 'SD2.0' },
       { value: 'veo-3.1', label: 'Veo 3.1' },
     )
     const wrapper = mount(ShotGenerationOptionsPopover, {
@@ -41,7 +41,7 @@ describe('ShotGenerationOptionsPopover', () => {
     await wrapper.get('[aria-label="调整生成参数"]').trigger('click')
 
     expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
-      videoModel: 'doubao-seedance-2.0',
+      videoModel: 'doubao-seedance-2.0-all-in-one',
     })
     wrapper.unmount()
   })

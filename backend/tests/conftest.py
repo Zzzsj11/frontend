@@ -20,6 +20,7 @@ os.environ["LLM_API_KEY"] = "test-only-llm-key"
 os.environ["ALL_IN_ONE_API_KEY"] = "test-only-all-in-one-key"
 os.environ["AIGC_TOKEN"] = "test-only-shared-provider-key"
 os.environ["GENERAL_OUTLINE_LLM_MODEL"] = ""
+os.environ["VIDEO_MODEL"] = "doubao-seedance-2.0-all-in-one"
 
 
 @pytest.fixture(scope="session")

@@ -696,11 +696,13 @@ async def seed_system_data() -> None:
                 row["modality"],
                 row["provider_model_id"],
                 row["capabilities"],
-                row["code"] == "nano-banana-2.1-all-in-one",
+                row["code"] in {"nano-banana-2.1-all-in-one", "doubao-seedance-2.0-all-in-one"},
             )
             for row in all_in_one_rows(source_caps)
         )
         for mid, model_provider_id, code, name, modality, provider_id, capabilities, is_default in defaults:
+            if modality == "video" and model_provider_id != all_in_one_provider.id:
+                continue
             if code in {
                 "doubao-seedance-2.0",
                 "doubao-seedance-2.0-mini",

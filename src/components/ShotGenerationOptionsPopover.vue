@@ -11,6 +11,8 @@ import {
   imageResolutionChoices,
   isH3VideoModel,
   videoDurationChoices,
+  videoRatioChoices,
+  videoModelCapabilities,
   videoResolutionChoices,
   videoResolutionLabel,
 } from '../generationModels'
@@ -37,9 +39,17 @@ const popoverStyle = ref<Record<string, string>>({})
 const resolutionChoices = computed<string[]>(() => {
   return props.mode === 'scene'
     ? imageResolutionChoices(props.modelValue.imageModel)
-    : videoResolutionChoices(props.modelValue.videoModel)
+    : videoResolutionChoices(
+        props.modelValue.videoModel,
+        ['auto', 'reference'].includes(props.modelValue.h3Mode ?? 'auto'),
+      )
 })
-const ratioChoices: ShotGenOptions['ratio'][] = ['16:9', '9:16', '4:3', '1:1']
+const ratioChoices = computed(() =>
+  props.mode === 'shot'
+    ? videoRatioChoices(props.modelValue.videoModel)
+    : (['16:9', '9:16', '4:3', '1:1'] as ShotGenOptions['ratio'][]),
+)
+const videoCaps = computed(() => videoModelCapabilities(props.modelValue.videoModel))
 const durationChoices = computed(() => {
   const configured = videoDurationChoices(props.modelValue.videoModel)
   return configured.length ? configured : VIDEO_DURATION_CHOICES
@@ -93,11 +103,18 @@ const updateRatio = (ratio: ShotGenOptions['ratio']) => {
   })
 }
 const updateVideoModel = (model: string) => {
-  const allowed = videoResolutionChoices(model) as ShotGenOptions['resolution'][]
+  const allowed = videoResolutionChoices(model, true) as ShotGenOptions['resolution'][]
   const durations = videoDurationChoices(model)
   emit('update:modelValue', {
     ...props.modelValue,
     videoModel: model,
+    ratio: videoRatioChoices(model).includes(props.modelValue.ratio)
+      ? props.modelValue.ratio
+      : (videoRatioChoices(model)[0] ?? '16:9'),
+    generateAudio:
+      videoModelCapabilities(model).audioToggle === false ? false : props.modelValue.generateAudio,
+    watermark:
+      videoModelCapabilities(model).watermarkToggle === false ? false : props.modelValue.watermark,
     resolution: allowed.includes(props.modelValue.resolution)
       ? props.modelValue.resolution
       : (allowed[0] ?? '720p'),
@@ -290,6 +307,7 @@ onBeforeUnmount(close)
           <fieldset v-if="mode === 'shot'" class="option-group switch-group">
             <legend>视频附加选项</legend>
             <button
+              v-if="videoCaps.audioToggle !== false"
               type="button"
               class="switch-option"
               :class="{ active: modelValue.generateAudio }"
@@ -300,6 +318,7 @@ onBeforeUnmount(close)
               <span><strong>生成背景音</strong><small>为视频生成环境音或配乐</small></span>
             </button>
             <button
+              v-if="videoCaps.watermarkToggle !== false"
               type="button"
               class="switch-option"
               :class="{ active: modelValue.watermark }"

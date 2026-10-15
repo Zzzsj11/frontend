@@ -131,7 +131,7 @@ async def build_general_story_bible(*, config: dict[str, Any], shots: list[dict[
                 "wardrobeIntent": shot.get("wardrobeIntent") or "",
                 "wardrobeByCharacter": shot.get("wardrobeByCharacter") or {},
                 "materialDuration": durations[index],
-                "generationDuration": normalize_video_duration(durations[index]),
+                "generationDuration": normalize_video_duration(durations[index], config.get("video_model")),
             }
             for index, shot in enumerate(shots)
         ],
@@ -139,8 +139,12 @@ async def build_general_story_bible(*, config: dict[str, Any], shots: list[dict[
 
 
 def exact_durations(total_duration: float, count: int, capabilities: dict | None = None) -> list[float]:
-    if count < 1 or total_duration < count * MIN_VIDEO_DURATION or total_duration > count * MAX_VIDEO_DURATION:
-        raise ValueError(f"总时长必须在 {count * MIN_VIDEO_DURATION}–{count * MAX_VIDEO_DURATION} 秒之间，才能保证每镜 {MIN_VIDEO_DURATION}–{MAX_VIDEO_DURATION} 秒")
+    limits = (capabilities or {}).get("durations") or {}
+    minimum = int(limits.get("min", MIN_VIDEO_DURATION))
+    maximum = int(limits.get("max", MAX_VIDEO_DURATION))
+    valid_minimum, valid_maximum = (min(MIN_VIDEO_DURATION, minimum), max(MAX_VIDEO_DURATION, maximum))
+    if count < 1 or total_duration < count * valid_minimum or total_duration > count * valid_maximum:
+        raise ValueError(f"总时长必须在 {count * valid_minimum}–{count * valid_maximum} 秒之间")
     units = round(total_duration * 10)
     base, remainder = divmod(units, count)
     values = [base + (1 if index < remainder else 0) for index in range(count)]
@@ -148,8 +152,8 @@ def exact_durations(total_duration: float, count: int, capabilities: dict | None
     if capabilities is None:
         return durations
     limits = capabilities.get("durations") or {}
-    minimum = max(MIN_VIDEO_DURATION, int(limits.get("min") or MIN_VIDEO_DURATION))
-    maximum = min(MAX_VIDEO_DURATION, int(limits.get("max") or MAX_VIDEO_DURATION))
+    minimum = int(limits.get("min", MIN_VIDEO_DURATION))
+    maximum = int(limits.get("max", MAX_VIDEO_DURATION))
     allowed = list(range(minimum, maximum + 1))
     options = capabilities.get("durationOptions")
     if isinstance(options, list) and options:

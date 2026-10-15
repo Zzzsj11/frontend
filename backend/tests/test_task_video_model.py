@@ -46,11 +46,11 @@ def model_case(client):
 
 
 def change(client, headers, task, **kwargs):
-    return client.post(f"/api/tasks/{task}/video-model", headers=headers, json={"model": "minimax-h3", **kwargs})
+    return client.post(f"/api/tasks/{task}/video-model", headers=headers, json={"model": "minimax-h3-all-in-one", **kwargs})
 
 
 @pytest.mark.parametrize("kind", ["ass", "general", "general_random"])
-@pytest.mark.parametrize("target", ["minimax-h3", "minimax-h3-all-in-one"])
+@pytest.mark.parametrize("target", ["minimax-h3-all-in-one"])
 def test_atomic_apply_all_sources_preserves_assets_timeline_and_defaults(client, model_case, kind, target):
     _, headers, task_id = model_case
 
@@ -115,9 +115,9 @@ def test_stale_preview_and_incompatible_reference_are_atomic(client, model_case)
 
     asyncio.run(edit())
     assert change(client, headers, task_id, apply=True, preview_token=plan["previewToken"]).status_code == 409
-    blocked = change(client, headers, task_id, model="wan3.0-video").json()
+    blocked = change(client, headers, task_id, model="gemini-omni-1.1-flash-preview-all-in-one").json()
     assert blocked["blockers"]
-    assert change(client, headers, task_id, model="wan3.0-video", apply=True, preview_token=blocked["previewToken"]).status_code == 422
+    assert change(client, headers, task_id, model="gemini-omni-1.1-flash-preview-all-in-one", apply=True, preview_token=blocked["previewToken"]).status_code == 422
 
     async def verify():
         async with session_factory() as db:
@@ -137,7 +137,7 @@ def test_hidden_model_rejected_and_stale_generation_stopped_before_provider(clie
 
     async def hide(hidden):
         async with session_factory() as db:
-            model = (await db.execute(select(AiModelModel).where(AiModelModel.code == "minimax-h3"))).scalar_one()
+            model = (await db.execute(select(AiModelModel).where(AiModelModel.code == "minimax-h3-all-in-one"))).scalar_one()
             model.user_visible = not hidden
             await db.commit()
 
@@ -157,7 +157,7 @@ def test_hidden_model_rejected_and_stale_generation_stopped_before_provider(clie
         "/api/generations/videos",
         headers=headers,
         json={
-            "model": "doubao-seedance-2.0",
+            "model": "doubao-seedance-2.0-all-in-one",
             "prompt": "普通场景",
             "duration": 5,
             "project_task_id": task_id,

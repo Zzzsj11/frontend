@@ -291,7 +291,7 @@ def test_generation_job_persists_agent_request_attribution(client, monkeypatch):
     monkeypatch.setattr("app.main.jobs.dispatch", no_dispatch)
     response = client.post(
         "/api/generations/videos",
-        json={"prompt": "Agent 归因测试", "duration": 5, "model": "doubao-seedance-2.0"},
+        json={"prompt": "Agent 归因测试", "duration": 5, "model": "doubao-seedance-2.0-all-in-one"},
         headers={"X-Test-Run-Id": "agent-real-generation-001", "X-Agent-Name": "code-agent", "X-Agent-Run-Id": "agent-real-generation-001"},
     )
     assert response.status_code == 202

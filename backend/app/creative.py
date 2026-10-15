@@ -42,7 +42,7 @@ class CreativeMediaIn(BaseModel):
 class CreativeOptimizeIn(BaseModel):
     provider: str
     prompt: str = Field(min_length=1, max_length=7000)
-    duration: int = Field(default=8, ge=4, le=15)
+    duration: int = Field(default=8, ge=1, le=30)
     ratio: str = "16:9"
     media: list[CreativeMediaIn] = Field(default_factory=list, max_length=15)
 

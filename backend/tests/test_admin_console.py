@@ -31,66 +31,19 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     assert image_models["nano-banana-2.1-all-in-one"]["capabilities"]["resolutions"] == ["1K", "2K", "4K"]
     assert image_models["nano-banana-2.1-all-in-one"]["capabilities"]["referenceImage"] == {"min": 0, "max": 14}
     assert image_models["seedream-5.0-pro-all-in-one"]["capabilities"]["resolutions"] == ["1K", "1.5K", "2K"]
-    h3 = next(x for x in options if x["id"] == "minimax-h3-runninghub")
-    direct_h3 = next(x for x in options if x["id"] == "minimax-h3")
-    new_models = {
-        x["id"]: x
-        for x in options
-        if x["id"]
-        in {
-            "doubao-seedance-2.0-mini",
-            "doubao-seedance-2.0-fast",
-            "wan3.0-video",
-            "wan3.0-video-prime",
-            "kling-v3",
-            "happyhorse-1.1-t2v",
-            "happyhorse-1.1-i2v",
-            "happyhorse-1.1-r2v",
-        }
-    }
-    assert h3["name"] == "H3（RunningHub，2并发，仅测试时用）"
-    assert h3["capabilities"]["executionConcurrency"] == 2
-    assert h3["capabilities"]["resolutionLabels"]["720p"] == "736P"
-    assert h3["capabilities"]["billing"] == {
-        "provider": "runninghub",
-        "unitPricePerSecond": 0,
-        "balanceCheck": False,
-        "billingMode": "excluded",
-        "currency": "CNY",
-    }
-    assert direct_h3["name"] == "H3（英和）"
-    assert direct_h3["capabilities"]["executionConcurrency"] == 200
-    assert direct_h3["capabilities"]["executionPool"] == "yinghe-h3"
-    assert direct_h3["capabilities"]["resolutionLabels"]["720p"] == "768P"
+    from app.all_in_one_catalog import VIDEO_MODEL_CODES
+
+    videos = {item["id"]: item for item in options if item["modality"] == "video"}
+    assert set(videos) == VIDEO_MODEL_CODES
+    assert len(videos) == 12
+    assert all(item["capabilities"]["providerCode"] == "all-in-one" for item in videos.values())
+    assert all("all in one" not in item["name"] and "英和" not in item["name"] for item in videos.values())
+    h3 = videos["minimax-h3-all-in-one"]
+    assert h3["name"] == "H3"
+    assert h3["capabilities"]["executionConcurrency"] == 100
     assert h3["capabilities"]["referenceImage"] == {"min": 0, "max": 6}
-    assert h3["capabilities"]["referenceVideo"] == {"min": 0, "max": 1}
-    assert h3["capabilities"]["referenceAudio"] == {"min": 0, "max": 3}
-    assert h3["capabilities"]["referenceTotalMax"] == 10
-    assert h3["capabilities"]["referenceImage"]["max"] == 6
-    assert h3["capabilities"]["referenceVideo"]["max"] == 1
-    assert "first_last" in h3["capabilities"]["h3Modes"]
-    assert "first_last" in direct_h3["capabilities"]["h3Modes"]
-    assert {model_id: model["name"] for model_id, model in new_models.items()} == {
-        "doubao-seedance-2.0-mini": "SD2.0 Mini（英和）",
-        "doubao-seedance-2.0-fast": "SD2.0 Fast（英和）",
-        "wan3.0-video": "Wan3.0（英和）",
-        "wan3.0-video-prime": "Wan3.0 Prime（英和）",
-        "kling-v3": "Kling V3（英和）",
-        "happyhorse-1.1-t2v": "HappyHorse 1.1 文生（英和）",
-        "happyhorse-1.1-i2v": "HappyHorse 1.1 图生（英和）",
-        "happyhorse-1.1-r2v": "HappyHorse 1.1 参考生（英和）",
-    }
-    assert new_models["doubao-seedance-2.0-mini"]["capabilities"]["resolutions"] == ["480p", "720p"]
-    assert new_models["wan3.0-video"]["capabilities"]["resolutions"] == ["480p", "720p", "1080p"]
-    assert new_models["wan3.0-video"]["capabilities"]["providerResolutionMap"]["720p"] == "720P"
-    assert new_models["wan3.0-video"]["capabilities"]["providerOmitFields"] == ["generate_audio", "watermark", "return_last_frame"]
-    assert new_models["kling-v3"]["capabilities"]["resolutions"] == ["720p", "1080p"]
-    assert new_models["kling-v3"]["capabilities"]["resolutionLabels"]["720p"] == "720P"
-    assert new_models["kling-v3"]["capabilities"]["providerResolutionMap"]["720p"] == "720P"
-    assert new_models["kling-v3"]["capabilities"]["providerOmitFields"] == ["generate_audio", "watermark", "return_last_frame"]
-    assert new_models["happyhorse-1.1-t2v"]["capabilities"]["referenceImage"] == {"min": 0, "max": 0}
-    assert new_models["happyhorse-1.1-i2v"]["capabilities"]["referenceImage"] == {"min": 1, "max": 1}
-    assert new_models["happyhorse-1.1-r2v"]["capabilities"]["referenceImage"] == {"min": 1, "max": 9}
+    assert h3["capabilities"]["providerResolutionMap"]["720p"] == "768P"
+    assert videos["gemini-omni-1.1-flash-preview-all-in-one"]["capabilities"]["durationOptions"] == [10]
     client.delete(f"/api/admin/users/{created['id']}")
     # Restore the shared TestClient's refresh cookie for subsequent auth tests.
     restored = client.post("/api/auth/login", json={"username": "admin", "password": "secure-admin-123"})
