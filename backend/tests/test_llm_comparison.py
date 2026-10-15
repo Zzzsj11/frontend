@@ -10,7 +10,7 @@ async def test_compare_chat_models_uses_protocol_adapter_and_isolates_failure(mo
     monkeypatch.setattr(
         llm_comparison,
         "settings",
-        SimpleNamespace(llm_api_key="test-key", llm_base_url="https://ai.example.com/v1"),
+        SimpleNamespace(llm_channel="", llm_api_key="test-key", llm_base_url="https://ai.example.com/v1"),
     )
 
     async def fake_openai(model, messages, temperature, max_tokens):
@@ -42,6 +42,6 @@ def test_anthropic_messages_url_does_not_duplicate_v1(monkeypatch):
     monkeypatch.setattr(
         llm_comparison,
         "settings",
-        SimpleNamespace(llm_api_key="test-key", llm_base_url="https://ai.example.com/v1"),
+        SimpleNamespace(llm_channel="", llm_api_key="test-key", llm_base_url="https://ai.example.com/v1"),
     )
     assert llm_comparison._anthropic_messages_url() == "https://ai.example.com/v1/messages"

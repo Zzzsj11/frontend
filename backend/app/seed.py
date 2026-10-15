@@ -174,11 +174,13 @@ async def seed_system_data() -> None:
                 session.add(UserAdminRoleModel(id=f"uar-super-{admin.id}", user_id=admin.id, role_id=role.id))
         provider = await session.get(AiProviderModel, "provider-yinghe")
         if not provider:
-            provider = AiProviderModel(id="provider-yinghe", code="yinghe", name="银河 API", base_url="", status="active")
+            provider = AiProviderModel(id="provider-yinghe", code="yinghe", name="银河 API", base_url="", status="inactive" if settings.llm_channel == "all-in-one" else "active")
             session.add(provider)
         runninghub_provider = await session.get(AiProviderModel, "provider-runninghub")
         if not runninghub_provider:
-            runninghub_provider = AiProviderModel(id="provider-runninghub", code="runninghub", name="RunningHub", base_url="", status="active")
+            runninghub_provider = AiProviderModel(
+                id="provider-runninghub", code="runninghub", name="RunningHub", base_url="", status="inactive" if settings.llm_channel == "all-in-one" else "active"
+            )
             session.add(runninghub_provider)
         yseeai_provider = await session.get(AiProviderModel, "provider-yseeai")
         if not yseeai_provider:
@@ -187,7 +189,7 @@ async def seed_system_data() -> None:
                 code="yseeai",
                 name="英和海外",
                 base_url="https://api-aigc.yseeai.com",
-                status="active",
+                status="inactive" if settings.llm_channel == "all-in-one" else "active",
             )
             session.add(yseeai_provider)
         toapis_provider = await session.get(AiProviderModel, "provider-toapis")
@@ -197,7 +199,7 @@ async def seed_system_data() -> None:
                 code="toapis",
                 name="ToAPIs",
                 base_url="https://toapis.cn",
-                status="active",
+                status="inactive" if settings.llm_channel == "all-in-one" else "active",
             )
             session.add(toapis_provider)
         all_in_one_provider = await session.get(AiProviderModel, "provider-all-in-one")
@@ -696,12 +698,12 @@ async def seed_system_data() -> None:
                 row["modality"],
                 row["provider_model_id"],
                 row["capabilities"],
-                row["code"] in {"nano-banana-2.1-all-in-one", "doubao-seedance-2.0-all-in-one"},
+                row["code"] in {"gemini-3.8-flash-all-in-one", "nano-banana-2.1-all-in-one", "doubao-seedance-2.0-all-in-one"},
             )
             for row in all_in_one_rows(source_caps)
         )
         for mid, model_provider_id, code, name, modality, provider_id, capabilities, is_default in defaults:
-            if modality == "video" and model_provider_id != all_in_one_provider.id:
+            if (settings.llm_channel == "all-in-one" or modality == "video") and model_provider_id != all_in_one_provider.id:
                 continue
             if code in {
                 "doubao-seedance-2.0",
@@ -874,6 +876,8 @@ async def seed_system_data() -> None:
 
 async def ensure_pending_asset_avatars() -> None:
     """补齐数字人在英合账号下的 asset://，供 cron 幂等执行。"""
+    if settings.llm_channel == "all-in-one":
+        return
     import asyncio
 
     from .providers import create_real_face_asset

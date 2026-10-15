@@ -9,6 +9,8 @@ env_file=".env.${env_name}"
 test -f "$env_file" || { echo "missing $env_file"; exit 1; }
 test -z "$(git status --porcelain)" || { echo "working tree must be clean"; exit 1; }
 
+if [[ "$env_name" == "production" ]]; then DEPLOY_ENV=production python3 scripts/configure-single-platform.py; fi
+
 sha="$(git rev-parse HEAD)"
 version="git-${sha}"
 export RELEASE_VERSION="$version"

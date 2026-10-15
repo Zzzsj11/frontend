@@ -25,7 +25,7 @@ const submit = async () => {
     )
     setAccessToken(result.accessToken)
     auth.user = result.user
-    void auth.loadBalance(true)
+    void auth.loadAllInOneCredits()
     await router.replace('/projects')
   } catch (value) {
     error.value = value instanceof Error ? value.message : '修改失败'

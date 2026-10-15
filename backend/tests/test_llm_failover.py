@@ -62,8 +62,8 @@ async def test_all_in_one_primary_falls_back_with_same_channel_suffix(monkeypatc
     monkeypatch.setattr(llm_failover, "redis", redis)
     monkeypatch.setattr(llm_failover, "settings", replace(llm_failover.settings, llm_channel="all-in-one"))
     for _ in range(5):
-        await llm_failover.record_failure("gpt-6.1-sol-all-in-one")
+        await llm_failover.record_failure("gemini-3.8-flash-all-in-one")
     assert redis.ttl == 2 * 60 * 60
-    assert await llm_failover.choose_model("gpt-6.1-sol-all-in-one") == "doubao-seed-2-1-pro-260915-all-in-one"
-    await llm_failover.record_success("gpt-6.1-sol-all-in-one")
-    assert await llm_failover.choose_model("gpt-6.1-sol-all-in-one") == "gpt-6.1-sol-all-in-one"
+    assert await llm_failover.choose_model("gemini-3.8-flash-all-in-one") == "doubao-seed-2-1-pro-260915-all-in-one"
+    await llm_failover.record_success("gemini-3.8-flash-all-in-one")
+    assert await llm_failover.choose_model("gemini-3.8-flash-all-in-one") == "gemini-3.8-flash-all-in-one"

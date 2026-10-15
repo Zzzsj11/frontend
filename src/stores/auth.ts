@@ -58,7 +58,6 @@ export const useAuthStore = defineStore('auth', {
         this.user = await restoreSession().catch(() => null)
         this.ready = true
         if (this.user && !this.user.mustChangePassword) {
-          void this.loadBalance()
           void this.loadAllInOneCredits()
         }
       }
@@ -68,7 +67,6 @@ export const useAuthStore = defineStore('auth', {
       try {
         this.user = (await loginRequest(username, password)).user
         if (!this.user.mustChangePassword) {
-          void this.loadBalance()
           void this.loadAllInOneCredits()
         }
       } finally {

@@ -50,7 +50,7 @@ def test_all_in_one_text_channel_uses_its_own_key(monkeypatch) -> None:
     assert config._resolve_llm_settings("domestic-key", "https://domestic.example/v1", "domestic-model") == (
         "https://platform.example/v1",
         "platform-key",
-        "gpt-6.1-sol-all-in-one",
+        "gemini-3.8-flash-all-in-one",
     )
 
 

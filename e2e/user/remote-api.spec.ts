@@ -86,7 +86,8 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
   try {
     const me = await json<{ username: string }>(await admin.get('/api/auth/me'))
     expect(me.username).toBe(adminUsername)
-    await json(await admin.get('/api/account/balance'))
+    expect((await admin.get('/api/account/balance')).status()).toBe(410)
+    await json(await admin.get('/api/account/all-in-one-credits'))
 
     const refreshed = await json<{ accessToken: string }>(await admin.post('/api/auth/refresh'))
     expect(refreshed.accessToken).toBeTruthy()

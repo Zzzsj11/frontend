@@ -154,14 +154,16 @@ class GeneralOutlineComparisonIn(BaseModel):
 @router.get("/chat-comparison/models")
 async def chat_comparison_models(user: CurrentUser):
     require_admin(user)
-    return [{"code": item.code, "name": item.name, "protocol": item.protocol} for item in CHAT_TEST_MODELS]
+    return [
+        {"code": item.code, "name": item.name, "protocol": item.protocol} for item in CHAT_TEST_MODELS if settings.llm_channel != "all-in-one" or item.code.endswith("-all-in-one")
+    ]
 
 
 @router.post("/chat-comparison/run")
 async def run_chat_comparison(payload: ChatComparisonIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
     require_admin(user)
     models = list(dict.fromkeys(payload.models))
-    allowed = {item.code for item in CHAT_TEST_MODELS}
+    allowed = {item.code for item in CHAT_TEST_MODELS if settings.llm_channel != "all-in-one" or item.code.endswith("-all-in-one")}
     unknown = [model for model in models if model not in allowed]
     if unknown:
         raise HTTPException(422, f"不支持的 Chat 模型：{', '.join(unknown)}")
@@ -211,7 +213,7 @@ async def run_general_outline_comparison(payload: GeneralOutlineComparisonIn, re
     if payload.empty_shot_count + payload.character_shot_count > GENERAL_STORYBOARD_MAX_SHOTS:
         raise HTTPException(422, f"通用分镜最多生成 {GENERAL_STORYBOARD_MAX_SHOTS} 个镜头")
     models = list(dict.fromkeys(payload.models))
-    allowed = {item.code for item in CHAT_TEST_MODELS}
+    allowed = {item.code for item in CHAT_TEST_MODELS if settings.llm_channel != "all-in-one" or item.code.endswith("-all-in-one")}
     unknown = [model for model in models if model not in allowed]
     if unknown:
         raise HTTPException(422, f"不支持的 Chat 模型：{', '.join(unknown)}")
@@ -898,6 +900,8 @@ async def providers(user: CurrentUser, db: AsyncSession = Db):
 @router.post("/providers", status_code=201)
 async def create_provider(payload: ProviderIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
     require_admin(user)
+    if settings.llm_channel == "all-in-one" and payload.code != "all-in-one":
+        raise HTTPException(422, "系统仅支持平台渠道")
     item = AiProviderModel(id=f"provider-{uuid.uuid4().hex}", code=payload.code, name=payload.name, base_url=payload.base_url, status=payload.status)
     db.add(item)
     await audit(db, request, user, "provider.create", "ai_provider", item.id, after=payload.model_dump())
@@ -2026,7 +2030,8 @@ async def prompt_optimizer_status(user: CurrentUser):
 @router.post("/prompt-optimizer/upload")
 async def prompt_optimizer_upload(file: UploadFile, user: CurrentUser):
     require_admin(user)
-    _runninghub_guard()
+    if settings.llm_channel != "all-in-one":
+        _runninghub_guard()
     content = await file.read(50 * 1024 * 1024 + 1)
     if len(content) > 50 * 1024 * 1024:
         raise HTTPException(413, "素材不能超过 50MB")
@@ -2040,15 +2045,17 @@ async def prompt_optimizer_upload(file: UploadFile, user: CurrentUser):
     else:
         url = await get_storage().put_bytes(key, content, mime_type)
         thumbnail_url = None
-    try:
-        runninghub = await rh_upload_media(content, file.filename or f"reference-{kind}")
-    except RunningHubError as exc:
-        raise _runninghub_error(exc) from exc
+    runninghub = {}
+    if settings.llm_channel != "all-in-one":
+        try:
+            runninghub = await rh_upload_media(content, file.filename or f"reference-{kind}")
+        except RunningHubError as exc:
+            raise _runninghub_error(exc) from exc
     return {
         "kind": kind,
         "url": url,
         "thumbnailUrl": thumbnail_url,
-        "runningHubFileName": runninghub["fileName"],
+        "runningHubFileName": runninghub.get("fileName", ""),
         "runningHubDownloadUrl": runninghub.get("downloadUrl", ""),
         "name": file.filename or "",
         "mimeType": mime_type,

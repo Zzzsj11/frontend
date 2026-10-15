@@ -12,18 +12,14 @@ import {
   type PromptOptimizerStatus,
   type PromptOptimizerTask,
 } from '../api/adminPromptOptimizer'
-import {
-  fetchRunningHubStatus,
-  queryRunningHubTask,
-  submitRunningHubTask,
-  type RunningHubStatus,
-  type RunningHubTaskResult,
-} from '../api/adminRunningHub'
+import { generateShotVideo } from '../api/mediaGen'
+import { DEFAULT_IMAGE_MODEL, loadGenerationModels, videoRatioChoices } from '../generationModels'
+import type { ShotGenOptions } from '../types'
 
 type GenerationMode = 'text' | 'first_frame' | 'first_last' | 'reference'
 
 const status = ref<PromptOptimizerStatus | null>(null)
-const provider = ref<PromptOptimizerProvider>('minimax')
+const provider = ref<PromptOptimizerProvider>('gemini')
 const prompt = ref('')
 const duration = ref(15)
 const ratio = ref('16:9')
@@ -31,8 +27,7 @@ const media = ref<PromptOptimizerMedia[]>([])
 const tasks = ref<PromptOptimizerTask[]>([])
 const current = ref<PromptOptimizerTask | null>(null)
 const generationMode = ref<GenerationMode>('reference')
-const runningHubStatus = ref<RunningHubStatus | null>(null)
-const generation = ref<RunningHubTaskResult | null>(null)
+const generation = ref<{ status: string; videoUrl?: string } | null>(null)
 const generationLoading = ref(false)
 const generationError = ref('')
 const loading = ref(false)
@@ -43,7 +38,6 @@ const copied = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const promptInput = ref<HTMLTextAreaElement | null>(null)
 let pollTimer: ReturnType<typeof setTimeout> | null = null
-let generationPollTimer: ReturnType<typeof setTimeout> | null = null
 
 const providerInfo = computed(() => status.value?.providers[provider.value])
 const counts = computed(() => ({
@@ -64,9 +58,18 @@ const generationVideos = computed(() => media.value.filter((item) => item.kind =
 const generationAudios = computed(() => media.value.filter((item) => item.kind === 'audio'))
 const generationPrompt = computed(() => current.value?.outputPrompt?.trim() || prompt.value.trim())
 const canGenerate = computed(() => {
-  if (!runningHubStatus.value?.configured || generationLoading.value || !generationPrompt.value)
+  if (
+    !status.value?.providers.gemini.configured ||
+    generationLoading.value ||
+    !generationPrompt.value
+  )
     return false
-  if (media.value.some((item) => !item.runningHubFileName)) return false
+  if (
+    !(videoRatioChoices('minimax-h3-all-in-one') as readonly string[]).includes(
+      ratio.value === 'adaptive' ? '16:9' : ratio.value,
+    )
+  )
+    return false
   if (generationMode.value === 'text') return true
   if (generationMode.value === 'first_frame') return generationImages.value.length >= 1
   if (generationMode.value === 'first_last') return generationImages.value.length >= 2
@@ -84,12 +87,7 @@ const generationHint = computed(() => {
   if (generationMode.value === 'first_last') return '依次使用第 1、2 张图片作为首帧和尾帧。'
   return '最多使用 6 张图片、1 段视频和 3 段音频，合计不超过 10 个素材。'
 })
-const generationVideoUrl = computed(
-  () =>
-    generation.value?.results?.find((item) => item.outputType === 'mp4')?.url ||
-    generation.value?.results?.[0]?.url ||
-    '',
-)
+const generationVideoUrl = computed(() => generation.value?.videoUrl || '')
 
 const limitFor = (kind: PromptOptimizerMediaKind) =>
   kind === 'image'
@@ -169,87 +167,47 @@ const stopPoll = () => {
   pollTimer = null
 }
 
-const stopGenerationPoll = () => {
-  if (generationPollTimer) clearTimeout(generationPollTimer)
-  generationPollTimer = null
-}
-
-const runningHubRatio = () => {
-  const options =
-    generationMode.value === 'text'
-      ? runningHubStatus.value?.textAspectRatios
-      : generationMode.value === 'first_frame' || generationMode.value === 'first_last'
-        ? runningHubStatus.value?.firstFrameAspectRatios
-        : runningHubStatus.value?.aspectRatios
-  if (!options?.length) return '16:9 (Widescreen)'
-  return options.find((value) => value.startsWith(ratio.value)) || options[0]
-}
-
-const pollGeneration = (taskId: string) => {
-  stopGenerationPoll()
-  const tick = async () => {
-    try {
-      const result = await queryRunningHubTask(taskId)
-      generation.value = result
-      if (result.status === 'RUNNING' || result.status === 'QUEUED') {
-        generationPollTimer = setTimeout(tick, 4000)
-        return
-      }
-      if (result.status !== 'SUCCESS')
-        generationError.value = result.errorMessage || 'H3 视频生成失败'
-    } catch (reason) {
-      generationError.value = reason instanceof Error ? reason.message : '查询 H3 任务失败'
-    }
-    generationPollTimer = null
-  }
-  generationPollTimer = setTimeout(tick, 1500)
-}
-
+const generationAbort = new AbortController()
 const generateVideo = async () => {
-  if (!canGenerate.value || !runningHubStatus.value) return
+  if (!canGenerate.value) return
   generationLoading.value = true
   generationError.value = ''
-  generation.value = null
-  stopGenerationPoll()
+  generation.value = { status: 'RUNNING' }
   try {
-    const images = generationImages.value.map((item) => item.runningHubFileName!)
-    const created = await submitRunningHubTask({
-      mode: generationMode.value,
-      prompt: generationPrompt.value,
-      duration: duration.value,
-      aspectRatio: runningHubRatio(),
-      images:
-        generationMode.value === 'text'
-          ? []
-          : images.slice(
-              0,
-              generationMode.value === 'first_last'
-                ? 2
-                : generationMode.value === 'first_frame'
-                  ? 1
-                  : 6,
-            ),
-      videos:
-        generationMode.value === 'reference'
-          ? generationVideos.value.slice(0, 1).map((item) => item.runningHubFileName!)
-          : [],
-      audios:
-        generationMode.value === 'reference'
-          ? generationAudios.value.slice(0, 3).map((item) => item.runningHubFileName!)
-          : [],
-      ...(generationMode.value === 'text'
-        ? { textMegapixels: runningHubStatus.value.textMegapixelsDefault }
-        : generationMode.value === 'first_frame' || generationMode.value === 'first_last'
-          ? { firstFrameMegapixels: runningHubStatus.value.firstFrameMegapixelsDefault }
-          : {
-              stage1Megapixels: runningHubStatus.value.megapixelsDefault[0],
-              stage2Megapixels: runningHubStatus.value.megapixelsDefault[1],
-            }),
-    })
-    generation.value = { taskId: created.taskId, status: created.status }
-    pollGeneration(created.taskId)
+    const mode = generationMode.value
+    const imageUrls =
+      mode === 'text'
+        ? []
+        : generationImages.value
+            .slice(0, mode === 'first_frame' ? 1 : mode === 'first_last' ? 2 : 6)
+            .map((item) => item.url)
+    const result = await generateShotVideo(
+      generationPrompt.value,
+      undefined,
+      [],
+      {
+        videoModel: 'minimax-h3-all-in-one',
+        imageModel: DEFAULT_IMAGE_MODEL,
+        ratio: (ratio.value === 'adaptive' ? '16:9' : ratio.value) as ShotGenOptions['ratio'],
+        resolution: '720p',
+        duration: duration.value,
+        h3Mode: mode,
+        referenceImageUrls: imageUrls,
+        referenceVideoUrls:
+          mode === 'reference' ? generationVideos.value.map((item) => item.url) : [],
+        referenceAudioUrls:
+          mode === 'reference' ? generationAudios.value.map((item) => item.url) : [],
+        generateAudio: true,
+        watermark: false,
+      },
+      undefined,
+      undefined,
+      generationAbort.signal,
+    )
+    generation.value = { status: 'SUCCESS', videoUrl: result.videoUrl }
   } catch (reason) {
-    generationError.value = reason instanceof Error ? reason.message : 'H3 视频任务提交失败'
+    generationError.value = reason instanceof Error ? reason.message : 'H3 视频任务失败'
+    generation.value = { status: 'FAILED' }
   } finally {
     generationLoading.value = false
   }
@@ -317,15 +275,14 @@ const copyOutput = async () => {
 
 onMounted(async () => {
   try {
-    const [nextStatus, history, nextRunningHubStatus] = await Promise.all([
+    const [nextStatus, history] = await Promise.all([
       fetchPromptOptimizerStatus(),
       fetchPromptOptimizerTasks(),
-      fetchRunningHubStatus(),
+      loadGenerationModels(),
     ])
     status.value = nextStatus
     tasks.value = history.items
     current.value = history.items[0] || null
-    runningHubStatus.value = nextRunningHubStatus
     if (!nextStatus.providers.minimax.configured && nextStatus.providers.gemini.configured)
       provider.value = 'gemini'
   } catch (reason) {
@@ -335,7 +292,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopPoll()
-  stopGenerationPoll()
+  generationAbort.abort()
 })
 </script>
 
@@ -351,7 +308,10 @@ onBeforeUnmount(() => {
 
       <div class="provider-switch" role="group" aria-label="提示词优化模型">
         <button
-          v-for="key in ['gemini', 'minimax'] as PromptOptimizerProvider[]"
+          v-for="key in [
+            'gemini',
+            ...(status?.providers.minimax.configured ? ['minimax'] : []),
+          ] as PromptOptimizerProvider[]"
           :key="key"
           type="button"
           :class="{ active: provider === key }"
@@ -362,8 +322,9 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
+      <p class="hint">视频参考按首、中、尾画面及音轨分析，视频和音频参考最长 15 秒。</p>
       <p v-if="providerInfo && !providerInfo.configured" class="config-warning">
-        当前服务未配置后端密钥，请先设置对应的 PROMPT_OPTIMIZER_* 环境变量。
+        平台服务暂不可用，请联系管理员检查平台配置。
       </p>
 
       <div class="generation-mode" role="group" aria-label="H3 生成模式">
@@ -524,7 +485,7 @@ onBeforeUnmount(() => {
         class="result-state"
       >
         <span class="spinner" />
-        <b>MiniMax 正在理解多参考素材</b>
+        <b>Gemini 正在理解多参考素材</b>
         <small>任务 {{ current.providerTaskId || current.id }}</small>
       </div>
       <div v-else-if="current?.error" class="result-state error-state">
@@ -561,7 +522,7 @@ onBeforeUnmount(() => {
         <div>
           <b>H3 视频任务</b>
           <span>{{ generation.status }}</span>
-          <small>{{ generation.taskId }}</small>
+          <small>平台视频生成任务</small>
         </div>
         <video v-if="generationVideoUrl" :src="generationVideoUrl" controls playsinline />
         <div
@@ -569,7 +530,7 @@ onBeforeUnmount(() => {
           class="generation-progress"
         >
           <span class="spinner" />
-          RunningHub 正在生成视频
+          平台正在生成视频
         </div>
       </div>
     </section>

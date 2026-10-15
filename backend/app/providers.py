@@ -299,6 +299,8 @@ async def create_real_face_asset(public_url: str, *, name: str) -> str:
 
 
 def _image_config() -> tuple[str, dict[str, str]]:
+    if settings.llm_channel == "all-in-one":
+        raise ProviderError("旧渠道已停用，请使用平台模型")
     if model_gateway.routed("yinghe"):
         return model_gateway.route("yinghe")
     if not settings.image_api_key:
@@ -307,6 +309,8 @@ def _image_config() -> tuple[str, dict[str, str]]:
 
 
 def _video_config() -> tuple[str, dict[str, str]]:
+    if settings.llm_channel == "all-in-one":
+        raise ProviderError("旧渠道已停用，请使用平台模型")
     if model_gateway.routed("yinghe"):
         return model_gateway.route("yinghe")
     if not settings.video_api_key:
@@ -315,6 +319,8 @@ def _video_config() -> tuple[str, dict[str, str]]:
 
 
 def _yseeai_config() -> tuple[str, dict[str, str]]:
+    if settings.llm_channel == "all-in-one":
+        raise ProviderError("旧渠道已停用，请使用平台模型")
     if model_gateway.routed("yseeai"):
         return model_gateway.route("yseeai")
     if not settings.yseeai_api_key:
@@ -323,6 +329,8 @@ def _yseeai_config() -> tuple[str, dict[str, str]]:
 
 
 def _toapis_config() -> tuple[str, dict[str, str]]:
+    if settings.llm_channel == "all-in-one":
+        raise ProviderError("旧渠道已停用，请使用平台模型")
     if model_gateway.routed("toapis"):
         return model_gateway.route("toapis")
     if not settings.toapis_api_key:

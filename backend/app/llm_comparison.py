@@ -23,6 +23,7 @@ class ChatTestModel:
 
 
 CHAT_TEST_MODELS = (
+    ChatTestModel("gemini-3.8-flash-all-in-one", "Gemini 3.8 Flash"),
     ChatTestModel("gpt-6.1-sol", "GPT 6.1 Sol（当前文本渠道）"),
     ChatTestModel("gpt-6-sol", "GPT 6 Sol（当前文本渠道）"),
     ChatTestModel("gpt-6.1-sol-all-in-one", "GPT 6.1 Sol（all in one）"),
@@ -85,6 +86,8 @@ async def _call_anthropic(model: str, messages: list[dict[str, str]], temperatur
 
 async def call_chat_model(*, model: str, protocol: str, messages: list[dict[str, str]], temperature: float, max_tokens: int) -> tuple[str, Any, str | None]:
     """单次模型调用；业务流程通过显式 model/protocol 注入测试模型，不改全局默认配置。"""
+    if settings.llm_channel == "all-in-one" and not model.endswith("-all-in-one"):
+        raise ValueError("旧渠道文本模型已停用，请选择平台模型")
     caller = _call_anthropic if protocol == "anthropic" else _call_openai
     return await caller(model, messages, temperature, max_tokens)
 

@@ -39,19 +39,16 @@ def _jpeg_pair(content: bytes) -> tuple[bytes, bytes]:
         thumbnail = image.copy()
         thumbnail.thumbnail((320, 480), Image.Resampling.LANCZOS)
         original_buffer, thumbnail_buffer = io.BytesIO(), io.BytesIO()
-        original.save(
-            original_buffer, format="JPEG", quality=90, optimize=True, progressive=True
-        )
-        thumbnail.save(
-            thumbnail_buffer, format="JPEG", quality=78, optimize=True, progressive=True
-        )
+        original.save(original_buffer, format="JPEG", quality=90, optimize=True, progressive=True)
+        thumbnail.save(thumbnail_buffer, format="JPEG", quality=78, optimize=True, progressive=True)
         return original_buffer.getvalue(), thumbnail_buffer.getvalue()
 
 
 def _identity_text(human: DigitalHumanModel) -> str:
-    return "，".join(
-        value.strip() for value in (human.age_description, human.gender) if value and value.strip()
-    ) + "。仅参考人物五官、脸型、肤色、年龄感和发型；卡通人物保持卡通风格，儿童不得成人化"
+    return (
+        "，".join(value.strip() for value in (human.age_description, human.gender) if value and value.strip())
+        + "。仅参考人物五官、脸型、肤色、年龄感和发型；卡通人物保持卡通风格，儿童不得成人化"
+    )
 
 
 async def replace(manifest_path: Path, dry_run: bool) -> None:
@@ -110,30 +107,29 @@ async def replace(manifest_path: Path, dry_run: bool) -> None:
                 old_values[column.name] = value.isoformat() if isinstance(value, datetime) else value
             backup.append(old_values)
             identity = _identity_text(human)
-            asset_mapping.append({
-                "id": human.id,
-                "code": human.asset_code,
-                "source_url": requested[human.id]["url"],
-                "generation_job_id": requested[human.id].get("generation_job_id"),
-                "generation_run_id": requested[human.id].get("run_id"),
-                "original_key": f"system/digital-humans/{run_id}/{human.asset_code}.jpg",
-                "thumbnail_key": f"system/digital-humans/{run_id}/thumbnails/{human.asset_code}.jpg",
-                "registration_name": f"mv-{human.asset_code}-{run_id}",
-                "provider": "yinghe",
-                "status": "pending",
-                "expected_old": old_values,
-                "updates": {
-                    "description": identity,
-                    "appearance_style": identity,
-                    "clothing_description": "",
-                    "suitable_music_styles": "",
-                    "avatar_prompt": (
-                        "1024x1536单张头肩大头照，白色无图案T恤、纯灰背景；"
-                        "仅保留人物五官、年龄感和发型，保留卡通/儿童身份"
-                    ),
-                    "system_prompt": f"图片ID：{human.asset_code}\n人物名称：{human.name}\n性别：{human.gender}\n年龄估计：{human.age_description}\n人物身份描述：{identity}",
-                },
-            })
+            asset_mapping.append(
+                {
+                    "id": human.id,
+                    "code": human.asset_code,
+                    "source_url": requested[human.id]["url"],
+                    "generation_job_id": requested[human.id].get("generation_job_id"),
+                    "generation_run_id": requested[human.id].get("run_id"),
+                    "original_key": f"system/digital-humans/{run_id}/{human.asset_code}.jpg",
+                    "thumbnail_key": f"system/digital-humans/{run_id}/thumbnails/{human.asset_code}.jpg",
+                    "registration_name": f"mv-{human.asset_code}-{run_id}",
+                    "provider": "yinghe",
+                    "status": "pending",
+                    "expected_old": old_values,
+                    "updates": {
+                        "description": identity,
+                        "appearance_style": identity,
+                        "clothing_description": "",
+                        "suitable_music_styles": "",
+                        "avatar_prompt": ("1024x1536单张头肩大头照，白色无图案T恤、纯灰背景；仅保留人物五官、年龄感和发型，保留卡通/儿童身份"),
+                        "system_prompt": f"图片ID：{human.asset_code}\n人物名称：{human.name}\n性别：{human.gender}\n年龄估计：{human.age_description}\n人物身份描述：{identity}",
+                    },
+                }
+            )
 
     backup_path = manifest_path.with_name(f"{manifest_path.stem}-{run_id}-backup.json")
     mapping_path = manifest_path.with_name(f"{manifest_path.stem}-{run_id}-mapping.json")
@@ -176,10 +172,13 @@ async def replace(manifest_path: Path, dry_run: bool) -> None:
                 row["updates"]["avatar_thumbnail_url"] = await storage.put_bytes(row["thumbnail_key"], thumbnail, "image/jpeg")
                 row["status"] = "registering"
                 save_mapping()
-                yinghe_asset = await create_real_face_asset(row["updates"]["avatar_url"], name=row["registration_name"])
-                if not isinstance(yinghe_asset, str) or not yinghe_asset.startswith("asset://") or not yinghe_asset[8:]:
-                    raise ValueError(f"{row['id']}: Yinghe registration returned no asset URL")
-                row["updates"]["asset_avatar_url"] = yinghe_asset
+                from app.config import settings
+
+                if settings.llm_channel != "all-in-one":
+                    yinghe_asset = await create_real_face_asset(row["updates"]["avatar_url"], name=row["registration_name"])
+                    if not isinstance(yinghe_asset, str) or not yinghe_asset.startswith("asset://") or not yinghe_asset[8:]:
+                        raise ValueError(f"{row['id']}: Yinghe registration returned no asset URL")
+                    row["updates"]["asset_avatar_url"] = yinghe_asset
                 row["status"] = "prepared"
                 save_mapping()
                 print(json.dumps({"prepared": index, "count": len(asset_mapping), **row}, ensure_ascii=False), flush=True)

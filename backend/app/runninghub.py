@@ -135,6 +135,8 @@ class RunningHubError(RuntimeError):
 
 
 def _base_url() -> str:
+    if settings.llm_channel == "all-in-one":
+        raise RuntimeError("旧渠道已停用，请使用平台模型")
     if model_gateway.routed("runninghub"):
         return model_gateway.route("runninghub")[0] + "/openapi/v2"
     return settings.runninghub_base_url

@@ -57,7 +57,7 @@ def _read_provider_value(name: str) -> str:
 SHARED_PROVIDER_KEY = _read_provider_value("AIGC_TOKEN")
 SHARED_LLM_BASE_URL = _read_provider_value("CHAT_COMPLETIONS_BASE_URL") or "https://ai-aigc.fzyinghe.com/v1"
 SHARED_LLM_MODEL = _read_provider_value("CHAT_DEFAULT_MODEL") or os.getenv("AIGC_CHAT_MODEL", "gpt-5.6-sol")
-LLM_CHANNEL = os.getenv("LLM_CHANNEL", "").strip().lower()
+LLM_CHANNEL = os.getenv("LLM_CHANNEL", "all-in-one").strip().lower()
 if LLM_CHANNEL not in {"", "yseeai", "toapis", "all-in-one"}:
     raise ValueError("LLM_CHANNEL 仅支持留空、yseeai、toapis 或 all-in-one")
 
@@ -80,7 +80,7 @@ def _resolve_llm_settings(shared_key: str, shared_base_url: str, shared_model: s
         return (
             os.getenv("ALL_IN_ONE_BASE_URL", "https://mg.epaipix.com").rstrip("/") + "/v1",
             os.getenv("ALL_IN_ONE_API_KEY", ""),
-            os.getenv("ALL_IN_ONE_LLM_MODEL", "gpt-6.1-sol-all-in-one"),
+            os.getenv("ALL_IN_ONE_LLM_MODEL", "gemini-3.8-flash-all-in-one"),
         )
     if shared_key:
         return shared_base_url, shared_key, shared_model
@@ -229,6 +229,10 @@ def validate_runtime_security() -> None:
     if "*" in settings.cors_origins:
         raise RuntimeError("启用凭证时 APP_CORS_ORIGINS 禁止使用通配符")
     if settings.app_env == "production":
+        if settings.llm_channel != "all-in-one" or not all(model.endswith("-all-in-one") for model in (settings.llm_model, settings.general_outline_llm_model)):
+            raise RuntimeError("生产环境仅允许 All in one 文本模型")
+        if os.getenv("MODEL_GATEWAY_URL", ""):
+            raise RuntimeError("生产环境已统一使用 All in one，不再使用旧模型网关")
         if not RUNTIME_SECRETS_FILE.is_file():
             raise RuntimeError("生产环境必须挂载 /run/secrets/runtime_secrets")
         mode = RUNTIME_SECRETS_FILE.stat().st_mode & 0o777

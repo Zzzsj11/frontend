@@ -9,12 +9,7 @@ import {
   uploadPromptOptimizerMedia,
 } from '../../src/api/adminPromptOptimizer'
 import AdminPromptOptimizerPanel from '../../src/components/AdminPromptOptimizerPanel.vue'
-import {
-  fetchRunningHubStatus,
-  queryRunningHubTask,
-  submitRunningHubTask,
-  type RunningHubStatus,
-} from '../../src/api/adminRunningHub'
+import { generateShotVideo } from '../../src/api/mediaGen'
 
 vi.mock('../../src/api/adminPromptOptimizer', () => ({
   createPromptOptimizerTask: vi.fn(),
@@ -24,10 +19,11 @@ vi.mock('../../src/api/adminPromptOptimizer', () => ({
   uploadPromptOptimizerMedia: vi.fn(),
 }))
 
-vi.mock('../../src/api/adminRunningHub', () => ({
-  fetchRunningHubStatus: vi.fn(),
-  queryRunningHubTask: vi.fn(),
-  submitRunningHubTask: vi.fn(),
+vi.mock('../../src/api/mediaGen', () => ({ generateShotVideo: vi.fn() }))
+vi.mock('../../src/generationModels', () => ({
+  DEFAULT_IMAGE_MODEL: 'nano-banana-2.1-all-in-one',
+  loadGenerationModels: vi.fn(),
+  videoRatioChoices: () => ['16:9', '9:16'],
 }))
 
 const configuredStatus = {
@@ -40,21 +36,6 @@ const configuredStatus = {
   durationRange: [4, 15] as [number, number],
 }
 
-const runningHubStatus: RunningHubStatus = {
-  configured: true,
-  keyTail: '…c817',
-  workflowId: 'workflow-1',
-  modes: ['reference', 'text', 'first_frame', 'first_last'],
-  aspectRatios: ['16:9 (Widescreen)'],
-  firstFrameAspectRatios: ['16:9 (Widescreen)'],
-  textAspectRatios: ['16:9 (Widescreen)'],
-  durationRange: [4, 15] as [number, number],
-  megapixelsPresets: [{ value: 0.9, size: '1280×736' }],
-  megapixelsDefault: [0.4, 0.9] as [number, number],
-  textMegapixelsDefault: 0.9,
-  firstFrameMegapixelsDefault: 0.9,
-}
-
 describe('admin prompt optimizer panel', () => {
   beforeEach(() => {
     vi.mocked(fetchPromptOptimizerStatus).mockReset().mockResolvedValue(configuredStatus)
@@ -62,9 +43,6 @@ describe('admin prompt optimizer panel', () => {
     vi.mocked(uploadPromptOptimizerMedia).mockReset()
     vi.mocked(createPromptOptimizerTask).mockReset()
     vi.mocked(queryPromptOptimizerTask).mockReset()
-    vi.mocked(fetchRunningHubStatus).mockReset().mockResolvedValue(runningHubStatus)
-    vi.mocked(queryRunningHubTask).mockReset()
-    vi.mocked(submitRunningHubTask).mockReset()
   })
 
   it('uploads mixed media and submits to the selected provider', async () => {
@@ -123,9 +101,13 @@ describe('admin prompt optimizer panel', () => {
   })
 
   it('supports all four H3 generation modes and submits text generation directly', async () => {
-    vi.mocked(submitRunningHubTask).mockResolvedValue({ taskId: 'h3-task-1', status: 'QUEUED' })
+    vi.mocked(generateShotVideo).mockResolvedValue({
+      coverUrl: '',
+      videoUrl: 'https://tos.test/video.mp4',
+      duration: 15,
+    })
     const wrapper = mount(AdminPromptOptimizerPanel)
-    await vi.waitFor(() => expect(fetchRunningHubStatus).toHaveBeenCalled())
+    await vi.waitFor(() => expect(fetchPromptOptimizerStatus).toHaveBeenCalled())
 
     expect(wrapper.findAll('.generation-mode button').map((item) => item.text())).toEqual([
       '文生视频',
@@ -136,36 +118,39 @@ describe('admin prompt optimizer panel', () => {
     await wrapper.find('#optimizer-prompt').setValue('宫廷舞蹈，镜头缓慢推进')
     await wrapper.findAll('.generation-mode button')[0].trigger('click')
     await wrapper.find('.generate-button').trigger('click')
-    await vi.waitFor(() => expect(submitRunningHubTask).toHaveBeenCalled())
-    expect(submitRunningHubTask).toHaveBeenCalledWith(
+    await vi.waitFor(() => expect(generateShotVideo).toHaveBeenCalled())
+    expect(generateShotVideo).toHaveBeenCalledWith(
+      '宫廷舞蹈，镜头缓慢推进',
+      undefined,
+      [],
       expect.objectContaining({
-        mode: 'text',
-        prompt: '宫廷舞蹈，镜头缓慢推进',
-        images: [],
-        aspectRatio: '16:9 (Widescreen)',
+        h3Mode: 'text',
+        videoModel: 'minimax-h3-all-in-one',
+        referenceImageUrls: [],
+        ratio: '16:9',
       }),
+      undefined,
+      undefined,
+      expect.any(AbortSignal),
     )
     wrapper.unmount()
   })
 
-  it('shows configuration warning and disables optimization when a provider has no key', async () => {
+  it('hides the retired MiniMax optimizer and warns when the platform has no key', async () => {
     vi.mocked(fetchPromptOptimizerStatus).mockResolvedValue({
       ...configuredStatus,
       providers: {
         ...configuredStatus.providers,
-        minimax: { configured: false, model: 'MiniMax-H3', keyTail: '' },
+        gemini: { configured: false, model: 'gemini-3.8-flash-all-in-one', keyTail: '' },
+        minimax: { configured: false, model: '已停用', keyTail: '' },
       },
     })
     const wrapper = mount(AdminPromptOptimizerPanel)
     await vi.waitFor(() =>
       expect(wrapper.find('.provider-switch button.active').text()).toContain('Gemini'),
     )
-    const minimax = wrapper
-      .findAll('.provider-switch button')
-      .find((item) => item.text().includes('MiniMax'))!
-    await minimax.trigger('click')
-    await wrapper.vm.$nextTick()
-    expect(wrapper.text()).toContain('未配置后端密钥')
+    expect(wrapper.findAll('.provider-switch button')).toHaveLength(1)
+    await vi.waitFor(() => expect(wrapper.text()).toContain('平台服务暂不可用'))
     expect(wrapper.find('.optimize-button').attributes('disabled')).toBeDefined()
   })
 })

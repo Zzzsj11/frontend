@@ -287,6 +287,8 @@ async def query_business_balance(*, force: bool = False) -> dict[str, Any]:
 
 
 async def query_provider_balances(*, force: bool = False, providers: set[str] | None = None) -> dict[str, Any]:
+    if settings.llm_channel == "all-in-one":
+        return unavailable_balance("旧渠道余额查询已停用，请查询平台积分")
     requested = providers or {"yinghe"}
     yinghe = await query_business_balance(force=force) if "yinghe" in requested else unavailable_balance("本次未查询英和余额")
     return {"providers": {"yinghe": yinghe}, **yinghe}

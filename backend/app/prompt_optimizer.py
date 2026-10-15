@@ -19,6 +19,11 @@ Analyze every supplied text, image, video, and audio reference directly. Return 
 
 
 def provider_status() -> dict[str, dict[str, Any]]:
+    if settings.llm_channel == "all-in-one":
+        return {
+            "gemini": {"configured": bool(settings.all_in_one_api_key), "model": settings.llm_model, "keyTail": ""},
+            "minimax": {"configured": False, "model": "已停用", "keyTail": ""},
+        }
     return {
         "gemini": {
             "configured": bool(settings.prompt_optimizer_gemini_api_key),
@@ -68,6 +73,8 @@ def _raise_provider_error(response: httpx.Response, provider: str) -> None:
 
 
 async def call_gemini(*, prompt: str, duration: int, ratio: str, media: list[dict[str, Any]], agent_name: str = "", agent_run_id: str = "") -> dict[str, Any]:
+    if settings.llm_channel == "all-in-one":
+        return await _call_platform(prompt=prompt, duration=duration, ratio=ratio, media=media, agent_name=agent_name, agent_run_id=agent_run_id)
     content: list[dict[str, Any]] = [{"type": "text", "text": f"{SYSTEM_INSTRUCTION}\n\n{enrich_prompt(prompt, duration, ratio, media)}"}]
     for item in media:
         kind = item["kind"]
@@ -104,6 +111,8 @@ async def call_gemini(*, prompt: str, duration: int, ratio: str, media: list[dic
 
 
 async def create_minimax(*, prompt: str, duration: int, ratio: str, media: list[dict[str, Any]], agent_name: str = "", agent_run_id: str = "") -> dict[str, Any]:
+    if settings.llm_channel == "all-in-one":
+        raise RuntimeError("MiniMax 专用优化接口已停用，请选择 Gemini")
     content: list[dict[str, Any]] = [{"type": "text", "text": enrich_prompt(prompt, duration, ratio, media)}]
     for item in media:
         kind = item["kind"]
@@ -132,6 +141,8 @@ async def create_minimax(*, prompt: str, duration: int, ratio: str, media: list[
 
 
 async def query_minimax(task_id: str, *, via_gateway: bool, agent_name: str = "", agent_run_id: str = "") -> dict[str, Any]:
+    if settings.llm_channel == "all-in-one":
+        raise RuntimeError("MiniMax 专用优化接口已停用，请选择 Gemini")
     headers = {"Authorization": f"Bearer {settings.prompt_optimizer_minimax_api_key}", **_agent_headers(agent_name, agent_run_id)}
     async with httpx.AsyncClient(timeout=settings.prompt_optimizer_timeout) as client:
         base = settings.prompt_optimizer_minimax_base_url
@@ -147,4 +158,40 @@ async def query_minimax(task_id: str, *, via_gateway: bool, agent_name: str = ""
         "usage": task.get("usage") or {},
         "error": (task.get("error") or {}).get("message") or "",
         "requestId": response.headers.get("x-request-id"),
+    }
+
+
+async def _call_platform(*, prompt: str, duration: int, ratio: str, media: list[dict[str, Any]], agent_name: str, agent_run_id: str) -> dict[str, Any]:
+    from .all_in_one import chat_client, upstream_model
+    from .llm_failover import choose_model, record_failure, record_success
+    from .llm_policy import check_provider_text, completion_options
+    from .optimizer_media import content_parts
+
+    model = await choose_model(settings.llm_model)
+    if model != settings.llm_model and media:
+        # Text-only backup must not silently discard multimodal evidence.
+        raise RuntimeError("多参考优化主模型暂不可用，请稍后重试；不会将参考素材交给纯文本备用模型")
+    content = [{"type": "text", "text": SYSTEM_INSTRUCTION + "\n\n" + enrich_prompt(prompt, duration, ratio, media)}]
+    content.extend(await content_parts(media, model_gateway.current_owner()))
+    messages = [{"role": "user", "content": content}]
+    started = time.perf_counter()
+    try:
+        async with chat_client(user_id=model_gateway.current_owner(), timeout=settings.prompt_optimizer_timeout) as client:
+            response = await client.chat.completions.create(
+                model=upstream_model(model), messages=messages, extra_headers=_agent_headers(agent_name, agent_run_id), **completion_options(model, 7000)
+            )
+        text = response.choices[0].message.content or ""
+        check_provider_text(text)
+    except Exception:
+        await record_failure(model)
+        raise
+    await record_success(model)
+    return {
+        "prompt": text,
+        "usage": response.usage.model_dump() if response.usage else {},
+        "requestId": response.id,
+        "durationMs": round((time.perf_counter() - started) * 1000),
+        "requestSnapshot": messages,
+        "provider": "all-in-one",
+        "model": model,
     }
