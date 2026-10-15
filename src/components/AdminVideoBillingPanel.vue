@@ -53,9 +53,13 @@ const compactMoney = (value: number) => `¥${compactNumber(value)}`
 const perSecondJiao = (amount: number, durationSeconds: number) =>
   durationSeconds > 0 && amount > 0 ? `${compactNumber((amount / durationSeconds) * 10, 4)}毛` : '-'
 const billingLabel = (value: string) =>
-  ({ priced: '已计费', excluded: '渠道暂不计费', unpriced: '缺少价格', no_usage: '无供应商用量' })[
-    value
-  ] || value
+  ({
+    priced: '已计费',
+    excluded: '渠道暂不计费',
+    unpriced: '缺少价格',
+    no_usage: '无供应商用量',
+    pending: '待平台结算',
+  })[value] || value
 
 const load = async () => {
   loading.value = true
@@ -166,6 +170,7 @@ onMounted(load)
         <option value="priced">已计费</option>
         <option value="excluded">渠道暂不计费</option>
         <option value="unpriced">缺少价格</option>
+        <option value="pending">待平台结算</option>
         <option value="no_usage">无供应商用量</option>
       </select>
       <select v-model="model" aria-label="视频模型" @change="search">
@@ -220,7 +225,7 @@ onMounted(load)
             <th>时长</th>
             <th>生成耗时</th>
             <th>生成结果</th>
-            <th>计费用量/单价<small>Token / 秒</small></th>
+            <th>计费用量/单价<small>Token / 秒 / 积分</small></th>
             <th>费用/每秒费用（单价毛）</th>
             <th>操作</th>
           </tr>
@@ -260,7 +265,7 @@ onMounted(load)
               {{ usage(item.usageQuantity, item.usageUnit) }}<small>{{ item.rateLabel }}</small>
             </td>
             <td class="amount">
-              {{ compactMoney(item.amount)
+              {{ item.billingStatus === 'pending' ? '待结算' : compactMoney(item.amount)
               }}<small>{{ perSecondJiao(item.amount, item.durationSeconds) }}</small>
             </td>
             <td><button class="action" @click="openDetail(item.id)">详情</button></td>

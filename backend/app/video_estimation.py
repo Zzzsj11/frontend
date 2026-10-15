@@ -16,7 +16,7 @@ class VideoEstimatePolicy:
             "unitPricePerSecond": self.unit_price_per_second,
             "balanceCheck": self.balance_check,
             "billingMode": self.billing_mode,
-            "currency": "CNY",
+            "currency": "points" if self.billing_mode == "platform_points" else "CNY",
         }
 
 
@@ -54,4 +54,8 @@ VIDEO_ESTIMATE_POLICIES = {
 
 
 def video_estimate_policy(model: str) -> VideoEstimatePolicy:
+    from .all_in_one_catalog import VIDEO_MODEL_CODES
+
+    if model in VIDEO_MODEL_CODES:
+        return VideoEstimatePolicy("all-in-one", 0, balance_check=False, billing_mode="platform_points")
     return VIDEO_ESTIMATE_POLICIES.get(model, VideoEstimatePolicy("yinghe", 0.83))

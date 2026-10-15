@@ -71,7 +71,10 @@ const money = (value: number) => `¥${value.toFixed(6)}`
             <span>计费用量</span><b>{{ detail.usageQuantity }} {{ detail.usageUnit }}</b>
           </div>
           <div>
-            <span>本次费用</span><b class="amount">{{ money(detail.amount) }}</b>
+            <span>本次费用</span
+            ><b class="amount">{{
+              detail.billingStatus === 'pending' ? '待平台结算' : money(detail.amount)
+            }}</b>
           </div>
           <div>
             <span>生成状态</span

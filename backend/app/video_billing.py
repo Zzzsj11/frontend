@@ -131,12 +131,13 @@ async def reconcile_video_job(
             await db.execute(select(TokenUsageModel).where(TokenUsageModel.generation_job_id == job.id).order_by(TokenUsageModel.created_at.desc()).limit(1))
         ).scalar_one_or_none()
     model, provider = _model_provider(job, usage)
+    is_platform = provider == "all-in-one"
     is_runninghub = provider == "runninghub" or model == "minimax-h3-runninghub"
     is_token_billed = model in TOKEN_BILLED_VIDEO_MODELS
     is_second_billed = model in SECOND_BILLED_VIDEO_MODELS or (model == "minimax-h3" and provider == "yinghe-h3")
     if record is not None:
         # 模型或关联报价退役后，历史财务快照只读，不能按当前能力重算为零。
-        if not (is_runninghub or is_token_billed or is_second_billed):
+        if not (is_platform or is_runninghub or is_token_billed or is_second_billed):
             return record
         if record.pricing_rule_id:
             historical_rule = (
@@ -158,7 +159,20 @@ async def reconcile_video_job(
     amount = ZERO
     rule = None
 
-    if is_runninghub:
+    if is_platform:
+        terminal = (job.request or {}).get("_providerTerminalResponse") or {}
+        bill = raw_usage.get("platformBilling") or metrics.get("platformBilling") or terminal.get("billing") or {}
+        if bill:
+            raw_usage = {**raw_usage, "platformBilling": bill}
+        usage_type, usage_unit = "platform_points", "积分"
+        if bill.get("status") in {"settled", "refunded"} and bill.get("points") is not None:
+            billing_status = "priced"
+            quantity = _decimal(bill["points"])
+            amount = _decimal(bill["cny"]) if bill.get("cny") is not None else quantity / Decimal("100")
+        else:
+            # 预占和待核账不代表免费；仅平台终态结算能记为费用。
+            billing_status = "pending"
+    elif is_runninghub:
         billing_status = "excluded"
         usage_type = "runninghub_coins"
         usage_unit = "RH币"
@@ -194,7 +208,7 @@ async def reconcile_video_job(
         applied_unit_price = (_decimal(rule.unit_price) * discount_rate).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_UP)
         amount = (quantity / _decimal(rule.unit_size) * applied_unit_price).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_UP)
     else:
-        applied_unit_price = ZERO
+        applied_unit_price = Decimal("0.01") if is_platform and billing_status == "priced" else ZERO
 
     if record is None:
         record = VideoBillingRecordModel(id=f"vbill-{uuid.uuid4().hex}", generation_job_id=job.id)
@@ -286,7 +300,7 @@ async def reconcile_video_billing(
         counts["processed"] = int(counts["processed"]) + 1
         if record.is_failed:
             counts["failed"] = int(counts["failed"]) + 1
-        key = {"priced": "priced", "excluded": "excluded", "unpriced": "unpriced", "no_usage": "noUsage"}[record.billing_status]
+        key = {"priced": "priced", "excluded": "excluded", "unpriced": "unpriced", "pending": "unpriced", "no_usage": "noUsage"}[record.billing_status]
         counts[key] = int(counts[key]) + 1
     await db.flush()
     return counts

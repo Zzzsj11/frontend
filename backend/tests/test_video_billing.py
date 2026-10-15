@@ -532,3 +532,91 @@ async def test_batch_snapshot_protection_uses_only_bulk_queries(billing_db, monk
         assert _row_snapshot(rows[3]) == snapshot
     await db.refresh(active[3])
     assert active[3].amount == Decimal("16")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "billing,expected_status,points,amount",
+    [
+        ({"status": "settled", "points": "201.073700", "cny": "2.010737"}, "priced", "201.073700", "2.010737"),
+        ({"status": "refunded", "points": "0", "cny": "0"}, "priced", "0", "0"),
+        ({"status": "pending_reconciliation", "points": None, "reserved_points": "200"}, "pending", "0", "0"),
+    ],
+)
+async def test_platform_settlement_uses_actual_points_and_never_treats_reservation_as_free(billing_db, billing, expected_status, points, amount):
+    db = billing_db
+    job = GenerationJobModel(
+        id="platform-bill",
+        kind="video",
+        status="succeeded",
+        provider="all-in-one",
+        request={"model": "gemini-omni-1.1-flash-preview-all-in-one", "duration": 10},
+        result={"usage": {"platformBilling": billing}},
+    )
+    db.add(job)
+    await db.flush()
+    record = await reconcile_video_job(db, job)
+    assert record.billing_status == expected_status
+    assert record.usage_unit == "积分"
+    assert record.usage_quantity == Decimal(points)
+    assert record.amount == Decimal(amount)
+    # 核算幂等，也允许旧 unpriced 快照补齐为平台实际结算。
+    record.billing_status = "unpriced"
+    again = await reconcile_video_job(db, job)
+    assert again.id == record.id and again.billing_status == expected_status
+
+
+def test_admin_sync_refreshes_settlement_without_resubmitting_or_duplicating_usage(client, monkeypatch):
+    job_id = "platform-late-bill"
+
+    async def seed():
+        async with session_factory() as db:
+            db.add(
+                GenerationJobModel(
+                    id=job_id,
+                    kind="video",
+                    status="succeeded",
+                    provider="all-in-one",
+                    provider_task_id="synthetic-platform-bill",
+                    user_id="user-admin",
+                    generation_origin="agent_test",
+                    agent_name="code-agent",
+                    agent_run_id="synthetic-bill-refresh",
+                    request={"model": "gemini-omni-1.1-flash-preview-all-in-one", "duration": 10},
+                    result={"videoUrl": "https://tos.test/existing.mp4", "usage": {"platformBilling": {"status": "pending_reconciliation", "points": None}}},
+                )
+            )
+            await db.flush()
+            db.add(
+                TokenUsageModel(
+                    id="platform-late-usage",
+                    generation_job_id=job_id,
+                    operation="generation_video",
+                    provider="all-in-one",
+                    model="gemini-omni-1.1-flash-preview-all-in-one",
+                    raw_usage={"platformBilling": {"status": "pending_reconciliation", "points": None}},
+                )
+            )
+            await db.commit()
+
+    asyncio.run(seed())
+    provider = AsyncMock(return_value={"status": "SUCCEEDED", "usage": {"platformBilling": {"status": "settled", "points": "150.125600", "cny": "1.501256"}}})
+    monkeypatch.setattr("app.admin.query_provider_task", provider)
+    monkeypatch.setattr("app.admin.job_manager.is_active", lambda _: False)
+    for _ in range(2):
+        response = client.post(f"/api/admin/jobs/{job_id}/sync")
+        assert response.status_code == 200, response.text
+        assert response.json()["action"] == "billing_refreshed"
+
+    async def check():
+        async with session_factory() as db:
+            job = await db.get(GenerationJobModel, job_id)
+            assert job.result["videoUrl"] == "https://tos.test/existing.mp4"
+            assert job.agent_run_id == "synthetic-bill-refresh"
+            usage_rows = list(await db.scalars(select(TokenUsageModel).where(TokenUsageModel.generation_job_id == job_id)))
+            assert len(usage_rows) == 1
+            record = await db.scalar(select(VideoBillingRecordModel).where(VideoBillingRecordModel.generation_job_id == job_id))
+            assert record.billing_status == "priced" and record.amount == Decimal("1.501256")
+            assert record.usage_quantity == Decimal("150.125600")
+
+    asyncio.run(check())

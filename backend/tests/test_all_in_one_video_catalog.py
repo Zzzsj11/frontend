@@ -82,3 +82,20 @@ def test_grok_reference_mode_rejects_unsupported_full_hd():
         validate_video_references(VideoGenerationCreate(prompt="synthetic", resolution="1080p", image_urls=["https://tos.test/ref.png"]), caps)
     assert error.value.status_code == 422
     validate_video_references(VideoGenerationCreate(prompt="synthetic", resolution="1080p", h3_mode="first_frame", image_urls=["https://tos.test/ref.png"]), caps)
+
+
+@pytest.mark.asyncio
+async def test_all_twelve_batch_models_skip_unrelated_yinghe_balance(monkeypatch):
+    from app import balance
+    from app.video_estimation import video_estimate_policy
+
+    unrelated = AsyncMock(side_effect=AssertionError("must not query Yinghe for platform jobs"))
+    monkeypatch.setattr(balance, "query_provider_balances", unrelated)
+    requests = []
+    for row in video_rows():
+        policy = video_estimate_policy(row["code"])
+        assert policy.provider == "all-in-one" and not policy.balance_check
+        requests.append(VideoGenerationCreate(model=row["code"], prompt="synthetic", duration=row["capabilities"]["durations"]["min"]))
+    result = await balance.ensure_video_batch_balance(requests)
+    assert result["providerEstimates"] == {}
+    unrelated.assert_not_awaited()
