@@ -124,7 +124,7 @@ export const isH3VideoModel = (modelId?: string): boolean => {
   )
 }
 export const generationModelLabel = (option: GenerationModelOption): string => {
-  if (PROJECT_VIDEO_MODEL_IDS.has(option.value))
+  if (PROJECT_VIDEO_MODEL_IDS.has(option.value) || option.value.endsWith('-all-in-one'))
     return option.label.replace(/[（(]all in one[）)]/gi, '').trim()
   if (option.value === 'minimax-h3-runninghub') {
     return 'H3（RunningHub，2并发，仅测试时用）'
@@ -186,7 +186,11 @@ export async function loadGenerationModels(
     >('/model-options')
     const images = items
       .filter((x) => x.modality === 'image')
-      .map((x) => ({ value: x.id, label: x.name, capabilities: x.capabilities }))
+      .map((x) => ({
+        value: x.id,
+        label: generationModelLabel({ value: x.id, label: x.name }),
+        capabilities: x.capabilities,
+      }))
       .sort(
         (left, right) =>
           Number(left.capabilities?.sortOrder ?? 100) -
@@ -195,7 +199,11 @@ export async function loadGenerationModels(
     const videos = sortVideoModelOptions(
       items
         .filter((x) => x.modality === 'video' && PROJECT_VIDEO_MODEL_IDS.has(x.id))
-        .map((x) => ({ value: x.id, label: x.name, capabilities: x.capabilities })),
+        .map((x) => ({
+          value: x.id,
+          label: generationModelLabel({ value: x.id, label: x.name }),
+          capabilities: x.capabilities,
+        })),
     )
     IMAGE_MODEL_OPTIONS.splice(0, IMAGE_MODEL_OPTIONS.length, ...images)
     VIDEO_MODEL_OPTIONS.splice(0, VIDEO_MODEL_OPTIONS.length, ...videos)

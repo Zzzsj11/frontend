@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseSelect from './base/BaseSelect.vue'
 import { computed, watch } from 'vue'
 import type { SongEmotionInput } from '../api/adminSongEmotions'
 import type { GeneralStoryboardOptions } from '../types'
@@ -75,14 +76,14 @@ watch(() => props.options, initializeDefaults, { immediate: true })
       <p class="hint">与“通用分类”实时联动，选择上级后自动更新下级选项。</p>
       <div class="field-row category-row">
         <label
-          >一级分类<select v-model="model.primaryCategory" required @change="selectPrimary">
+          >一级分类<BaseSelect v-model="model.primaryCategory" required @change="selectPrimary">
             <option v-for="item in primaryOptions" :key="item.value" :value="item.value">
               {{ item.label }}
             </option>
-          </select></label
+          </BaseSelect></label
         >
         <label
-          >二级分类<select
+          >二级分类<BaseSelect
             v-model="model.secondaryCategory"
             :disabled="!secondaryOptions.length"
             @change="selectSecondary"
@@ -91,10 +92,10 @@ watch(() => props.options, initializeDefaults, { immediate: true })
             <option v-for="item in secondaryOptions" :key="item.value" :value="item.value">
               {{ item.label }}
             </option>
-          </select></label
+          </BaseSelect></label
         >
         <label
-          >三级分类<select
+          >三级分类<BaseSelect
             v-model="model.tertiaryCategory"
             :disabled="!tertiaryOptions.length"
             @change="syncMaterialCategory"
@@ -103,7 +104,7 @@ watch(() => props.options, initializeDefaults, { immediate: true })
             <option v-for="item in tertiaryOptions" :key="item.value" :value="item.value">
               {{ item.label }}
             </option>
-          </select></label
+          </BaseSelect></label
         >
       </div>
       <div class="material-preview">
@@ -169,7 +170,6 @@ label {
   font-weight: 600;
 }
 input,
-select,
 textarea {
   width: 100%;
   padding: 10px 12px;
@@ -180,7 +180,6 @@ textarea {
   font: inherit;
 }
 input:focus,
-select:focus,
 textarea:focus {
   border-color: var(--primary);
   outline: none;

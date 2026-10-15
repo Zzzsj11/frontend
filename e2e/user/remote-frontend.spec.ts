@@ -1,3 +1,4 @@
+import { selectDropdown, expectDropdownOptions } from '../select'
 import { expect, test } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -64,8 +65,8 @@ test('deployed frontend login, project and storyboard configuration journey', as
     await expect(songCode).toBeDisabled()
     await expect(songCode).toHaveValue('10012204')
     await expect(assDialog.getByText(/可不选/)).toBeVisible()
-    await expect(assDialog.getByLabel('画幅')).toHaveValue('16:9')
-    await expect(assDialog.getByLabel('清晰度').first()).toHaveValue('480p')
+    await expect(assDialog.getByLabel('画幅')).toHaveAttribute('data-value', '16:9')
+    await expect(assDialog.getByLabel('清晰度').first()).toHaveAttribute('data-value', '480p')
     await expect(assDialog.getByLabel('视频模型')).toBeEnabled()
     await assDialog.getByLabel('视频模型').click()
     await expect(page.getByRole('option')).toHaveCount(12)
@@ -73,13 +74,13 @@ test('deployed frontend login, project and storyboard configuration journey', as
       page.getByRole('option').filter({ hasText: /英和|all in one|RunningHub/ }),
     ).toHaveCount(0)
     await page.getByRole('option', { name: 'Gemini Omni 1.1 Flash Preview', exact: true }).click()
-    await expect(assDialog.getByLabel('清晰度').first()).toHaveValue('720p')
-    await expect(assDialog.getByLabel('画幅').locator('option')).toHaveCount(2)
+    await expect(assDialog.getByLabel('清晰度').first()).toHaveAttribute('data-value', '720p')
+    await expectDropdownOptions(assDialog.getByLabel('画幅'), 2)
     await assDialog.getByLabel('视频模型').click()
     await page.getByRole('option', { name: 'SD2.0', exact: true }).click()
     await expect(assDialog.getByLabel('图片模型')).toBeEnabled()
     await assDialog.getByLabel('图片模型').click()
-    await page.getByRole('option', { name: 'Nano Banana 2.1（all in one）', exact: true }).click()
+    await page.getByRole('option', { name: 'Nano Banana 2.1', exact: true }).click()
     await expect(assDialog.getByLabel('图片模型')).toContainText('Nano Banana 2.1')
     await page.screenshot({ path: join(output, '03-ass-dialog.png'), fullPage: true })
     await page.reload()
@@ -92,19 +93,19 @@ test('deployed frontend login, project and storyboard configuration journey', as
       .click()
     const general = page.locator('.modal').filter({ hasText: '定制通用分镜' })
     await expect(general).toBeVisible()
-    await general.getByLabel('画幅').selectOption('9:16')
-    await expect(general.getByLabel('画幅')).toHaveValue('9:16')
+    await selectDropdown(general.getByLabel('画幅'), '9:16')
+    await expect(general.getByLabel('画幅')).toHaveAttribute('data-value', '9:16')
     await expect(general.getByLabel('视频模型')).toBeEnabled()
     await expect(general.getByLabel('图片模型')).toBeEnabled()
     await general.getByLabel('图片模型').click()
-    await page.getByRole('option', { name: 'Nano Banana 2.1（all in one）', exact: true }).click()
+    await page.getByRole('option', { name: 'Nano Banana 2.1', exact: true }).click()
     await expect(general.getByLabel('图片模型')).toContainText('Nano Banana 2.1')
     await general.getByLabel('图片模型').click()
     await expect(page.getByRole('option')).toHaveCount(2)
     await page.screenshot({ path: join(output, '04-image-model-options.png'), fullPage: true })
-    await page.getByRole('option', { name: 'Seedream Pro（all in one）', exact: true }).click()
-    await general.getByLabel('图片清晰度').selectOption('1.5K')
-    await expect(general.getByLabel('图片清晰度').locator('option[value="4K"]')).toHaveCount(0)
+    await page.getByRole('option', { name: 'Seedream Pro', exact: true }).click()
+    await selectDropdown(general.getByLabel('图片清晰度'), '1.5K')
+    await expectDropdownOptions(general.getByLabel('图片清晰度'), ['1K', '1.5K', '2K'])
     for (const mode of ['定制通用分镜', '随机通用分镜']) {
       if (mode === '随机通用分镜') {
         await general.getByRole('button', { name: '取消', exact: true }).click()

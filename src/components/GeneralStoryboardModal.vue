@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseSelect from './base/BaseSelect.vue'
 import { computed, ref, watch } from 'vue'
 import { apiRequest } from '../api/client'
 import type { AccountBalance } from '../stores/auth'
@@ -350,7 +351,7 @@ const submit = async () => {
           <div class="field-grid three">
             <label
               ><span>曲风 *</span
-              ><select v-model="genre">
+              ><BaseSelect v-model="genre">
                 <option
                   v-for="item in store.generalStoryboardOptions.genres"
                   :key="item.value"
@@ -358,25 +359,25 @@ const submit = async () => {
                 >
                   {{ item.label }}
                 </option>
-              </select></label
+              </BaseSelect></label
             >
             <label
               ><span>二级分类{{ secondaryOptions.length ? ' *' : '' }}</span
-              ><select v-model="secondary" :disabled="!secondaryOptions.length">
+              ><BaseSelect v-model="secondary" :disabled="!secondaryOptions.length">
                 <option v-if="!secondaryOptions.length" value="">无下级分类</option>
                 <option v-for="item in secondaryOptions" :key="item.value" :value="item.value">
                   {{ item.label }}
                 </option>
-              </select></label
+              </BaseSelect></label
             >
             <label
               ><span>三级分类</span
-              ><select v-model="tertiary">
+              ><BaseSelect v-model="tertiary">
                 <option value="">不指定</option>
                 <option v-for="item in tertiaryOptions" :key="item.value" :value="item.value">
                   {{ item.label }}
                 </option>
-              </select></label
+              </BaseSelect></label
             >
           </div>
         </section>
@@ -386,43 +387,43 @@ const submit = async () => {
           <div class="field-grid five">
             <label
               ><span>季节</span
-              ><select v-model="season">
+              ><BaseSelect v-model="season">
                 <option v-for="item in store.generalStoryboardOptions.seasons" :key="item">
                   {{ item }}
                 </option>
-              </select></label
+              </BaseSelect></label
             >
             <label
               ><span>性别</span
-              ><select v-model="gender">
+              ><BaseSelect v-model="gender">
                 <option v-for="item in GENERAL_GENDER_OPTIONS" :key="item" :value="item">
                   {{ item }}
                 </option>
-              </select></label
+              </BaseSelect></label
             >
             <label
               ><span>年龄段</span
-              ><select v-model="ageGroup">
+              ><BaseSelect v-model="ageGroup">
                 <option v-for="item in store.generalStoryboardOptions.ageGroups" :key="item">
                   {{ item }}
                 </option>
-              </select></label
+              </BaseSelect></label
             >
             <label
               ><span>画面风格</span
-              ><select v-model="visualStyle">
+              ><BaseSelect v-model="visualStyle">
                 <option v-for="item in store.generalStoryboardOptions.visualStyles" :key="item">
                   {{ item }}
                 </option>
-              </select></label
+              </BaseSelect></label
             >
             <label
               ><span>画幅</span
-              ><select v-model="ratio">
+              ><BaseSelect v-model="ratio">
                 <option v-for="item in videoRatios" :key="item">
                   {{ item }}
                 </option>
-              </select></label
+              </BaseSelect></label
             >
           </div>
         </section>
@@ -483,19 +484,19 @@ const submit = async () => {
           <div class="field-grid three model-grid">
             <label
               ><span>清晰度 *</span
-              ><select v-model="resolution">
+              ><BaseSelect v-model="resolution">
                 <option v-for="item in resolutionChoices" :key="item" :value="item">
                   {{ videoResolutionLabel(videoModel, item) }}
                 </option>
-              </select></label
+              </BaseSelect></label
             >
             <label v-if="random"
               ><span>画幅</span
-              ><select v-model="ratio">
+              ><BaseSelect v-model="ratio">
                 <option v-for="item in videoRatios" :key="item">
                   {{ item }}
                 </option>
-              </select></label
+              </BaseSelect></label
             >
             <VideoModelSelect v-model="videoModel" label="视频模型 *" />
             <ImageModelSelect
@@ -506,11 +507,11 @@ const submit = async () => {
             />
             <label v-if="!random"
               ><span>图片清晰度 *</span
-              ><select v-model="imageResolution" aria-label="图片清晰度">
+              ><BaseSelect v-model="imageResolution" aria-label="图片清晰度">
                 <option v-for="item in imageResolutions" :key="item" :value="item">
                   {{ item }}
                 </option>
-              </select></label
+              </BaseSelect></label
             >
           </div>
           <p class="model-hint">超出所选模型并发上限的任务会自动排队。</p>
@@ -757,7 +758,6 @@ const submit = async () => {
   font-size: var(--font-sm);
   color: var(--text-secondary);
 }
-select,
 input,
 textarea {
   width: 100%;
@@ -769,7 +769,6 @@ textarea {
   color: var(--text);
   outline: none;
 }
-select:focus,
 input:focus,
 textarea:focus {
   border-color: var(--primary);
@@ -839,11 +838,6 @@ textarea {
 }
 .model-grid {
   margin: 12px 0 6px;
-}
-.model-grid select:disabled {
-  background: var(--surface-muted);
-  color: var(--text-secondary);
-  cursor: not-allowed;
 }
 .model-hint {
   margin: 0 0 12px;

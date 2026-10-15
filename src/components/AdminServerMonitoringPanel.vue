@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseSelect from './base/BaseSelect.vue'
 import { formatChinaDateTime } from '../utils/dateTime'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
@@ -118,13 +119,13 @@ const changeRange = () => void load()
         </p>
       </div>
       <div class="range-actions">
-        <select v-model.number="hours" @change="changeRange">
+        <BaseSelect v-model.number="hours" @change="changeRange">
           <option :value="1">最近 1 小时</option>
           <option :value="6">最近 6 小时</option>
           <option :value="24">最近 24 小时</option>
           <option :value="168">最近 7 天</option>
           <option :value="720">最近 30 天</option>
-        </select>
+        </BaseSelect>
         <button type="button" :disabled="loading" @click="load">
           {{ loading ? '刷新中…' : '刷新' }}
         </button>
@@ -500,7 +501,6 @@ const changeRange = () => void load()
   color: #667085;
   font-size: 12px;
 }
-.range-actions select,
 .range-actions button,
 .maintenance-actions button {
   height: 34px;

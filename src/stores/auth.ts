@@ -94,7 +94,7 @@ export const useAuthStore = defineStore('auth', {
         {},
         true,
         [404],
-      ).catch(() => ({ available: false, message: 'all in one 积分暂不可用' }))
+      ).catch(() => ({ available: false, message: '平台积分暂不可用' }))
     },
     async logout() {
       const uid = this.user?.id

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseSelect from './base/BaseSelect.vue'
 import { computed } from 'vue'
 import { DEFAULT_H3_MODE } from '../mediaConstraints'
 import type { ShotGenOptions } from '../types'
@@ -21,7 +22,7 @@ const urls = (value: string, max: number) =>
     <legend>H3 生成方式</legend>
     <label class="field"
       ><span>生成模式</span>
-      <select
+      <BaseSelect
         :value="selectedMode"
         aria-label="H3 生成模式"
         @change="
@@ -33,7 +34,7 @@ const urls = (value: string, max: number) =>
         <option value="first_frame">首帧 I2VA</option>
         <option value="first_last">首尾帧 FL2VA</option>
         <option value="reference">多参考 Ref2VA</option>
-      </select>
+      </BaseSelect>
     </label>
     <p class="hint">
       {{
@@ -102,7 +103,7 @@ const urls = (value: string, max: number) =>
       </label>
       <label class="field"
         ><span>音频用途</span>
-        <select
+        <BaseSelect
           :value="modelValue.h3AudioUsage ?? 'reference'"
           @change="
             update(
@@ -115,7 +116,7 @@ const urls = (value: string, max: number) =>
           <option value="reuse">请求复用原音频</option>
           <option value="generated">由模型生成声音</option>
           <option value="mute">静音意图</option>
-        </select>
+        </BaseSelect>
       </label>
       <p class="hint">产品限制：最多6图、1视频、3音频，共最多10个文件。</p>
     </template>
@@ -152,8 +153,7 @@ const urls = (value: string, max: number) =>
   color: var(--danger);
 }
 .field input,
-.field textarea,
-.field select {
+.field textarea {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--border);

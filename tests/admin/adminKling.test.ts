@@ -1,3 +1,4 @@
+import BaseSelect from '../../src/components/base/BaseSelect.vue'
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -109,14 +110,14 @@ describe('admin kling panel', () => {
 
     // 先开声音，再填参考视频 → 声音被强制 off 且选择框禁用（接口约束）
     const soundSelect = wrapper
-      .findAll('select')
-      .find((item) => (item.element as HTMLSelectElement).value === 'off')!
-    await soundSelect.setValue('on')
+      .findAllComponents(BaseSelect)
+      .find((item) => item.props('modelValue') === 'off')!
+    soundSelect.vm.$emit('update:modelValue', 'on')
     const videoInput = wrapper.find('input[placeholder*="视频 URL"]')
     await videoInput.setValue('https://x.test/motion.mp4')
     await flush()
-    expect((soundSelect.element as HTMLSelectElement).value).toBe('off')
-    expect(soundSelect.attributes('disabled')).toBeDefined()
+    expect(soundSelect.props('modelValue')).toBe('off')
+    expect(soundSelect.props('disabled')).toBe(true)
     wrapper.unmount()
   })
 

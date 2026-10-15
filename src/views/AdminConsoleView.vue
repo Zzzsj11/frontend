@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseSelect from '../components/base/BaseSelect.vue'
 import { computed, onMounted, ref } from 'vue'
 import { apiRequest } from '../api/client'
 import AdminModelComparisonPanel from '../components/AdminModelComparisonPanel.vue'
@@ -795,19 +796,19 @@ onMounted(() => {
             </p>
           </div>
           <div v-if="tab === 'jobs'" class="filters">
-            <select v-model="jobFilters.kind" @change="searchJobs">
+            <BaseSelect v-model="jobFilters.kind" @change="searchJobs">
               <option value="">全部类型</option>
               <option value="image">图片</option>
               <option value="video">视频</option>
-            </select>
-            <select v-model="jobFilters.status" @change="searchJobs">
+            </BaseSelect>
+            <BaseSelect v-model="jobFilters.status" @change="searchJobs">
               <option value="">全部状态</option>
               <option value="queued">queued</option>
               <option value="running">running</option>
               <option value="succeeded">succeeded</option>
               <option value="failed">failed</option>
               <option value="cancelled">cancelled</option>
-            </select>
+            </BaseSelect>
             <input
               v-model="jobFilters.q"
               placeholder="任务ID / 供应商任务ID"
@@ -816,13 +817,13 @@ onMounted(() => {
             <button class="refresh" @click="searchJobs">查询</button>
           </div>
           <div v-if="tab === 'requests'" class="filters">
-            <select v-model="reqFilters.runId" @change="searchPaged">
+            <BaseSelect v-model="reqFilters.runId" @change="searchPaged">
               <option value="">全部批次</option>
               <option v-for="r in reqRuns" :key="r.runId" :value="r.runId">
                 {{ r.runId }}（{{ r.requests }} 次 · 均 {{ r.avgMs }}ms · 峰 {{ r.maxMs }}ms · 错
                 {{ r.errors }}）
               </option>
-            </select>
+            </BaseSelect>
             <input
               v-model="reqFilters.path"
               placeholder="路径过滤 如 /api/auth"
@@ -833,11 +834,11 @@ onMounted(() => {
           <div v-if="tab === 'llm'" class="filters">
             <input v-model="llmFilters.projectTaskId" placeholder="projectTaskId 过滤" />
             <input v-model="llmFilters.operation" placeholder="operation 如 ass_scene_plan" />
-            <select v-model="llmFilters.status">
+            <BaseSelect v-model="llmFilters.status">
               <option value="">全部状态</option>
               <option value="ok">ok</option>
               <option value="error">error</option>
-            </select>
+            </BaseSelect>
             <button class="refresh" @click="searchPaged">查询</button>
           </div>
           <form v-if="tab === 'users'" class="filters" @submit.prevent="createUser">
@@ -938,11 +939,11 @@ onMounted(() => {
                   <td v-if="tab === 'users'">
                     <label class="admin-role-editor"
                       >后台角色
-                      <select :value="adminRoleCode(row)" @change="saveAdminRole(row, $event)">
+                      <BaseSelect :value="adminRoleCode(row)" @change="saveAdminRole(row, $event)">
                         <option value="none">普通用户</option>
                         <option value="ass_admin">内容配置管理员</option>
                         <option value="super_admin">超级管理员</option>
-                      </select>
+                      </BaseSelect>
                     </label>
                     <div class="user-quota-editor">
                       <label
@@ -1250,16 +1251,14 @@ td:last-child {
   font-size: 12px;
   line-height: 1.7;
 }
-.filters input,
-.filters select {
+.filters input {
   padding: 8px 12px;
   border: 1px solid var(--border-dark);
   border-radius: var(--radius-sm);
   font-size: 13px;
   min-width: 200px;
 }
-.filters input:focus,
-.filters select:focus {
+.filters input:focus {
   outline: none;
   border-color: var(--primary);
 }

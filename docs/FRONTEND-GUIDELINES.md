@@ -156,3 +156,5 @@ SFC 块顺序固定（ESLint `vue/block-order` 强制）：`<script setup>` → 
 视频入口统一使用 `VideoModelSelect`，图片入口统一使用 `ImageModelSelect`；两者复用无业务状态的 `base/BaseModelSelect`（Reka UI Select），不得在各弹窗重新实现原生下拉。Portal 菜单样式由 `src/style.css` 的 `.generation-model-*` 统一维护，嵌套弹窗外部点击检测须识别该菜单。
 
 图片组件从模型目录读取可用选项，并按画幅过滤，当前开放 all in one Nano Banana 2.1 与 Seedream Pro；业务父组件在切换模型时同步清晰度。清晰度及参考图上限以服务端模型能力为准，不在各弹窗复制静态限制。
+
+普通单选下拉统一使用 `base/BaseSelect`，保留 `option` 插槽、`v-model`（含 `.number`）及 `change` 事件。它与模型选择器共用 Reka UI 的触发器、SVG 箭头、键盘导航和 Portal 菜单；禁止新增原生 `select` 或页面独立箭头样式。图片与视频的展示名称不包含渠道名称，内部模型标识保持不变。

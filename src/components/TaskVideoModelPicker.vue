@@ -213,13 +213,6 @@ onBeforeUnmount(() => {
 .model-body p {
   margin: 0;
 }
-.model-body select {
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  background: var(--bg);
-}
 .hint {
   color: var(--text-secondary);
   font-size: var(--font-sm);

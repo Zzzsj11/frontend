@@ -41,8 +41,7 @@ small {
   flex-wrap: wrap;
   gap: 8px;
 }
-.toolbar input,
-.toolbar select {
+.toolbar input {
   padding: 8px 10px;
   border: 1px solid var(--border-dark);
   border-radius: var(--radius-sm);

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseSelect from './base/BaseSelect.vue'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   createStoryboardOption,
@@ -283,7 +284,7 @@ const addingUnderName = computed(() => {
               </span>
             </td>
             <td v-if="kind === 'genre'">
-              <select
+              <BaseSelect
                 class="policy-select"
                 :value="row.item.castPolicy ?? ''"
                 :disabled="busy"
@@ -293,7 +294,7 @@ const addingUnderName = computed(() => {
                 <option value="">继承上级（默认自动匹配）</option>
                 <option value="required">必须手动选择</option>
                 <option value="optional_random">可选，未选自动匹配</option>
-              </select>
+              </BaseSelect>
             </td>
             <td class="ops-col">
               <template v-if="confirmingId === row.item.id">

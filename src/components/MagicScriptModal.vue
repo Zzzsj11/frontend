@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseSelect from './base/BaseSelect.vue'
 import { computed, ref, watch } from 'vue'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
@@ -168,27 +169,27 @@ const cancel = () => {
         <div class="config-grid">
           <label
             ><span>画幅 *</span
-            ><select v-model="ratio">
+            ><BaseSelect v-model="ratio">
               <option v-for="item in videoRatios" :key="item" :value="item">{{ item }}</option>
-            </select></label
+            </BaseSelect></label
           >
           <label
             ><span>清晰度 *</span
-            ><select v-model="resolution">
+            ><BaseSelect v-model="resolution">
               <option v-for="item in resolutionChoices" :key="item" :value="item">
                 {{ videoResolutionLabel(videoModel, item) }}
               </option>
-            </select></label
+            </BaseSelect></label
           >
           <VideoModelSelect v-model="videoModel" label="视频模型 *" />
           <ImageModelSelect v-model="imageModel" :ratio="ratio" label="图片模型 *" />
           <label
             ><span>图片清晰度 *</span
-            ><select v-model="imageResolution" aria-label="图片清晰度">
+            ><BaseSelect v-model="imageResolution" aria-label="图片清晰度">
               <option v-for="item in imageResolutions" :key="item" :value="item">
                 {{ item }}
               </option>
-            </select></label
+            </BaseSelect></label
           >
         </div>
         <p class="model-hint">超出所选模型并发上限的任务会自动排队。</p>
@@ -367,19 +368,6 @@ const cancel = () => {
   gap: 6px;
   font-size: var(--font-sm);
   color: var(--text-secondary);
-}
-.config-grid select {
-  width: 100%;
-  border: 1px solid var(--border-dark);
-  border-radius: var(--radius-sm);
-  background: #fff;
-  padding: 9px 10px;
-  color: var(--text);
-}
-.config-grid select:disabled {
-  background: var(--surface-muted);
-  color: var(--text-secondary);
-  cursor: not-allowed;
 }
 .model-hint {
   margin: 7px 0 0;

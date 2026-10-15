@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseSelect from './base/BaseSelect.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { ScriptLine } from '../types'
 import { DEFAULT_SHOT_OPTIONS, formatTime, useProjectStore } from '../stores/project'
@@ -246,12 +247,12 @@ onBeforeUnmount(() => {
         >
         <label v-if="line.generationStatus === 'succeeded'" class="duration-select" @click.stop>
           <span>时长</span>
-          <select
+          <BaseSelect
             :value="line.shotOptions?.duration ?? DEFAULT_SHOT_OPTIONS.duration"
             @change="onDurationChange"
           >
             <option v-for="d in durationChoices" :key="d" :value="d">{{ d }} 秒</option>
-          </select>
+          </BaseSelect>
         </label>
       </div>
       <template v-else-if="!isCreative">
@@ -550,15 +551,6 @@ onBeforeUnmount(() => {
   gap: 4px;
   color: var(--text-secondary);
   font-size: 11px;
-}
-.duration-select select {
-  border: 1px solid var(--border-dark);
-  border-radius: var(--radius-xs);
-  background: #fff;
-  padding: 1px 5px;
-  font-size: 11px;
-  color: var(--text);
-  cursor: pointer;
 }
 .prompt-generation-state .error-text {
   overflow: hidden;

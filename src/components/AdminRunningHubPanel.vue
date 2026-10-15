@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseSelect from './base/BaseSelect.vue'
 import { formatChinaDateTime } from '../utils/dateTime'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import {
@@ -506,11 +507,11 @@ const statusTone = (value: string) =>
           :disabled="!ready"
         />
         <label class="form-label">宽高比</label>
-        <select v-model="aspectRatio" class="num-input" :disabled="!ready">
+        <BaseSelect v-model="aspectRatio" class="num-input" :disabled="!ready">
           <option v-for="item in availableAspectRatios" :key="item" :value="item">
             {{ item }}
           </option>
-        </select>
+        </BaseSelect>
         <label class="form-label">种子</label>
         <input
           v-model="seedRaw"
@@ -524,7 +525,7 @@ const statusTone = (value: string) =>
 
       <div v-if="mode === 'reference'" class="row params">
         <label class="form-label">一采分辨率</label>
-        <select v-model.number="stage1Mp" class="num-input wide" :disabled="!ready">
+        <BaseSelect v-model.number="stage1Mp" class="num-input wide" :disabled="!ready">
           <option
             v-for="preset in status?.megapixelsPresets ?? []"
             :key="preset.value"
@@ -532,9 +533,9 @@ const statusTone = (value: string) =>
           >
             {{ preset.value }} MP（16:9 约 {{ preset.size }}）
           </option>
-        </select>
+        </BaseSelect>
         <label class="form-label">二采分辨率</label>
-        <select v-model.number="stage2Mp" class="num-input wide" :disabled="!ready">
+        <BaseSelect v-model.number="stage2Mp" class="num-input wide" :disabled="!ready">
           <option
             v-for="preset in status?.megapixelsPresets ?? []"
             :key="preset.value"
@@ -542,7 +543,7 @@ const statusTone = (value: string) =>
           >
             {{ preset.value }} MP（16:9 约 {{ preset.size }}）
           </option>
-        </select>
+        </BaseSelect>
       </div>
       <p v-if="mode === 'reference'" class="hint">
         一采是低清参考生成（默认 0.4 MP），二采是放大精修出片（默认 0.9 MP）；尺寸标注按 16:9
@@ -551,7 +552,7 @@ const statusTone = (value: string) =>
 
       <div v-else-if="mode === 'text'" class="row params">
         <label class="form-label">输出分辨率</label>
-        <select v-model.number="textMp" class="num-input wide" :disabled="!ready">
+        <BaseSelect v-model.number="textMp" class="num-input wide" :disabled="!ready">
           <option
             v-for="preset in status?.megapixelsPresets ?? []"
             :key="preset.value"
@@ -559,13 +560,13 @@ const statusTone = (value: string) =>
           >
             {{ preset.value }} MP（16:9 约 {{ preset.size }}）
           </option>
-        </select>
+        </BaseSelect>
         <span class="hint">纯文本工作流为单阶段 8 步生成，输出包含音频。</span>
       </div>
 
       <div v-else class="row params">
         <label class="form-label">输出分辨率</label>
-        <select v-model.number="firstFrameMp" class="num-input wide" :disabled="!ready">
+        <BaseSelect v-model.number="firstFrameMp" class="num-input wide" :disabled="!ready">
           <option
             v-for="preset in status?.megapixelsPresets ?? []"
             :key="preset.value"
@@ -573,7 +574,7 @@ const statusTone = (value: string) =>
           >
             {{ preset.value }} MP（16:9 约 {{ preset.size }}）
           </option>
-        </select>
+        </BaseSelect>
         <span class="hint"
           >{{ mode === 'first_last' ? '首尾帧' : '首帧' }}工作流为单阶段 8
           步生成，输出包含音频。</span
@@ -984,11 +985,6 @@ const statusTone = (value: string) =>
   padding: 6px 10px;
   font-size: var(--font-md);
   width: 110px;
-}
-/* 下拉框按内容自适应宽度，避免「16:9 (Wide)」这类长选项被截断 */
-select.num-input {
-  width: auto;
-  min-width: 152px;
 }
 .num-input.wide {
   width: 240px;

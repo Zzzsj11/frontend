@@ -1,3 +1,4 @@
+import BaseSelect from '../../src/components/base/BaseSelect.vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AdminVideoBillingPanel from '../../src/components/AdminVideoBillingPanel.vue'
@@ -144,7 +145,9 @@ describe('AdminVideoBillingPanel', () => {
   it('支持筛选失败任务并触发历史重算', async () => {
     const wrapper = mount(AdminVideoBillingPanel)
     await flushPromises()
-    await wrapper.find('select').setValue('failed')
+    const select = wrapper.findComponent(BaseSelect)
+    select.vm.$emit('update:modelValue', 'failed')
+    select.vm.$emit('change', new Event('change'))
     await flushPromises()
     expect(apiRequest.mock.calls.at(-1)?.[0]).toContain('status=failed')
     apiRequest

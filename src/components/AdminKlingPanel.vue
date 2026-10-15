@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseSelect from './base/BaseSelect.vue'
 import { formatChinaDateTime } from '../utils/dateTime'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
@@ -301,13 +302,13 @@ const statusTone = (value: string) =>
           :disabled="!ready"
         />
         <label class="form-label">模式</label>
-        <select v-model="mode" class="num-input" :disabled="!ready">
+        <BaseSelect v-model="mode" class="num-input" :disabled="!ready">
           <option v-for="item in status?.modes ?? ['std', 'pro', '4k']" :key="item" :value="item">
             {{ item }}{{ item === 'std' ? '（720P）' : item === 'pro' ? '（1080P）' : '（4K）' }}
           </option>
-        </select>
+        </BaseSelect>
         <label class="form-label">比例</label>
-        <select v-model="aspectRatio" class="num-input" :disabled="!ready">
+        <BaseSelect v-model="aspectRatio" class="num-input" :disabled="!ready">
           <option
             v-for="item in status?.aspectRatios ?? ['16:9', '9:16', '1:1']"
             :key="item"
@@ -315,12 +316,12 @@ const statusTone = (value: string) =>
           >
             {{ item }}
           </option>
-        </select>
+        </BaseSelect>
         <label class="form-label">声音</label>
-        <select v-model="sound" class="num-input" :disabled="!ready || hasVideo">
+        <BaseSelect v-model="sound" class="num-input" :disabled="!ready || hasVideo">
           <option value="off">off</option>
           <option value="on">on</option>
-        </select>
+        </BaseSelect>
         <label class="form-label">相关性</label>
         <input
           v-model.number="cfgScale"
@@ -336,11 +337,11 @@ const statusTone = (value: string) =>
       <div class="row slots">
         <div v-for="(slot, index) in slots" :key="index" class="slot">
           <div class="slot-head">
-            <select v-model="slot.type" class="type-select" :disabled="!ready">
+            <BaseSelect v-model="slot.type" class="type-select" :disabled="!ready">
               <option value="first_frame">首帧</option>
               <option value="end_frame">尾帧</option>
               <option value="reference">参考图</option>
-            </select>
+            </BaseSelect>
             <button type="button" class="ghost-btn" :disabled="!ready" @click="triggerPick(index)">
               本地图片
             </button>
@@ -383,11 +384,11 @@ const statusTone = (value: string) =>
           placeholder="feature"
         />
         <label class="form-label">保留原声</label>
-        <select v-model="videoKeepSound" class="num-input" :disabled="!ready || !hasVideo">
+        <BaseSelect v-model="videoKeepSound" class="num-input" :disabled="!ready || !hasVideo">
           <option value="">默认</option>
           <option value="yes">yes</option>
           <option value="no">no</option>
-        </select>
+        </BaseSelect>
       </div>
       <p v-if="hasVideo" class="hint">使用参考视频时声音已强制为 off（接口约束）。</p>
 
@@ -550,11 +551,6 @@ const statusTone = (value: string) =>
   padding: 6px 10px;
   font-size: var(--font-md);
   width: 96px;
-}
-/* 下拉框按内容自适应宽度，避免「pro（1080P）」这类长选项被截断 */
-select.num-input {
-  width: auto;
-  min-width: 148px;
 }
 .text-input:focus,
 .num-input:focus {

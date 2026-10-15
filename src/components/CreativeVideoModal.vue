@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseSelect from './base/BaseSelect.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   fetchCreativeStatus,
@@ -280,11 +281,11 @@ onBeforeUnmount(() => pollTimer && clearTimeout(pollTimer))
       <div class="settings">
         <label
           >时长
-          <select v-model.number="duration">
+          <BaseSelect v-model.number="duration">
             <option v-for="value in durationChoices" :key="value" :value="value">
               {{ value }} 秒
             </option>
-          </select></label
+          </BaseSelect></label
         >
         <div>
           <span>画面比例</span

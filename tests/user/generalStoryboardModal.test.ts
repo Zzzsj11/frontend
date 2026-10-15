@@ -32,13 +32,11 @@ describe('general storyboard defaults', () => {
     store.generalStoryboardOpen = true
     // BaseModal Teleport 到 body，等 watch(reset) 与弹层渲染完成
     await vi.waitFor(() =>
-      expect(document.body.querySelectorAll('select').length).toBeGreaterThan(0),
+      expect(document.body.querySelectorAll('[role=combobox]').length).toBeGreaterThan(0),
     )
 
-    const selects = Array.from(document.body.querySelectorAll('select'))
-    const resolutionSelect = selects.find((select) => select.querySelector('option[value="1080p"]'))
-    expect(resolutionSelect, '未找到清晰度下拉框').toBeDefined()
-    expect(resolutionSelect!.value).toBe('720p')
+    const resolutionSelect = document.body.querySelector('[role=combobox][data-value="720p"]')
+    expect(resolutionSelect, '未找到清晰度下拉框').not.toBeNull()
     const videoModelSelect = document.body.querySelector(
       'button[aria-label="视频模型"]',
     ) as HTMLButtonElement
