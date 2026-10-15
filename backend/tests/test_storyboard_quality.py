@@ -881,7 +881,7 @@ def test_general_storyboard_enforces_four_to_fifteen_seconds_per_shot(client) ->
     assert valid.status_code == 201
     task = client.get(f"/api/tasks/{valid.json()['taskId']}").json()
     assert task["storyboardConfig"]["resolution"] == "720p"
-    assert task["storyboardConfig"]["image_model"] == "gemini-nano-banana-2.1"
+    assert task["storyboardConfig"]["image_model"] == "nano-banana-2.1-all-in-one"
     assert task["storyboardConfig"]["video_model"] == "doubao-seedance-2.0-all-in-one"
     assert all(line["shotOptions"]["resolution"] == "720p" for line in task["lines"])
 

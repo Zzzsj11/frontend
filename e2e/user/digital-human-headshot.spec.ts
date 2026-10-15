@@ -105,7 +105,7 @@ async function mockApp(page: Page) {
     },
     '/api/model-options': [
       {
-        id: 'gemini-nano-banana-2.1',
+        id: 'nano-banana-2.1-all-in-one',
         name: 'Nano Banana 2.1',
         modality: 'image',
         sortOrder: 10,

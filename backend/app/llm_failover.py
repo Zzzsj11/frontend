@@ -8,10 +8,10 @@ from .config import settings
 from .redis_store import redis
 
 PRIMARY_MODEL = "gpt-6.1-sol"
-FALLBACK_MODEL = "gpt-6-sol"
+FALLBACK_MODEL = "doubao-seed-2-1-pro-260915"
 FAILURE_LIMIT = 5
 COOLDOWN_SECONDS = 2 * 60 * 60
-TEXT_CHANNELS = frozenset({"yseeai", "toapis", "all-in-one"})
+TEXT_CHANNELS = frozenset({"all-in-one"})
 logger = logging.getLogger("mvagent.llm_failover")
 
 _RECORD_FAILURE = """
@@ -37,7 +37,7 @@ async def choose_model(model: str) -> str:
     except Exception:
         logger.warning("Unable to read text-model failover state", exc_info=True)
         return model
-    return FALLBACK_MODEL + ("-all-in-one" if settings.llm_channel == "all-in-one" else "") if failures >= FAILURE_LIMIT else model
+    return FALLBACK_MODEL + "-all-in-one" if failures >= FAILURE_LIMIT else model
 
 
 async def record_success(model: str) -> None:

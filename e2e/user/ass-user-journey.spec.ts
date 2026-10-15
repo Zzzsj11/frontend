@@ -70,11 +70,21 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
       contentType: 'application/json',
       body: JSON.stringify([
         {
-          id: 'gemini-nano-banana-2.1',
+          id: 'nano-banana-2.1-all-in-one',
           name: 'Nano Banana 2.1',
           modality: 'image',
           sortOrder: 10,
-          capabilities: { resolutions: ['1K', '2K', '4K'] },
+          capabilities: { ratios: ['16:9', '9:16', '4:3', '1:1'], resolutions: ['1K', '2K', '4K'] },
+        },
+        {
+          id: 'seedream-5.0-pro-all-in-one',
+          name: 'Seedream 5.0 Pro',
+          modality: 'image',
+          capabilities: {
+            ratios: ['16:9', '9:16', '4:3', '1:1'],
+            resolutions: ['1K', '1.5K', '2K'],
+            referenceImage: { max: 10 },
+          },
         },
         { id: 'doubao-seedance-2.0', name: 'SD2.0', modality: 'video' },
         { id: 'doubao-seedance-2.0-mini', name: 'SD2.0 Mini', modality: 'video' },
@@ -201,7 +211,7 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
               resolution: '720p',
               duration: 4,
               ratio: '16:9',
-              imageModel: 'gemini-nano-banana-2.1',
+              imageModel: 'nano-banana-2.1-all-in-one',
               videoModel: 'minimax-h3-runninghub',
               segmentType: 'lyric',
               timelineLabel: '自动化测试歌词',
@@ -269,7 +279,7 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
               resolution: '720p',
               duration: 4,
               ratio: '16:9',
-              imageModel: 'gemini-nano-banana-2.1',
+              imageModel: 'nano-banana-2.1-all-in-one',
               videoModel: 'minimax-h3-runninghub',
               segmentType: 'lyric',
               timelineLabel: '自动化测试歌词',
@@ -330,10 +340,11 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await page.getByRole('option', { name: 'H3（RunningHub，2并发，仅测试时用）' }).click()
   await expect(page.getByLabel('视频模型')).toContainText('H3（RunningHub，2并发，仅测试时用）')
   await expect(page.getByLabel('视频模型')).toBeEnabled()
-  await expect(page.getByLabel('图片模型')).toHaveValue('gemini-nano-banana-2.1')
+  await expect(page.getByLabel('图片模型')).toContainText('Nano Banana 2.1')
   await expect(page.getByLabel('图片模型')).toBeEnabled()
-  await page.getByLabel('图片模型').selectOption('gemini-nano-banana-2.1')
-  await expect(page.getByLabel('图片模型')).toHaveValue('gemini-nano-banana-2.1')
+  await page.getByLabel('图片模型').click()
+  await page.getByRole('option', { name: 'Nano Banana 2.1（all in one）', exact: true }).click()
+  await expect(page.getByLabel('图片模型')).toContainText('Nano Banana 2.1')
   await page.getByLabel('图片清晰度').selectOption('2K')
   await expect(page.getByLabel('图片清晰度')).toHaveValue('2K')
   await page.getByRole('button', { name: '生成', exact: true }).click()
@@ -381,10 +392,24 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await general.getByLabel('视频模型').click()
   await expect(page.getByRole('option')).toHaveCount(10)
   await page.keyboard.press('Escape')
-  await expect(general.getByLabel('图片模型')).toHaveValue('gemini-nano-banana-2.1')
+  await expect(general.getByLabel('图片模型')).toContainText('Nano Banana 2.1')
   await expect(general.getByLabel('图片模型')).toBeEnabled()
-  await general.getByLabel('图片模型').selectOption('gemini-nano-banana-2.1')
-  await expect(general.getByLabel('图片模型')).toHaveValue('gemini-nano-banana-2.1')
+  await general.getByLabel('图片模型').click()
+  await expect(page.getByRole('option')).toHaveCount(2)
+  await page.screenshot({ path: test.info().outputPath('image-model-options.png') })
+  await page.keyboard.press('Escape')
+  await general.getByLabel('画幅').selectOption('1:1')
+  await general.getByLabel('图片模型').click()
+  await page.getByRole('option', { name: 'Seedream Pro（all in one）', exact: true }).click()
+  await expect(general.getByLabel('图片清晰度').locator('option[value="4K"]')).toHaveCount(0)
+  await general.getByLabel('图片清晰度').selectOption('1.5K')
+  await expect(general.getByLabel('图片清晰度')).toHaveValue('1.5K')
+  await general.getByLabel('画幅').selectOption('16:9')
+  await expect(general.getByLabel('图片模型')).toContainText('Seedream Pro')
+  await page.screenshot({ path: test.info().outputPath('image-model-select.png') })
+  await general.getByLabel('图片模型').click()
+  await page.getByRole('option', { name: 'Nano Banana 2.1（all in one）', exact: true }).click()
+  await expect(general.getByLabel('图片模型')).toContainText('Nano Banana 2.1')
   await general.getByLabel('图片清晰度').selectOption('4K')
   await expect(general.getByLabel('图片清晰度')).toHaveValue('4K')
   const generate = general.getByRole('button', { name: '批量生成', exact: true })

@@ -222,7 +222,7 @@ async def seed_system_data() -> None:
                     "providerProtocol": "toapis-image",
                     "sortOrder": 10,
                 },
-                True,
+                False,
             ),
             (
                 "model-sd20",
@@ -688,7 +688,16 @@ async def seed_system_data() -> None:
 
         source_caps = {item[2]: item[6] for item in defaults}
         defaults.extend(
-            ("model-" + row["code"], all_in_one_provider.id, row["code"], row["name"], row["modality"], row["provider_model_id"], row["capabilities"], False)
+            (
+                "model-" + row["code"],
+                all_in_one_provider.id,
+                row["code"],
+                row["name"],
+                row["modality"],
+                row["provider_model_id"],
+                row["capabilities"],
+                row["code"] == "nano-banana-2.1-all-in-one",
+            )
             for row in all_in_one_rows(source_caps)
         )
         for mid, model_provider_id, code, name, modality, provider_id, capabilities, is_default in defaults:
@@ -727,8 +736,12 @@ async def seed_system_data() -> None:
                         modality=modality,
                         provider_model_id=provider_id or code,
                         capabilities=capabilities,
-                        status="active" if provider_configured or settings.app_env != "production" else "inactive",
-                        user_visible=True,
+                        status="inactive"
+                        if code in {"gemini-nano-banana-2.1", "gpt-6-sol-all-in-one"}
+                        else "active"
+                        if provider_configured or settings.app_env != "production"
+                        else "inactive",
+                        user_visible=code not in {"gemini-nano-banana-2.1", "gpt-6-sol-all-in-one"},
                         is_default=is_default,
                     )
                 )

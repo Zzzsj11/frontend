@@ -38,8 +38,8 @@ async def test_chat_timeout_allows_long_outline_stage(configured):
 
 def test_catalog_scope_does_not_clone_yinghe_billing():
     result = rows({"minimax-h3": {"billing": {"currency": "CNY"}, "h3Modes": ["reference"]}})
-    assert len(result) == 6
-    assert len([m for m in result if m["modality"] == "chat"]) == 3
+    assert len(result) == 9
+    assert len([m for m in result if m["modality"] == "chat"]) == 4
     h3 = next(m for m in result if m["provider_model_id"] == "MiniMax-H3")
     assert h3["capabilities"]["billing"] == {
         "provider": "all-in-one",
@@ -183,11 +183,12 @@ def test_aio_models_are_available_in_catalog_and_comparison(client):
     import json
 
     encoded = json.dumps(options)
-    for code in ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "doubao-seedance-2.0", "wan3.0-video", "minimax-h3"]:
+    for code in ["gpt-6.1-sol", "gpt-6-astra", "doubao-seed-2-1-pro-260915", "doubao-seedance-2.0", "wan3.0-video", "minimax-h3"]:
         assert code + "-all-in-one" in encoded
-    assert any(item["id"] == "gemini-nano-banana-2.1" for item in options)
+    assert any(item["id"] == "nano-banana-2.1-all-in-one" for item in options)
+    assert any(item["id"] == "seedream-5.0-pro-all-in-one" for item in options)
     comparison = client.get("/api/admin/chat-comparison/models").json()
-    assert all(any(item["code"] == code + "-all-in-one" for item in comparison) for code in ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol"])
+    assert all(any(item["code"] == code + "-all-in-one" for item in comparison) for code in ["gpt-6.1-sol", "gpt-6-astra", "doubao-seed-2-1-pro-260915"])
 
 
 @pytest.mark.asyncio

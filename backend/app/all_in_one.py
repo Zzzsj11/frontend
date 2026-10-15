@@ -99,13 +99,15 @@ async def store_result(job: Any, body: dict[str, Any]) -> dict[str, Any]:
 
 async def generate(request: Any, job: Any) -> dict[str, Any]:
     from .jobs import jobs
-    from .providers import ProviderError, ProviderSubmissionUncertainError, _raise_for_status
+    from .providers import ProviderError, ProviderSubmissionUncertainError, _raise_for_status, _toapis_image_ratio
 
     snapshot = job.request or {}
     model = snapshot.get("_providerModelId") or upstream_model(request.model)
     payload: dict[str, Any] = {"model": model, "prompt": request.prompt}
     if job.kind == "image":
-        payload.update(images=request.images, size=request.size, quality=request.quality, n=request.n)
+        if request.quality != "auto":
+            raise ProviderError("all in one 图片模型仅支持 quality=auto")
+        payload.update(images=request.images, size=_toapis_image_ratio(request.size), resolution=request.resolution, quality="auto", n=request.n)
     else:
         mode = snapshot.get("_h3Mode") or request.h3_mode
         modes = {"first_last": "first_last", "first_frame": "first_frame", "reference": "reference", "text": "text"}
@@ -147,6 +149,10 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
             body = response.json()
             await jobs.record_provider_response(job, "submission", body)
     except ProviderError as exc:
+        if getattr(exc, "submission_certain", False):
+            from .image_failover import record_outcome
+
+            await record_outcome(job, succeeded=False)
         exc.provider = PROVIDER
         raise
     except (httpx.RequestError, ValueError) as exc:
@@ -182,9 +188,15 @@ async def resume(job: Any) -> dict[str, Any]:
             continue
         if data["status"] == "SUCCEEDED":
             await jobs.record_provider_response(job, "terminal", data)
+            from .image_failover import record_outcome
+
+            await record_outcome(job, succeeded=True)
             return await store_result(job, data)
         if data["status"] in {"FAILED", "CANCELLED"}:
             await jobs.record_provider_response(job, "terminal", data)
+            from .image_failover import record_outcome
+
+            await record_outcome(job, succeeded=False)
             raise ProviderError(data["failReason"] or "all in one 生成失败")
         await jobs.update_progress(job, min(90, job.progress + 2))
         await asyncio.sleep(POLL_INTERVAL_SECONDS)

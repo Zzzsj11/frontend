@@ -7,7 +7,7 @@ export interface ImageTaskOptions {
   /** WIDTHxHEIGHT；后端转换为 ToAPIs 支持的画幅比例。 */
   size?: string
   quality?: 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-  resolution?: '1K' | '2K' | '4K'
+  resolution?: '1K' | '1.5K' | '2K' | '4K'
   /** 每次生成 1 张图片。 */
   n?: number
   /** 图片 URL（或数组）：传入即按图生图处理，不传为文生图 */

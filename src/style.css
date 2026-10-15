@@ -169,7 +169,7 @@ h2 {
 
 /* 滚动条美化 */
 /* Reka Select 使用 Portal，菜单位于组件作用域之外。 */
-.video-model-menu {
+.generation-model-menu {
   z-index: var(--z-modal-nested);
   width: max(var(--reka-select-trigger-width), 280px);
   max-width: min(420px, calc(100vw - 32px));
@@ -180,24 +180,24 @@ h2 {
   background: var(--surface);
   box-shadow: var(--shadow-dropdown);
 }
-.video-model-viewport {
+.generation-model-viewport {
   max-height: min(440px, var(--reka-select-content-available-height));
   overflow-y: auto;
   padding: 7px;
 }
-.video-model-group + .video-model-group {
+.generation-model-group + .generation-model-group {
   margin-top: 6px;
   padding-top: 6px;
   border-top: 1px solid var(--border);
 }
-.video-model-group-label {
+.generation-model-group-label {
   display: block;
   padding: 7px 10px 5px;
   color: var(--text-secondary);
   font-size: var(--font-sm);
   font-weight: 600;
 }
-.video-model-item {
+.generation-model-item {
   display: flex;
   min-height: 39px;
   align-items: center;
@@ -210,14 +210,14 @@ h2 {
   outline: none;
   cursor: pointer;
 }
-.video-model-item[data-highlighted] {
+.generation-model-item[data-highlighted] {
   background: var(--primary-light);
   color: var(--primary);
 }
-.video-model-item[data-state='checked'] {
+.generation-model-item[data-state='checked'] {
   font-weight: 600;
 }
-.video-model-check {
+.generation-model-check {
   width: 18px;
   flex: none;
   color: var(--primary);

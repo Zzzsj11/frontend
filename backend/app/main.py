@@ -48,6 +48,7 @@ from .domain import owned_line, owned_project, owned_task, project_audio_json, u
 from .domain import router as domain_router
 from .error_logging import record_api_error, request_payload
 from .h3_prompt_compiler import compile_h3_prompt
+from .image_model_policy import validate_image_selection
 from .jobs import jobs
 from .media_constraints import normalize_video_duration
 from .models import (
@@ -485,13 +486,14 @@ async def create_ass_storyboard(
     extra_requirement: str = Form(""),
     ratio: Literal["16:9", "9:16", "4:3", "1:1"] = Form("16:9"),
     resolution: Literal["480p", "720p", "1080p"] = Form("480p"),
-    image_model: str = Form("gemini-nano-banana-2.1"),
-    image_resolution: Literal["1K", "2K", "4K"] = Form("1K"),
+    image_model: str = Form("nano-banana-2.1-all-in-one"),
+    image_resolution: Literal["1K", "1.5K", "2K", "4K"] = Form("1K"),
     video_model: str = Form("doubao-seedance-2.0-all-in-one"),
     db: AsyncSession = Depends(database_session),
 ) -> dict:
     await owned_project(db, user.id, project_id)
-    await require_active_model(db, image_model, "image")
+    selected_image_model, _ = await require_active_model(db, image_model, "image")
+    validate_image_selection(image_model, selected_image_model.capabilities or {}, size=ratio, resolution=image_resolution)
     await require_active_model(db, video_model, "video")
     if not ass_file.filename or not ass_file.filename.lower().endswith(".ass"):
         raise HTTPException(422, "仅支持 .ass 文件")
@@ -728,10 +730,20 @@ async def create_image_generation(payload: ImageGenerationCreate, user: CurrentU
         payload.prompt = await _portrait_prompt(payload.portrait.description, payload.portrait.style)
     if not payload.prompt.strip():
         raise HTTPException(422, "prompt 与 portrait 至少提供其一")
-    # 人物身份卡与场景图统一使用 ToAPIs Nano Banana 2.1，并固化实际模型供 Worker 和用量对账。
+    # 人物身份卡与场景图默认使用 all in one Nano Banana，并固化实际模型供 Worker 和用量对账。
     if not payload.model and (payload.portrait is not None or payload.purpose == "digital_human"):
         payload.model = settings.digital_human_image_model
     model, provider = await require_active_model(db, payload.model or settings.image_model, "image")
+    payload.model = model.code
+    validate_image_selection(
+        model.code,
+        model.capabilities or {},
+        size=payload.size,
+        resolution=payload.resolution,
+        purpose=payload.purpose,
+        images=payload.images,
+        quality=payload.quality,
+    )
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
     await _check_concurrency(db, user.id, "image", settings.image_generation_concurrency)
     await consume_daily_quota(db, user_id=user.id, category="image")

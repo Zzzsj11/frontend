@@ -14,14 +14,14 @@
 
 文本模型可通过 `LLM_CHANNEL=yseeai` 或 `LLM_CHANNEL=toapis` 单独选择英和海外或 ToAPIs；前者使用 `YSEEAI_LLM_API_KEY` 和固定的 `https://ai-aigc.yseeai.com/v1`，后者优先使用 `TOAPIS_LLM_API_KEY`，未配置时复用 `TOAPIS_API_KEY`，默认地址为 `https://toapis.cn/v1`。两渠道默认模型均为 `gpt-6.1-sol`，大纲默认使用同一模型，也可由 `GENERAL_OUTLINE_LLM_MODEL` 单独指定。显式文本渠道优先于国内共享 Token，仅改变 Chat、大纲及逐镜提示词调用；图片和视频仍用各自渠道配置。模型网关开启时，显式文本渠道仍直连所选供应商，媒体继续按网关设置路由。Token 账本及 LLM 调用记录保存实际渠道。
 
-`LLM_CHANNEL=all-in-one` 使用平台 Key 的 `gpt-6.1-sol-all-in-one` 作为 Chat、大纲和逐镜提示词默认模型，连续五次供应商失败后在同一平台切换到 `gpt-6-sol-all-in-one`，两小时后重试主模型。ASS、通用分镜和直接视频生成的新任务默认使用 `doubao-seedance-2.0-all-in-one`；`wan3.0-video-all-in-one` 与 `minimax-h3-all-in-one` 可逐镜选择。三个视频型号的项目侧执行池上限为 500，实际并发还受平台 Key、Worker 和用户限额约束。图片模型暂继续使用 ToAPIs `gemini-nano-banana-2.1`。all in one 视频工单保存上游请求、受理响应、终态响应和平台积分结算，批量预检不误用英和余额。
+`LLM_CHANNEL=all-in-one` 使用平台 Key 的 `gpt-6.1-sol-all-in-one` 作为 Chat、大纲和逐镜提示词默认模型，连续五次供应商失败后在同一平台切换到 `doubao-seed-2-1-pro-260915-all-in-one`，两小时后重试主模型。ASS、通用分镜和直接视频生成的新任务默认使用 `doubao-seedance-2.0-all-in-one`；`wan3.0-video-all-in-one` 与 `minimax-h3-all-in-one` 可逐镜选择。三个视频型号的项目侧执行池上限为 500，实际并发还受平台 Key、Worker 和用户限额约束。文本和图片新任务只使用 all in one，视频模型仍允许既有渠道。all in one 工单保存上游请求、受理响应、终态响应和平台积分结算。
 
 all in one 文本请求允许最多等待 10 分钟，ASS 两阶段大纲发生异常时仍把已完成阶段的请求、响应和用量写入日志。RunningHub 路由的视频人物参考图使用可公开读取的 TOS 原图 URL；不提交该路由不支持的 `private_asset_review` 参数，也不提交英和账户专属的 `asset://` URL。
 all in one 视频工单从项目创建起允许最多 2 小时的排队、生成和回收窗口，后台超时巡检采用同一渠道专属期限；其他渠道仍使用 20 分钟。
 
-用户场景图与私有数字人身份图统一使用 ToAPIs `gemini-nano-banana-2.1`。文生图和最多 14 张公开 URL 参考图均调用 `/v1/images/generations`，用 `metadata.resolution` 选择 `1K`、`2K`、`4K`，任务结果轮询后将原图与缩略图归档到 TOS。用户界面单独保存图片清晰度，不改变视频清晰度。旧英和与 all-in-one 图片模型保留历史工单归因，新任务不可选。
+用户场景图与私有数字人身份图默认使用 all in one `nano-banana-2.1`。文生图和最多 14 张公开 URL 参考图调用 `/v1/images`，可选 `1K`、`2K`、`4K`，任务结果轮询后将原图与缩略图归档到 TOS。`seedream-5.0-pro` 作为同平台备用模型，支持多画幅、1K/1.5K/2K、最多10张参考图和人物身份图。Nano 连续3个确定失败的工单后，后续新图片工单自动选择 Seedream，Redis 跨 Worker 共享计数并按工单去重；Nano 成功清零，最后一次失败两小时后重新尝试 Nano。备用成功不清零主模型故障。提交不确定、轮询中断及 TOS 归档错误不计入生成确定失败，不自动重提旧工单。选模在入队前固化，实际模型、执行池、规格及切换原因保存在工单请求；4K 请求切换时记录原规格并使用 Seedream 2K，画幅与参考图不裁剪；超过10张参考图或备用停用则保留 Nano 并记录未切换原因。用户界面单独保存图片清晰度，不改变视频清晰度。历史渠道和生成工单保留归因，但旧图片模型不再供新任务选择。
 
-所选文本渠道的 `gpt-6.1-sol` 供应商调用连续失败 5 次时，Redis 按渠道分别计数，让后续 Chat、大纲和逐镜提示词请求改用同渠道的 `gpt-6-sol`；冷却 2 小时后自动重新试用主模型，主模型成功即清零。仅实际供应商调用错误或供应商返回的繁忙文本计入失败，结构校验失败不计入。请求日志、用量账本与 LLM 调用记录保存实际调用的模型；Redis 不可用时保持主模型，不误切换到备用模型。
+all in one 的 `gpt-6.1-sol` 供应商调用连续失败 5 次时，Redis 计数，让后续 Chat、大纲和逐镜提示词请求改用同渠道的 `doubao-seed-2-1-pro-260915`；冷却 2 小时后自动重新试用主模型，主模型成功即清零。仅实际供应商调用错误或供应商返回的繁忙文本计入失败，结构校验失败不计入。请求日志、用量账本与 LLM 调用记录保存实际调用的模型；Redis 不可用时保持主模型，不误切换到备用模型。
 
 模型调用可整体切换到独立模型服务（`model-service/`，对外 API + 管理 API + 双前端，独立数据库与部署）：配置 `MODEL_GATEWAY_URL` 与 `MODEL_GATEWAY_API_KEY` 后，`backend/app/model_gateway.py` 将 LLM、图片、视频、Kling/RunningHub 及提示词优化调用路由到该服务；留空则保持现有直连供应商行为。迁移按渠道灰度——`MIGRATED_CHANNELS` 已承接 yinghe、yseeai、toapis、runninghub 与两个提示词优化渠道；PPIO 与 BFL 已移除支持，不属于待迁移渠道，也不允许旁路直连。网关请求携带内部 Key、`X-User-Id` 用户归因与 Agent 三头；工单上下文内 `Idempotency-Key` 由工单 ID 派生稳定键（媒体创建另由 providers 以 `{job_id}:{variant}` 覆盖），Worker 崩溃重放由网关按 (client, user, key) 去重，不会重复创建上游任务。仍受支持渠道的旧直连工单恢复时按原来源直连查询；已退役渠道仅保留历史记录，不恢复调用。网关工单在 `MODEL_GATEWAY_URL` 缺失时禁止静默回退，避免来源丢失。model-service 自身架构、API 协议与部署见 `model-service/README.md` 及 `model-service/docs/`。
 

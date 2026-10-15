@@ -26,6 +26,7 @@ from .database import database_session, session_factory
 from .error_logging import redact_error_text
 from .generation_constraints import OUTLINE_STALE_SECONDS
 from .generation_timing import generation_elapsed_seconds
+from .image_model_policy import validate_image_selection
 from .jobs import Job, jobs
 from .media_constraints import normalize_video_duration
 from .models import (
@@ -585,6 +586,8 @@ async def create_general_storyboard(project_id: str, payload: GeneralStoryboardC
         if not model:
             label = {"chat": "文本", "image": "图片", "video": "视频", "audio": "音频"}.get(modality, "生成")
             raise HTTPException(422, f"不支持或已停用的{label}模型：{code}")
+        if modality == "image":
+            validate_image_selection(code, model.capabilities or {}, size=payload.ratio, resolution=payload.image_resolution)
     total = payload.empty_shot_count + payload.character_shot_count
     if total < 1:
         raise HTTPException(422, "至少需要一个分镜")

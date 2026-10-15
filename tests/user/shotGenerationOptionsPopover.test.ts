@@ -98,10 +98,9 @@ describe('ShotGenerationOptionsPopover', () => {
     })
 
     await wrapper.get('[aria-label="调整生成参数"]').trigger('click')
-    const select = document.querySelector('[aria-label="图片模型"]') as HTMLSelectElement
-    expect(Array.from(select.options).map((option) => [option.value, option.text])).toEqual([
-      [DEFAULT_IMAGE_MODEL, 'Nano Banana 2.1'],
-    ])
+    const select = document.querySelector('[aria-label="图片模型"]') as HTMLButtonElement
+    expect(select.tagName).toBe('BUTTON')
+    expect(select.textContent).toContain('Nano Banana 2.1')
     expect(document.body.textContent).toContain('1K')
     expect(document.body.textContent).toContain('2K')
     expect(document.body.textContent).toContain('4K')

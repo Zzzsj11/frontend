@@ -486,10 +486,10 @@ def test_portrait_publish_rejects_missing_headshot_safety_fragment(fragment) -> 
 @pytest.mark.parametrize(
     ("payload", "expected_model"),
     [
-        ({"portrait": {"description": "", "style": "女"}}, "gemini-nano-banana-2.1"),
-        ({"prompt": "身份参考卡", "purpose": "digital_human"}, "gemini-nano-banana-2.1"),
-        ({"portrait": {}, "model": "gemini-nano-banana-2.1"}, "gemini-nano-banana-2.1"),
-        ({"prompt": "清晨空镜", "purpose": "scene", "model": "gemini-nano-banana-2.1"}, "gemini-nano-banana-2.1"),
+        ({"portrait": {"description": "", "style": "女"}}, "nano-banana-2.1-all-in-one"),
+        ({"prompt": "身份参考卡", "purpose": "digital_human"}, "nano-banana-2.1-all-in-one"),
+        ({"portrait": {}, "model": "nano-banana-2.1-all-in-one"}, "nano-banana-2.1-all-in-one"),
+        ({"prompt": "清晨空镜", "purpose": "scene", "model": "nano-banana-2.1-all-in-one"}, "nano-banana-2.1-all-in-one"),
     ],
 )
 def test_portrait_default_model_is_persisted_without_overriding_explicit_models(client, monkeypatch, payload, expected_model) -> None:
@@ -505,8 +505,8 @@ def test_portrait_default_model_is_persisted_without_overriding_explicit_models(
     response = client.post("/api/generations/images", json=payload)
     assert response.status_code == 202
     assert captured[0]["model"] == expected_model
-    assert captured[0]["_providerModelId"] == expected_model
-    assert captured[0]["_provider"] == "toapis"
+    assert captured[0]["_providerModelId"] == "nano-banana-2.1"
+    assert captured[0]["_provider"] == "all-in-one"
     assert "画面风格" not in captured[0]["prompt"]
 
 
