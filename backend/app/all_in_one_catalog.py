@@ -7,6 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 
 TEXT_MODELS = (
+    ("gemini-3.8-flash", "Gemini 3.8 Flash"),
     ("gpt-6.1-sol", "GPT 6.1 Sol"),
     ("doubao-seed-2-1-pro-260915", "Doubao Seed 2.1 Pro"),
     ("gpt-6-astra", "GPT 6 Astra"),

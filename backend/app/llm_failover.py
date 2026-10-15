@@ -7,7 +7,7 @@ import logging
 from .config import settings
 from .redis_store import redis
 
-PRIMARY_MODEL = "gpt-6.1-sol"
+PRIMARY_MODEL = "gemini-3.8-flash"
 FALLBACK_MODEL = "doubao-seed-2-1-pro-260915"
 FAILURE_LIMIT = 5
 COOLDOWN_SECONDS = 2 * 60 * 60

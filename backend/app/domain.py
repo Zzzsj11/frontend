@@ -1950,6 +1950,8 @@ async def list_humans(user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
 
 async def _sync_human_asset_avatar(human: DigitalHumanModel) -> None:
     """将人物原图注册到英合虚拟人物素材库，生成视频时用 asset:// 链接替代原始 TOS 路径以通过真人人脸校验。"""
+    if settings.llm_channel == "all-in-one":
+        return
     from .error_logging import log_background_error
     from .providers import create_real_face_asset
 

@@ -87,4 +87,5 @@ printf '%s\n' "$version" > .deployed-version
 deployed_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 printf '{"version":"%s","deployedAt":"%s"}\n' "$version" "$deployed_at" > .deployment/info.json.tmp
 mv .deployment/info.json.tmp .deployment/info.json
+if [[ "$env_name" == "production" ]]; then ./scripts/retire-legacy-service-cron.sh; fi
 echo "deployed $version ($env_name); previous=$previous"

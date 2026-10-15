@@ -167,8 +167,6 @@ async def lifespan(_app: FastAPI):
     await seed_system_data()
     await recover_stale_storyboard_generation()
     await jobs.expire_overdue_video_jobs()
-    # 数字人虚拟资产补注册由 cron 脚本每分钟执行（scripts/ensure_asset_avatars.py，带防重入锁），
-    # 不再在启动时重复扫描，避免与 cron 并发导致同一人物重复注册资产
     if settings.job_execution_mode != "worker":
         recovered = await jobs.recover_stale_jobs(resume_generation)
         if recovered["resumed"] or recovered["failed"]:
@@ -189,6 +187,18 @@ app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), al
 # 测试流量耗时采集：仅带 X-Test-Run-Id 头或 API_REQUEST_LOG_ALL=true 时入库
 app.middleware("http")(api_request_log_middleware)
 app.middleware("http")(agent_attribution_middleware)
+
+
+@app.middleware("http")
+async def retired_supplier_routes(request: Request, call_next):
+    path = request.url.path
+    if settings.llm_channel == "all-in-one" and (
+        path == "/api/account/balance" or any(path == prefix or path.startswith(prefix + "/") for prefix in ("/api/admin/runninghub", "/api/admin/kling"))
+    ):
+        return JSONResponse(status_code=410, content={"detail": "旧渠道接口已停用，请使用平台模型和积分接口"})
+    return await call_next(request)
+
+
 app.include_router(mv_export_router)
 app.include_router(domain_router)
 app.include_router(task_video_model_router)
@@ -244,6 +254,8 @@ def sse(payload: dict) -> str:
 
 
 async def require_active_model(db: AsyncSession, code: str, modality: str) -> tuple[AiModelModel, AiProviderModel]:
+    if settings.llm_channel == "all-in-one" and not code.endswith("-all-in-one"):
+        raise HTTPException(422, "旧渠道模型已停用，请选择平台模型")
     if modality == "video":
         from .all_in_one_catalog import VIDEO_MODEL_CODES
 

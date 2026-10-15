@@ -14,14 +14,14 @@
 
 文本模型可通过 `LLM_CHANNEL=yseeai` 或 `LLM_CHANNEL=toapis` 单独选择英和海外或 ToAPIs；前者使用 `YSEEAI_LLM_API_KEY` 和固定的 `https://ai-aigc.yseeai.com/v1`，后者优先使用 `TOAPIS_LLM_API_KEY`，未配置时复用 `TOAPIS_API_KEY`，默认地址为 `https://toapis.cn/v1`。两渠道默认模型均为 `gpt-6.1-sol`，大纲默认使用同一模型，也可由 `GENERAL_OUTLINE_LLM_MODEL` 单独指定。显式文本渠道优先于国内共享 Token，仅改变 Chat、大纲及逐镜提示词调用；图片和视频仍用各自渠道配置。模型网关开启时，显式文本渠道仍直连所选供应商，媒体继续按网关设置路由。Token 账本及 LLM 调用记录保存实际渠道。
 
-`LLM_CHANNEL=all-in-one` 使用平台 Key 的 `gpt-6.1-sol-all-in-one` 作为 Chat、大纲和逐镜提示词默认模型，连续五次供应商失败后在同一平台切换到 `doubao-seed-2-1-pro-260915-all-in-one`，两小时后重试主模型。所有新视频任务只开放 all in one 的 12 个模型，默认 `doubao-seedance-2.0-all-in-one`；目录、规格、并发和迁移规则见 [视频模型目录](VIDEO-MODEL-CATALOG.md)。界面按系列分组，不展示渠道后缀。历史渠道、素材和费用归因保留，旧模型不能创建新任务。all in one 工单保存上游请求、受理响应、终态响应和平台积分结算。
+`LLM_CHANNEL=all-in-one` 使用平台 Key 的 `gemini-3.8-flash-all-in-one` 作为 Chat、大纲和逐镜提示词默认模型，连续五次供应商失败后在同一平台切换到 `doubao-seed-2-1-pro-260915-all-in-one`，两小时后重试主模型。所有新视频任务只开放 all in one 的 12 个模型，默认 `doubao-seedance-2.0-all-in-one`；目录、规格、并发和迁移规则见 [视频模型目录](VIDEO-MODEL-CATALOG.md)。界面按系列分组，不展示渠道后缀。历史渠道、素材和费用归因保留，旧模型不能创建新任务。all in one 工单保存上游请求、受理响应、终态响应和平台积分结算。
 
 all in one 文本请求允许最多等待 10 分钟，ASS 两阶段大纲发生异常时仍把已完成阶段的请求、响应和用量写入日志。RunningHub 路由的视频人物参考图使用可公开读取的 TOS 原图 URL；不提交该路由不支持的 `private_asset_review` 参数，也不提交英和账户专属的 `asset://` URL。
 all in one 视频工单从项目创建起允许最多 2 小时的排队、生成和回收窗口，后台超时巡检采用同一渠道专属期限；其他渠道仍使用 20 分钟。
 
 用户场景图与私有数字人身份图默认使用 all in one `nano-banana-2.1`。文生图和最多 14 张公开 URL 参考图调用 `/v1/images`，可选 `1K`、`2K`、`4K`，任务结果轮询后将原图与缩略图归档到 TOS。`seedream-5.0-pro` 作为同平台备用模型，支持多画幅、1K/1.5K/2K、最多10张参考图和人物身份图。Nano 连续3个确定失败的工单后，后续新图片工单自动选择 Seedream，Redis 跨 Worker 共享计数并按工单去重；Nano 成功清零，最后一次失败两小时后重新尝试 Nano。备用成功不清零主模型故障。提交不确定、轮询中断及 TOS 归档错误不计入生成确定失败，不自动重提旧工单。选模在入队前固化，实际模型、执行池、规格及切换原因保存在工单请求；4K 请求切换时记录原规格并使用 Seedream 2K，画幅与参考图不裁剪；超过10张参考图或备用停用则保留 Nano 并记录未切换原因。用户界面单独保存图片清晰度，不改变视频清晰度。历史渠道和生成工单保留归因，但旧图片模型不再供新任务选择。
 
-all in one 的 `gpt-6.1-sol` 供应商调用连续失败 5 次时，Redis 计数，让后续 Chat、大纲和逐镜提示词请求改用同渠道的 `doubao-seed-2-1-pro-260915`；冷却 2 小时后自动重新试用主模型，主模型成功即清零。仅实际供应商调用错误或供应商返回的繁忙文本计入失败，结构校验失败不计入。请求日志、用量账本与 LLM 调用记录保存实际调用的模型；Redis 不可用时保持主模型，不误切换到备用模型。
+all in one 的 `gemini-3.8-flash` 供应商调用连续失败 5 次时，Redis 计数，让后续 Chat、大纲和逐镜提示词请求改用同渠道的 `doubao-seed-2-1-pro-260915`；冷却 2 小时后自动重新试用主模型，主模型成功即清零。仅实际供应商调用错误或供应商返回的繁忙文本计入失败，结构校验失败不计入。请求日志、用量账本与 LLM 调用记录保存实际调用的模型；Redis 不可用时保持主模型，不误切换到备用模型。
 
 模型调用可整体切换到独立模型服务（`model-service/`，对外 API + 管理 API + 双前端，独立数据库与部署）：配置 `MODEL_GATEWAY_URL` 与 `MODEL_GATEWAY_API_KEY` 后，`backend/app/model_gateway.py` 将 LLM、图片、视频、Kling/RunningHub 及提示词优化调用路由到该服务；留空则保持现有直连供应商行为。迁移按渠道灰度——`MIGRATED_CHANNELS` 已承接 yinghe、yseeai、toapis、runninghub 与两个提示词优化渠道；PPIO 与 BFL 已移除支持，不属于待迁移渠道，也不允许旁路直连。网关请求携带内部 Key、`X-User-Id` 用户归因与 Agent 三头；工单上下文内 `Idempotency-Key` 由工单 ID 派生稳定键（媒体创建另由 providers 以 `{job_id}:{variant}` 覆盖），Worker 崩溃重放由网关按 (client, user, key) 去重，不会重复创建上游任务。仍受支持渠道的旧直连工单恢复时按原来源直连查询；已退役渠道仅保留历史记录，不恢复调用。网关工单在 `MODEL_GATEWAY_URL` 缺失时禁止静默回退，避免来源丢失。model-service 自身架构、API 协议与部署见 `model-service/README.md` 及 `model-service/docs/`。
 
@@ -54,3 +54,8 @@ ASS 子项目关联歌曲音频后，可通过 `/api/tasks/{id}/video-exports` �
 成片进度阶段为准备/下载（0–25）、媒体检查与合成（26–85）、全片解码校验（85–90）、上传（90–98）、封面保存（99）、成功（100）；编码进度来自 FFmpeg 输出时长，上传来自实际字节回调。完成前不显示 100%。浏览器断线自动重连并用 GET 轮询兜底，刷新通过任务列表恢复。Worker 失租最多自动重放到第 3 次，终态失败同步回写导出记录；单次处理超时会终止 FFmpeg 子进程，临时目录随任务清理。
 
 子项目视频模型统一修改：视频编辑器顶部模型入口覆盖 ASS、定制通用、随机通用。`POST /api/tasks/{task_id}/video-model` 先预览能力适配，再携带预览摘要原子保存默认模型与全部活动分镜配置；开放目录中的 Seedance、Wan、MiniMax、Veo、Grok、Gemini 六个系列。排队/生成中的视频及大纲任务阻止修改，过期预览与旧页签生成请求返回 409。原素材、提示词与时间轴保留，手动新增分镜继承修改后的默认配置。
+
+
+2026-10-15 服务收口：生产只保留 All in one 模型调用。文本、大纲、逐镜提示词默认 Gemini 3.8 Flash，连续五次供应商失败后切换豆包 Seed 2.1 Pro，计数冷却两小时；图片默认 Nano Banana 2.1、备用 Seedream Pro，视频为平台 12 模型。提示词优化使用同一平台文本模型，视频本地提取首/中/尾三帧并转换音轨为 16kHz 单声道 PCM WAV，音视频参考最长 15 秒；不调用已退役的 MiniMax 专用优化接口。多参考优化主模型不可用时明确失败，不丢弃素材套用纯文本备用模型。
+
+旧渠道模型/供应商软删除；旧余额和旧模型实验接口返回 410；登录和恢复会话只刷新平台积分。人物创建和更新使用 TOS 原图，不再注册英和素材，线上补扫 cron 在版本发布后移除。旧请求/响应解析仅用于历史记录与隔离单元测试，不恢复旧服务。媒体存储仍用 TOS，合并导出仍由本系统执行。

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .agent_attribution import current_agent_attribution
 from .auth import CurrentUser
+from .config import settings
 from .database import database_session, session_factory
 from .jobs import Job, jobs
 from .models import PromptOptimizationTaskModel
@@ -175,6 +176,8 @@ async def run_prompt_optimization_job(job: Job) -> dict[str, Any]:
             raise RuntimeError("提示词优化任务不存在")
         provider, prompt, duration, ratio = item.provider, item.input_prompt, item.duration, item.ratio
         media, model, user_id = list(item.input_media or []), item.model, item.user_id
+    if settings.llm_channel == "all-in-one":
+        model = settings.llm_model
     started = time.perf_counter()
     try:
         if provider == "gemini":
@@ -196,6 +199,8 @@ async def run_prompt_optimization_job(job: Job) -> dict[str, Any]:
                 if time.monotonic() >= deadline:
                     raise RuntimeError("MiniMax 提示词优化超过 20 分钟仍未完成")
                 await asyncio.sleep(3.5)
+        provider = result.get("provider") or provider
+        model = result.get("model") or model
         if result.get("status") == "failed":
             raise RuntimeError(str(result.get("error") or f"{provider} 提示词优化失败"))
         if not str(result.get("prompt") or "").strip():
@@ -204,10 +209,13 @@ async def run_prompt_optimization_job(job: Job) -> dict[str, Any]:
             current = await session.get(PromptOptimizationTaskModel, task_id)
             if not current:
                 raise RuntimeError("提示词优化任务不存在")
+            current.model = model
             current.status, current.output_prompt, current.error = "succeeded", result["prompt"], ""
             current.request_id = current.request_id or result.get("requestId")
             current.usage_data = {**(result.get("usage") or {}), "usageRecorded": True}
-            add_token_usage(session, operation=operation, provider=provider, model=model, usage=result.get("usage"), user_id=user_id, request_id=current.request_id)
+            add_token_usage(
+                session, operation=operation, provider=provider, model=model, usage=result.get("usage"), user_id=user_id, request_id=current.request_id, generation_job_id=job.id
+            )
             add_llm_call_log(
                 session,
                 operation=operation,
@@ -217,6 +225,8 @@ async def run_prompt_optimization_job(job: Job) -> dict[str, Any]:
                 user_id=user_id,
                 request_id=current.request_id,
                 duration_ms=round((time.perf_counter() - started) * 1000),
+                request_messages=result.get("requestSnapshot") or [],
+                generation_job_id=job.id,
                 response_text=current.output_prompt,
             )
             await session.commit()
@@ -229,10 +239,11 @@ async def run_prompt_optimization_job(job: Job) -> dict[str, Any]:
                 add_llm_call_log(
                     session,
                     operation=operation,
-                    provider=provider,
+                    provider="all-in-one" if settings.llm_channel == "all-in-one" else provider,
                     model=model,
                     usage={},
                     user_id=user_id,
+                    generation_job_id=job.id,
                     status="error",
                     error=current.error,
                     duration_ms=round((time.perf_counter() - started) * 1000),

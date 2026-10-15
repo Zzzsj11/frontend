@@ -35,6 +35,24 @@ describe('auth logout cleanup', () => {
     expect(auth.balance).toBeNull()
   })
 
+  it('loads only platform credits after login', async () => {
+    const auth = useAuthStore()
+    const legacy = vi.spyOn(auth, 'loadBalance').mockResolvedValue()
+    const credits = vi.spyOn(auth, 'loadAllInOneCredits').mockResolvedValue()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          accessToken: 'test-token',
+          user: { id: 'u1', username: 'u1', mustChangePassword: false },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    await auth.login('u1', 'test')
+    expect(credits).toHaveBeenCalledOnce()
+    expect(legacy).not.toHaveBeenCalled()
+  })
+
   it('clears per-user sidebar keys and the pending digital human draft on logout', async () => {
     const auth = useAuthStore()
     auth.user = {

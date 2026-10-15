@@ -25,6 +25,8 @@ class KlingError(RuntimeError):
 
 
 def _base_url() -> str:
+    if settings.llm_channel == "all-in-one":
+        raise RuntimeError("旧渠道已停用，请使用平台模型")
     return model_gateway.route("yinghe")[0] if model_gateway.routed("yinghe") else settings.kling_api_base_url
 
 

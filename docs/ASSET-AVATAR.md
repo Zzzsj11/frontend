@@ -2,6 +2,8 @@
 
 > 写给接手开发的程序员 / code-agent。本文档说明人物素材（数字人）图片的存储方式、上游 AIGC 平台的真人人脸校验问题，以及 `asset://` 虚拟资产机制的完整链路：谁在注册、存在哪、生成视频时怎么用、失败了怎么兜底。
 
+> 2026-10-15：英和资产注册已退役。下述旧协议保留为历史说明；当前运行规则以 §5 为准，所有新生成使用 TOS 原图。
+
 ## 1. 背景：真人人脸校验问题
 
 人物身份图统一生成 **1024×1536 竖版单人正面头肩大头照**，保留白色圆领 T 恤、
@@ -70,33 +72,22 @@ The request failed because the input image 'content[1]' 'content[2]' may contain
 
 > 注意：`/api/uploads` 与 `/api/uploads/import` 只是图片文件上传，不创建数字人记录，不走 asset 流程。
 
-### 4.2 兜底体系（两层，注册失败不阻断）
+### 4.2 历史兜底体系（已退役）
 
 1. **入库时同步注册**：创建/换图时立即注册；失败只记错误日志（`api_error_logs`，error_type=AssetError），人物正常入库，`asset_avatar_url` 留空，生成视频降级用 TOS 路径（可能撞人脸校验）
 2. **线上 cron 每分钟补扫**：独立脚本 `backend/scripts/ensure_asset_avatars.py`，每分钟补齐英合缺失资产（复用 `seed.py::ensure_pending_asset_avatars()`），使临时注册失败可自动恢复
 
 > 注：曾有过"服务启动时再扫一次"的第三层，与 cron 功能重复且无防重入锁（可能与 cron 并发导致同一人物重复注册资产），已移除。补注册统一由 cron 负责，仅部署线上环境时配置 crontab，本机禁止配置（见 §5）。
 
-## 5. cron 脚本部署详情
+## 5. 英和资产补注册退役（2026-10-15）
 
-脚本：`backend/scripts/ensure_asset_avatars.py`
+所有新生图、视频和提示词优化只调用 All in one。人物原图与缩略图继续保存在 TOS，生成请求使用用户自己的 TOS 原图 URL，不再注册英和 `asset://`。
 
-- 逻辑：统计活跃且 `asset_avatar_url IS NULL` 的数字人 → 有缺失就逐个注册 → 打印 `handled N pending human(s)`
-- 幂等 + 防重入（fcntl 文件锁 `/tmp/mvagent-asset-sync.lock`，同一时刻只允许一个同步进程）
+旧补注册脚本和 Compose 包装入口已删除，维护任务安装脚本不再创建该 cron；生产发布通过 `scripts/retire-legacy-service-cron.sh` 只移除旧补注册调度，保留健康检查、数据库备份及监控任务。所有环境禁止恢复旧调度。
 
-**运行范围：仅线上服务器。本机（macOS）禁止配置或恢复此补扫任务，包括 cron、launchd 及其他周期调度。开发初始化、重启 Docker 和部署操作不得自动安装本机任务。**
+历史 `asset_avatar_url` 保留供审计，新建/更新人物不调用英和接口；更新图片时清空失效链接。旧渠道模型和供应商通过 Alembic 软删除，历史工单、素材与费用归因保留。
 
-2026-09-29 已移除本机每分钟调用 `docker exec mv-agent-frontend-backend-1 python /srv/mvagent/scripts/ensure_asset_avatars.py` 的旧 crontab。旧入口在 Docker 无响应时会累积 Docker 客户端进程；脚本内的文件锁只有进入容器后才生效，不能防止宿主机调用积压。本次停用仅作用于本机，线上既有调度保持不变。
-
-线上宿主机每分钟调用的入口：
-
-```sh
-PROJECT_DIR=/opt/mv-agent-frontend /opt/mv-agent-frontend/scripts/sync-digital-human-assets.sh
-```
-
-线上日志：`/var/lib/docker/mv-agent-maintenance/logs/asset-sync-cron.log`。维护时复用线上现有调度，不重复安装。容器内脚本路径为 `/srv/mvagent/scripts/ensure_asset_avatars.py`，由版本化镜像交付。
-
-## 6. 生成视频时的 URL 映射（前端零改动）
+## 6. 历史 URL 映射与人物参考规则
 
 `main.py::create_video_generation`（POST /api/generations/videos）中，提交给供应商前调用 `_resolve_asset_avatar_urls()`：
 
@@ -118,8 +109,8 @@ PROJECT_DIR=/opt/mv-agent-frontend /opt/mv-agent-frontend/scripts/sync-digital-h
 | `backend/app/config.py`                         | `aigc_asset_group_id`（默认 `group-20260817142427-1cfe75`，V3 素材组）                                  |
 | `backend/app/models.py`                         | `DigitalHumanModel.asset_avatar_url` 字段                                                               |
 | `backend/migrations/versions/d4f2b8e6a1c0_*.py` | 英合资产字段的历史加列迁移（非当前 head；保留迁移链）                                                    |
-| `backend/scripts/ensure_asset_avatars.py`       | cron 补扫脚本                                                                                           |
-| `scripts/sync-digital-human-assets.sh`          | 宿主机 Compose 包装入口，读取当前部署版本后在 backend 容器执行补扫                                      |
+| 已删除：`backend/scripts/ensure_asset_avatars.py`       | cron 补扫脚本                                                                                           |
+| 已删除：`scripts/sync-digital-human-assets.sh`          | 宿主机 Compose 包装入口，读取当前部署版本后在 backend 容器执行补扫                                      |
 | `backend/tests/test_generation_jobs.py`         | 全部相关自动化测试                                                                                      |
 
 ## 8. 自动化测试覆盖

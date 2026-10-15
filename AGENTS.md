@@ -12,4 +12,4 @@
 
 前端代码须遵循 `docs/FRONTEND-GUIDELINES.md`（组件、样式令牌、弹层与 z-index 层级规范）；格式由 Prettier 统一，`make lint-frontend` 包含 `format:check` 卡口。
 
-数字人资产定时补扫只允许在线上服务器运行；本机禁止配置或恢复调用 `ensure_asset_avatars.py` / `sync-digital-human-assets.sh` 的 cron、launchd 或其他周期任务。部署、开发初始化不得自动安装本机补扫任务；维护线上现有调度，详见 `docs/ASSET-AVATAR.md` §5。
+英和数字人资产补注册已退役；所有环境禁止配置或恢复调用 `ensure_asset_avatars.py` / `sync-digital-human-assets.sh` 的 cron、launchd 或其他周期任务。生产发布会移除旧补注册调度，人物参考直接使用 TOS 原图。详见 `docs/ASSET-AVATAR.md` §5。

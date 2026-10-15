@@ -32,7 +32,7 @@ import {
 type GenerationMode = CreativeGenerationMode
 const store = useProjectStore()
 const status = ref<CreativeStatus | null>(null)
-const provider = ref<CreativeProvider>('minimax')
+const provider = ref<CreativeProvider>('gemini')
 const mode = ref<GenerationMode>('reference')
 const originalPrompt = ref('')
 const optimizedPrompt = ref('')
@@ -214,7 +214,10 @@ onBeforeUnmount(() => pollTimer && clearTimeout(pollTimer))
       <p class="intro">混合图片、视频和音频，优化为 H3 可直接使用的结构化提示词并加入当前项目。</p>
       <div class="switch two" role="group" aria-label="提示词优化模型">
         <button
-          v-for="key in ['gemini', 'minimax'] as CreativeProvider[]"
+          v-for="key in [
+            'gemini',
+            ...(status?.providers.minimax.configured ? ['minimax'] : []),
+          ] as CreativeProvider[]"
           :key="key"
           :class="{ active: provider === key }"
           @click="provider = key"
@@ -223,6 +226,7 @@ onBeforeUnmount(() => pollTimer && clearTimeout(pollTimer))
           }}<small>{{ status?.providers[key].model || '未配置' }}</small>
         </button>
       </div>
+      <p class="hint">视频参考按首、中、尾画面及音轨分析，视频和音频参考最长 15 秒。</p>
       <div class="switch modes" role="group" aria-label="视频生成模式">
         <button
           v-for="item in [
