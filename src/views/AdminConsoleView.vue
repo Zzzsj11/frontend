@@ -434,6 +434,7 @@ const syncJob = async (row: AdminRow) => {
     )
     const actionText: Record<string, string> = {
       recovered: '已挽回结果并落库',
+      billing_refreshed: '已刷新平台积分结算',
       failed: '已同步失败原因',
       resumed: '已重新挂起轮询',
       unchanged: '状态一致无需处理',

@@ -93,7 +93,7 @@ from .runninghub import upload_media as rh_upload_media
 from .server_monitoring import monitoring_summary
 from .storage import get_storage, import_remote, is_user_owned_tos_url, put_image_with_thumbnail, safe_key
 from .storyboard_options import OPTION_KINDS, load_general_storyboard_options
-from .token_usage import add_llm_call_log, add_token_usage
+from .token_usage import add_llm_call_log, add_token_usage, normalize_usage
 from .video_billing import run_video_billing_reconciliation, video_discount_label, video_discount_rate
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -498,6 +498,41 @@ async def sync_generation_job(job_id: str, request: Request, user: CurrentUser, 
         if job:
             await job_manager.finalize_failure(job, str(data.get("failReason") or f"供应商任务状态：{provider_status}"))
             action = "failed"
+    elif (succeeded or failed) and model.provider == "all-in-one" and model.kind == "video":
+        from .video_billing import reconcile_video_job
+
+        # 只查询并刷新已存在任务的结算，不重复生成、下载或创建素材。
+        reported = data.get("usage") or {}
+        if isinstance(reported.get("platformBilling"), dict):
+            await db.execute(select(GenerationJobModel.id).where(GenerationJobModel.id == model.id).with_for_update())
+            await db.refresh(model)
+            model.result = {**(model.result or {}), "usage": reported}
+            model.request = {**(model.request or {}), "_providerTerminalResponse": data}
+            usage_record = await db.scalar(select(TokenUsageModel).where(TokenUsageModel.generation_job_id == model.id).order_by(TokenUsageModel.created_at.desc()).limit(1))
+            normalized = normalize_usage(reported)
+            if usage_record:
+                usage_record.raw_usage = normalized["raw"]
+                usage_record.input_tokens = normalized["inputTokens"]
+                usage_record.output_tokens = normalized["outputTokens"]
+                usage_record.cached_input_tokens = normalized["cachedInputTokens"]
+                usage_record.total_tokens = normalized["totalTokens"]
+            else:
+                add_token_usage(
+                    db,
+                    operation=f"generation_{model.kind}",
+                    provider="all-in-one",
+                    model=str((model.request or {}).get("model") or ""),
+                    usage=reported,
+                    user_id=model.user_id,
+                    project_id=model.project_id,
+                    project_task_id=model.project_task_id,
+                    storyboard_line_id=model.storyboard_line_id,
+                    generation_job_id=model.id,
+                    request_id=model.provider_task_id,
+                )
+            await db.flush()
+            await reconcile_video_job(db, model)
+            action = "billing_refreshed"
     elif not succeeded and not failed and model.status in {"queued", "running"}:
         if await job_manager.resume_one(job_id, resume_generation):
             action = "resumed"
@@ -535,8 +570,10 @@ def _video_rate_json(record: VideoBillingRecordModel) -> dict:
     discount_rate = video_discount_rate(model=record.model, provider=record.provider)
     discount_label = video_discount_label(model=record.model, provider=record.provider)
     list_unit_price = _money(Decimal(str(unit_price)) / discount_rate) if unit_price and discount_rate < 1 else unit_price
-    unit_label = "100万 Token" if record.usage_type == "completion_tokens" else "秒"
-    if not unit_price:
+    unit_label = "积分" if record.usage_type == "platform_points" else "100万 Token" if record.usage_type == "completion_tokens" else "秒"
+    if record.billing_status == "pending":
+        rate_label = "待平台结算，预占不是扣费"
+    elif not unit_price:
         rate_label = "暂不计费"
     elif discount_label:
         rate_label = f"¥{unit_price:g} / {unit_label}（原价 ¥{list_unit_price:g}，{discount_label}）"
@@ -639,7 +676,7 @@ async def video_billing(
                 func.sum(case((VideoBillingRecordModel.is_failed.is_(True), 1), else_=0)),
                 func.coalesce(func.sum(case((VideoBillingRecordModel.is_failed.is_(True), VideoBillingRecordModel.amount), else_=0)), 0),
                 func.sum(case((VideoBillingRecordModel.billing_status == "excluded", 1), else_=0)),
-                func.sum(case((VideoBillingRecordModel.billing_status == "unpriced", 1), else_=0)),
+                func.sum(case((VideoBillingRecordModel.billing_status.in_(["unpriced", "pending"]), 1), else_=0)),
                 func.sum(case((VideoBillingRecordModel.billing_status == "no_usage", 1), else_=0)),
                 func.sum(case((GenerationJobModel.generation_origin == "agent_test", 1), else_=0)),
                 func.sum(case((GenerationJobModel.generation_origin == "business", 1), else_=0)),

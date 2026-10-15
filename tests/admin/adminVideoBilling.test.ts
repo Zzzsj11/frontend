@@ -105,6 +105,29 @@ describe('AdminVideoBillingPanel', () => {
     expect(wrapper.findAll('nav[aria-label$="列表分页"]')).toHaveLength(2)
   })
 
+  it('待平台结算不显示为零费用或免费', async () => {
+    apiRequest.mockResolvedValue({
+      ...response,
+      items: [
+        {
+          ...response.items[0],
+          provider: 'all-in-one',
+          billingStatus: 'pending',
+          amount: 0,
+          usageQuantity: 0,
+          usageUnit: '积分',
+          rateLabel: '待平台结算，预占不是扣费',
+        },
+      ],
+    })
+    const wrapper = mount(AdminVideoBillingPanel)
+    await flushPromises()
+    expect(wrapper.get('tbody .amount').text()).toContain('待结算')
+    expect(wrapper.get('tbody .amount').text()).not.toContain('¥0')
+    expect(wrapper.get('tbody').text()).toContain('待平台结算')
+    wrapper.unmount()
+  })
+
   it('清空搜索条件后回到首页并重新加载完整列表', async () => {
     const wrapper = mount(AdminVideoBillingPanel)
     await flushPromises()

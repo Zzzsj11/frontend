@@ -30,10 +30,10 @@ test('administrator can inspect dashboard, models, errors and audit logs', async
   await expect(page.getByRole('button', { name: '保存日限额' }).first()).toBeVisible()
   await page.getByRole('button', { name: '模型管理' }).click()
   await expect(
-    page.locator('tbody').getByText('gemini-nano-banana-2.1', { exact: true }).first(),
+    page.locator('tbody').getByText('nano-banana-2.1-all-in-one', { exact: true }).first(),
   ).toBeVisible()
   await expect(
-    page.locator('tbody').getByText('doubao-seedance-2.0', { exact: true }).first(),
+    page.locator('tbody').getByText('doubao-seedance-2.0-all-in-one', { exact: true }).first(),
   ).toBeVisible()
   await page.getByRole('button', { name: 'Chat 模型对比' }).click()
   await expect(page.getByRole('heading', { name: '通用 MV 大纲对比' })).toBeVisible()
@@ -62,8 +62,33 @@ test('administrator can inspect dashboard, models, errors and audit logs', async
   await expect(page.getByRole('button', { name: '重新核算全部历史' })).toBeVisible()
   await expect(page.getByRole('columnheader', { name: '来源' })).toBeVisible()
   await expect(page.getByRole('columnheader', { name: '时长' })).toBeVisible()
-  await expect(page.getByRole('columnheader', { name: '计费用量/单价 Token / 秒' })).toBeVisible()
+  await expect(
+    page.getByRole('columnheader', { name: '计费用量/单价 Token / 秒 / 积分' }),
+  ).toBeVisible()
   await expect(page.getByRole('columnheader', { name: '费用/每秒费用（单价毛）' })).toBeVisible()
+  const catalogRun = process.env.VIDEO_CATALOG_TEST_RUN_ID
+  if (catalogRun) {
+    await page.getByLabel('生成来源').selectOption('agent_test')
+    await page.getByLabel('搜索', { exact: true }).fill(catalogRun)
+    const bills = page.waitForResponse(
+      (r) =>
+        r.url().includes('/api/admin/video-billing?') &&
+        new URL(r.url()).searchParams.get('q') === catalogRun,
+    )
+    await page.getByRole('button', { name: '查询', exact: true }).click()
+    const records = (await (await bills).json()).items
+    expect(records).toHaveLength(12)
+    for (const record of records) {
+      expect(record.provider).toBe('all-in-one')
+      expect(record.usageUnit).toBe('积分')
+      expect(['priced', 'pending']).toContain(record.billingStatus)
+    }
+    await expect(page.locator('tbody tr')).toHaveCount(12)
+    await page.screenshot({
+      path: test.info().outputPath('all-in-one-video-billing.png'),
+      fullPage: true,
+    })
+  }
   await page.locator('tbody').getByRole('button', { name: '详情' }).first().click()
   await expect(page.getByRole('dialog', { name: '视频费用与生成详情' })).toBeVisible()
   await expect(page.getByText('计价标准')).toBeVisible()
