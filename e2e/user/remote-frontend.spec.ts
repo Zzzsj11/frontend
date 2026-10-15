@@ -37,9 +37,9 @@ test('deployed frontend login, project and storyboard configuration journey', as
     const loginBody = await (await loginResponse).json()
     accessToken = loginBody.accessToken
     await expect(page.getByRole('heading', { name: '视频编辑器' })).toBeVisible()
-    await expect(page.locator('.balance-pill.yinghe .balance-value')).not.toHaveText('--')
-    await expect(page.locator('.app-header .balance-pill')).toHaveCount(2)
-    await expect(page.locator('.balance-pill.all-in-one')).toBeVisible()
+    await expect(page.locator('.balance-pill.yinghe')).toHaveCount(0)
+    await expect(page.locator('.app-header .balance-pill')).toHaveCount(1)
+    await expect(page.locator('.balance-pill.all-in-one')).toContainText('All in one')
     await expect(page.locator('header').or(page.locator('.top-bar')).first()).toBeVisible()
     await page.screenshot({ path: join(output, '01-login.png'), fullPage: true })
 
