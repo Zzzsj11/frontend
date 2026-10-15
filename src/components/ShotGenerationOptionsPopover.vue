@@ -564,8 +564,7 @@ onBeforeUnmount(close)
   color: var(--text-regular);
   font-size: var(--font-sm);
 }
-.reference-field textarea,
-.reference-field select {
+.reference-field textarea {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--border);

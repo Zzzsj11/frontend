@@ -1,3 +1,4 @@
+import BaseSelect from '../../src/components/base/BaseSelect.vue'
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -165,8 +166,13 @@ describe('admin storyboard options panel', () => {
   it('configures an inheritable cast policy for a genre node', async () => {
     const wrapper = mount(AdminStoryboardOptionsPanel)
     await flush()
-    const select = wrapper.get('select[aria-label="爱情消极人物选择策略"]')
-    await select.setValue('required')
+    const select = wrapper
+      .findAllComponents(BaseSelect)
+      .find((item) => item.find('[aria-label="爱情消极人物选择策略"]').exists())!
+    const target = document.createElement('select')
+    target.add(new Option('必须手动选择', 'required'))
+    select.vm.$emit('change', { target } as unknown as Event)
+    await flush()
     expect(updateStoryboardOption).toHaveBeenCalledWith('g2', { castPolicy: 'required' })
     wrapper.unmount()
   })

@@ -123,11 +123,11 @@ describe('admin song emotion profiles panel', () => {
     await vi.waitFor(() => expect(wrapper.text()).toContain('姐姐真漂亮'))
     await wrapper.get('button.primary').trigger('click')
     await vi.waitFor(() =>
-      expect(document.body.querySelectorAll('.category-row select')).toHaveLength(3),
+      expect(document.body.querySelectorAll('.category-row [role=combobox]')).toHaveLength(3),
     )
-    const selects = document.body.querySelectorAll<HTMLSelectElement>('.category-row select')
-    expect([...selects[0].options].map((option) => option.text)).toContain('流行歌曲')
-    expect([...selects[1].options].map((option) => option.text)).toContain('爱情消极')
+    const selects = document.body.querySelectorAll('.category-row [role=combobox]')
+    expect(selects[0].textContent).toContain('流行歌曲')
+    expect(selects[1].textContent).toContain('爱情消极')
     expect(document.body.querySelector('.material-preview')?.textContent).toContain(
       '流行歌曲-爱情消极-失恋',
     )

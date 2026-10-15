@@ -1,3 +1,4 @@
+import { selectDropdown } from '../select'
 import { expect, test } from '@playwright/test'
 import { agentTestHeaders, remoteCredentials, testRunId } from '../env'
 test.skip(!process.env.ADMIN_CONSOLE_E2E, 'set ADMIN_CONSOLE_E2E=1')
@@ -68,7 +69,7 @@ test('administrator can inspect dashboard, models, errors and audit logs', async
   await expect(page.getByRole('columnheader', { name: '费用/每秒费用（单价毛）' })).toBeVisible()
   const catalogRun = process.env.VIDEO_CATALOG_TEST_RUN_ID
   if (catalogRun) {
-    await page.getByLabel('生成来源').selectOption('agent_test')
+    await selectDropdown(page.getByLabel('生成来源'), 'Agent 开发测试')
     await page.getByLabel('搜索', { exact: true }).fill(catalogRun)
     const bills = page.waitForResponse(
       (r) =>

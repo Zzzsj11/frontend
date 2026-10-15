@@ -236,3 +236,32 @@ h2 {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* 全站下拉框使用统一触发器与菜单，紧凑场景仅改变尺寸，不改变交互。 */
+.app-select {
+  display: inline-flex;
+  width: auto !important;
+  max-width: 100%;
+  vertical-align: middle;
+}
+label .app-select {
+  display: flex;
+  width: 100% !important;
+}
+.generation-model-trigger {
+  min-height: 44px;
+  box-sizing: border-box;
+  line-height: 1.4;
+}
+.app-select .generation-model-trigger {
+  min-width: 96px;
+  padding: 9px 12px;
+}
+.generation-model-chevron svg {
+  display: block;
+  flex: none;
+}
+.generation-model-item[data-disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

@@ -13,7 +13,8 @@ const userInitial = computed(() => userName.value.trim().charAt(0).toUpperCase()
 const yingheBalance = computed(() => auth.balance?.providers?.yinghe ?? auth.balance)
 const allInOneTitle = computed(() => {
   const credits = auth.allInOneCredits
-  if (!credits?.available) return credits?.message || '点击刷新 all in one 积分'
+  if (!credits?.available)
+    return credits?.message?.replace(/all in one/gi, '平台') || '点击刷新平台积分'
   return `当前 Key ${credits.keyMasked || '--'} · 月额度 ${credits.monthlyPoints || '--'} 积分 · 已用 ${credits.spentPoints || '--'} · 预占 ${credits.reservedPoints || '--'} · 点击刷新`
 })
 const hasAdminAccess = computed(
@@ -108,7 +109,7 @@ onBeforeUnmount(() => {
         @click="void auth.loadAllInOneCredits()"
       >
         <span class="balance-icon" aria-hidden="true">◎</span>
-        <span class="balance-provider">all in one</span>
+        <span class="balance-provider">平台</span>
         <span class="balance-value">{{ auth.allInOneCredits?.remainingDisplay || '--' }}</span>
         <span class="balance-key">积分</span>
       </button>

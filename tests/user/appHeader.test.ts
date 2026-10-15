@@ -72,7 +72,7 @@ describe('AppHeader provider balances', () => {
     expect(balance.attributes('title')).toContain('当前 Key yh-test***（视频 Key）')
     expect(balance.attributes('title')).toContain('月度已用 341.04 / 限额 1000')
     const allInOne = wrapper.get('.balance-pill.all-in-one')
-    expect(allInOne.text()).toContain('all in one')
+    expect(allInOne.text()).toContain('平台')
     expect(allInOne.text()).toContain('123.50')
     expect(allInOne.attributes('title')).toContain('当前 Key ms_test***')
     wrapper.unmount()

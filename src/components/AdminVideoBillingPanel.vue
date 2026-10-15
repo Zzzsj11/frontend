@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseSelect from './base/BaseSelect.vue'
 import { computed, onMounted, ref } from 'vue'
 import {
   getVideoBillingDetail,
@@ -164,7 +165,7 @@ onMounted(load)
       </article>
     </div>
     <div class="toolbar">
-      <select v-model="status" aria-label="对账状态" @change="search">
+      <BaseSelect v-model="status" aria-label="对账状态" @change="search">
         <option value="">全部状态</option>
         <option value="failed">最终生成失败</option>
         <option value="priced">已计费</option>
@@ -172,16 +173,16 @@ onMounted(load)
         <option value="unpriced">缺少价格</option>
         <option value="pending">待平台结算</option>
         <option value="no_usage">无供应商用量</option>
-      </select>
-      <select v-model="model" aria-label="视频模型" @change="search">
+      </BaseSelect>
+      <BaseSelect v-model="model" aria-label="视频模型" @change="search">
         <option value="">全部模型</option>
         <option v-for="item in data.models" :key="item" :value="item">{{ item }}</option>
-      </select>
-      <select v-model="origin" aria-label="生成来源" @change="search">
+      </BaseSelect>
+      <BaseSelect v-model="origin" aria-label="生成来源" @change="search">
         <option value="">全部来源</option>
         <option value="business">正常业务</option>
         <option value="agent_test">Agent 开发测试</option>
-      </select>
+      </BaseSelect>
       <div class="search-field">
         <input
           v-model="keyword"

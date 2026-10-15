@@ -18,15 +18,32 @@ import AppIcon from '../AppIcon.vue'
 const props = withDefaults(
   defineProps<{
     modelValue: string
-    groups: Array<{ label: string; items: Array<{ value: string; label: string }> }>
-    icon?: 'movie' | 'image'
+    groups: Array<{
+      label: string
+      items: Array<{ value: string; label: string; disabled?: boolean }>
+    }>
+    icon?: 'movie' | 'image' | null
+    placeholder?: string
+    triggerAttrs?: Record<string, unknown>
+    name?: string
+    required?: boolean
     label?: string
     ariaLabel?: string
     disabled?: boolean
     id?: string
     compact?: boolean
   }>(),
-  { icon: 'movie', label: '', ariaLabel: '生成模型', disabled: false, id: '', compact: false },
+  {
+    name: undefined,
+    icon: 'movie',
+    label: '',
+    ariaLabel: '',
+    disabled: false,
+    id: '',
+    compact: false,
+    placeholder: '请选择',
+    triggerAttrs: () => ({}),
+  },
 )
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 const generatedId = useId()
@@ -34,7 +51,7 @@ const selectId = computed(() => props.id || generatedId)
 const selectedLabel = computed(
   () =>
     props.groups.flatMap((group) => group.items).find((item) => item.value === props.modelValue)
-      ?.label ?? '请选择模型',
+      ?.label ?? props.placeholder,
 )
 const updateModel = (value: unknown) => {
   if (typeof value === 'string') emit('update:modelValue', value)
@@ -46,13 +63,30 @@ const updateModel = (value: unknown) => {
     <label v-if="label" class="generation-model-label" :for="selectId">{{ label }}</label>
     <SelectRoot
       :model-value="modelValue"
+      :name="name"
+      :required="required"
       :disabled="disabled || !groups.length"
       @update:model-value="updateModel"
     >
-      <SelectTrigger :id="selectId" class="generation-model-trigger" :aria-label="ariaLabel">
-        <AppIcon :name="icon" :size="compact ? 14 : 16" />
+      <SelectTrigger
+        v-bind="triggerAttrs"
+        :id="selectId"
+        class="generation-model-trigger"
+        :aria-label="ariaLabel || undefined"
+      >
+        <AppIcon v-if="icon" :name="icon" :size="compact ? 14 : 16" />
         <SelectValue class="generation-model-value">{{ selectedLabel }}</SelectValue>
-        <SelectIcon class="generation-model-chevron">⌄</SelectIcon>
+        <SelectIcon class="generation-model-chevron" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path
+              d="m6 9 6 6 6-6"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </SelectIcon>
       </SelectTrigger>
       <SelectPortal>
         <SelectContent
@@ -64,21 +98,27 @@ const updateModel = (value: unknown) => {
         >
           <SelectViewport class="generation-model-viewport">
             <SelectGroup v-for="group in groups" :key="group.label" class="generation-model-group">
-              <SelectLabel class="generation-model-group-label">{{ group.label }}</SelectLabel>
+              <SelectLabel v-if="group.label" class="generation-model-group-label">{{
+                group.label
+              }}</SelectLabel>
               <SelectItem
                 v-for="item in group.items"
                 :key="item.value"
                 class="generation-model-item"
                 :value="item.value"
+                :disabled="item.disabled"
               >
-                <SelectItemIndicator class="generation-model-check">✓</SelectItemIndicator>
-                <SelectItemText>{{ item.label }}</SelectItemText>
+                <SelectItemIndicator class="generation-model-check" aria-hidden="true"
+                  >✓</SelectItemIndicator
+                >
+                <SelectItemText class="generation-model-item-text">{{ item.label }}</SelectItemText>
               </SelectItem>
             </SelectGroup>
           </SelectViewport>
         </SelectContent>
       </SelectPortal>
     </SelectRoot>
+    <slot name="after" />
   </div>
 </template>
 
@@ -104,7 +144,9 @@ const updateModel = (value: unknown) => {
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
-  font: inherit;
+  font-family: inherit;
+  font-size: var(--font-md);
+  font-weight: 400;
   text-align: left;
   cursor: pointer;
   transition:
@@ -139,8 +181,13 @@ const updateModel = (value: unknown) => {
 .generation-model-chevron {
   flex: none;
   color: var(--text-secondary);
-  font-size: 20px;
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  line-height: 0;
 }
 .compact .generation-model-trigger {
   min-height: 42px;

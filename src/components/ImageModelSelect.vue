@@ -18,17 +18,14 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 const groups = computed(() =>
   [
     {
-      label: 'all in one · 图片生成',
+      label: '图片生成',
       items: IMAGE_MODEL_OPTIONS.filter(
         (item) =>
           ['nano-banana-2.1-all-in-one', 'seedream-5.0-pro-all-in-one'].includes(item.value) &&
           (!props.ratio || imageModelSupportsRatio(item.value, props.ratio)),
       ).map((item) => ({
         value: item.value,
-        label:
-          item.value === 'nano-banana-2.1-all-in-one'
-            ? 'Nano Banana 2.1（all in one）'
-            : 'Seedream Pro（all in one）',
+        label: item.value === 'nano-banana-2.1-all-in-one' ? 'Nano Banana 2.1' : 'Seedream Pro',
       })),
     },
   ].filter((group) => group.items.length),

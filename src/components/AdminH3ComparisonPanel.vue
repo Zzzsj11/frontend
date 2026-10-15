@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseSelect from './base/BaseSelect.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   fetchRunningHubComparisonSources,
@@ -193,26 +194,26 @@ onBeforeUnmount(() => pollTimers.forEach((timer) => clearTimeout(timer)))
       <div v-if="sources.length" class="comparison-filters">
         <label>
           用户
-          <select v-model="selectedUser">
+          <BaseSelect v-model="selectedUser">
             <option v-for="username in users" :key="username" :value="username">
               {{ username }}
             </option>
-          </select>
+          </BaseSelect>
         </label>
         <label>
           已生成视频人物 / 分镜任务
-          <select v-model="selectedTask">
+          <BaseSelect v-model="selectedTask">
             <option v-for="task in tasks" :key="task.taskId" :value="task.taskId">
               {{ task.projectName }} · {{ task.taskTitle }}
             </option>
-          </select>
+          </BaseSelect>
         </label>
         <label>
           对比模式
-          <select v-model="comparisonMode">
+          <BaseSelect v-model="comparisonMode">
             <option value="multi_reference">多参考图</option>
             <option value="first_frame">首帧对比</option>
-          </select>
+          </BaseSelect>
         </label>
       </div>
       <p v-else class="empty-text">暂无具备公网首帧和成片的 Seedance 2.0 通用分镜。</p>
@@ -373,13 +374,6 @@ figure {
   flex-direction: column;
   gap: 6px;
   font-size: var(--font-sm);
-}
-select {
-  min-height: 38px;
-  border: 1px solid var(--border-dark);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  padding: 6px 10px;
 }
 .source-grid,
 .reports {

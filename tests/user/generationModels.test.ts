@@ -9,6 +9,20 @@ import {
 } from '../../src/generationModels'
 
 describe('generation model labels', () => {
+  it('hides the channel suffix on both image and video model names', () => {
+    expect(
+      generationModelLabel({
+        value: 'nano-banana-2.1-all-in-one',
+        label: 'Nano Banana 2.1 (all in one)',
+      }),
+    ).toBe('Nano Banana 2.1')
+    expect(
+      generationModelLabel({
+        value: 'doubao-seedance-2.0-all-in-one',
+        label: 'SD2.0（all in one）',
+      }),
+    ).toBe('SD2.0')
+  })
   it('shows a finite model concurrency limit in every model picker', () => {
     expect(
       generationModelLabel({
