@@ -33,20 +33,20 @@ export const PROJECT_VIDEO_MODEL_GROUPS = [
   {
     label: 'Seedance 系列',
     ids: [
-      'doubao-seedance-2.0',
-      'doubao-seedance-2.0-mini',
-      'doubao-seedance-2.0-fast',
       'doubao-seedance-2.0-all-in-one',
+      'doubao-seedance-2.0-fast-all-in-one',
+      'doubao-seedance-2.0-mini-all-in-one',
+      'doubao-seedance-2.5-all-in-one',
     ],
   },
+  { label: 'Wan 系列', ids: ['wan3.0-video-all-in-one', 'wan3.0-video-prime-all-in-one'] },
+  { label: 'MiniMax 系列', ids: ['minimax-h3-all-in-one'] },
   {
-    label: 'Wan3.0 系列',
-    ids: ['wan3.0-video', 'wan3.0-video-prime', 'wan3.0-video-all-in-one'],
+    label: 'Veo 系列',
+    ids: ['veo-3.1-all-in-one', 'veo-3.1-fast-all-in-one', 'veo-3.1-lite-all-in-one'],
   },
-  {
-    label: 'H3',
-    ids: ['minimax-h3', 'minimax-h3-runninghub', 'minimax-h3-all-in-one'],
-  },
+  { label: 'Grok 系列', ids: ['grok-video-1.5-all-in-one'] },
+  { label: 'Gemini 系列', ids: ['gemini-omni-1.1-flash-preview-all-in-one'] },
 ] as const
 export const PROJECT_VIDEO_MODEL_IDS = new Set<string>(
   PROJECT_VIDEO_MODEL_GROUPS.flatMap((group) => group.ids),
@@ -72,11 +72,20 @@ export const imageResolutionChoices = (modelId?: string): string[] => {
     ? resolutions.filter((item): item is string => typeof item === 'string')
     : ['1K', '2K', '4K']
 }
-export const videoResolutionChoices = (modelId?: string): string[] => {
-  const configured = videoModelCapabilities(modelId).resolutions
+export const videoResolutionChoices = (modelId?: string, referenceMode = false): string[] => {
+  const caps = videoModelCapabilities(modelId)
+  const configured =
+    referenceMode && Array.isArray(caps.referenceResolutions)
+      ? caps.referenceResolutions
+      : caps.resolutions
   return Array.isArray(configured) && configured.length
     ? configured.filter((item): item is string => typeof item === 'string')
     : [...DEFAULT_VIDEO_RESOLUTIONS]
+}
+export const videoRatioChoices = (modelId?: string): Array<'16:9' | '9:16' | '4:3' | '1:1'> => {
+  const available = videoModelCapabilities(modelId).ratios
+  const ratios = ['16:9', '9:16', '4:3', '1:1'] as const
+  return ratios.filter((ratio) => !Array.isArray(available) || available.includes(ratio))
 }
 export const videoDurationChoices = (modelId?: string): number[] => {
   const capabilities = videoModelCapabilities(modelId)
@@ -115,6 +124,8 @@ export const isH3VideoModel = (modelId?: string): boolean => {
   )
 }
 export const generationModelLabel = (option: GenerationModelOption): string => {
+  if (PROJECT_VIDEO_MODEL_IDS.has(option.value))
+    return option.label.replace(/[（(]all in one[）)]/gi, '').trim()
   if (option.value === 'minimax-h3-runninghub') {
     return 'H3（RunningHub，2并发，仅测试时用）'
   }
@@ -183,7 +194,7 @@ export async function loadGenerationModels(
       )
     const videos = sortVideoModelOptions(
       items
-        .filter((x) => x.modality === 'video')
+        .filter((x) => x.modality === 'video' && PROJECT_VIDEO_MODEL_IDS.has(x.id))
         .map((x) => ({ value: x.id, label: x.name, capabilities: x.capabilities })),
     )
     IMAGE_MODEL_OPTIONS.splice(0, IMAGE_MODEL_OPTIONS.length, ...images)

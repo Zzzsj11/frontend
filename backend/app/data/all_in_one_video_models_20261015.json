@@ -1,0 +1,731 @@
+[
+  {
+    "code": "doubao-seedance-2.0-all-in-one",
+    "provider_model_id": "seedance-2.0",
+    "name": "SD2.0",
+    "modality": "video",
+    "capabilities": {
+      "series": "Seedance",
+      "ratios": [
+        "16:9",
+        "9:16",
+        "4:3",
+        "1:1"
+      ],
+      "durations": {
+        "min": 4,
+        "max": 15
+      },
+      "resolutions": [
+        "480p",
+        "720p",
+        "1080p"
+      ],
+      "referenceImage": {
+        "min": 0,
+        "max": 9
+      },
+      "referenceVideo": {
+        "min": 0,
+        "max": 3
+      },
+      "referenceAudio": {
+        "min": 0,
+        "max": 3
+      },
+      "providerCode": "all-in-one",
+      "providerProtocol": "all-in-one",
+      "executionPool": "all-in-one:doubao-seedance-2.0",
+      "executionConcurrency": 500,
+      "billing": {
+        "provider": "all-in-one",
+        "balanceCheck": false,
+        "billingMode": "platform_points",
+        "currency": "points"
+      },
+      "systemManaged": true,
+      "sortOrder": 100,
+      "audioToggle": true,
+      "watermarkToggle": true,
+      "referenceModes": [
+        "auto",
+        "text",
+        "first_frame",
+        "reference",
+        "first_last"
+      ],
+      "contractVersion": "all-in-one-videos-20261015"
+    },
+    "sort_order": 100
+  },
+  {
+    "code": "doubao-seedance-2.0-fast-all-in-one",
+    "provider_model_id": "seedance-2.0-fast",
+    "name": "SD2.0 Fast",
+    "modality": "video",
+    "capabilities": {
+      "series": "Seedance",
+      "ratios": [
+        "16:9",
+        "9:16",
+        "4:3",
+        "1:1"
+      ],
+      "durations": {
+        "min": 4,
+        "max": 15
+      },
+      "resolutions": [
+        "480p",
+        "720p"
+      ],
+      "referenceImage": {
+        "min": 0,
+        "max": 9
+      },
+      "referenceVideo": {
+        "min": 0,
+        "max": 3
+      },
+      "referenceAudio": {
+        "min": 0,
+        "max": 3
+      },
+      "providerCode": "all-in-one",
+      "providerProtocol": "all-in-one",
+      "executionPool": "all-in-one:doubao-seedance-2.0-fast",
+      "executionConcurrency": 50,
+      "billing": {
+        "provider": "all-in-one",
+        "balanceCheck": false,
+        "billingMode": "platform_points",
+        "currency": "points"
+      },
+      "systemManaged": true,
+      "sortOrder": 101,
+      "audioToggle": true,
+      "watermarkToggle": true,
+      "referenceModes": [
+        "auto",
+        "text",
+        "first_frame",
+        "reference",
+        "first_last"
+      ],
+      "contractVersion": "all-in-one-videos-20261015"
+    },
+    "sort_order": 101
+  },
+  {
+    "code": "doubao-seedance-2.0-mini-all-in-one",
+    "provider_model_id": "seedance-2.0-mini",
+    "name": "SD2.0 Mini",
+    "modality": "video",
+    "capabilities": {
+      "series": "Seedance",
+      "ratios": [
+        "16:9",
+        "9:16",
+        "4:3",
+        "1:1"
+      ],
+      "durations": {
+        "min": 4,
+        "max": 15
+      },
+      "resolutions": [
+        "480p",
+        "720p"
+      ],
+      "referenceImage": {
+        "min": 0,
+        "max": 9
+      },
+      "referenceVideo": {
+        "min": 0,
+        "max": 3
+      },
+      "referenceAudio": {
+        "min": 0,
+        "max": 3
+      },
+      "providerCode": "all-in-one",
+      "providerProtocol": "all-in-one",
+      "executionPool": "all-in-one:doubao-seedance-2.0-mini",
+      "executionConcurrency": 50,
+      "billing": {
+        "provider": "all-in-one",
+        "balanceCheck": false,
+        "billingMode": "platform_points",
+        "currency": "points"
+      },
+      "systemManaged": true,
+      "sortOrder": 102,
+      "audioToggle": true,
+      "watermarkToggle": true,
+      "referenceModes": [
+        "auto",
+        "text",
+        "first_frame",
+        "reference",
+        "first_last"
+      ],
+      "contractVersion": "all-in-one-videos-20261015"
+    },
+    "sort_order": 102
+  },
+  {
+    "code": "doubao-seedance-2.5-all-in-one",
+    "provider_model_id": "seedance-2.5",
+    "name": "SD2.5",
+    "modality": "video",
+    "capabilities": {
+      "series": "Seedance",
+      "ratios": [
+        "16:9",
+        "9:16",
+        "4:3",
+        "1:1"
+      ],
+      "durations": {
+        "min": 4,
+        "max": 30
+      },
+      "resolutions": [
+        "480p",
+        "720p",
+        "1080p"
+      ],
+      "referenceImage": {
+        "min": 0,
+        "max": 30
+      },
+      "referenceVideo": {
+        "min": 0,
+        "max": 10
+      },
+      "referenceAudio": {
+        "min": 0,
+        "max": 10
+      },
+      "providerCode": "all-in-one",
+      "providerProtocol": "all-in-one",
+      "executionPool": "all-in-one:doubao-seedance-2.5",
+      "executionConcurrency": 50,
+      "billing": {
+        "provider": "all-in-one",
+        "balanceCheck": false,
+        "billingMode": "platform_points",
+        "currency": "points"
+      },
+      "systemManaged": true,
+      "sortOrder": 103,
+      "audioToggle": true,
+      "watermarkToggle": true,
+      "referenceModes": [
+        "auto",
+        "text",
+        "first_frame",
+        "reference",
+        "first_last"
+      ],
+      "contractVersion": "all-in-one-videos-20261015"
+    },
+    "sort_order": 103
+  },
+  {
+    "code": "wan3.0-video-all-in-one",
+    "provider_model_id": "wan3.0-video",
+    "name": "Wan3.0",
+    "modality": "video",
+    "capabilities": {
+      "series": "Wan",
+      "ratios": [
+        "16:9",
+        "9:16",
+        "4:3",
+        "1:1"
+      ],
+      "durations": {
+        "min": 2,
+        "max": 30
+      },
+      "resolutions": [
+        "720p"
+      ],
+      "referenceImage": {
+        "min": 0,
+        "max": 10
+      },
+      "referenceVideo": {
+        "min": 0,
+        "max": 5
+      },
+      "referenceAudio": {
+        "min": 0,
+        "max": 5
+      },
+      "providerCode": "all-in-one",
+      "providerProtocol": "all-in-one",
+      "executionPool": "all-in-one:wan3.0-video",
+      "executionConcurrency": 500,
+      "billing": {
+        "provider": "all-in-one",
+        "balanceCheck": false,
+        "billingMode": "platform_points",
+        "currency": "points"
+      },
+      "systemManaged": true,
+      "sortOrder": 104,
+      "audioToggle": false,
+      "watermarkToggle": true,
+      "referenceModes": [
+        "auto",
+        "text",
+        "first_frame",
+        "reference",
+        "first_last"
+      ],
+      "contractVersion": "all-in-one-videos-20261015"
+    },
+    "sort_order": 104
+  },
+  {
+    "code": "wan3.0-video-prime-all-in-one",
+    "provider_model_id": "wan3.0-video-prime",
+    "name": "Wan3.0 Prime",
+    "modality": "video",
+    "capabilities": {
+      "series": "Wan",
+      "ratios": [
+        "16:9",
+        "9:16",
+        "4:3",
+        "1:1"
+      ],
+      "durations": {
+        "min": 2,
+        "max": 30
+      },
+      "resolutions": [
+        "480p",
+        "720p",
+        "1080p"
+      ],
+      "referenceImage": {
+        "min": 0,
+        "max": 10
+      },
+      "referenceVideo": {
+        "min": 0,
+        "max": 5
+      },
+      "referenceAudio": {
+        "min": 0,
+        "max": 5
+      },
+      "providerCode": "all-in-one",
+      "providerProtocol": "all-in-one",
+      "executionPool": "all-in-one:wan3.0-video-prime",
+      "executionConcurrency": 100,
+      "billing": {
+        "provider": "all-in-one",
+        "balanceCheck": false,
+        "billingMode": "platform_points",
+        "currency": "points"
+      },
+      "systemManaged": true,
+      "sortOrder": 105,
+      "audioToggle": false,
+      "watermarkToggle": true,
+      "referenceModes": [
+        "auto",
+        "text",
+        "first_frame",
+        "reference",
+        "first_last"
+      ],
+      "contractVersion": "all-in-one-videos-20261015"
+    },
+    "sort_order": 105
+  },
+  {
+    "code": "minimax-h3-all-in-one",
+    "provider_model_id": "MiniMax-H3",
+    "name": "H3",
+    "modality": "video",
+    "capabilities": {
+      "series": "MiniMax",
+      "ratios": [
+        "16:9",
+        "9:16",
+        "4:3",
+        "1:1"
+      ],
+      "durations": {
+        "min": 4,
+        "max": 15
+      },
+      "resolutions": [
+        "720p",
+        "1080p"
+      ],
+      "referenceImage": {
+        "min": 0,
+        "max": 6
+      },
+      "referenceVideo": {
+        "min": 0,
+        "max": 1
+      },
+      "referenceAudio": {
+        "min": 0,
+        "max": 3
+      },
+      "providerCode": "all-in-one",
+      "providerProtocol": "all-in-one",
+      "executionPool": "all-in-one:minimax-h3",
+      "executionConcurrency": 100,
+      "billing": {
+        "provider": "all-in-one",
+        "balanceCheck": false,
+        "billingMode": "platform_points",
+        "currency": "points"
+      },
+      "systemManaged": true,
+      "sortOrder": 106,
+      "audioToggle": false,
+      "watermarkToggle": true,
+      "referenceModes": [
+        "auto",
+        "text",
+        "first_frame",
+        "reference",
+        "first_last"
+      ],
+      "contractVersion": "all-in-one-videos-20261015",
+      "resolutionLabels": {
+        "720p": "768P",
+        "1080p": "2K"
+      },
+      "providerResolutionMap": {
+        "720p": "768P",
+        "1080p": "2K"
+      },
+      "h3Modes": [
+        "auto",
+        "text",
+        "first_frame",
+        "first_last",
+        "reference"
+      ],
+      "referenceTotalMax": 10,
+      "referenceAudioRequiresVisual": true
+    },
+    "sort_order": 106
+  },
+  {
+    "code": "veo-3.1-all-in-one",
+    "provider_model_id": "veo-3.1",
+    "name": "Veo 3.1",
+    "modality": "video",
+    "capabilities": {
+      "series": "Veo",
+      "ratios": [
+        "16:9",
+        "9:16"
+      ],
+      "durations": {
+        "min": 4,
+        "max": 8
+      },
+      "resolutions": [
+        "720p",
+        "1080p",
+        "4k"
+      ],
+      "referenceImage": {
+        "min": 0,
+        "max": 3
+      },
+      "referenceVideo": {
+        "min": 0,
+        "max": 0
+      },
+      "referenceAudio": {
+        "min": 0,
+        "max": 0
+      },
+      "providerCode": "all-in-one",
+      "providerProtocol": "all-in-one",
+      "executionPool": "all-in-one:veo-3.1",
+      "executionConcurrency": 500,
+      "billing": {
+        "provider": "all-in-one",
+        "balanceCheck": false,
+        "billingMode": "platform_points",
+        "currency": "points"
+      },
+      "systemManaged": true,
+      "sortOrder": 107,
+      "audioToggle": true,
+      "watermarkToggle": false,
+      "referenceModes": [
+        "auto",
+        "text",
+        "first_frame",
+        "reference",
+        "first_last"
+      ],
+      "contractVersion": "all-in-one-videos-20261015",
+      "durationOptions": [
+        4,
+        6,
+        8
+      ]
+    },
+    "sort_order": 107
+  },
+  {
+    "code": "veo-3.1-fast-all-in-one",
+    "provider_model_id": "veo-3.1-fast",
+    "name": "Veo 3.1 Fast",
+    "modality": "video",
+    "capabilities": {
+      "series": "Veo",
+      "ratios": [
+        "16:9",
+        "9:16"
+      ],
+      "durations": {
+        "min": 4,
+        "max": 8
+      },
+      "resolutions": [
+        "720p",
+        "1080p",
+        "4k"
+      ],
+      "referenceImage": {
+        "min": 0,
+        "max": 3
+      },
+      "referenceVideo": {
+        "min": 0,
+        "max": 0
+      },
+      "referenceAudio": {
+        "min": 0,
+        "max": 0
+      },
+      "providerCode": "all-in-one",
+      "providerProtocol": "all-in-one",
+      "executionPool": "all-in-one:veo-3.1-fast",
+      "executionConcurrency": 500,
+      "billing": {
+        "provider": "all-in-one",
+        "balanceCheck": false,
+        "billingMode": "platform_points",
+        "currency": "points"
+      },
+      "systemManaged": true,
+      "sortOrder": 108,
+      "audioToggle": true,
+      "watermarkToggle": false,
+      "referenceModes": [
+        "auto",
+        "text",
+        "first_frame",
+        "reference",
+        "first_last"
+      ],
+      "contractVersion": "all-in-one-videos-20261015",
+      "durationOptions": [
+        4,
+        6,
+        8
+      ]
+    },
+    "sort_order": 108
+  },
+  {
+    "code": "veo-3.1-lite-all-in-one",
+    "provider_model_id": "veo-3.1-lite",
+    "name": "Veo 3.1 Lite",
+    "modality": "video",
+    "capabilities": {
+      "series": "Veo",
+      "ratios": [
+        "16:9",
+        "9:16"
+      ],
+      "durations": {
+        "min": 4,
+        "max": 8
+      },
+      "resolutions": [
+        "720p"
+      ],
+      "referenceImage": {
+        "min": 0,
+        "max": 3
+      },
+      "referenceVideo": {
+        "min": 0,
+        "max": 0
+      },
+      "referenceAudio": {
+        "min": 0,
+        "max": 0
+      },
+      "providerCode": "all-in-one",
+      "providerProtocol": "all-in-one",
+      "executionPool": "all-in-one:veo-3.1-lite",
+      "executionConcurrency": 500,
+      "billing": {
+        "provider": "all-in-one",
+        "balanceCheck": false,
+        "billingMode": "platform_points",
+        "currency": "points"
+      },
+      "systemManaged": true,
+      "sortOrder": 109,
+      "audioToggle": true,
+      "watermarkToggle": false,
+      "referenceModes": [
+        "auto",
+        "text",
+        "first_frame",
+        "reference",
+        "first_last"
+      ],
+      "contractVersion": "all-in-one-videos-20261015",
+      "durationOptions": [
+        4,
+        6,
+        8
+      ]
+    },
+    "sort_order": 109
+  },
+  {
+    "code": "grok-video-1.5-all-in-one",
+    "provider_model_id": "grok-video-1.5",
+    "name": "Grok Video 1.5",
+    "modality": "video",
+    "capabilities": {
+      "series": "Grok",
+      "ratios": [
+        "16:9",
+        "9:16",
+        "4:3",
+        "1:1"
+      ],
+      "durations": {
+        "min": 1,
+        "max": 15
+      },
+      "resolutions": [
+        "480p",
+        "720p",
+        "1080p"
+      ],
+      "referenceImage": {
+        "min": 0,
+        "max": 7
+      },
+      "referenceVideo": {
+        "min": 0,
+        "max": 0
+      },
+      "referenceAudio": {
+        "min": 0,
+        "max": 0
+      },
+      "providerCode": "all-in-one",
+      "providerProtocol": "all-in-one",
+      "executionPool": "all-in-one:grok-video-1.5",
+      "executionConcurrency": 500,
+      "billing": {
+        "provider": "all-in-one",
+        "balanceCheck": false,
+        "billingMode": "platform_points",
+        "currency": "points"
+      },
+      "systemManaged": true,
+      "sortOrder": 110,
+      "audioToggle": false,
+      "watermarkToggle": false,
+      "referenceModes": [
+        "auto",
+        "text",
+        "first_frame",
+        "reference"
+      ],
+      "contractVersion": "all-in-one-videos-20261015",
+      "referenceResolutions": [
+        "480p",
+        "720p"
+      ]
+    },
+    "sort_order": 110
+  },
+  {
+    "code": "gemini-omni-1.1-flash-preview-all-in-one",
+    "provider_model_id": "gemini-omni-1.1-flash-preview",
+    "name": "Gemini Omni 1.1 Flash Preview",
+    "modality": "video",
+    "capabilities": {
+      "series": "Gemini",
+      "ratios": [
+        "16:9",
+        "9:16"
+      ],
+      "durations": {
+        "min": 10,
+        "max": 10
+      },
+      "resolutions": [
+        "720p"
+      ],
+      "referenceImage": {
+        "min": 0,
+        "max": 5
+      },
+      "referenceVideo": {
+        "min": 0,
+        "max": 0
+      },
+      "referenceAudio": {
+        "min": 0,
+        "max": 0
+      },
+      "providerCode": "all-in-one",
+      "providerProtocol": "all-in-one",
+      "executionPool": "all-in-one:gemini-omni-1.1-flash-preview",
+      "executionConcurrency": 500,
+      "billing": {
+        "provider": "all-in-one",
+        "balanceCheck": false,
+        "billingMode": "platform_points",
+        "currency": "points"
+      },
+      "systemManaged": true,
+      "sortOrder": 111,
+      "audioToggle": false,
+      "watermarkToggle": false,
+      "referenceModes": [
+        "auto",
+        "text",
+        "first_frame",
+        "reference"
+      ],
+      "contractVersion": "all-in-one-videos-20261015",
+      "durationOptions": [
+        10
+      ],
+      "defaultDuration": 10
+    },
+    "sort_order": 111
+  }
+]

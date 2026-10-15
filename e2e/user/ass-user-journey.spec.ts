@@ -1,3 +1,4 @@
+import videoCatalog from '../../backend/app/data/all_in_one_video_models_20261015.json' with { type: 'json' }
 import { expect, test } from '@playwright/test'
 
 const ORIGIN = 'http://127.0.0.1:4173'
@@ -86,22 +87,12 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
             referenceImage: { max: 10 },
           },
         },
-        { id: 'doubao-seedance-2.0', name: 'SD2.0', modality: 'video' },
-        { id: 'doubao-seedance-2.0-mini', name: 'SD2.0 Mini', modality: 'video' },
-        { id: 'doubao-seedance-2.0-fast', name: 'SD2.0 Fast', modality: 'video' },
-        { id: 'doubao-seedance-2.0-all-in-one', name: 'SD2.0 (all in one)', modality: 'video' },
-        { id: 'wan3.0-video', name: 'Wan3.0', modality: 'video' },
-        { id: 'wan3.0-video-prime', name: 'Wan3.0 Prime', modality: 'video' },
-        { id: 'wan3.0-video-all-in-one', name: 'Wan3.0 (all in one)', modality: 'video' },
-        { id: 'minimax-h3', name: 'H3（英和）', modality: 'video' },
-        {
-          id: 'minimax-h3-runninghub',
-          name: 'H3',
-          modality: 'video',
-          capabilities: { h3Modes: ['auto', 'text'], executionConcurrency: 2 },
-        },
-        { id: 'minimax-h3-all-in-one', name: 'H3 (all in one)', modality: 'video' },
-        { id: 'veo-3.1', name: 'Veo 3.1', modality: 'video' },
+        ...videoCatalog.map((item) => ({
+          id: item.code,
+          name: item.name,
+          modality: item.modality,
+          capabilities: item.capabilities,
+        })),
       ]),
     }),
   )
@@ -212,7 +203,7 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
               duration: 4,
               ratio: '16:9',
               imageModel: 'nano-banana-2.1-all-in-one',
-              videoModel: 'minimax-h3-runninghub',
+              videoModel: 'minimax-h3-all-in-one',
               segmentType: 'lyric',
               timelineLabel: '自动化测试歌词',
               outlineStatus: 'pending',
@@ -280,7 +271,7 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
               duration: 4,
               ratio: '16:9',
               imageModel: 'nano-banana-2.1-all-in-one',
-              videoModel: 'minimax-h3-runninghub',
+              videoModel: 'minimax-h3-all-in-one',
               segmentType: 'lyric',
               timelineLabel: '自动化测试歌词',
               outlineStatus: 'ready',
@@ -334,12 +325,18 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await expect(page.getByLabel('画幅 *')).toHaveValue('16:9')
   await expect(page.getByLabel('清晰度 *')).toHaveValue('480p')
   await page.getByLabel('视频模型').click()
-  await expect(page.getByRole('option')).toHaveCount(10)
-  await expect(page.getByRole('option', { name: 'Veo 3.1' })).toHaveCount(0)
+  await expect(page.getByRole('option')).toHaveCount(12)
+  await expect(page.getByRole('option', { name: 'Veo 3.1', exact: true })).toHaveCount(1)
   await page.screenshot({ path: test.info().outputPath('video-model-select.png') })
-  await page.getByRole('option', { name: 'H3（RunningHub，2并发，仅测试时用）' }).click()
-  await expect(page.getByLabel('视频模型')).toContainText('H3（RunningHub，2并发，仅测试时用）')
+  await page.getByRole('option', { name: 'H3' }).click()
+  await expect(page.getByLabel('视频模型')).toContainText('H3')
   await expect(page.getByLabel('视频模型')).toBeEnabled()
+  await page.getByLabel('视频模型').click()
+  await page.getByRole('option', { name: 'Gemini Omni 1.1 Flash Preview', exact: true }).click()
+  await expect(page.getByLabel('清晰度 *')).toHaveValue('720p')
+  await expect(page.getByLabel('画幅 *').locator('option')).toHaveCount(2)
+  await page.getByLabel('视频模型').click()
+  await page.getByRole('option', { name: 'H3', exact: true }).click()
   await expect(page.getByLabel('图片模型')).toContainText('Nano Banana 2.1')
   await expect(page.getByLabel('图片模型')).toBeEnabled()
   await page.getByLabel('图片模型').click()
@@ -362,8 +359,8 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await detail.getByRole('button', { name: '视频', exact: true }).click()
   await detail.getByRole('button', { name: '调整生成参数' }).click()
   await page.locator('.options-popover button[aria-label="视频模型"]').click()
-  await expect(page.getByRole('option')).toHaveCount(10)
-  await expect(page.getByRole('option', { name: 'Veo 3.1' })).toHaveCount(0)
+  await expect(page.getByRole('option')).toHaveCount(12)
+  await expect(page.getByRole('option', { name: 'Veo 3.1', exact: true })).toHaveCount(1)
   await page.keyboard.press('Escape')
   await page
     .getByRole('dialog', { name: '视频生成参数' })
@@ -390,7 +387,14 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await expect(general.getByLabel('视频模型')).toContainText('SD2.0')
   await expect(general.getByLabel('视频模型')).toBeEnabled()
   await general.getByLabel('视频模型').click()
-  await expect(page.getByRole('option')).toHaveCount(10)
+  await page.getByRole('option', { name: 'Gemini Omni 1.1 Flash Preview', exact: true }).click()
+  await expect(general.getByLabel('总时长（秒）')).toHaveValue('170')
+  await expect(general.getByLabel('画幅').locator('option')).toHaveCount(2)
+  await general.getByLabel('视频模型').click()
+  await page.getByRole('option', { name: 'SD2.0', exact: true }).click()
+  await general.getByLabel('总时长（秒）').fill('210')
+  await general.getByLabel('视频模型').click()
+  await expect(page.getByRole('option')).toHaveCount(12)
   await page.keyboard.press('Escape')
   await expect(general.getByLabel('图片模型')).toContainText('Nano Banana 2.1')
   await expect(general.getByLabel('图片模型')).toBeEnabled()
@@ -429,11 +433,11 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await expect(random.getByText('空镜数量')).toBeVisible()
   await expect(random.getByText('人物镜数量')).toBeVisible()
   await random.getByLabel('视频模型').click()
-  await expect(page.getByRole('option')).toHaveCount(10)
+  await expect(page.getByRole('option')).toHaveCount(12)
   await expect(page.getByText('Seedance 系列')).toBeVisible()
-  await expect(page.getByText('Wan3.0 系列')).toBeVisible()
+  await expect(page.getByText('Wan 系列')).toBeVisible()
   await expect(page.getByText('H3', { exact: true })).toBeVisible()
-  await expect(page.getByRole('option', { name: 'Veo 3.1' })).toHaveCount(0)
+  await expect(page.getByRole('option', { name: 'Veo 3.1', exact: true })).toHaveCount(1)
   await page.keyboard.press('Escape')
   await expect(random.getByText('视觉与人物设定')).toHaveCount(0)
   await expect(random.getByText(/人物素材/)).toHaveCount(0)

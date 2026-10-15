@@ -182,7 +182,7 @@ def test_general_creation_applies_model_duration_before_outline(client, kind) ->
             "empty_shot_count": 5,
             "character_shot_count": 0,
             "total_duration": 60,
-            "video_model": "grok-video-1.5",
+            "video_model": "gemini-omni-1.1-flash-preview-all-in-one",
             "resolution": "720p",
             "extra_requirement": "保留场景内容",
             "digital_human_ids": [],
@@ -614,7 +614,7 @@ def test_placeholder_shot_marks_failed_outline() -> None:
 def test_video_duration_accepts_full_provider_range_and_normalizes_plans() -> None:
     assert VideoGenerationCreate(prompt="test", duration=4).duration == 4
     assert VideoGenerationCreate(prompt="test", duration=15).duration == 15
-    for invalid in (3, 16):
+    for invalid in (0, 31):
         with pytest.raises(ValidationError):
             VideoGenerationCreate(prompt="test", duration=invalid)
     assert normalize_video_duration(1.2) == 4
@@ -779,7 +779,7 @@ def test_random_general_storyboard_skips_outline_and_builds_shot_type_prompts(cl
             "total_duration": 15,
             "ratio": "16:9",
             "resolution": "480p",
-            "video_model": "doubao-seedance-2.0",
+            "video_model": "doubao-seedance-2.0-all-in-one",
             "extra_requirement": "夏日公路旅行",
         },
     )

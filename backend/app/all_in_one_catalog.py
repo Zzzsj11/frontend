@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
+from pathlib import Path
 
 TEXT_MODELS = (
     ("gpt-6.1-sol", "GPT 6.1 Sol"),
@@ -22,11 +24,13 @@ IMAGE_MODELS = (
         {"ratios": ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"], "resolutions": ["1K", "1.5K", "2K"], "imageToImage": True, "referenceImage": {"min": 0, "max": 10}},
     ),
 )
-MEDIA_MODELS = (
-    ("doubao-seedance-2.0", "seedance-2.0", "SD2.0", "video"),
-    ("wan3.0-video", "wan3.0-video", "Wan3.0", "video"),
-    ("minimax-h3", "MiniMax-H3", "H3", "video"),
-)
+
+
+def video_rows() -> list[dict]:
+    return json.loads((Path(__file__).parent / "data" / "all_in_one_video_models_20261015.json").read_text())
+
+
+VIDEO_MODEL_CODES = frozenset(row["code"] for row in video_rows())
 
 
 def rows(source_capabilities: dict[str, dict]) -> list[dict]:
@@ -53,37 +57,5 @@ def rows(source_capabilities: dict[str, dict]) -> list[dict]:
             sortOrder=10 + order,
         )
         result.append({"code": code + "-all-in-one", "provider_model_id": code, "name": name, "modality": "image", "capabilities": caps, "sort_order": 10 + order})
-    for order, (code, upstream, name, modality) in enumerate(MEDIA_MODELS):
-        ratios = ["16:9", "9:16", "4:3", "1:1"]
-        caps = (
-            {"ratios": ratios, "imageToImage": True, "referenceImage": {"min": 0, "max": 15}}
-            if modality == "image"
-            else {"ratios": ratios, "durations": {"min": 4, "max": 15}, "resolutions": ["480p", "720p", "1080p"]}
-        )
-        caps.update(deepcopy(source_capabilities.get(code, {})))
-        if code == "doubao-seedance-2.0":
-            caps.update(resolutions=["480p", "720p"], referenceImage={"min": 0, "max": 9}, referenceVideo={"min": 0, "max": 3}, referenceAudio={"min": 0, "max": 3})
-        elif code == "minimax-h3":
-            caps.update(
-                resolutions=["720p", "1080p"],
-                providerResolutionMap={"720p": "768P", "1080p": "2K"},
-                h3Modes=["auto", "text", "first_frame", "first_last", "reference"],
-                referenceImage={"min": 0, "max": 6},
-                referenceVideo={"min": 0, "max": 1},
-                referenceAudio={"min": 0, "max": 3},
-                referenceTotalMax=10,
-                referenceAudioRequiresVisual=True,
-            )
-        elif code == "wan3.0-video":
-            caps.update(referenceImage={"min": 0, "max": 10}, referenceVideo={"min": 0, "max": 5}, referenceAudio={"min": 0, "max": 5})
-        caps.update(providerCode="all-in-one", providerProtocol="all-in-one", executionPool=f"all-in-one:{code}", executionConcurrency=500)
-        # Yinghe asset:// belongs to its own account; this channel receives original TOS URLs.
-        caps["billing"] = {"provider": "all-in-one", "balanceCheck": False, "billingMode": "platform_points", "currency": "points"}
-        if code != "minimax-h3":
-            caps.pop("providerResolutionMap", None)
-        caps.pop("systemManaged", None)
-        caps["sortOrder"] = 100 + order
-        result.append(
-            {"code": code + "-all-in-one", "provider_model_id": upstream, "name": name + "（all in one）", "modality": modality, "capabilities": caps, "sort_order": 100 + order}
-        )
+    result.extend(video_rows())
     return result

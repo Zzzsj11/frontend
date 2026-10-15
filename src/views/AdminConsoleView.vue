@@ -158,8 +158,6 @@ const ALL_NAV_GROUPS: AdminNavGroup[] = [
     items: [
       { key: 'chat-comparison', label: 'Chat 模型对比' },
       { key: 'prompt-optimizer', label: '多参考提示词优化' },
-      { key: 'runninghub', label: 'H3 工作流' },
-      { key: 'kling', label: 'Kling 测试' },
     ],
   },
   {

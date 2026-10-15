@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   fetchCreativeStatus,
   optimizeCreativePrompt,
@@ -13,11 +13,14 @@ import type { CreativeReferenceMedia, ShotGenOptions } from '../types'
 import { DEFAULT_SHOT_OPTIONS, useProjectStore } from '../stores/project'
 import {
   VIDEO_MODEL_OPTIONS,
-  generationModelLabel,
-  isH3VideoModel,
+  videoModelCapabilities,
+  videoDurationChoices,
+  videoRatioChoices,
+  videoResolutionChoices,
   loadGenerationModels,
 } from '../generationModels'
 import BaseModal from './base/BaseModal.vue'
+import VideoModelSelect from './VideoModelSelect.vue'
 import AppIcon from './AppIcon.vue'
 import {
   creativeModeReady,
@@ -35,7 +38,7 @@ const optimizedPrompt = ref('')
 const media = ref<CreativeReferenceMedia[]>([])
 const duration = ref(15)
 const ratio = ref<ShotGenOptions['ratio']>('16:9')
-const videoModel = ref('minimax-h3')
+const videoModel = ref('minimax-h3-all-in-one')
 const task = ref<CreativeOptimization | null>(null)
 const loading = ref(false)
 const uploading = ref(false)
@@ -54,8 +57,33 @@ const canOptimize = computed(() => {
   return Boolean(status.value?.providers[provider.value].configured)
 })
 const canCreate = computed(() => Boolean(optimizedPrompt.value.trim()) && !loading.value)
-const h3Models = computed(() => VIDEO_MODEL_OPTIONS.filter((item) => isH3VideoModel(item.value)))
-const modeReady = computed(() => creativeModeReady(mode.value, media.value))
+const videoCaps = computed(() => videoModelCapabilities(videoModel.value))
+const durationChoices = computed(() => videoDurationChoices(videoModel.value))
+const ratios = computed(() => videoRatioChoices(videoModel.value))
+watch(videoModel, () => {
+  if (!durationChoices.value.includes(duration.value))
+    duration.value = durationChoices.value[0] ?? 5
+  if (!ratios.value.includes(ratio.value)) ratio.value = ratios.value[0] ?? '16:9'
+  if (!(videoCaps.value.referenceModes as string[] | undefined)?.includes(mode.value))
+    mode.value = 'text'
+})
+const referenceLimits = computed(() => ({
+  image: Number(videoCaps.value.referenceImage?.max ?? 6),
+  video: Number((videoCaps.value.referenceVideo as { max?: number } | undefined)?.max ?? 1),
+  audio: Number((videoCaps.value.referenceAudio as { max?: number } | undefined)?.max ?? 3),
+  total: Number(videoCaps.value.referenceTotalMax ?? 50),
+  audioRequiresVisual: Boolean(videoCaps.value.referenceAudioRequiresVisual),
+}))
+const modeReady = computed(
+  () =>
+    creativeModeReady(mode.value, media.value, referenceLimits.value) &&
+    counts.value.image <= Number(videoCaps.value.referenceImage?.max ?? 6) &&
+    counts.value.video <=
+      Number((videoCaps.value.referenceVideo as { max?: number } | undefined)?.max ?? 1) &&
+    counts.value.audio <=
+      Number((videoCaps.value.referenceAudio as { max?: number } | undefined)?.max ?? 3) &&
+    (videoCaps.value.referenceModes as string[] | undefined)?.includes(mode.value),
+)
 const labelOf = (item: CreativeReferenceMedia, index: number) => {
   const label = item.kind === 'image' ? '图片' : item.kind === 'video' ? '视频' : '音频'
   return `${label}${media.value.slice(0, index + 1).filter((entry) => entry.kind === item.kind).length}`
@@ -73,7 +101,7 @@ const addFiles = async (files: File[]) => {
             ? 'audio'
             : null
       if (!kind) throw new Error(`${file.name} 不是支持的媒体格式`)
-      const limit = kind === 'image' ? 9 : 3
+      const limit = referenceLimits.value[kind]
       if (counts.value[kind] >= limit) throw new Error(`${kind} 素材已达到数量上限`)
       media.value.push(await uploadCreativeMedia(file))
     }
@@ -134,6 +162,8 @@ const create = async () => {
       duration: duration.value,
       ratio: ratio.value,
       videoModel: videoModel.value,
+      resolution: (videoResolutionChoices(videoModel.value)[0] ??
+        '720p') as ShotGenOptions['resolution'],
       h3Mode: mode.value,
       h3FirstFrameUrl: references.firstFrameUrl,
       h3LastFrameUrl: references.lastFrameUrl,
@@ -159,8 +189,8 @@ const create = async () => {
 onMounted(async () => {
   try {
     await loadGenerationModels()
-    if (!h3Models.value.some((item) => item.value === videoModel.value))
-      videoModel.value = h3Models.value[0]?.value || 'minimax-h3'
+    if (!VIDEO_MODEL_OPTIONS.some((item) => item.value === videoModel.value))
+      videoModel.value = VIDEO_MODEL_OPTIONS[0]?.value || 'minimax-h3-all-in-one'
     status.value = await fetchCreativeStatus()
     if (!status.value.providers.minimax.configured && status.value.providers.gemini.configured)
       provider.value = 'gemini'
@@ -192,7 +222,7 @@ onBeforeUnmount(() => pollTimer && clearTimeout(pollTimer))
           }}<small>{{ status?.providers[key].model || '未配置' }}</small>
         </button>
       </div>
-      <div class="switch modes" role="group" aria-label="H3 生成模式">
+      <div class="switch modes" role="group" aria-label="视频生成模式">
         <button
           v-for="item in [
             { key: 'text', label: '文生视频' },
@@ -202,19 +232,13 @@ onBeforeUnmount(() => pollTimer && clearTimeout(pollTimer))
           ] as Array<{ key: GenerationMode; label: string }>"
           :key="item.key"
           :class="{ active: mode === item.key }"
+          :disabled="!(videoCaps.referenceModes as string[] | undefined)?.includes(item.key)"
           @click="mode = item.key"
         >
           {{ item.label }}
         </button>
       </div>
-      <label
-        >视频渠道
-        <select v-model="videoModel">
-          <option v-for="item in h3Models" :key="item.value" :value="item.value">
-            {{ generationModelLabel(item) }}
-          </option>
-        </select>
-      </label>
+      <VideoModelSelect v-model="videoModel" label="视频模型" />
       <label
         >目标描述<textarea
           v-model="originalPrompt"
@@ -228,7 +252,10 @@ onBeforeUnmount(() => pollTimer && clearTimeout(pollTimer))
       <div class="media-head">
         <b>参考素材</b
         ><span
-          >图片 {{ counts.image }}/9 · 视频 {{ counts.video }}/3 · 音频 {{ counts.audio }}/3</span
+          >图片 {{ counts.image }}/{{ referenceLimits.image }} · 视频 {{ counts.video }}/{{
+            referenceLimits.video
+          }}
+          · 音频 {{ counts.audio }}/{{ referenceLimits.audio }}</span
         >
       </div>
       <input
@@ -252,13 +279,17 @@ onBeforeUnmount(() => pollTimer && clearTimeout(pollTimer))
       </div>
       <div class="settings">
         <label
-          >时长 <input v-model.number="duration" type="range" min="4" max="15" />
-          {{ duration }} 秒</label
+          >时长
+          <select v-model.number="duration">
+            <option v-for="value in durationChoices" :key="value" :value="value">
+              {{ value }} 秒
+            </option>
+          </select></label
         >
         <div>
           <span>画面比例</span
           ><button
-            v-for="value in ['16:9', '4:3', '1:1', '9:16'] as ShotGenOptions['ratio'][]"
+            v-for="value in ratios"
             :key="value"
             :class="{ active: ratio === value }"
             @click="ratio = value"

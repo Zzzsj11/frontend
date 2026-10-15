@@ -1,6 +1,6 @@
 # 技术架构
 
-计价预检以模型能力中的 `billing` 为单一产品配置：声明渠道、每秒粗估价、是否检查余额和是否排除。RunningHub 测试通道不计费且不检查英和余额；最终对账仍以版本化 `video_pricing_rules` 和供应商真实用量为财务事实。
+计价预检以模型能力中的 `billing` 为单一产品配置：声明渠道、每秒粗估价、是否检查余额和是否排除。新视频使用 all in one 的平台积分结算，不使用英和余额预检；旧通道和 `video_pricing_rules` 仅用于对应历史任务。最终对账以实际供应商用量和平台结算为准。
 
 视频归档完成后，媒体 Worker 在受控并发下使用 ffprobe 读取 TOS 文件，将请求档位、供应商档位、实际宽高、FPS、编码、真实时长和文件大小固化到任务结果与 `shot_assets`。历史素材可用 `backend/scripts/backfill_video_metadata.py` 幂等补齐。管理后台历史重算通过 `billing_reconcile` 持久化 Worker 工单执行，每批 500 条，支持进度、重复请求复用和中断重放。
 
@@ -14,7 +14,7 @@
 
 文本模型可通过 `LLM_CHANNEL=yseeai` 或 `LLM_CHANNEL=toapis` 单独选择英和海外或 ToAPIs；前者使用 `YSEEAI_LLM_API_KEY` 和固定的 `https://ai-aigc.yseeai.com/v1`，后者优先使用 `TOAPIS_LLM_API_KEY`，未配置时复用 `TOAPIS_API_KEY`，默认地址为 `https://toapis.cn/v1`。两渠道默认模型均为 `gpt-6.1-sol`，大纲默认使用同一模型，也可由 `GENERAL_OUTLINE_LLM_MODEL` 单独指定。显式文本渠道优先于国内共享 Token，仅改变 Chat、大纲及逐镜提示词调用；图片和视频仍用各自渠道配置。模型网关开启时，显式文本渠道仍直连所选供应商，媒体继续按网关设置路由。Token 账本及 LLM 调用记录保存实际渠道。
 
-`LLM_CHANNEL=all-in-one` 使用平台 Key 的 `gpt-6.1-sol-all-in-one` 作为 Chat、大纲和逐镜提示词默认模型，连续五次供应商失败后在同一平台切换到 `doubao-seed-2-1-pro-260915-all-in-one`，两小时后重试主模型。ASS、通用分镜和直接视频生成的新任务默认使用 `doubao-seedance-2.0-all-in-one`；`wan3.0-video-all-in-one` 与 `minimax-h3-all-in-one` 可逐镜选择。三个视频型号的项目侧执行池上限为 500，实际并发还受平台 Key、Worker 和用户限额约束。文本和图片新任务只使用 all in one，视频模型仍允许既有渠道。all in one 工单保存上游请求、受理响应、终态响应和平台积分结算。
+`LLM_CHANNEL=all-in-one` 使用平台 Key 的 `gpt-6.1-sol-all-in-one` 作为 Chat、大纲和逐镜提示词默认模型，连续五次供应商失败后在同一平台切换到 `doubao-seed-2-1-pro-260915-all-in-one`，两小时后重试主模型。所有新视频任务只开放 all in one 的 12 个模型，默认 `doubao-seedance-2.0-all-in-one`；目录、规格、并发和迁移规则见 [视频模型目录](VIDEO-MODEL-CATALOG.md)。界面按系列分组，不展示渠道后缀。历史渠道、素材和费用归因保留，旧模型不能创建新任务。all in one 工单保存上游请求、受理响应、终态响应和平台积分结算。
 
 all in one 文本请求允许最多等待 10 分钟，ASS 两阶段大纲发生异常时仍把已完成阶段的请求、响应和用量写入日志。RunningHub 路由的视频人物参考图使用可公开读取的 TOS 原图 URL；不提交该路由不支持的 `private_asset_review` 参数，也不提交英和账户专属的 `asset://` URL。
 all in one 视频工单从项目创建起允许最多 2 小时的排队、生成和回收窗口，后台超时巡检采用同一渠道专属期限；其他渠道仍使用 20 分钟。
@@ -27,7 +27,7 @@ all in one 的 `gpt-6.1-sol` 供应商调用连续失败 5 次时，Redis 计数
 
 ASS 与定制通用分镜默认使用 `OUTLINE_PROTOCOL_VERSION=v2` 的紧凑大纲协议。定制通用一次输出全片导演决策骨架；ASS 固定为一次大场景规划加一次全曲镜头骨架，不再按大场景并行重复提交人物长描述。后续逐镜提示词仍消费兼容的标准大纲字段，因此无需改动下游图片、视频和导出链路。紧急回滚可将该变量设为 `v1`，恢复旧提示词和旧调用编排。
 
-Chat对话、媒体生成、素材导出、ASS/通用大纲、逐镜提示词和ASS场景段重试支持两种执行模式：默认 `inline` 保持本地单进程行为；服务器设置 `JOB_EXECUTION_MODE=worker` 后，API只在同一事务中写领域状态和 `generation_jobs`，`worker-chat`、`worker-image`、`worker-media`（仅视频）、`worker-export` 与 `worker-storyboard` 使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 领取。图片和视频使用独立执行池，避免长视频轮询占满图片槽；单机默认分别为32并发。分镜工单的完整人物、上下文、大纲和重试快照保存在 `generation_jobs.request`，进度与心跳同时落PostgreSQL；Worker中断后最多自动重放3次。Redis承担低延迟 Worker 唤醒、Chat跨进程取消、热状态与事件，短暂不可用不会丢失数据库工单。模型注册中心的 `executionPool/executionConcurrency` 同时由进程内信号量和 Redis 原子租约约束，多 Worker 或多节点共享同一并发上限；Redis不可用时降级为进程内限制。视频生成按供应商和模型拆分执行池：英和提供 SD2.0 与 MiniMax-H3 直连，RunningHub H3 保留为并发 2 的测试通道。人物入库或换图时，TOS 原图注册为英合虚拟人物资产；生成英合 Seedance 视频时使用 `asset_avatar_url` 中的 `asset://`，原始 TOS URL 始终保留用于展示和对账。各 H3 通道共享提示词编译与参考素材约束，但分别适配创建、查询、恢复和结果解析协议。顶部余额接口仅查询英和商户与子账号 Key；批量任务按模型 `billing` 声明决定估价和余额预检，不跨渠道兜底。独立 model-service 的管理余额采集支持 yinghe、yseeai、toapis，不等同于 MV 生成预检范围。新模型接入现状和剩余清单见 `TODO_MODEL_EXPANSION.md`。
+Chat对话、媒体生成、素材导出、ASS/通用大纲、逐镜提示词和ASS场景段重试支持两种执行模式：默认 `inline` 保持本地单进程行为；服务器设置 `JOB_EXECUTION_MODE=worker` 后，API只在同一事务中写领域状态和 `generation_jobs`，`worker-chat`、`worker-image`、`worker-media`（仅视频）、`worker-export` 与 `worker-storyboard` 使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 领取。图片和视频使用独立执行池，避免长视频轮询占满图片槽；单机默认分别为32并发。分镜工单的完整人物、上下文、大纲和重试快照保存在 `generation_jobs.request`，进度与心跳同时落PostgreSQL；Worker中断后最多自动重放3次。Redis承担低延迟 Worker 唤醒、Chat跨进程取消、热状态与事件，短暂不可用不会丢失数据库工单。模型注册中心的 `executionPool/executionConcurrency` 同时由进程内信号量和 Redis 原子租约约束，多 Worker 或多节点共享同一并发上限；Redis不可用时降级为进程内限制。新视频生成全部使用 all in one，按模型拆分执行池；旧供应商适配保留用于历史查询。人物入库或换图时，TOS 原图注册为英合虚拟人物资产；生成英合 Seedance 视频时使用 `asset_avatar_url` 中的 `asset://`，原始 TOS URL 始终保留用于展示和对账。各 H3 通道共享提示词编译与参考素材约束，但分别适配创建、查询、恢复和结果解析协议。顶部余额接口仅查询英和商户与子账号 Key；批量任务按模型 `billing` 声明决定估价和余额预检，不跨渠道兜底。独立 model-service 的管理余额采集支持 yinghe、yseeai、toapis，不等同于 MV 生成预检范围。新模型接入现状和剩余清单见 `TODO_MODEL_EXPANSION.md`。
 
 余额展示查询使用 60 秒服务端缓存，前端仅在页面可见时每 5 分钟按需刷新；用户手动点击可请求实时刷新，但服务端会合并 5 秒内的并发强刷。生成确认弹窗读取短时缓存，真正提交时仅对任务涉及的渠道执行最终余额校验，因此降频不削弱任务提交卡口。
 
@@ -53,4 +53,4 @@ ASS 子项目关联歌曲音频后，可通过 `/api/tasks/{id}/video-exports` �
 
 成片进度阶段为准备/下载（0–25）、媒体检查与合成（26–85）、全片解码校验（85–90）、上传（90–98）、封面保存（99）、成功（100）；编码进度来自 FFmpeg 输出时长，上传来自实际字节回调。完成前不显示 100%。浏览器断线自动重连并用 GET 轮询兜底，刷新通过任务列表恢复。Worker 失租最多自动重放到第 3 次，终态失败同步回写导出记录；单次处理超时会终止 FFmpeg 子进程，临时目录随任务清理。
 
-子项目视频模型统一修改：视频编辑器顶部模型入口覆盖 ASS、定制通用、随机通用。`POST /api/tasks/{task_id}/video-model` 先预览能力适配，再携带预览摘要原子保存默认模型与全部活动分镜配置；仅开放 Seedance、Wan3.0、H3 系列。排队/生成中的视频及大纲任务阻止修改，过期预览与旧页签生成请求返回 409。原素材、提示词与时间轴保留，手动新增分镜继承修改后的默认配置。
+子项目视频模型统一修改：视频编辑器顶部模型入口覆盖 ASS、定制通用、随机通用。`POST /api/tasks/{task_id}/video-model` 先预览能力适配，再携带预览摘要原子保存默认模型与全部活动分镜配置；开放目录中的 Seedance、Wan、MiniMax、Veo、Grok、Gemini 六个系列。排队/生成中的视频及大纲任务阻止修改，过期预览与旧页签生成请求返回 409。原素材、提示词与时间轴保留，手动新增分镜继承修改后的默认配置。

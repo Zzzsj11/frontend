@@ -89,58 +89,21 @@ def test_kling_endpoints_require_api_key(client, monkeypatch):
     assert status["model"] == settings.kling_model
     assert status["modes"] == ["std", "pro", "4k"]
     assert status["imageTypes"] == ["first_frame", "end_frame", "reference"]
-    assert client.post("/api/admin/kling/tasks", json={"prompt": "x"}).status_code == 503
+    assert client.post("/api/admin/kling/tasks", json={"prompt": "x"}).status_code == 410
     assert client.get("/api/admin/kling/tasks/t1").status_code == 503
 
 
 def test_kling_task_submit_and_query(client, monkeypatch):
-    monkeypatch.setattr(admin_module, "settings", dataclasses.replace(settings, kling_api_key="sk-kling-test-9abc"))
-    submitted: dict = {}
-    queries: list[str] = []
+    monkeypatch.setattr(admin_module, "settings", dataclasses.replace(settings, kling_api_key="synthetic-key"))
 
-    async def fake_create(**kwargs):
-        submitted.update(kwargs)
-        return {"taskId": "893605946402811985", "status": "submitted"}
+    async def fake_query(task_id):
+        return {"task_id": task_id, "task_status": "succeed", "task_result": {"videos": []}}
 
-    async def fake_query(task_id: str):
-        queries.append(task_id)
-        return {
-            "task_id": task_id,
-            "task_status": "succeed",
-            "task_result": {"videos": [{"id": "1", "url": "https://cdn.test/out.mp4", "duration": "5"}]},
-        }
-
-    monkeypatch.setattr(admin_module, "kling_create_task", fake_create)
     monkeypatch.setattr(admin_module, "kling_query_task", fake_query)
-
-    status = client.get("/api/admin/kling/status").json()
-    assert status["configured"] is True and status["keyTail"] == "...9abc"
-
-    created = client.post(
-        "/api/admin/kling/tasks",
-        json={
-            "prompt": "镜头缓慢拉远",
-            "images": [{"imageUrl": "https://x.test/first.png", "type": "first_frame"}],
-            "duration": 5,
-            "mode": "std",
-            "aspectRatio": "1:1",
-            "sound": "off",
-            "cfgScale": 0.3,
-        },
-    )
-    assert created.status_code == 201
-    assert created.json() == {"taskId": "893605946402811985", "status": "submitted"}
-    assert submitted["prompt"] == "镜头缓慢拉远"
-    assert submitted["images"] == [{"imageUrl": "https://x.test/first.png", "type": "first_frame"}]
-    assert submitted["mode"] == "std" and submitted["aspect_ratio"] == "1:1" and submitted["cfg_scale"] == 0.3
-
-    result = client.get("/api/admin/kling/tasks/893605946402811985").json()
-    assert result["task_status"] == "succeed"
-    assert result["task_result"]["videos"][0]["url"] == "https://cdn.test/out.mp4"
-    assert queries == ["893605946402811985"]
-
-    actions = {x["action"] for x in client.get("/api/admin/audit-logs").json()["items"]}
-    assert "kling_task.submit" in actions
+    assert client.post("/api/admin/kling/tasks", json={"prompt": "retired"}).status_code == 410
+    historical = client.get("/api/admin/kling/tasks/historical-task")
+    assert historical.status_code == 200
+    assert historical.json()["task_status"] == "succeed"
 
 
 def test_kling_upstream_error_mapped_to_502(client, monkeypatch):

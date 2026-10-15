@@ -36,6 +36,8 @@ import {
   VIDEO_MODEL_OPTIONS,
   loadGenerationModels,
   videoResolutionChoices,
+  videoRatioChoices,
+  videoDurationChoices,
   videoResolutionLabel,
 } from '../generationModels'
 
@@ -84,8 +86,11 @@ const castRequired = computed(() => characterShotCount.value > 0 && castPolicy.v
 const totalShots = computed(
   () => Math.max(0, emptyShotCount.value) + Math.max(0, characterShotCount.value),
 )
-const minimumTotalDuration = computed(() => totalShots.value * MIN_VIDEO_DURATION)
-const maximumTotalDuration = computed(() => totalShots.value * MAX_VIDEO_DURATION)
+const videoDurations = computed(() => videoDurationChoices(videoModel.value))
+const minimumPerShot = computed(() => videoDurations.value[0] ?? MIN_VIDEO_DURATION)
+const maximumPerShot = computed(() => videoDurations.value.at(-1) ?? MAX_VIDEO_DURATION)
+const minimumTotalDuration = computed(() => totalShots.value * minimumPerShot.value)
+const maximumTotalDuration = computed(() => totalShots.value * maximumPerShot.value)
 const averageDuration = computed(() =>
   totalShots.value ? Math.round((totalDuration.value / totalShots.value) * 10) / 10 : 0,
 )
@@ -93,6 +98,7 @@ const resolutionChoices = computed<ShotGenOptions['resolution'][]>(() => {
   return videoResolutionChoices(videoModel.value) as ShotGenOptions['resolution'][]
 })
 
+const videoRatios = computed(() => videoRatioChoices(videoModel.value))
 const imageResolutions = computed(() => imageResolutionChoices(imageModel.value))
 const durationIsValid = computed(
   () =>
@@ -170,6 +176,11 @@ watch(secondary, () => {
   tertiary.value = tertiaryOptions.value[0]?.value ?? ''
 })
 watch(videoModel, () => {
+  if (!videoRatios.value.includes(ratio.value)) ratio.value = videoRatios.value[0] ?? '16:9'
+  totalDuration.value = Math.min(
+    maximumTotalDuration.value,
+    Math.max(minimumTotalDuration.value, totalDuration.value),
+  )
   if (!resolutionChoices.value.includes(resolution.value)) {
     resolution.value = resolutionChoices.value[0] ?? '720p'
   }
@@ -216,7 +227,7 @@ const submit = async () => {
       if (!videoBalanceCheckRequired(request.videoModel)) {
         const confirmed = await confirmDialog({
           title: '确认批量生成视频',
-          message: `本次将创建 ${request.groupCount ?? 1} 组、每组 ${request.totalDuration} 秒的视频任务。RunningHub 当前仅作测试通道，暂不纳入平台费用和余额预检。`,
+          message: `本次将创建 ${request.groupCount ?? 1} 组、每组 ${request.totalDuration} 秒的视频任务。将按平台积分计费，实际扣减以各模型任务最终结算为准。`,
           confirmText: '确定生成',
           cancelText: '取消',
         })
@@ -408,7 +419,7 @@ const submit = async () => {
             <label
               ><span>画幅</span
               ><select v-model="ratio">
-                <option v-for="item in store.generalStoryboardOptions.ratios" :key="item">
+                <option v-for="item in videoRatios" :key="item">
                   {{ item }}
                 </option>
               </select></label
@@ -465,7 +476,8 @@ const submit = async () => {
             }}
             个空镜、{{ characterShotCount }} 个人物镜，平均每镜约
             <strong>{{ averageDuration }} 秒</strong>；允许总时长
-            <strong>{{ minimumTotalDuration }}–{{ maximumTotalDuration }} 秒</strong>（每镜 4–15
+            <strong>{{ minimumTotalDuration }}–{{ maximumTotalDuration }} 秒</strong>（每镜
+            {{ minimumPerShot }}–{{ maximumPerShot }}
             秒）
           </p>
           <div class="field-grid three model-grid">
@@ -480,7 +492,7 @@ const submit = async () => {
             <label v-if="random"
               ><span>画幅</span
               ><select v-model="ratio">
-                <option v-for="item in store.generalStoryboardOptions.ratios" :key="item">
+                <option v-for="item in videoRatios" :key="item">
                   {{ item }}
                 </option>
               </select></label
@@ -501,7 +513,7 @@ const submit = async () => {
               </select></label
             >
           </div>
-          <p class="model-hint">H3 同时执行上限为 2 个任务，超出的任务会自动排队。</p>
+          <p class="model-hint">超出所选模型并发上限的任务会自动排队。</p>
           <label class="extra-field"
             ><span>额外要求（可选）</span
             ><textarea

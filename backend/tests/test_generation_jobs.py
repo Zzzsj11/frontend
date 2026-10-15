@@ -2141,7 +2141,7 @@ async def test_resolve_asset_avatar_urls_maps_human_tos_to_asset(client) -> None
 
 
 def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) -> None:
-    """端到端：POST /api/generations/videos 时，数字人头像 TOS 路径在进入生成器前被替换为 asset://。"""
+    """端到端：POST /api/generations/videos 时，数字人头像 TOS 路径在进入生成器前保留公开 TOS URL。"""
     import time
 
     from app import main
@@ -2189,7 +2189,7 @@ def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) ->
                 break
             time.sleep(0.05)
         assert state["status"] == "succeeded"
-        assert captured["image_urls"] == ["asset://video-human-1", "https://tos.test/scene.png"]
+        assert captured["image_urls"] == ["https://tos.test/video-human.jpg", "https://tos.test/scene.png"]
         assert "人物身份参考硬约束" in str(captured["prompt"])
         assert "五官、脸型、肤色和年龄感" in str(captured["prompt"])
         assert "不得从头肩照推断或锁定全身身体比例" in str(captured["prompt"])
@@ -2201,8 +2201,8 @@ def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) ->
         response = client.post(
             "/api/generations/videos",
             json={
-                "prompt": "test HappyHorse video",
-                "model": "happyhorse-1.1-i2v",
+                "prompt": "test Wan reference video",
+                "model": "wan3.0-video-prime-all-in-one",
                 "image_urls": ["https://tos.test/video-human.jpg"],
                 "resolution": "720p",
                 "duration": 5,
@@ -2230,7 +2230,7 @@ def test_video_generation_endpoint_uses_asset_avatar_url(client, monkeypatch) ->
 def test_h3_endpoint_enforces_official_reference_capabilities(client) -> None:
     base = {
         "prompt": "故宫舞蹈",
-        "model": "minimax-h3-runninghub",
+        "model": "minimax-h3-all-in-one",
         "image_urls": ["https://tos.test/person.jpg"],
     }
     too_many_videos = client.post(
@@ -2241,7 +2241,7 @@ def test_h3_endpoint_enforces_official_reference_capabilities(client) -> None:
 
     audio_only = client.post(
         "/api/generations/videos",
-        json={"prompt": "故宫舞蹈", "model": "minimax-h3-runninghub", "audio_urls": ["https://tos.test/music.wav"]},
+        json={"prompt": "故宫舞蹈", "model": "minimax-h3-all-in-one", "audio_urls": ["https://tos.test/music.wav"]},
     )
     assert audio_only.status_code == 422
     assert "不能单独使用" in audio_only.json()["detail"]
@@ -2973,7 +2973,7 @@ def test_admin_sync_rejects_unavailable_source_before_query(client, monkeypatch,
     assert _job_row(job_id)["status"] == "failed"
 
 
-@pytest.mark.parametrize("model", ["doubao-seedance-2.0", "minimax-h3-runninghub"])
+@pytest.mark.parametrize("model", ["doubao-seedance-2.0-all-in-one", "minimax-h3-all-in-one"])
 def test_video_submission_appends_quality_by_line_type_without_repeating(client, monkeypatch, model):
     import time
 
@@ -2998,7 +2998,7 @@ def test_video_submission_appends_quality_by_line_type_without_repeating(client,
     project = client.post("/api/projects", json={"name": "Shot quality"}).json()
     response = client.post(
         f"/api/projects/{project['id']}/storyboards/general/random",
-        json={"genre": "流行歌曲", "empty_shot_count": 1, "character_shot_count": 1, "total_duration": 10, "video_model": "doubao-seedance-2.0"},
+        json={"genre": "流行歌曲", "empty_shot_count": 1, "character_shot_count": 1, "total_duration": 10, "video_model": "doubao-seedance-2.0-all-in-one"},
     )
     assert response.status_code == 201, response.text
     task = response.json()

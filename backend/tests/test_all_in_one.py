@@ -38,7 +38,7 @@ async def test_chat_timeout_allows_long_outline_stage(configured):
 
 def test_catalog_scope_does_not_clone_yinghe_billing():
     result = rows({"minimax-h3": {"billing": {"currency": "CNY"}, "h3Modes": ["reference"]}})
-    assert len(result) == 9
+    assert len(result) == 18
     assert len([m for m in result if m["modality"] == "chat"]) == 4
     h3 = next(m for m in result if m["provider_model_id"] == "MiniMax-H3")
     assert h3["capabilities"]["billing"] == {
@@ -47,7 +47,7 @@ def test_catalog_scope_does_not_clone_yinghe_billing():
         "billingMode": "platform_points",
         "currency": "points",
     }
-    assert h3["capabilities"]["executionConcurrency"] == 500
+    assert h3["capabilities"]["executionConcurrency"] == 100
     assert "reference" in h3["capabilities"]["h3Modes"]
     assert next(m for m in result if m["code"].startswith("doubao-seedance"))["provider_model_id"] == "seedance-2.0"
 

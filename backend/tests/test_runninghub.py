@@ -199,78 +199,22 @@ def test_runninghub_endpoints_require_api_key(client, monkeypatch):
     assert status["megapixelsDefault"] == [0.4, 0.9]
     assert {"value": 0.9, "size": "1280×736"} in status["megapixelsPresets"]
     payload = {"prompt": "测试", "images": ["a.png"]}
-    assert client.post("/api/admin/runninghub/tasks", json=payload).status_code == 503
+    assert client.post("/api/admin/runninghub/tasks", json=payload).status_code == 410
     assert client.post("/api/admin/runninghub/query", json={"taskId": "t1"}).status_code == 503
     assert client.post("/api/admin/runninghub/upload", files={"file": ("a.png", b"png-bytes")}).status_code == 503
 
 
 def test_runninghub_task_submit_and_query(client, monkeypatch):
-    configured = dataclasses.replace(settings, runninghub_api_key="rh-test-key-1234")
-    monkeypatch.setattr(admin_module, "settings", configured)
-    submitted: dict = {}
-    queries: list[str] = []
-    uploads: list[bytes] = []
+    monkeypatch.setattr(admin_module, "settings", dataclasses.replace(settings, runninghub_api_key="synthetic-key"))
 
-    async def fake_submit(**kwargs):
-        submitted.update(kwargs)
-        return {"taskId": "2013508786110730241", "status": "RUNNING"}
+    async def fake_query(task_id):
+        return {"taskId": task_id, "status": "SUCCESS", "results": []}
 
-    async def fake_query(task_id: str):
-        queries.append(task_id)
-        return {"taskId": task_id, "status": "SUCCESS", "results": [{"url": "https://cos.test/out.mp4", "outputType": "mp4"}]}
-
-    async def fake_upload(content: bytes, filename: str):
-        uploads.append(content)
-        return {"fileName": f"openapi/{filename}", "downloadUrl": "https://cos.test/in.png", "size": str(len(content))}
-
-    async def fake_import(url: str, category: str, filename: str | None = None):
-        return f"https://tos.test/{filename}"
-
-    class FakeStorage:
-        async def put_bytes(self, key: str, content: bytes, content_type: str | None = None):
-            return f"https://tos.test/{key}"
-
-    monkeypatch.setattr(admin_module, "rh_submit_reference_task", fake_submit)
     monkeypatch.setattr(admin_module, "rh_query_task", fake_query)
-    monkeypatch.setattr(admin_module, "rh_upload_media", fake_upload)
-    monkeypatch.setattr(admin_module, "import_remote", fake_import)
-    monkeypatch.setattr(admin_module, "get_storage", lambda: FakeStorage())
-
-    status = client.get("/api/admin/runninghub/status").json()
-    assert status["configured"] is True and status["keyTail"] == "...1234"
-
-    created = client.post(
-        "/api/admin/runninghub/tasks",
-        json={"prompt": "医生场景", "duration": 12, "aspectRatio": "16:9 (Widescreen)", "images": ["openapi/a.png"], "seed": 42},
-    )
-    assert created.status_code == 201
-    assert created.json() == {"taskId": "2013508786110730241", "status": "RUNNING"}
-    assert submitted == {
-        "prompt": "医生场景",
-        "duration": 12,
-        "aspect_ratio": "16:9 (Widescreen)",
-        "images": ["openapi/a.png"],
-        "videos": [],
-        "audios": [],
-        "seed": 42,
-        # 请求未传 → pydantic 默认值
-        "stage1_megapixels": 0.4,
-        "stage2_megapixels": 0.9,
-    }
-
-    result = client.post("/api/admin/runninghub/query", json={"taskId": "2013508786110730241"}).json()
-    assert result["status"] == "SUCCESS"
-    assert result["results"][0]["url"] == "https://tos.test/2013508786110730241-0.mp4"
-    assert queries == ["2013508786110730241"]
-
-    uploaded = client.post("/api/admin/runninghub/upload", files={"file": ("ref.png", b"fake-png")})
-    assert uploaded.status_code == 200
-    assert uploaded.json()["fileName"] == "openapi/ref.png"
-    assert uploaded.json()["tosUrl"].startswith("https://tos.test/")
-    assert uploads == [b"fake-png"]
-
-    actions = {x["action"] for x in client.get("/api/admin/audit-logs").json()["items"]}
-    assert "runninghub_task.submit" in actions
+    assert client.post("/api/admin/runninghub/tasks", json={"prompt": "retired", "images": ["https://test.tos/a.png"]}).status_code == 410
+    historical = client.post("/api/admin/runninghub/query", json={"taskId": "historical-task"})
+    assert historical.status_code == 200
+    assert historical.json()["status"] == "SUCCESS"
 
 
 def test_runninghub_upstream_error_mapped_to_502(client, monkeypatch):
@@ -287,36 +231,8 @@ def test_runninghub_upstream_error_mapped_to_502(client, monkeypatch):
 
 
 def test_runninghub_admin_submits_first_last_mode(client, monkeypatch):
-    configured = dataclasses.replace(settings, runninghub_api_key="rh-test-key")
-    monkeypatch.setattr(admin_module, "settings", configured)
-    submitted = {}
-
-    async def fake_submit(**kwargs):
-        submitted.update(kwargs)
-        return {"taskId": "rh-fl2va-test", "status": "RUNNING"}
-
-    monkeypatch.setattr(admin_module, "rh_submit_first_last_frame_task", fake_submit)
-    response = client.post(
-        "/api/admin/runninghub/tasks",
-        json={
-            "mode": "first_last",
-            "prompt": "Picture 1 continuously transitions to Picture 2",
-            "duration": 8,
-            "aspectRatio": "16:9 (Widescreen)",
-            "images": ["openapi/first.png", "openapi/last.png"],
-            "seed": 7,
-        },
-    )
-    assert response.status_code == 201
-    assert submitted == {
-        "prompt": "Picture 1 continuously transitions to Picture 2",
-        "duration": 8,
-        "aspect_ratio": "16:9 (Widescreen)",
-        "first_image": "openapi/first.png",
-        "last_image": "openapi/last.png",
-        "seed": 7,
-        "megapixels": 0.9,
-    }
+    response = client.post("/api/admin/runninghub/tasks", json={"prompt": "retired", "mode": "first_last", "images": ["https://test.tos/a.png", "https://test.tos/b.png"]})
+    assert response.status_code == 410
 
 
 def test_runninghub_seedance_comparison_source_and_submit(client, monkeypatch):
@@ -359,14 +275,6 @@ def test_runninghub_seedance_comparison_source_and_submit(client, monkeypatch):
             await db.commit()
 
     asyncio.run(seed_source())
-    submitted = {}
-
-    async def fake_submit(**kwargs):
-        submitted.update(kwargs)
-        return {"taskId": "h3-comparison-task", "status": "RUNNING"}
-
-    monkeypatch.setattr(admin_module, "rh_submit_first_frame_task", fake_submit)
-
     listed = client.get("/api/admin/runninghub/comparison-sources")
     assert listed.status_code == 200
     source = next(item for item in listed.json()["items"] if item["lineId"] == line_id)
@@ -374,18 +282,7 @@ def test_runninghub_seedance_comparison_source_and_submit(client, monkeypatch):
     assert source["seedanceUrl"] == "https://tos.test/seedance.mp4"
 
     created = client.post("/api/admin/runninghub/comparisons", json={"lineId": line_id})
-    assert created.status_code == 201
-    payload = created.json()
-    assert payload["taskId"] == "h3-comparison-task"
-    assert payload["inputMedia"][1]["role"] == "seedance_source"
-    assert submitted == {
-        "prompt": "清晨草原\n\n无人空镜，镜头缓慢推进",
-        "duration": 8.0,
-        "aspect_ratio": "16:9 (Widescreen)",
-        "image": "https://tos.test/comparison-cover.jpg",
-        "seed": None,
-        "megapixels": 0.9,
-    }
+    assert created.status_code == 410
 
 
 def test_runninghub_endpoints_require_admin(client):

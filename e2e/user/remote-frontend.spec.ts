@@ -67,6 +67,16 @@ test('deployed frontend login, project and storyboard configuration journey', as
     await expect(assDialog.getByLabel('画幅')).toHaveValue('16:9')
     await expect(assDialog.getByLabel('清晰度').first()).toHaveValue('480p')
     await expect(assDialog.getByLabel('视频模型')).toBeEnabled()
+    await assDialog.getByLabel('视频模型').click()
+    await expect(page.getByRole('option')).toHaveCount(12)
+    await expect(
+      page.getByRole('option').filter({ hasText: /英和|all in one|RunningHub/ }),
+    ).toHaveCount(0)
+    await page.getByRole('option', { name: 'Gemini Omni 1.1 Flash Preview', exact: true }).click()
+    await expect(assDialog.getByLabel('清晰度').first()).toHaveValue('720p')
+    await expect(assDialog.getByLabel('画幅').locator('option')).toHaveCount(2)
+    await assDialog.getByLabel('视频模型').click()
+    await page.getByRole('option', { name: 'SD2.0', exact: true }).click()
     await expect(assDialog.getByLabel('图片模型')).toBeEnabled()
     await assDialog.getByLabel('图片模型').click()
     await page.getByRole('option', { name: 'Nano Banana 2.1（all in one）', exact: true }).click()

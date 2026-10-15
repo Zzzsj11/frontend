@@ -10,26 +10,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .all_in_one_catalog import VIDEO_MODEL_CODES
 from .auth import CurrentUser
 from .database import database_session
 from .domain import owned_task, task_json
 from .models import AiModelModel, AiProviderModel, GenerationJobModel, ProjectTaskModel, StoryboardLineModel
 
 router = APIRouter(prefix="/api")
-SUPPORTED_VIDEO_MODELS = frozenset(
-    {
-        "doubao-seedance-2.0",
-        "doubao-seedance-2.0-mini",
-        "doubao-seedance-2.0-fast",
-        "wan3.0-video",
-        "wan3.0-video-prime",
-        "minimax-h3",
-        "minimax-h3-runninghub",
-        "doubao-seedance-2.0-all-in-one",
-        "wan3.0-video-all-in-one",
-        "minimax-h3-all-in-one",
-    }
-)
+
+SUPPORTED_VIDEO_MODELS = VIDEO_MODEL_CODES
 
 
 class TaskVideoModelChange(BaseModel):
@@ -54,12 +43,16 @@ def plan_line(options: dict, model: AiModelModel, number: int) -> tuple[dict, li
     capabilities = model.capabilities or {}
     updated["videoModel"] = model.code
     resolution = options.get("resolution") or "480p"
-    resolutions = capabilities.get("resolutions") or ["480p", "720p", "1080p"]
+    resolutions = capabilities.get("referenceResolutions") or capabilities.get("resolutions") or ["480p", "720p", "1080p"]
     if resolution not in resolutions:
         updated["resolution"] = resolutions[0]
         labels = capabilities.get("resolutionLabels") or {}
         target_label = labels.get(resolutions[0]) or str(resolutions[0]).upper()
         changes.append(f"第 {number} 镜：清晰度 {resolution.upper()} → {target_label}")
+    for field, capability in (("generateAudio", "audioToggle"), ("watermark", "watermarkToggle")):
+        if updated.get(field) and capabilities.get(capability) is False:
+            updated[field] = False
+            changes.append(f"第 {number} 镜：关闭目标模型不支持的附加选项")
     ratio = options.get("ratio") or "16:9"
     if ratio not in (capabilities.get("ratios") or ["16:9", "9:16", "4:3", "1:1"]):
         errors.append(f"第 {number} 镜：目标模型不支持画幅 {ratio}，请先调整该镜头")
@@ -86,8 +79,8 @@ def plan_line(options: dict, model: AiModelModel, number: int) -> tuple[dict, li
         rule = capabilities.get(key) or {"max": 0}
         if len(refs) > int(rule.get("max") or 0):
             errors.append(f"第 {number} 镜：目标模型不支持当前参考{label}数量，请先处理该镜头")
-    if options.get("referenceImageUrls") and not capabilities.get("h3Modes"):
-        errors.append(f"第 {number} 镜：存在 H3 专用多图参考，请先处理该镜头")
+    if len(options.get("referenceImageUrls") or []) > int((capabilities.get("referenceImage") or {}).get("max") or 0):
+        errors.append(f"第 {number} 镜：目标模型不支持当前参考图片数量，请先处理该镜头")
     return updated, changes, errors
 
 
@@ -114,7 +107,7 @@ async def change_task_video_model(task_id: str, payload: TaskVideoModelChange, u
     if active or task.status == "outlining":
         raise HTTPException(409, "当前子项目有排队或生成中的任务，请等待完成后修改视频模型")
     if payload.model not in SUPPORTED_VIDEO_MODELS:
-        raise HTTPException(422, "批量修改仅支持 Seedance、Wan3.0 和 H3 系列")
+        raise HTTPException(422, "请选择当前支持的视频模型")
     model = (
         await db.execute(
             select(AiModelModel)

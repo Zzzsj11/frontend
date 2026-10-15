@@ -92,17 +92,13 @@ export async function generateShotVideo(
       : requestedMode
   const explicitFirst = options.h3FirstFrameUrl || referenceImageUrl
   const imageUrls =
-    !isH3VideoModel(options.videoModel) || mode === 'auto'
-      ? automaticImages
-      : mode === 'text'
-        ? []
-        : mode === 'first_frame'
-          ? ([explicitFirst].filter(Boolean) as string[])
-          : mode === 'first_last'
-            ? ([explicitFirst, options.h3LastFrameUrl].filter(Boolean) as string[])
-            : Array.from(
-                new Set([...automaticImages, ...(options.referenceImageUrls ?? [])]),
-              ).slice(0, 6)
+    mode === 'text'
+      ? []
+      : mode === 'first_frame'
+        ? ([explicitFirst].filter(Boolean) as string[])
+        : mode === 'first_last'
+          ? ([explicitFirst, options.h3LastFrameUrl].filter(Boolean) as string[])
+          : Array.from(new Set([...automaticImages, ...(options.referenceImageUrls ?? [])]))
   const includeReferences = mode === 'auto' || mode === 'reference'
   const job = await request<GenerationJob>('/generations/videos', {
     method: 'POST',
@@ -130,7 +126,7 @@ export async function generateShotVideo(
     coverThumbnailUrl?: string
     videoUrl: string
     duration: number
-  }>(job.id, 1_260_000, { signal })
+  }>(job.id, 7_260_000, { signal })
   return {
     coverUrl: result.coverUrl || referenceImageUrl || '',
     coverThumbnailUrl: result.coverThumbnailUrl,

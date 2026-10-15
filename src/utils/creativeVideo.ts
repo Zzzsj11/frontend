@@ -5,6 +5,7 @@ export type CreativeGenerationMode = 'text' | 'first_frame' | 'first_last' | 're
 export const creativeModeReady = (
   mode: CreativeGenerationMode,
   media: CreativeReferenceMedia[],
+  limits = { image: 6, video: 1, audio: 3, total: 10, audioRequiresVisual: false },
 ): boolean => {
   const images = media.filter((item) => item.kind === 'image').length
   const videos = media.filter((item) => item.kind === 'video').length
@@ -12,7 +13,14 @@ export const creativeModeReady = (
   if (mode === 'text') return true
   if (mode === 'first_frame') return images === 1 && videos === 0 && audios === 0
   if (mode === 'first_last') return images === 2 && videos === 0 && audios === 0
-  return media.length > 0 && images <= 6 && videos <= 1 && audios <= 3 && media.length <= 10
+  return (
+    media.length > 0 &&
+    images <= limits.image &&
+    videos <= limits.video &&
+    audios <= limits.audio &&
+    media.length <= limits.total &&
+    (!limits.audioRequiresVisual || audios === 0 || images + videos > 0)
+  )
 }
 
 export const creativeReferences = (
