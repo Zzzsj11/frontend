@@ -10,7 +10,6 @@ const menuOpen = ref(false)
 const menu = ref<HTMLElement | null>(null)
 const userName = computed(() => auth.user?.displayName || auth.user?.username || '用户')
 const userInitial = computed(() => userName.value.trim().charAt(0).toUpperCase() || 'U')
-const yingheBalance = computed(() => auth.balance?.providers?.yinghe ?? auth.balance)
 const allInOneTitle = computed(() => {
   const credits = auth.allInOneCredits
   if (!credits?.available)
@@ -20,21 +19,6 @@ const allInOneTitle = computed(() => {
 const hasAdminAccess = computed(
   () => auth.user?.isSuperAdmin || Boolean(auth.user?.permissions?.length),
 )
-const keyText = computed(() => {
-  const key = yingheBalance.value?.key
-  if (!key) return ''
-  return `${key.keyMasked} 余 ${key.remainingDisplay}${key.stale ? '（缓存）' : ''}`
-})
-const balanceTitle = computed(() => {
-  if (yingheBalance.value?.message) return yingheBalance.value.message
-  const key = yingheBalance.value?.key
-  if (!key) return yingheBalance.value?.keyError || '点击刷新余额'
-  const name = key.keyName ? `（${key.keyName}）` : ''
-  const quota = key.quotaAmt == null ? '不限额' : key.quotaAmt
-  const warning = key.warning ? ` · ${key.warning}` : ''
-  return `当前 Key ${key.keyMasked}${name} · 月度已用 ${key.usedAmt ?? '--'} / 限额 ${quota}${warning} · 点击刷新余额`
-})
-
 const logout = async () => {
   menuOpen.value = false
   await auth.logout()
@@ -47,20 +31,19 @@ const closeFromEscape = (event: KeyboardEvent) => {
   if (event.key === 'Escape') menuOpen.value = false
 }
 const BALANCE_AUTO_REFRESH_MS = 5 * 60_000
-const refreshBalance = (force = false) => {
+const refreshBalance = () => {
   if (!auth.user?.mustChangePassword && document.visibilityState === 'visible') {
-    void auth.loadBalance(force)
     void auth.loadAllInOneCredits()
   }
 }
 const refreshBalanceIfStale = () => {
-  const updatedAt = Date.parse(auth.balance?.updatedAt || '')
+  const updatedAt = Date.parse(auth.allInOneCredits?.updatedAt || '')
   if (
-    !auth.balance ||
+    !auth.allInOneCredits ||
     !Number.isFinite(updatedAt) ||
     Date.now() - updatedAt >= BALANCE_AUTO_REFRESH_MS
   )
-    refreshBalance(false)
+    refreshBalance()
 }
 const refreshBalanceWhenVisible = () => {
   if (document.visibilityState === 'visible') refreshBalanceIfStale()
@@ -72,7 +55,7 @@ onMounted(() => {
   window.addEventListener('focus', refreshBalanceIfStale)
   document.addEventListener('visibilitychange', refreshBalanceWhenVisible)
   refreshTimer = window.setInterval(refreshBalanceIfStale, BALANCE_AUTO_REFRESH_MS)
-  if (!auth.balance) refreshBalance(false)
+  if (!auth.allInOneCredits) refreshBalance()
 })
 onBeforeUnmount(() => {
   document.removeEventListener('click', closeFromOutside)
@@ -93,23 +76,12 @@ onBeforeUnmount(() => {
     <div class="header-actions">
       <DeploymentBadge />
       <button
-        class="balance-pill yinghe"
-        :class="{ loading: auth.balanceLoading }"
-        :title="balanceTitle"
-        @click="refreshBalance(true)"
-      >
-        <span class="balance-icon" aria-hidden="true">ϟ</span>
-        <span class="balance-provider">英和</span>
-        <span class="balance-value">{{ yingheBalance?.balanceDisplay || '--' }}</span>
-        <span v-if="keyText" class="balance-key" data-test="key-quota">{{ keyText }}</span>
-      </button>
-      <button
         class="balance-pill all-in-one"
         :title="allInOneTitle"
         @click="void auth.loadAllInOneCredits()"
       >
         <span class="balance-icon" aria-hidden="true">◎</span>
-        <span class="balance-provider">平台</span>
+        <span class="balance-provider">All in one</span>
         <span class="balance-value">{{ auth.allInOneCredits?.remainingDisplay || '--' }}</span>
         <span class="balance-key">积分</span>
       </button>

@@ -9,7 +9,7 @@ describe('AppHeader provider balances', () => {
   beforeEach(() => setActivePinia(createPinia()))
   afterEach(() => vi.useRealTimers())
 
-  it('并列展示英和余额和 all in one Key 剩余积分', () => {
+  it('只展示 All in one Key 剩余积分', () => {
     const auth = useAuthStore()
     auth.user = {
       id: 'u1',
@@ -17,38 +17,6 @@ describe('AppHeader provider balances', () => {
       displayName: 'Dev 01',
       role: 'user',
       mustChangePassword: false,
-    }
-    auth.balance = {
-      available: true,
-      balance: '2626.47',
-      balanceDisplay: '2626.47',
-      currency: 'CNY',
-      updatedAt: '',
-      key: {
-        keyMasked: 'yh-test***',
-        keyName: '视频 Key',
-        quotaAmt: 1000,
-        usedAmt: 341.04,
-        remaining: 658.96,
-        remainingDisplay: '658.96',
-      },
-      providers: {
-        yinghe: {
-          available: true,
-          balance: '2626.47',
-          balanceDisplay: '2626.47',
-          currency: 'CNY',
-          updatedAt: '',
-          key: {
-            keyMasked: 'yh-test***',
-            keyName: '视频 Key',
-            quotaAmt: 1000,
-            usedAmt: 341.04,
-            remaining: 658.96,
-            remainingDisplay: '658.96',
-          },
-        },
-      },
     }
     auth.allInOneCredits = {
       available: true,
@@ -64,21 +32,16 @@ describe('AppHeader provider balances', () => {
         stubs: { RouterLink: { template: '<a><slot /></a>' }, DeploymentBadge: true },
       },
     })
-    const balance = wrapper.get('.balance-pill.yinghe')
-    expect(wrapper.findAll('.balance-pill')).toHaveLength(2)
-    expect(balance.text()).toContain('英和')
-    expect(balance.get('.balance-value').text()).toBe('2626.47')
-    expect(balance.get('[data-test="key-quota"]').text()).toBe('yh-test*** 余 658.96')
-    expect(balance.attributes('title')).toContain('当前 Key yh-test***（视频 Key）')
-    expect(balance.attributes('title')).toContain('月度已用 341.04 / 限额 1000')
+    expect(wrapper.findAll('.balance-pill')).toHaveLength(1)
+    expect(wrapper.find('.balance-pill.yinghe').exists()).toBe(false)
     const allInOne = wrapper.get('.balance-pill.all-in-one')
-    expect(allInOne.text()).toContain('平台')
+    expect(allInOne.text()).toContain('All in one')
     expect(allInOne.text()).toContain('123.50')
     expect(allInOne.attributes('title')).toContain('当前 Key ms_test***')
     wrapper.unmount()
   })
 
-  it('自动刷新每五分钟使用缓存，只有用户点击才强制查询', async () => {
+  it('每五分钟刷新平台积分并支持手动刷新', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-16T12:00:00Z'))
     const auth = useAuthStore()
@@ -89,14 +52,12 @@ describe('AppHeader provider balances', () => {
       role: 'user',
       mustChangePassword: false,
     }
-    auth.balance = {
+    auth.allInOneCredits = {
       available: true,
-      balance: '100',
-      balanceDisplay: '100.00',
-      currency: 'CNY',
+      remainingDisplay: '100.00',
       updatedAt: new Date().toISOString(),
     }
-    const loadBalance = vi.spyOn(auth, 'loadBalance').mockResolvedValue()
+    const loadCredits = vi.spyOn(auth, 'loadAllInOneCredits').mockResolvedValue()
     const wrapper = mount(AppHeader, {
       global: {
         stubs: { RouterLink: { template: '<a><slot /></a>' }, DeploymentBadge: true },
@@ -104,13 +65,13 @@ describe('AppHeader provider balances', () => {
     })
 
     await vi.advanceTimersByTimeAsync(60_000)
-    expect(loadBalance).not.toHaveBeenCalled()
+    expect(loadCredits).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(4 * 60_000)
-    expect(loadBalance).toHaveBeenCalledWith(false)
+    expect(loadCredits).toHaveBeenCalledTimes(1)
 
-    expect(wrapper.get('.balance-pill.yinghe .balance-value').text()).toBe('100.00')
-    await wrapper.get('.balance-pill.yinghe').trigger('click')
-    expect(loadBalance).toHaveBeenLastCalledWith(true)
+    expect(wrapper.get('.balance-pill.all-in-one .balance-value').text()).toBe('100.00')
+    await wrapper.get('.balance-pill.all-in-one').trigger('click')
+    expect(loadCredits).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
 
@@ -123,28 +84,25 @@ describe('AppHeader provider balances', () => {
       role: 'user',
       mustChangePassword: false,
     }
-    auth.balance = {
+    auth.allInOneCredits = {
       available: false,
-      balance: null,
-      balanceDisplay: '--',
-      currency: 'CNY',
       updatedAt: new Date().toISOString(),
-      message: '余额查询暂时不可用',
+      message: '积分查询暂时不可用',
     }
-    const loadBalance = vi.spyOn(auth, 'loadBalance').mockResolvedValue()
+    const loadCredits = vi.spyOn(auth, 'loadAllInOneCredits').mockResolvedValue()
     const wrapper = mount(AppHeader, {
       global: {
         stubs: { RouterLink: { template: '<a><slot /></a>' }, DeploymentBadge: true },
       },
     })
 
-    const balance = wrapper.get('.balance-pill.yinghe')
+    const balance = wrapper.get('.balance-pill.all-in-one')
     expect(balance.get('.balance-value').text()).toBe('--')
-    expect(balance.attributes('title')).toBe('余额查询暂时不可用')
+    expect(balance.attributes('title')).toBe('积分查询暂时不可用')
     expect(balance.find('[data-test="key-quota"]').exists()).toBe(false)
     expect(wrapper.get('.user-name').text()).toBe('Dev 01')
     await balance.trigger('click')
-    expect(loadBalance).toHaveBeenCalledWith(true)
+    expect(loadCredits).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 })
