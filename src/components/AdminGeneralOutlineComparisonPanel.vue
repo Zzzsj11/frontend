@@ -10,7 +10,7 @@ import { GENERAL_STORYBOARD_MAX_SHOTS } from '../generationConstraints'
 import AdminGeneralOutlineResults from './AdminGeneralOutlineResults.vue'
 
 const models = ref<ChatComparisonModel[]>([])
-const selectedModels = ref(['gpt-5.5', 'gpt-5.6-sol', 'claude-opus-4-8'])
+const selectedModels = ref(['gemini-3.8-flash-all-in-one', 'doubao-seed-2-1-pro-260915-all-in-one'])
 const loading = ref(false)
 const error = ref('')
 const results = ref<GeneralOutlineComparisonResult[]>([])
@@ -65,6 +65,10 @@ const run = async () => {
 onMounted(async () => {
   try {
     models.value = await fetchChatComparisonModels()
+    const allowed = new Set(models.value.map((item) => item.code))
+    selectedModels.value = selectedModels.value.filter((item) => allowed.has(item))
+    if (!selectedModels.value.length)
+      selectedModels.value = models.value.slice(0, 3).map((item) => item.code)
   } catch (e) {
     error.value = e instanceof Error ? e.message : '模型列表加载失败'
   }

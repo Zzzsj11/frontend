@@ -9,7 +9,10 @@ import {
 import AdminChatComparisonResults from './AdminChatComparisonResults.vue'
 
 const models = ref<ChatComparisonModel[]>([])
-const selectedModels = ref<string[]>(['gpt-5.5', 'gpt-5.6-sol', 'claude-opus-4-8'])
+const selectedModels = ref<string[]>([
+  'gemini-3.8-flash-all-in-one',
+  'doubao-seed-2-1-pro-260915-all-in-one',
+])
 const systemPrompt = ref('你是一个专业、严谨的人工智能助手。')
 const prompt = ref('')
 const temperature = ref(0.2)
@@ -34,6 +37,8 @@ const loadModels = async () => {
     models.value = await fetchChatComparisonModels()
     const allowed = new Set(models.value.map((item) => item.code))
     selectedModels.value = selectedModels.value.filter((item) => allowed.has(item)).slice(0, 6)
+    if (!selectedModels.value.length)
+      selectedModels.value = models.value.slice(0, 3).map((item) => item.code)
   } catch (e) {
     error.value = e instanceof Error ? e.message : '模型列表加载失败'
   } finally {

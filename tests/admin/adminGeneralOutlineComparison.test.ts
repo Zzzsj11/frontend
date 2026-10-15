@@ -68,4 +68,18 @@ describe('admin general outline comparison panel', () => {
     expect(wrapper.text()).toContain('黄昏海岸')
     expect(wrapper.text()).toContain('校验通过')
   })
+  it('selects only the available platform models by default', async () => {
+    const codes = ['gemini-3.8-flash-all-in-one', 'doubao-seed-2-1-pro-260915-all-in-one']
+    vi.mocked(fetchChatComparisonModels).mockResolvedValue(
+      codes.map((code) => ({ code, name: code, protocol: 'openai' })),
+    )
+    vi.mocked(runGeneralOutlineComparison).mockResolvedValue({ results: [] })
+    const wrapper = mount(AdminGeneralOutlineComparisonPanel)
+    await vi.waitFor(() => expect(wrapper.findAll('.model-grid button.selected')).toHaveLength(2))
+    await wrapper.find('.run-button').trigger('click')
+    expect(runGeneralOutlineComparison).toHaveBeenCalledWith(
+      expect.objectContaining({ models: codes }),
+    )
+    wrapper.unmount()
+  })
 })
