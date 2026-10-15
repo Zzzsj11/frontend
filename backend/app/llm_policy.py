@@ -14,7 +14,7 @@ class TemporaryLlmError(RuntimeError):
 
 def completion_options(model: str, max_tokens: int, temperature: float = 0.2) -> dict:
     model = model.removesuffix("-all-in-one")
-    if model in {"gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol"} or model.startswith("gpt-6-astra-"):
+    if model in {"gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "doubao-seed-2-1-pro-260915"} or model.startswith("gpt-6-astra-"):
         # Reasoning and visible text share the completion budget; avoid unsupported sampling parameters.
         return {"max_completion_tokens": max(8192, max_tokens * 2), "reasoning_effort": "low"}
     return {"max_tokens": max_tokens, "temperature": temperature}

@@ -1550,7 +1550,7 @@ export const useProjectStore = defineStore('project', {
           '',
           {
             size: '1024x1536',
-            quality: 'medium',
+            quality: 'auto',
             portrait: { description: input.description, style: input.style },
             ...(input.referenceImage ? { image: input.referenceImage } : {}),
           },
@@ -1604,7 +1604,7 @@ export const useProjectStore = defineStore('project', {
           '',
           {
             size: '1024x1536',
-            quality: 'medium',
+            quality: 'auto',
             portrait: { description: input.description?.trim() || '', style: input.style },
             ...(reference ? { image: reference.url } : {}),
           },
@@ -1743,7 +1743,7 @@ export const useProjectStore = defineStore('project', {
         const dhRef = dh.originalAvatar || dh.avatar
         const generated = await imageGen.generateImageAsset('', {
           size: '1024x1536',
-          quality: 'medium',
+          quality: 'auto',
           portrait: { description: identityDescription, style: dh.style },
           ...(dhRef ? { image: dhRef } : {}),
         })

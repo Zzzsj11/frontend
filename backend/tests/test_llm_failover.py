@@ -28,7 +28,7 @@ class RedisState:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("channel", ["yseeai", "toapis"])
-async def test_five_primary_failures_switch_later_storyboard_calls_to_fallback(monkeypatch, channel):
+async def test_legacy_channels_do_not_switch_models(monkeypatch, channel):
     redis = RedisState()
     monkeypatch.setattr(llm_failover, "redis", redis)
     monkeypatch.setattr(llm_failover, "settings", replace(llm_failover.settings, llm_channel=channel))
@@ -46,13 +46,11 @@ async def test_five_primary_failures_switch_later_storyboard_calls_to_fallback(m
     for _ in range(5):
         with pytest.raises(RuntimeError, match="supplier failed"):
             await storyboard_prompt._call(client, [], 1400, usage_records=records, operation="storyboard_line")
-    assert redis.value == 5
-    assert redis.key == f"llm:failover:{channel}:gpt-6.1-sol:failures"
-    assert redis.ttl == 2 * 60 * 60
+    assert redis.value == 0
     assert await storyboard_prompt._call(client, [], 1400, usage_records=records, operation="storyboard_line")
-    assert [call.kwargs["model"] for call in create.await_args_list] == ["gpt-6.1-sol"] * 5 + ["gpt-6-sol"]
-    assert records[-1]["model"] == "gpt-6-sol"
-    assert redis.value == 5
+    assert [call.kwargs["model"] for call in create.await_args_list] == ["gpt-6.1-sol"] * 6
+    assert records[-1]["model"] == "gpt-6.1-sol"
+    assert redis.value == 0
 
     await llm_failover.record_success("gpt-6.1-sol")
     assert await llm_failover.choose_model("gpt-6.1-sol") == "gpt-6.1-sol"
@@ -66,6 +64,6 @@ async def test_all_in_one_primary_falls_back_with_same_channel_suffix(monkeypatc
     for _ in range(5):
         await llm_failover.record_failure("gpt-6.1-sol-all-in-one")
     assert redis.ttl == 2 * 60 * 60
-    assert await llm_failover.choose_model("gpt-6.1-sol-all-in-one") == "gpt-6-sol-all-in-one"
+    assert await llm_failover.choose_model("gpt-6.1-sol-all-in-one") == "doubao-seed-2-1-pro-260915-all-in-one"
     await llm_failover.record_success("gpt-6.1-sol-all-in-one")
     assert await llm_failover.choose_model("gpt-6.1-sol-all-in-one") == "gpt-6.1-sol-all-in-one"

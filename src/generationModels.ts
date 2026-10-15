@@ -27,7 +27,7 @@ interface GenerationModelOption {
   label: string
   capabilities?: GenerationModelCapabilities
 }
-export const DEFAULT_IMAGE_MODEL: ImageModelId = 'gemini-nano-banana-2.1'
+export const DEFAULT_IMAGE_MODEL: ImageModelId = 'nano-banana-2.1-all-in-one'
 export const DEFAULT_VIDEO_MODEL: VideoModelId = 'doubao-seedance-2.0-all-in-one'
 export const PROJECT_VIDEO_MODEL_GROUPS = [
   {
@@ -60,6 +60,18 @@ export const VIDEO_MODEL_OPTIONS = reactive<Array<GenerationModelOption>>([
 ])
 export const videoModelCapabilities = (modelId?: string): GenerationModelCapabilities =>
   VIDEO_MODEL_OPTIONS.find((item) => item.value === modelId)?.capabilities ?? {}
+export const imageModelCapabilities = (modelId?: string): GenerationModelCapabilities =>
+  IMAGE_MODEL_OPTIONS.find((item) => item.value === modelId)?.capabilities ?? {}
+export const imageModelSupportsRatio = (modelId: string, ratio: string): boolean => {
+  const ratios = imageModelCapabilities(modelId).ratios
+  return !Array.isArray(ratios) || ratios.includes(ratio)
+}
+export const imageResolutionChoices = (modelId?: string): string[] => {
+  const resolutions = imageModelCapabilities(modelId).resolutions
+  return Array.isArray(resolutions) && resolutions.length
+    ? resolutions.filter((item): item is string => typeof item === 'string')
+    : ['1K', '2K', '4K']
+}
 export const videoResolutionChoices = (modelId?: string): string[] => {
   const configured = videoModelCapabilities(modelId).resolutions
   return Array.isArray(configured) && configured.length

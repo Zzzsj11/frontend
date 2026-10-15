@@ -25,11 +25,12 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     headers = bearer(changed["accessToken"])
     assert client.get("/api/admin/dashboard", headers=headers).status_code == 403
     options = client.get("/api/model-options", headers=headers).json()
-    assert any(x["id"] == "gemini-nano-banana-2.1" for x in options)
+    assert any(x["id"] == "nano-banana-2.1-all-in-one" for x in options)
     image_models = {x["id"]: x for x in options if x["modality"] == "image"}
-    assert set(image_models) == {"gemini-nano-banana-2.1"}
-    assert image_models["gemini-nano-banana-2.1"]["capabilities"]["resolutions"] == ["1K", "2K", "4K"]
-    assert image_models["gemini-nano-banana-2.1"]["capabilities"]["referenceImage"] == {"min": 0, "max": 14}
+    assert set(image_models) == {"nano-banana-2.1-all-in-one", "seedream-5.0-pro-all-in-one"}
+    assert image_models["nano-banana-2.1-all-in-one"]["capabilities"]["resolutions"] == ["1K", "2K", "4K"]
+    assert image_models["nano-banana-2.1-all-in-one"]["capabilities"]["referenceImage"] == {"min": 0, "max": 14}
+    assert image_models["seedream-5.0-pro-all-in-one"]["capabilities"]["resolutions"] == ["1K", "1.5K", "2K"]
     h3 = next(x for x in options if x["id"] == "minimax-h3-runninghub")
     direct_h3 = next(x for x in options if x["id"] == "minimax-h3")
     new_models = {

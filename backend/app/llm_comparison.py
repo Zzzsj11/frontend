@@ -27,7 +27,7 @@ CHAT_TEST_MODELS = (
     ChatTestModel("gpt-6-sol", "GPT 6 Sol（当前文本渠道）"),
     ChatTestModel("gpt-6.1-sol-all-in-one", "GPT 6.1 Sol（all in one）"),
     ChatTestModel("gpt-6-astra-all-in-one", "GPT 6 Astra（all in one）"),
-    ChatTestModel("gpt-6-sol-all-in-one", "GPT 6.0 Sol（all in one）"),
+    ChatTestModel("doubao-seed-2-1-pro-260915-all-in-one", "Doubao Seed 2.1 Pro（all in one，备用）"),
     ChatTestModel("gpt-6-astra", "GPT 6 Astra"),
     ChatTestModel("gpt-5.5", "GPT 5.5"),
     ChatTestModel("gpt-5.6-sol", "GPT 5.6 Sol"),

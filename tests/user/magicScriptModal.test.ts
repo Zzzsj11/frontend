@@ -29,8 +29,8 @@ describe('magic script defaults', () => {
     expect(videoModelSelect).toBeTruthy()
     expect(videoModelSelect.disabled).toBe(false)
     const imageModelSelect = document.body.querySelector(
-      'select[aria-label="图片模型"]',
-    ) as HTMLSelectElement
+      'button[aria-label="图片模型"]',
+    ) as HTMLButtonElement
     expect(imageModelSelect).toBeTruthy()
     expect(imageModelSelect.disabled).toBe(false)
     wrapper.unmount()

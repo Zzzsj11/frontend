@@ -22,6 +22,7 @@ import AppIcon from './AppIcon.vue'
 import BaseModal from './base/BaseModal.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
 import VideoModelSelect from './VideoModelSelect.vue'
+import ImageModelSelect from './ImageModelSelect.vue'
 import { MAX_VIDEO_DURATION, MIN_VIDEO_DURATION } from '../mediaConstraints'
 import {
   GENERAL_STORYBOARD_MAX_GROUPS,
@@ -30,7 +31,8 @@ import {
 import {
   DEFAULT_IMAGE_MODEL,
   DEFAULT_VIDEO_MODEL,
-  IMAGE_MODEL_OPTIONS,
+  imageModelSupportsRatio,
+  imageResolutionChoices,
   VIDEO_MODEL_OPTIONS,
   loadGenerationModels,
   videoResolutionChoices,
@@ -90,6 +92,8 @@ const averageDuration = computed(() =>
 const resolutionChoices = computed<ShotGenOptions['resolution'][]>(() => {
   return videoResolutionChoices(videoModel.value) as ShotGenOptions['resolution'][]
 })
+
+const imageResolutions = computed(() => imageResolutionChoices(imageModel.value))
 const durationIsValid = computed(
   () =>
     totalDuration.value >= minimumTotalDuration.value &&
@@ -130,6 +134,14 @@ const reset = () => {
   extraRequirement.value = ''
   selectedHumanIds.value = []
 }
+watch(ratio, () => {
+  if (!imageModelSupportsRatio(imageModel.value, ratio.value))
+    imageModel.value = DEFAULT_IMAGE_MODEL
+})
+watch(imageModel, () => {
+  if (!imageResolutions.value.includes(imageResolution.value))
+    imageResolution.value = (imageResolutions.value[0] ?? '1K') as typeof imageResolution.value
+})
 
 // immediate：弹层懒挂载（P3d）后挂载即打开，靠 immediate 完成表单初始化
 watch(
@@ -474,18 +486,16 @@ const submit = async () => {
               </select></label
             >
             <VideoModelSelect v-model="videoModel" label="视频模型 *" />
-            <label v-if="!random"
-              ><span>图片模型 *</span
-              ><select v-model="imageModel" aria-label="图片模型">
-                <option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">
-                  {{ item.label }}
-                </option>
-              </select></label
-            >
+            <ImageModelSelect
+              v-if="!random"
+              v-model="imageModel"
+              :ratio="ratio"
+              label="图片模型 *"
+            />
             <label v-if="!random"
               ><span>图片清晰度 *</span
               ><select v-model="imageResolution" aria-label="图片清晰度">
-                <option v-for="item in ['1K', '2K', '4K']" :key="item" :value="item">
+                <option v-for="item in imageResolutions" :key="item" :value="item">
                   {{ item }}
                 </option>
               </select></label

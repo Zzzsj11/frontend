@@ -160,8 +160,8 @@ class GeneralStoryboardCreate(BaseModel):
     visual_style: str
     ratio: Literal["16:9", "9:16", "1:1", "4:3"] = "16:9"
     resolution: Literal["480p", "540p", "720p", "1080p", "4k"] = "720p"
-    image_model: str = Field(default="gemini-nano-banana-2.1", min_length=1, max_length=160)
-    image_resolution: Literal["1K", "2K", "4K"] = "1K"
+    image_model: str = Field(default="nano-banana-2.1-all-in-one", min_length=1, max_length=160)
+    image_resolution: Literal["1K", "1.5K", "2K", "4K"] = "1K"
     video_model: str = Field(default="doubao-seedance-2.0-all-in-one", min_length=1, max_length=160)
     empty_shot_count: int = Field(ge=0, le=GENERAL_STORYBOARD_MAX_SHOTS)
     character_shot_count: int = Field(ge=0, le=GENERAL_STORYBOARD_MAX_SHOTS)
@@ -229,7 +229,7 @@ class ImageGenerationCreate(BaseModel):
     prompt: str = Field(default="", max_length=20_000)
     size: str = "1024x1024"
     quality: Literal["auto", "low", "medium", "high", "xhigh", "max"] = "auto"
-    resolution: Literal["1K", "2K", "4K"] = "1K"
+    resolution: Literal["1K", "1.5K", "2K", "4K"] = "1K"
     n: int = Field(default=1, ge=1, le=1)
     images: list[str] = Field(default_factory=list, max_length=14)
     model: str | None = Field(default=None, max_length=160)

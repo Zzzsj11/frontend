@@ -143,6 +143,10 @@ class JobManager:
         storyboard_line_id: str | None = None,
     ) -> Job:
         """Add a replayable job to the caller's transaction without dispatching it."""
+        if kind == "image":
+            from .image_failover import prepare_request
+
+            request = await prepare_request(session, request)
         now = time.time()
         generation_origin, agent_name, agent_run_id = current_agent_attribution()
         job = Job(

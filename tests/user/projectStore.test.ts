@@ -680,7 +680,7 @@ describe('digital human generation as headshots', () => {
     expect(upload).not.toHaveBeenCalled()
     expect(generate.mock.calls[0][1]).toEqual({
       size: '1024x1536',
-      quality: 'medium',
+      quality: 'auto',
       portrait: { description: '短发', style: '女' },
     })
     expect(store.castIds).toEqual([])

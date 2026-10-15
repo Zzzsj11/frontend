@@ -579,6 +579,7 @@ async def generate_image(request: ImageGenerationCreate, job: Job) -> dict[str, 
     if (job.request or {}).get("_provider") == "all-in-one":
         from .all_in_one import generate
 
+        request = ImageGenerationCreate.model_validate({key: value for key, value in (job.request or {}).items() if not key.startswith("_")})
         return await generate(request, job)
     if (job.request or {}).get("_provider") == "toapis":
         return await _generate_toapis_image(request, job)

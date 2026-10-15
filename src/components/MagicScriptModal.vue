@@ -5,11 +5,13 @@ import AppIcon from './AppIcon.vue'
 import BaseModal from './base/BaseModal.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
 import VideoModelSelect from './VideoModelSelect.vue'
+import ImageModelSelect from './ImageModelSelect.vue'
 import type { ShotGenOptions } from '../types'
 import {
   DEFAULT_IMAGE_MODEL,
   DEFAULT_VIDEO_MODEL,
-  IMAGE_MODEL_OPTIONS,
+  imageModelSupportsRatio,
+  imageResolutionChoices,
   loadGenerationModels,
   videoResolutionChoices,
   videoResolutionLabel,
@@ -36,6 +38,8 @@ const canSubmit = computed(() => songId.value.trim() !== '' && assFile.value !==
 const resolutionChoices = computed<ShotGenOptions['resolution'][]>(() => {
   return videoResolutionChoices(videoModel.value) as ShotGenOptions['resolution'][]
 })
+
+const imageResolutions = computed(() => imageResolutionChoices(imageModel.value))
 
 const resetForm = () => {
   songId.value = ''
@@ -66,6 +70,14 @@ watch(videoModel, () => {
   if (!resolutionChoices.value.includes(resolution.value)) {
     resolution.value = resolutionChoices.value[0] ?? '720p'
   }
+})
+watch(ratio, () => {
+  if (!imageModelSupportsRatio(imageModel.value, ratio.value))
+    imageModel.value = DEFAULT_IMAGE_MODEL
+})
+watch(imageModel, () => {
+  if (!imageResolutions.value.includes(imageResolution.value))
+    imageResolution.value = (imageResolutions.value[0] ?? '1K') as typeof imageResolution.value
 })
 
 // ---------- ass 文件 ----------
@@ -169,18 +181,11 @@ const cancel = () => {
             </select></label
           >
           <VideoModelSelect v-model="videoModel" label="视频模型 *" />
-          <label
-            ><span>图片模型 *</span
-            ><select v-model="imageModel" aria-label="图片模型">
-              <option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">
-                {{ item.label }}
-              </option>
-            </select></label
-          >
+          <ImageModelSelect v-model="imageModel" :ratio="ratio" label="图片模型 *" />
           <label
             ><span>图片清晰度 *</span
             ><select v-model="imageResolution" aria-label="图片清晰度">
-              <option v-for="item in ['1K', '2K', '4K']" :key="item" :value="item">
+              <option v-for="item in imageResolutions" :key="item" :value="item">
                 {{ item }}
               </option>
             </select></label

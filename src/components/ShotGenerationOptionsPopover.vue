@@ -7,6 +7,8 @@ import {
   PROJECT_VIDEO_MODEL_IDS,
   VIDEO_MODEL_OPTIONS,
   generationModelLabel,
+  imageModelSupportsRatio,
+  imageResolutionChoices,
   isH3VideoModel,
   videoDurationChoices,
   videoResolutionChoices,
@@ -20,6 +22,7 @@ import {
 import type { ShotGenOptions } from '../types'
 import H3GenerationModeFields from './H3GenerationModeFields.vue'
 import VideoModelSelect from './VideoModelSelect.vue'
+import ImageModelSelect from './ImageModelSelect.vue'
 
 const props = defineProps<{
   modelValue: ShotGenOptions
@@ -33,7 +36,7 @@ const open = ref(false)
 const popoverStyle = ref<Record<string, string>>({})
 const resolutionChoices = computed<string[]>(() => {
   return props.mode === 'scene'
-    ? ['1K', '2K', '4K']
+    ? imageResolutionChoices(props.modelValue.imageModel)
     : videoResolutionChoices(props.modelValue.videoModel)
 })
 const ratioChoices: ShotGenOptions['ratio'][] = ['16:9', '9:16', '4:3', '1:1']
@@ -68,6 +71,26 @@ const updateResolution = (value: string) => {
   if (props.mode === 'scene')
     updateOption('imageResolution', value as NonNullable<ShotGenOptions['imageResolution']>)
   else updateOption('resolution', value as ShotGenOptions['resolution'])
+}
+const updateImageModel = (model: string) => {
+  const allowed = imageResolutionChoices(model)
+  emit('update:modelValue', {
+    ...props.modelValue,
+    imageModel: model,
+    imageResolution: (allowed.includes(props.modelValue.imageResolution ?? '1K')
+      ? props.modelValue.imageResolution
+      : (allowed[0] ?? '1K')) as ShotGenOptions['imageResolution'],
+  })
+}
+const updateRatio = (ratio: ShotGenOptions['ratio']) => {
+  const imageModel = props.modelValue.imageModel
+  emit('update:modelValue', {
+    ...props.modelValue,
+    ratio,
+    ...(props.mode === 'scene' && !imageModelSupportsRatio(imageModel, ratio)
+      ? { imageModel: DEFAULT_IMAGE_MODEL, imageResolution: '1K' as const }
+      : {}),
+  })
 }
 const updateVideoModel = (model: string) => {
   const allowed = videoResolutionChoices(model) as ShotGenOptions['resolution'][]
@@ -117,7 +140,7 @@ const close = () => {
 const onDocumentClick = (event: MouseEvent) => {
   const target = event.target as Node
   // Reka 的 Portal 打开时会向 document 派发一次以 html 为目标的 click。
-  if (document.querySelector('.video-model-menu')) return
+  if (document.querySelector('.generation-model-menu')) return
   if (root.value && !root.value.contains(target) && !popover.value?.contains(target)) close()
 }
 const updatePopoverPosition = () => {
@@ -190,19 +213,13 @@ onBeforeUnmount(close)
               compact
               @update:model-value="updateVideoModel"
             />
-            <label v-else class="model-select-wrap">
-              <select
-                class="model-select"
-                :value="modelValue.imageModel"
-                aria-label="图片模型"
-                @change="updateOption('imageModel', ($event.target as HTMLSelectElement).value)"
-              >
-                <option v-for="item in IMAGE_MODEL_OPTIONS" :key="item.value" :value="item.value">
-                  {{ item.label }}
-                </option>
-              </select>
-              <span class="select-caret">⌄</span>
-            </label>
+            <ImageModelSelect
+              v-else
+              :model-value="modelValue.imageModel"
+              :ratio="modelValue.ratio"
+              compact
+              @update:model-value="updateImageModel"
+            />
           </fieldset>
 
           <fieldset class="option-group">
@@ -215,7 +232,7 @@ onBeforeUnmount(close)
                 class="segment-option"
                 :class="{ active: modelValue.ratio === ratio }"
                 :aria-pressed="modelValue.ratio === ratio"
-                @click="updateOption('ratio', ratio)"
+                @click="updateRatio(ratio)"
               >
                 <span class="ratio-shape" :class="`ratio-${ratio.replace(':', '-')}`" />
                 {{ ratio }}
