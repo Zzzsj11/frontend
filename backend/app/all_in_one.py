@@ -39,11 +39,11 @@ def headers(*, user_id: str | None = None, idempotency_key: str | None = None) -
     return result
 
 
-def chat_client(*, user_id: str | None = None, timeout: float = 600) -> AsyncOpenAI:
+def chat_client(*, user_id: str | None = None, timeout: float = 600, idempotency_key: str | None = None) -> AsyncOpenAI:
     return AsyncOpenAI(
         base_url=settings.all_in_one_base_url.rstrip("/") + "/v1",
         api_key=settings.all_in_one_api_key,
-        default_headers=headers(user_id=user_id, idempotency_key="aio-chat-" + uuid.uuid4().hex),
+        default_headers=headers(user_id=user_id, idempotency_key=idempotency_key or "aio-chat-" + uuid.uuid4().hex),
         timeout=timeout,
         max_retries=0,
     )

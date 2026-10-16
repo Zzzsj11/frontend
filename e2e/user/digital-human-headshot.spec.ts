@@ -111,7 +111,7 @@ async function mockApp(page: Page) {
         sortOrder: 10,
         capabilities: { resolutions: ['1K', '2K', '4K'] },
       },
-      { id: 'doubao-seedance-2.0', name: 'SD2.0', modality: 'video' },
+      { id: 'doubao-seedance-2.0-all-in-one', name: 'SD2.0', modality: 'video' },
     ],
     '/api/storyboards/general/options': {
       genres: [{ value: '流行歌曲', label: '流行歌曲' }],
@@ -276,7 +276,8 @@ function expectGeneration(body: Body, description: string, reference?: string) {
   expect(body).toMatchObject({
     prompt: '',
     size: '1024x1536',
-    quality: 'medium',
+    quality: 'auto',
+    resolution: '1K',
     n: 1,
     purpose: 'digital_human',
     portrait: { description, style: STYLE },

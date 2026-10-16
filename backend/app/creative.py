@@ -172,8 +172,10 @@ async def run_prompt_optimization_job(job: Job) -> dict[str, Any]:
     operation = str((job.request or {}).get("_operation") or "creative_prompt_optimization")
     async with session_factory() as session:
         item = await session.get(PromptOptimizationTaskModel, task_id)
-        if not item or item.deleted_at is not None:
+        if not item or item.deleted_at is not None or item.user_id != job.user_id:
             raise RuntimeError("提示词优化任务不存在")
+        if item.status == "succeeded":
+            return {"optimizationTaskId": task_id, "provider": "all-in-one" if settings.llm_channel == "all-in-one" else item.provider}
         provider, prompt, duration, ratio = item.provider, item.input_prompt, item.duration, item.ratio
         media, model, user_id = list(item.input_media or []), item.model, item.user_id
     if settings.llm_channel == "all-in-one":
@@ -209,6 +211,10 @@ async def run_prompt_optimization_job(job: Job) -> dict[str, Any]:
             current = await session.get(PromptOptimizationTaskModel, task_id)
             if not current:
                 raise RuntimeError("提示词优化任务不存在")
+            # 恢复与原 Worker 同时落库时只记一次业务用量。
+            await session.refresh(current, with_for_update=True)
+            if current.status == "succeeded":
+                return {"optimizationTaskId": task_id, "provider": provider}
             current.model = model
             current.status, current.output_prompt, current.error = "succeeded", result["prompt"], ""
             current.request_id = current.request_id or result.get("requestId")
@@ -235,18 +241,42 @@ async def run_prompt_optimization_job(job: Job) -> dict[str, Any]:
         async with session_factory() as session:
             current = await session.get(PromptOptimizationTaskModel, task_id)
             if current:
+                await session.refresh(current, with_for_update=True)
+                if current.status == "succeeded":
+                    return {"optimizationTaskId": task_id, "provider": "all-in-one" if settings.llm_channel == "all-in-one" else current.provider}
+                if (current.usage_data or {}).get("usageRecorded") and current.request_id == getattr(exc, "request_id", None):
+                    exc.usage_recorded = True
+                    raise
                 current.status, current.error = "failed", str(exc)[:2000]
+                current.model = getattr(exc, "model", model)
+                current.request_id = getattr(exc, "request_id", None) or current.request_id
+                current.usage_data = {**getattr(exc, "usage", {}), "usageRecorded": True}
+                # 失败状态、费用和调用日志同一事务提交，崩溃重放也只记一次费用。
+                add_token_usage(
+                    session,
+                    operation=f"{operation}_failed",
+                    provider="all-in-one" if settings.llm_channel == "all-in-one" else provider,
+                    model=current.model,
+                    usage=current.usage_data,
+                    user_id=user_id,
+                    generation_job_id=job.id,
+                    request_id=current.request_id,
+                )
                 add_llm_call_log(
                     session,
                     operation=operation,
                     provider="all-in-one" if settings.llm_channel == "all-in-one" else provider,
-                    model=model,
-                    usage={},
+                    model=current.model,
+                    usage=current.usage_data,
                     user_id=user_id,
                     generation_job_id=job.id,
+                    request_id=current.request_id,
+                    request_messages=getattr(exc, "request_messages", []),
+                    response_text=getattr(exc, "response_text", ""),
                     status="error",
                     error=current.error,
                     duration_ms=round((time.perf_counter() - started) * 1000),
                 )
                 await session.commit()
+                exc.usage_recorded = True
         raise

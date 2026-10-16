@@ -56,10 +56,25 @@ def is_tos_url(url: str) -> bool:
 
 def is_user_owned_tos_url(url: str, user_id: str) -> bool:
     """Accept only TOS objects stored below the authenticated user's prefix."""
-    if not is_tos_url(url):
+    try:
+        parsed = urlparse(url)
+        if not is_tos_url(url) or parsed.username or parsed.password or parsed.port not in (None, 443):
+            return False
+    except ValueError:
         return False
-    path = unquote(urlparse(url).path).replace("\\", "/")
-    return f"/users/{user_id}/" in f"/{path.lstrip('/')}"
+    path = parsed.path
+    # 校验与 HTTP 客户端必须使用相同路径；拒绝多次编码、分隔符和目录跳转歧义。
+    for _ in range(5):
+        decoded = unquote(path)
+        if decoded == path:
+            break
+        path = decoded
+    else:
+        return False
+    if "\\" in path or any(part in {".", ".."} for part in path.split("/")):
+        return False
+    prefixes = {"", settings.tos_reference_prefix.strip("/"), settings.tos_video_prefix.strip("/")}
+    return any(path.startswith(f"/{prefix + '/' if prefix else ''}users/{user_id}/") for prefix in prefixes)
 
 
 class TosStorage:

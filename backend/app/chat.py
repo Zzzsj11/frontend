@@ -14,7 +14,7 @@ from .config import settings
 from .database import session_factory
 from .jobs import Job, jobs
 from .llm_failover import choose_model, record_failure, record_success
-from .llm_policy import completion_options
+from .llm_policy import check_provider_text, completion_options
 from .model_gateway import AsyncOpenAI
 from .model_gateway import enabled as gateway_enabled
 from .models import ChatMessageModel, ChatSessionModel
@@ -234,6 +234,7 @@ class ChatManager:
                     if text:
                         chunks.append(text)
                         await append_chat_event(session.id, "assistant_delta", {"text": text})
+                check_provider_text("".join(chunks))
                 provider_completed = True
                 await record_success(model_used)
             answer = "".join(chunks)

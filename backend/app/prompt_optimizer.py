@@ -161,35 +161,100 @@ async def query_minimax(task_id: str, *, via_gateway: bool, agent_name: str = ""
     }
 
 
+class OptimizationCallError(RuntimeError):
+    """调用失败仍携带实际请求、响应和用量，交给工单账本持久化。"""
+
+    def __init__(self, cause: Exception, model: str, messages: list[dict], result: dict):
+        super().__init__(str(cause))
+        self.provider = "all-in-one"
+        self.model = model
+        self.usage = result.get("usage") or {}
+        self.request_id = result.get("requestId") or getattr(cause, "request_id", None)
+        self.request_messages = messages
+        self.response_text = result.get("prompt") or ""
+
+
+async def _job_snapshot(key: str, value: dict | None = None) -> dict | None:
+    """先持久化冻结输入，再调用供应商；恢复必须复用同一模型、内容和幂等键。"""
+    from sqlalchemy import select
+
+    from .database import session_factory
+    from .models import GenerationJobModel
+
+    job_id = model_gateway.current_job_id()
+    if not job_id:
+        return value
+    async with session_factory() as db:
+        query = select(GenerationJobModel).where(GenerationJobModel.id == job_id, GenerationJobModel.user_id == model_gateway.current_owner())
+        row = await db.scalar(query.with_for_update())
+        if row is None:
+            raise RuntimeError("提示词优化工单不存在或不属于当前用户")
+        stored = (row.request or {}).get(key)
+        if stored is None and value is not None:
+            row.request = {**(row.request or {}), key: value}
+            if key == "_optimizationRequest":
+                row.idempotency_key = value.get("idempotencyKey")
+            await db.commit()
+            stored = value
+        return stored
+
+
 async def _call_platform(*, prompt: str, duration: int, ratio: str, media: list[dict[str, Any]], agent_name: str, agent_run_id: str) -> dict[str, Any]:
     from .all_in_one import chat_client, upstream_model
     from .llm_failover import choose_model, record_failure, record_success
     from .llm_policy import check_provider_text, completion_options
     from .optimizer_media import content_parts
 
-    model = await choose_model(settings.llm_model)
-    if model != settings.llm_model and media:
-        # Text-only backup must not silently discard multimodal evidence.
-        raise RuntimeError("多参考优化主模型暂不可用，请稍后重试；不会将参考素材交给纯文本备用模型")
-    content = [{"type": "text", "text": SYSTEM_INSTRUCTION + "\n\n" + enrich_prompt(prompt, duration, ratio, media)}]
-    content.extend(await content_parts(media, model_gateway.current_owner()))
-    messages = [{"role": "user", "content": content}]
+    snapshot = await _job_snapshot("_optimizationRequest")
+    if snapshot is None:
+        model = await choose_model(settings.llm_model)
+        if model != settings.llm_model and media:
+            # Text-only backup must not silently discard multimodal evidence.
+            raise RuntimeError("多参考优化主模型暂不可用，请稍后重试；不会将参考素材交给纯文本备用模型")
+        content = [{"type": "text", "text": SYSTEM_INSTRUCTION + "\n\n" + enrich_prompt(prompt, duration, ratio, media)}]
+        content.extend(await content_parts(media, model_gateway.current_owner()))
+        snapshot = await _job_snapshot(
+            "_optimizationRequest",
+            {
+                "model": model,
+                "messages": [{"role": "user", "content": content}],
+                "options": completion_options(model, 7000),
+                "idempotencyKey": f"aio-{model_gateway.current_job_id()}:prompt-optimization:v1" if model_gateway.current_job_id() else None,
+            },
+        )
+    model, messages = snapshot["model"], snapshot["messages"]
     started = time.perf_counter()
+    cached = await _job_snapshot("_optimizationResponse")
+    result = cached or {}
     try:
-        async with chat_client(user_id=model_gateway.current_owner(), timeout=settings.prompt_optimizer_timeout) as client:
-            response = await client.chat.completions.create(
-                model=upstream_model(model), messages=messages, extra_headers=_agent_headers(agent_name, agent_run_id), **completion_options(model, 7000)
-            )
-        text = response.choices[0].message.content or ""
-        check_provider_text(text)
-    except Exception:
-        await record_failure(model)
-        raise
-    await record_success(model)
+        if cached is None:
+            job_id = model_gateway.current_job_id()
+            async with chat_client(
+                user_id=model_gateway.current_owner(),
+                timeout=settings.prompt_optimizer_timeout,
+                idempotency_key=snapshot.get("idempotencyKey") or (f"aio-{job_id}:prompt-optimization:v1" if job_id else None),
+            ) as client:
+                response = await client.chat.completions.create(
+                    model=upstream_model(model), messages=messages, extra_headers=_agent_headers(agent_name, agent_run_id), **snapshot["options"]
+                )
+            result = {
+                "prompt": response.choices[0].message.content or "" if response.choices else "",
+                "usage": response.usage.model_dump() if response.usage else {},
+                "requestId": response.id,
+            }
+            # 在内容校验、业务记录之前保存响应，崩溃恢复无需再次调用已完成请求。
+            result = await _job_snapshot("_optimizationResponse", result)
+        check_provider_text(result["prompt"])
+        if not result["prompt"].strip():
+            raise RuntimeError("文本模型未返回提示词")
+    except Exception as exc:
+        if cached is None:
+            await record_failure(model)
+        raise OptimizationCallError(exc, model, messages, result) from exc
+    if cached is None:
+        await record_success(model)
     return {
-        "prompt": text,
-        "usage": response.usage.model_dump() if response.usage else {},
-        "requestId": response.id,
+        **result,
         "durationMs": round((time.perf_counter() - started) * 1000),
         "requestSnapshot": messages,
         "provider": "all-in-one",
