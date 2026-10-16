@@ -12,6 +12,12 @@ class TemporaryLlmError(RuntimeError):
     pass
 
 
+class LlmContentPolicyError(RuntimeError):
+    """供应商明确拒绝输入，不应当作 JSON 损坏或服务故障再次调用。"""
+
+    pass
+
+
 def completion_options(model: str, max_tokens: int, temperature: float = 0.2) -> dict:
     model = model.removesuffix("-all-in-one")
     if model == "gemini-3.8-flash":
@@ -28,6 +34,10 @@ def check_provider_text(text: str) -> None:
     if len(stripped) > 1000 or stripped.startswith(("{", "[", "```")):
         return
     lower = stripped.lower()
+    if ("prompt contains sensitive words" in lower and "prohibited use policy" in lower) or lower.startswith(
+        ("the prompt could not be submitted", "your request was blocked due to safety", "prompt blocked due to safety")
+    ):
+        raise LlmContentPolicyError("文本模型内容审核未通过，请检查本镜描述后重试")
     if any(
         value in lower
         for value in (

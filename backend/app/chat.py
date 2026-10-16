@@ -14,7 +14,7 @@ from .config import settings
 from .database import session_factory
 from .jobs import Job, jobs
 from .llm_failover import choose_model, record_failure, record_success
-from .llm_policy import check_provider_text, completion_options
+from .llm_policy import LlmContentPolicyError, check_provider_text, completion_options
 from .model_gateway import AsyncOpenAI
 from .model_gateway import enabled as gateway_enabled
 from .models import ChatMessageModel, ChatSessionModel
@@ -269,7 +269,7 @@ class ChatManager:
                     await db.commit()
             await append_chat_event(session.id, "interrupted", {})
         except Exception as exc:
-            if provider_started and not provider_completed:
+            if provider_started and not provider_completed and not isinstance(exc, LlmContentPolicyError):
                 await record_failure(model_used)
             if not usage_recorded:
                 async with session_factory() as db:

@@ -11,7 +11,7 @@ from typing import Any
 from .config import settings
 from .error_logging import log_background_error
 from .llm_failover import choose_model, record_failure, record_success
-from .llm_policy import TemporaryLlmError, check_provider_text, completion_options, is_transient_error, outline_contract, retry_delay
+from .llm_policy import LlmContentPolicyError, TemporaryLlmError, check_provider_text, completion_options, is_transient_error, outline_contract, retry_delay
 from .media_constraints import normalize_video_duration
 from .model_gateway import AsyncOpenAI
 from .model_gateway import enabled as gateway_enabled
@@ -843,7 +843,8 @@ async def _call(
                 text = response.choices[0].message.content or ""
             check_provider_text(text)
         except Exception as exc:
-            await record_failure(model)
+            if not isinstance(exc, LlmContentPolicyError):
+                await record_failure(model)
             usage_records.append(
                 {
                     "operation": operation,
