@@ -69,11 +69,11 @@ defineEmits<{ click: [event: MouseEvent] }>()
   color: var(--primary);
 }
 .base-icon-btn.active:hover:not(:disabled) {
-  background: rgba(255, 90, 44, 0.14);
+  background: var(--palette-rgba-255-90-44-0-14);
 }
 .base-icon-btn.danger:hover:not(:disabled) {
   border-color: var(--danger);
-  background: rgba(238, 51, 51, 0.06);
+  background: var(--palette-rgba-238-51-51-0-06);
   color: var(--danger);
 }
 </style>

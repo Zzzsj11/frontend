@@ -271,7 +271,7 @@ const regenerate = async () => {
   display: flex;
   gap: 0;
   margin: 10px 20px 0;
-  border-bottom: 2px solid var(--border-light, #eee);
+  border-bottom: 2px solid var(--border-light, var(--border));
 }
 .outline-tabs button {
   border: none;
@@ -309,7 +309,7 @@ const regenerate = async () => {
   margin-bottom: 6px;
   padding: 12px 14px;
   border-radius: var(--radius-md);
-  background: #f8f5f0;
+  background: var(--palette-f8f5f0);
 }
 .global-visual h4 {
   margin: 0 0 8px;
@@ -339,7 +339,7 @@ const regenerate = async () => {
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: #fff;
+  background: var(--palette-ffffff);
 }
 .scene-index {
   display: grid;
@@ -376,7 +376,7 @@ const regenerate = async () => {
   margin-top: 7px;
   padding: 8px 10px;
   border-radius: var(--radius-sm);
-  background: #faf8f6;
+  background: var(--palette-faf8f6);
   font-size: 11px;
   line-height: 1.5;
   color: var(--text-secondary);
@@ -402,7 +402,7 @@ const regenerate = async () => {
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   background: var(--primary-light);
-  color: #a84d20;
+  color: var(--palette-a84d20);
   font-size: var(--font-sm);
   line-height: 1.6;
 }
@@ -421,7 +421,7 @@ const regenerate = async () => {
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: #fff;
+  background: var(--palette-ffffff);
 }
 .shot-index {
   display: grid;
@@ -458,8 +458,8 @@ const regenerate = async () => {
   color: var(--primary);
 }
 .shot-type.empty {
-  background: #eef3f5;
-  color: #62727a;
+  background: var(--palette-eef3f5);
+  color: var(--palette-62727a);
 }
 .duration-tag {
   padding: 2px 7px;
@@ -484,7 +484,7 @@ const regenerate = async () => {
   color: var(--text-secondary);
 }
 .roles {
-  color: #9b664b;
+  color: var(--palette-9b664b);
 }
 .failed-segments {
   margin: 12px 20px 0;
@@ -541,7 +541,7 @@ const regenerate = async () => {
   margin-top: 7px;
   padding: 8px 10px;
   border-radius: var(--radius-sm);
-  background: #faf8f6;
+  background: var(--palette-faf8f6);
   color: var(--text-secondary);
   font-size: 11px;
   line-height: 1.5;
@@ -570,12 +570,12 @@ const regenerate = async () => {
 .regenerate {
   border: 1px solid var(--primary-border);
   background: var(--primary-light);
-  color: #dc5c28;
+  color: var(--palette-dc5c28);
 }
 .close {
   border: 0;
   background: var(--primary);
-  color: #fff;
+  color: var(--palette-ffffff);
 }
 button:disabled {
   cursor: not-allowed;

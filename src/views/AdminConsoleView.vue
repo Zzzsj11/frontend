@@ -102,6 +102,9 @@ interface LlmDetail {
   requestId?: string
   createdAt: string
   error?: string
+  generationOrigin?: string
+  agentName?: string
+  agentRunId?: string
   requestMessages?: { role: string; content: string }[]
   responseText?: string
 }
@@ -223,7 +226,7 @@ const tabTitle = computed(
 const groupTitle = computed(
   () => NAV_GROUPS.value.find((g) => g.items.some((i) => i.key === tab.value))?.label ?? '',
 )
-const llmFilters = ref({ projectTaskId: '', operation: '', status: '' })
+const llmFilters = ref({ projectTaskId: '', operation: '', status: '', origin: '', agentRunId: '' })
 const llmDetail = ref<LlmDetail | null>(null),
   detailLoading = ref(false)
 const reqFilters = ref({ runId: '', path: '' })
@@ -261,6 +264,9 @@ const llmEndpoint = computed(() => {
     query.set('projectTaskId', llmFilters.value.projectTaskId.trim())
   if (llmFilters.value.operation.trim()) query.set('operation', llmFilters.value.operation.trim())
   if (llmFilters.value.status) query.set('status', llmFilters.value.status)
+  if (llmFilters.value.origin) query.set('origin', llmFilters.value.origin)
+  if (llmFilters.value.agentRunId.trim())
+    query.set('agentRunId', llmFilters.value.agentRunId.trim())
   query.set('limit', String(pageSize))
   query.set('offset', String(pageOffset.value))
   return `/admin/llm-calls?${query.toString()}`
@@ -834,6 +840,13 @@ onMounted(() => {
           <div v-if="tab === 'llm'" class="filters">
             <input v-model="llmFilters.projectTaskId" placeholder="projectTaskId 过滤" />
             <input v-model="llmFilters.operation" placeholder="operation 如 ass_scene_plan" />
+            <BaseSelect v-model="llmFilters.origin" aria-label="调用来源">
+              <option value="">全部来源</option>
+              <option value="business">正常业务</option>
+              <option value="agent_test">Agent 开发测试</option>
+              <option value="legacy_unknown">历史来源未知</option>
+            </BaseSelect>
+            <input v-model="llmFilters.agentRunId" placeholder="Agent 批次" />
             <BaseSelect v-model="llmFilters.status">
               <option value="">全部状态</option>
               <option value="ok">ok</option>
@@ -1020,6 +1033,16 @@ onMounted(() => {
             requestId: {{ llmDetail.requestId || '-' }} ·
             {{ formatChinaDateTime(llmDetail.createdAt) }}
           </p>
+          <p class="meta">
+            来源：{{
+              llmDetail.generationOrigin === 'agent_test'
+                ? 'Agent 开发测试'
+                : llmDetail.generationOrigin === 'business'
+                  ? '正常业务'
+                  : '历史来源未知'
+            }}
+            · {{ llmDetail.agentName || '-' }} · {{ llmDetail.agentRunId || '-' }}
+          </p>
           <p v-if="llmDetail.error" class="error">{{ llmDetail.error }}</p>
           <h3>请求消息（{{ llmDetail.requestMessages?.length || 0 }} 条）</h3>
           <pre v-for="(m, i) in llmDetail.requestMessages || []" :key="i" class="payload">
@@ -1033,9 +1056,9 @@ onMounted(() => {
 </template>
 <style scoped>
 .console {
-  --admin-bg: #f5f7fa;
-  --admin-surface: #fff;
-  --admin-border: #e4e7ec;
+  --admin-bg: var(--palette-f5f7fa);
+  --admin-surface: var(--palette-ffffff);
+  --admin-border: var(--palette-e4e7ec);
   height: 100%;
   min-height: 0;
   background: var(--admin-bg);
@@ -1062,7 +1085,7 @@ main {
   border: 0;
   border-radius: var(--radius-sm);
   background: var(--primary);
-  color: #fff;
+  color: var(--palette-ffffff);
   padding: 7px 14px;
   font-size: 13px;
   cursor: pointer;

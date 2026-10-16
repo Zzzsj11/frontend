@@ -431,10 +431,10 @@ const toggleFullscreen = () => {
   margin: 0;
   padding: 20px 16px 8px;
   text-align: center;
-  color: #fff;
+  color: var(--palette-ffffff);
   font-size: 15px;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85);
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.45));
+  text-shadow: 0 1px 4px var(--palette-rgba-0-0-0-0-85);
+  background: linear-gradient(transparent, var(--palette-rgba-0-0-0-0-45));
   pointer-events: none;
 }
 .preview-lyrics .lyric-line {
@@ -457,7 +457,7 @@ const toggleFullscreen = () => {
   right: 0;
   bottom: 0;
   height: 100px;
-  z-index: 2;
+  z-index: var(--z-local-raised);
 }
 /* 全屏悬浮控制条 */
 .fs-controls {
@@ -469,8 +469,8 @@ const toggleFullscreen = () => {
   align-items: center;
   gap: 14px;
   padding: 24px 20px 16px;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
-  z-index: 2;
+  background: linear-gradient(transparent, var(--palette-rgba-0-0-0-0-7));
+  z-index: var(--z-local-raised);
 }
 .fs-btn {
   border: none;
@@ -479,7 +479,7 @@ const toggleFullscreen = () => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: #fff;
+  color: var(--palette-ffffff);
   padding: 4px;
 }
 .fs-btn:hover {
@@ -487,12 +487,12 @@ const toggleFullscreen = () => {
 }
 .fs-time {
   font-size: 13px;
-  color: #fff;
+  color: var(--palette-ffffff);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 .fs-progress {
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--palette-rgba-255-255-255-0-3);
 }
 .controls {
   display: flex;
@@ -523,7 +523,7 @@ const toggleFullscreen = () => {
 .progress-bar {
   flex: 1;
   height: 4px;
-  background: #e5e5e5;
+  background: var(--palette-e5e5e5);
   border-radius: var(--radius-xs);
   position: relative;
   cursor: pointer;

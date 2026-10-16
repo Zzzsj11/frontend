@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { useAuthStore } from '../../src/stores/auth'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import GeneralStoryboardModal from '../../src/components/GeneralStoryboardModal.vue'
@@ -10,6 +11,13 @@ import * as confirmDialogModule from '../../src/composables/useConfirmDialog'
 describe('general storyboard defaults', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    useAuthStore().user = {
+      id: 'test-user',
+      username: 'test-user',
+      displayName: 'Test',
+      role: 'user',
+      mustChangePassword: false,
+    }
   })
 
   it('pins the shot-level default resolution to 480p', () => {

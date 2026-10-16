@@ -87,9 +87,14 @@ async def test_aggregate_reservations_spending_reallocation_and_retired_keys(ser
 @pytest.mark.asyncio
 async def test_beijing_month_boundary_preserves_reservations(service, monkeypatch):
     api, ctl, _, _ = service
+    credits = importlib.import_module("gateway.credits")
+    control_credits = importlib.import_module("control.credits")
+    clock = [datetime(2026, 9, 30, 15, 59, 30, tzinfo=timezone.utc)]
+    # 创建 Key 前固定两端财务时钟，不能从真实月份回拨后再次重置同一个月。
+    monkeypatch.setattr(credits, "now", lambda: clock[0])
+    monkeypatch.setattr(control_credits, "now", lambda: clock[0])
     uid, token, key = await user_key(api, ctl, monthly=20)
     await publish(ctl)
-    credits = importlib.import_module("gateway.credits")
     dbm = importlib.import_module("gateway.db")
     # A settled charge just before Beijing midnight belongs only to September.
     async with dbm.Session.begin() as db:
@@ -109,12 +114,11 @@ async def test_beijing_month_boundary_preserves_reservations(service, monkeypatc
                 created_at=datetime(2026, 9, 30, 15, 59, tzinfo=timezone.utc),
             )
         )
-    monkeypatch.setattr(credits, "now", lambda: datetime(2026, 9, 30, 15, 59, 30, tzinfo=timezone.utc))
     auth = {"Authorization": "Bearer " + token}
     assert (await api.get("/portal/me", headers=auth)).json()["quota"]["spent_points"] == "5.000000"
     response = await api.post("/v1/jobs", headers=headers(uid, key), json=body())
     assert response.status_code == 202, response.text
-    monkeypatch.setattr(credits, "now", lambda: datetime(2026, 9, 30, 16, 0, tzinfo=timezone.utc))
+    clock[0] = datetime(2026, 9, 30, 16, 0, tzinfo=timezone.utc)
     me = (await api.get("/portal/me", headers=auth)).json()
     assert me["quota"]["billing_month"] == "2026-10"
     assert me["quota"]["spent_points"] == "0.000000"

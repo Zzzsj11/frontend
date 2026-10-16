@@ -346,7 +346,7 @@ onBeforeUnmount(() => {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: #fff;
+  background: var(--palette-ffffff);
   cursor: default;
   transition:
     border-color 0.15s,
@@ -397,10 +397,10 @@ onBeforeUnmount(() => {
 }
 .script-line.selected {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(255, 90, 44, 0.12);
+  box-shadow: 0 0 0 2px var(--palette-rgba-255-90-44-0-12);
 }
 .drag-handle {
-  color: #bbb;
+  color: var(--palette-bbbbbb);
   cursor: grab;
   font-size: var(--font-md);
   user-select: none;
@@ -417,7 +417,7 @@ onBeforeUnmount(() => {
   height: 42px;
   border-radius: var(--radius-sm);
   overflow: hidden;
-  background: #f0f0f0;
+  background: var(--palette-f0f0f0);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -432,7 +432,7 @@ onBeforeUnmount(() => {
 .shot-thumb:hover {
   transform: translateY(-2px) scale(1.02);
   border-color: var(--primary);
-  box-shadow: 0 5px 14px rgba(255, 90, 44, 0.18);
+  box-shadow: 0 5px 14px var(--palette-rgba-255-90-44-0-18);
 }
 .shot-thumb img,
 .shot-thumb video {
@@ -448,7 +448,7 @@ onBeforeUnmount(() => {
 .thumb-loading {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--palette-rgba-0-0-0-0-45);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -461,11 +461,11 @@ onBeforeUnmount(() => {
   height: 16px;
   border-radius: 50%;
   background: var(--danger-active);
-  color: #fff;
+  color: var(--palette-ffffff);
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 1px 4px var(--palette-rgba-0-0-0-0-35);
 }
 .line-actions .gen-failed {
   border-color: var(--danger);
@@ -485,7 +485,7 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-sm);
   object-fit: contain;
   border: 1px solid var(--border);
-  box-shadow: 0 0 0 2px #fff;
+  box-shadow: 0 0 0 2px var(--palette-ffffff);
   transition:
     transform 0.15s,
     border-color 0.15s,
@@ -493,12 +493,12 @@ onBeforeUnmount(() => {
 }
 .dh-chip:hover {
   position: relative;
-  z-index: 2;
+  z-index: var(--z-local-raised);
   transform: translateY(-3px) scale(1.06);
   border-color: var(--primary);
   box-shadow:
-    0 0 0 2px #fff,
-    0 5px 12px rgba(255, 90, 44, 0.22);
+    0 0 0 2px var(--palette-ffffff),
+    0 5px 12px var(--palette-rgba-255-90-44-0-22);
 }
 .line-info {
   flex: 1;
@@ -566,8 +566,8 @@ onBeforeUnmount(() => {
 .segment-tag {
   padding: 2px 7px;
   border-radius: var(--radius-xs);
-  background: #f4ecff;
-  color: #7b5ac8;
+  background: var(--palette-f4ecff);
+  color: var(--palette-7b5ac8);
   font-size: 11px;
   font-weight: 600;
 }
@@ -604,7 +604,7 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-xs);
   color: var(--primary);
   background: var(--primary-light);
-  border: 1px solid rgba(255, 90, 44, 0.35);
+  border: 1px solid var(--palette-rgba-255-90-44-0-35);
   vertical-align: 1px;
 }
 .prompt {

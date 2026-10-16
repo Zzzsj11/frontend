@@ -63,7 +63,7 @@ async def image_download(
         human = await db.scalar(
             select(DigitalHumanModel.id).where(
                 DigitalHumanModel.deleted_at.is_(None),
-                or_(DigitalHumanModel.scope == "system", DigitalHumanModel.user_id == user.id),
+                DigitalHumanModel.scope == "system",
                 or_(DigitalHumanModel.avatar_url == src, DigitalHumanModel.avatar_thumbnail_url == src),
             )
         )

@@ -73,7 +73,7 @@ def route(channel: str) -> tuple[str, dict[str, str]]:
 async def run_with_context(job: Any, runner: Any) -> Any:
     snapshot = getattr(job, "request", None) or {}
     if not enabled():
-        if snapshot.get("_modelGateway") and job.provider_task_id:
+        if snapshot.get("_modelGateway"):
             raise RuntimeError("该工单属于模型网关；恢复前须保留 MODEL_GATEWAY_URL 配置")
         from .config import settings
 

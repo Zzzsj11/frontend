@@ -1,6 +1,6 @@
 # 本地开发
 
-准备 Node.js 22、Python 3.11+、Docker Desktop。复制后端环境模板并填写本地密钥，密钥不得提交。
+准备 Node.js 22、Python 3.12（与生产镜像一致）、Docker Desktop。复制后端环境模板并填写本地密钥，密钥不得提交。
 
 ```bash
 npm ci
@@ -10,7 +10,7 @@ make dev          # 等价于组合加载 local-build 覆盖后 docker compose u
 make preflight
 ```
 
-日常流程：从 `main` 创建 `codex/feature-*` 或 `codex/fix-*`；小步提交；修改数据库时生成 Alembic migration；提交前运行 `make preflight-lite`（跳过 Docker 构建，约 85s），推送发布前运行完整 `make preflight`；推送并创建 PR。`main` 应始终可部署。按改动范围选择更小验证集的分层策略见 [`TESTING.md`](TESTING.md#耗时与针对性验证本机实测)。
+日常流程：从 `main` 创建 `codex/feature-*` 或 `codex/fix-*`；小步提交；修改数据库时生成 Alembic migration；提交前运行 `make preflight-lite`（跳过 Docker 构建，缓存环境约 3 分钟），推送发布前运行完整 `make preflight`；推送并创建 PR。`main` 应始终可部署。按改动范围选择更小验证集的分层策略见 [`TESTING.md`](TESTING.md#耗时与针对性验证本机实测)。
 
 常用命令见根目录 `Makefile`。本地数据库和 Redis 端口仅用于开发；服务器测试环境的部署覆盖文件会移除端口映射。
 
@@ -28,6 +28,6 @@ make docker-build
 
 不要通过本任务修改 Docker Desktop 全局 registry mirror；全局设置会影响本机所有项目，且难以保证与生产构建隔离。
 
-## 数字人资产补扫
+## 数字人资产补注册已退役
 
-资产定时补扫仅在线上服务器运行，本机不配置 cron、launchd 或其他周期调度。2026-09-29 已移除本机每分钟执行 `docker exec ... ensure_asset_avatars.py` 的旧 crontab；开发初始化和部署操作不得重新安装。Docker 不可用时该入口可能累积客户端进程，容器内的文件锁无法保护尚未进入容器的调用。线上入口与规则见 [数字人资产链路](ASSET-AVATAR.md#5-cron-脚本部署详情)。
+所有环境均禁止配置或恢复 `ensure_asset_avatars.py`、`sync-digital-human-assets.sh` 的 cron、launchd 或其他周期任务。人物参考直接使用 TOS 原图。发布脚本会移除遗留调度。详见 [数字人资产链路](ASSET-AVATAR.md#5)。

@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 import { config as loadEnv } from 'dotenv'
 import { join } from 'node:path'
-import { targetBaseURL } from './e2e/env'
+import { isRemoteRunRequested, targetBaseURL } from './e2e/env'
 
 // 远程 e2e 凭据从 e2e/.env 读取（已 gitignore，模板见 e2e/.env.example）
 loadEnv({ path: join(process.cwd(), 'e2e', '.env'), quiet: true })
@@ -10,12 +10,7 @@ loadEnv({ path: join(process.cwd(), 'e2e', '.env'), quiet: true })
 // e2e/env.ts 的 targetBaseURL()（可用 PLAYWRIGHT_BASE_URL 覆盖），且不再本地起 dev server。
 // 曾经 remote-frontend 未设 PLAYWRIGHT_BASE_URL 时静默打到本地 preview，整轮“远程验收”
 // 实际没碰线上，login 404 才暴露。
-const remoteRun = !!(
-  process.env.REMOTE_FRONTEND_E2E ||
-  process.env.REMOTE_API_E2E ||
-  process.env.ADMIN_API_E2E ||
-  process.env.ADMIN_CONSOLE_E2E
-)
+const remoteRun = isRemoteRunRequested()
 
 export default defineConfig({
   testDir: './e2e',

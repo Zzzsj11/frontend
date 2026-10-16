@@ -506,7 +506,7 @@ test('无参考图时省略 images；生成等待中刷新从 mv:pending-dh 续�
   expect(mock.creates).toHaveLength(0)
   // 不预置 localStorage：必须由刚才的 UI 提交落下真实待恢复草稿。
   const draft = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem('mv:pending-dh') || 'null'),
+    JSON.parse(localStorage.getItem('mv:pending-dh:user-headshot') || 'null'),
   )
   expect(draft).toMatchObject({
     jobId: mock.jobs[0]!.id,
@@ -533,7 +533,9 @@ test('无参考图时省略 images；生成等待中刷新从 mv:pending-dh 续�
   await expect(card).toBeVisible({ timeout: 10_000 })
   await expectPortrait(card, mock.jobs[0]!.result.thumbnailUrls[0]!, false)
   await expect(restored.locator('.cast-label')).toHaveText('当前阵容（0）：')
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('mv:pending-dh'))).toBeNull()
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('mv:pending-dh:user-headshot')))
+    .toBeNull()
   expect(mock.creates).toHaveLength(1)
   await page.reload()
   await expect(page.getByRole('heading', { name: '视频编辑器' })).toBeVisible()
@@ -563,7 +565,9 @@ test('生成失败保留名称、分类、身份特征和参考预览，可原�
   await expect(library.getByRole('button', { name: '添加到资产库' })).toBeEnabled()
   await expect(cardNamed(library, '失败重试人物')).toHaveCount(0)
   await expect(library.locator('.cast-label')).toHaveText('当前阵容（0）：')
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('mv:pending-dh'))).toBeNull()
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('mv:pending-dh:user-headshot')))
+    .toBeNull()
   expect(mock.creates).toHaveLength(0)
   expect(mock.generations).toHaveLength(1)
   expectGeneration(mock.generations[0]!, '银发、椭圆脸', REFERENCE)

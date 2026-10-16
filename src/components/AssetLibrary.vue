@@ -600,7 +600,7 @@ const removeDh = async () => {
 }
 .btn-gen-dh:hover:not(:disabled) {
   background: var(--primary);
-  color: #fff;
+  color: var(--palette-ffffff);
 }
 .btn-gen-dh:disabled {
   opacity: 0.6;
@@ -611,7 +611,7 @@ const removeDh = async () => {
   align-items: center;
   gap: 6px;
   border: 1px solid var(--border-dark);
-  background: #fff;
+  background: var(--palette-ffffff);
   color: var(--text);
   border-radius: var(--radius-lg);
   padding: 6px 14px;
@@ -649,7 +649,7 @@ const removeDh = async () => {
   font-family: inherit;
   color: var(--text);
   outline: none;
-  background: #fff;
+  background: var(--palette-ffffff);
 }
 .gen-input:focus {
   border-color: var(--primary);
@@ -671,7 +671,7 @@ const removeDh = async () => {
   color: var(--text);
   outline: none;
   resize: vertical;
-  background: #fff;
+  background: var(--palette-ffffff);
 }
 .gen-desc:focus {
   border-color: var(--primary);
@@ -693,7 +693,7 @@ const removeDh = async () => {
   gap: 6px;
   border: none;
   background: var(--primary);
-  color: #fff;
+  color: var(--palette-ffffff);
   border-radius: var(--radius-sm);
   padding: 8px 18px;
   font-size: 13px;
@@ -723,7 +723,7 @@ const removeDh = async () => {
   aspect-ratio: 3 / 4;
   border: 1.5px dashed var(--primary);
   border-radius: var(--radius-sm);
-  background: #fff;
+  background: var(--palette-ffffff);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -763,8 +763,8 @@ const removeDh = async () => {
   height: 20px;
   border: none;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.62);
-  color: #fff;
+  background: var(--palette-rgba-0-0-0-0-62);
+  color: var(--palette-ffffff);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -840,7 +840,7 @@ const removeDh = async () => {
 .style-tab {
   border: 1px solid var(--border-dark);
   border-radius: var(--radius-lg);
-  background: #fff;
+  background: var(--palette-ffffff);
   color: var(--text);
   font-size: 13px;
   padding: 5px 14px;
@@ -854,7 +854,7 @@ const removeDh = async () => {
 .style-tab.active {
   border-color: var(--primary);
   background: var(--primary);
-  color: #fff;
+  color: var(--palette-ffffff);
 }
 .style-tab.managing {
   display: inline-flex;
@@ -877,7 +877,7 @@ const removeDh = async () => {
   color: var(--primary-active);
 }
 .style-tab.active .style-op:hover {
-  color: #fff;
+  color: var(--palette-ffffff);
 }
 .style-add,
 .style-manage {
@@ -897,7 +897,7 @@ const removeDh = async () => {
   display: inline-flex;
   padding: 0;
   border-color: var(--primary);
-  background: #fff;
+  background: var(--palette-ffffff);
 }
 .style-edit-input {
   width: 130px;
@@ -929,12 +929,12 @@ const removeDh = async () => {
   transition:
     border-color 0.15s,
     box-shadow 0.15s;
-  background: #fff;
+  background: var(--palette-ffffff);
   min-height: 200px;
 }
 .dh-card:hover {
-  border-color: rgba(255, 90, 44, 0.5);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  border-color: var(--palette-rgba-255-90-44-0-5);
+  box-shadow: 0 6px 18px var(--palette-rgba-0-0-0-0-08);
 }
 .dh-card.active {
   border-color: var(--primary);
@@ -956,9 +956,9 @@ const removeDh = async () => {
   position: absolute;
   top: 8px;
   right: 8px;
-  z-index: 2;
+  z-index: var(--z-local-raised);
   background: var(--primary);
-  color: #fff;
+  color: var(--palette-ffffff);
   font-size: 11px;
   padding: 3px 8px;
   border-radius: var(--radius-sm);
@@ -972,13 +972,17 @@ const removeDh = async () => {
   right: 0;
   bottom: 0;
   left: 0;
-  z-index: 1;
+  z-index: var(--z-local);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
   padding: 16px 8px 8px;
-  background: linear-gradient(to top, rgba(12, 12, 15, 0.82), rgba(12, 12, 15, 0));
+  background: linear-gradient(
+    to top,
+    var(--palette-rgba-12-12-15-0-82),
+    var(--palette-rgba-12-12-15-0)
+  );
   transform: translateY(100%);
   transition: transform 0.18s ease;
 }
@@ -997,7 +1001,7 @@ const removeDh = async () => {
   gap: 4px;
   border: none;
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--palette-rgba-255-255-255-0-92);
   color: var(--text);
   font-size: var(--font-sm);
   padding: 6px 14px;
@@ -1008,24 +1012,24 @@ const removeDh = async () => {
     background 0.15s;
 }
 .dh-action:hover {
-  background: #fff;
+  background: var(--palette-ffffff);
   color: var(--primary);
 }
 .dh-action.primary {
   background: var(--primary);
-  color: #fff;
+  color: var(--palette-ffffff);
 }
 .dh-action.primary:hover {
   background: var(--primary-hover);
-  color: #fff;
+  color: var(--palette-ffffff);
 }
 .dh-action.danger {
   background: var(--danger);
-  color: #fff;
+  color: var(--palette-ffffff);
 }
 .dh-action.danger:hover {
   background: var(--danger-active);
-  color: #fff;
+  color: var(--palette-ffffff);
 }
 .dh-action-row {
   display: flex;
@@ -1039,12 +1043,12 @@ const removeDh = async () => {
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   background: var(--primary-light);
-  color: #a85d29;
+  color: var(--palette-a85d29);
   font-size: var(--font-sm);
 }
 .edit-form :disabled {
-  background: #f5f3f1;
-  color: #887d74;
+  background: var(--palette-f5f3f1);
+  color: var(--palette-887d74);
   cursor: not-allowed;
 }
 .dh-info {
@@ -1103,8 +1107,8 @@ const removeDh = async () => {
 .edit-regen-mask {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
+  background: var(--palette-rgba-0-0-0-0-55);
+  color: var(--palette-ffffff);
   font-size: var(--font-sm);
   display: flex;
   flex-direction: column;
@@ -1150,7 +1154,7 @@ const removeDh = async () => {
   gap: 6px;
   margin-right: auto;
   border: 1px solid var(--primary-active);
-  background: #fff;
+  background: var(--palette-ffffff);
   color: var(--primary-active);
   border-radius: var(--radius-sm);
   padding: 7px 14px;
@@ -1160,7 +1164,7 @@ const removeDh = async () => {
 }
 .edit-delete:hover:not(:disabled) {
   background: var(--primary-active);
-  color: #fff;
+  color: var(--palette-ffffff);
 }
 .edit-delete:disabled {
   opacity: 0.5;
@@ -1185,7 +1189,7 @@ const removeDh = async () => {
   align-items: center;
   gap: 6px;
   border: 1px solid var(--border-dark);
-  background: #fff;
+  background: var(--palette-ffffff);
   color: var(--text);
   border-radius: var(--radius-sm);
   padding: 7px 14px;
@@ -1205,7 +1209,7 @@ const removeDh = async () => {
 }
 .edit-regen:hover:not(:disabled) {
   background: var(--primary);
-  color: #fff;
+  color: var(--palette-ffffff);
 }
 .edit-regen:disabled {
   opacity: 0.55;
@@ -1214,7 +1218,7 @@ const removeDh = async () => {
 .edit-save {
   border: none;
   background: var(--primary);
-  color: #fff;
+  color: var(--palette-ffffff);
   border-radius: var(--radius-sm);
   padding: 8px 22px;
   font-size: 13px;

@@ -16,3 +16,12 @@ model-service
 output
 .codex-build
 .codex-finalizer
+**/.runtime_secrets.env
+**/.postgres_password
+backups
+logs
+.playwright-cli
+test-results
+playwright-report
+
+.deployment

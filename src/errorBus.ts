@@ -56,6 +56,8 @@ export class ApiError extends Error {
   }
 }
 
+const reportedErrors = new WeakSet<ApiError>()
+
 export function reportApiError(error: unknown, fallback = '请求失败'): ApiError {
   const localMessage = error instanceof Error ? error.message : ''
   const isBrowserNetworkError =
@@ -71,6 +73,8 @@ export function reportApiError(error: unknown, fallback = '请求失败'): ApiEr
               ? fallback
               : localMessage || fallback,
         )
+  if (reportedErrors.has(value)) return value
+  reportedErrors.add(value)
   errorBus.show({
     title: value.status && value.status >= 500 ? '服务异常' : '操作未完成',
     message: value.message,

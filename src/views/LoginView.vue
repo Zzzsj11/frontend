@@ -41,7 +41,7 @@ const submit = async () => {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  background: radial-gradient(circle at top, var(--primary-light), #f5f6fa 55%);
+  background: radial-gradient(circle at top, var(--primary-light), var(--preview-text) 55%);
 }
 .login-card {
   width: 360px;
@@ -50,8 +50,8 @@ const submit = async () => {
   gap: 16px;
   padding: 34px;
   border-radius: var(--radius-pill);
-  background: #fff;
-  box-shadow: 0 18px 60px rgba(40, 30, 20, 0.14);
+  background: var(--palette-ffffff);
+  box-shadow: 0 18px 60px var(--palette-rgba-40-30-20-0-14);
 }
 h1 {
   margin: 0;
@@ -79,7 +79,7 @@ button {
   border: 0;
   border-radius: var(--radius-pill);
   background: var(--primary-hover);
-  color: #fff;
+  color: var(--palette-ffffff);
   font-weight: 700;
   cursor: pointer;
 }

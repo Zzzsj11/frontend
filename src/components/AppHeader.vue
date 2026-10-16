@@ -16,9 +16,7 @@ const allInOneTitle = computed(() => {
     return credits?.message?.replace(/all in one/gi, '平台') || '点击刷新平台积分'
   return `当前 Key ${credits.keyMasked || '--'} · 月额度 ${credits.monthlyPoints || '--'} 积分 · 已用 ${credits.spentPoints || '--'} · 预占 ${credits.reservedPoints || '--'} · 点击刷新`
 })
-const hasAdminAccess = computed(
-  () => auth.user?.isSuperAdmin || Boolean(auth.user?.permissions?.length),
-)
+const hasAdminAccess = computed(() => auth.canAccessAdmin)
 const logout = async () => {
   menuOpen.value = false
   await auth.logout()
@@ -118,7 +116,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .app-header {
   position: relative;
-  z-index: 600;
+  z-index: var(--z-library-controls);
   display: flex;
   flex: 0 0 auto;
   align-items: center;
@@ -126,19 +124,23 @@ onBeforeUnmount(() => {
   height: 58px;
   margin: 10px 14px 0;
   padding: 0 12px 0 10px;
-  border: 1px solid #eaded4;
+  border: 1px solid var(--palette-eaded4);
   border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(255, 248, 242, 0.96));
+  background: linear-gradient(
+    180deg,
+    var(--palette-rgba-255-255-255-0-99),
+    var(--palette-rgba-255-248-242-0-96)
+  );
   box-shadow:
-    0 8px 24px rgba(91, 64, 42, 0.07),
-    inset 0 1px 0 #fff;
+    0 8px 24px var(--palette-rgba-91-64-42-0-07),
+    inset 0 1px 0 var(--palette-ffffff);
 }
 .brand {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: 10px;
-  color: #201c19;
+  color: var(--palette-201c19);
   text-decoration: none;
 }
 .brand-mark {
@@ -148,10 +150,10 @@ onBeforeUnmount(() => {
   place-items: center;
   border-radius: var(--radius-md);
   background: var(--primary-gradient);
-  color: #fff;
+  color: var(--palette-ffffff);
   font-size: 20px;
   font-weight: 700;
-  box-shadow: 0 5px 12px rgba(255, 100, 39, 0.2);
+  box-shadow: 0 5px 12px var(--palette-rgba-255-100-39-0-2);
 }
 .brand-name {
   font-size: 16px;
@@ -174,11 +176,11 @@ onBeforeUnmount(() => {
 .balance-pill,
 .user-trigger {
   height: 38px;
-  border: 1px solid #ebded4;
+  border: 1px solid var(--palette-ebded4);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: inset 0 1px 0 #fff;
-  color: #4d4239;
+  background: var(--palette-rgba-255-255-255-0-92);
+  box-shadow: inset 0 1px 0 var(--palette-ffffff);
+  color: var(--palette-4d4239);
   cursor: pointer;
 }
 .balance-pill {
@@ -190,8 +192,8 @@ onBeforeUnmount(() => {
 }
 .balance-pill:hover,
 .user-trigger:hover {
-  border-color: #f0b28f;
-  background: #fff;
+  border-color: var(--palette-f0b28f);
+  background: var(--palette-ffffff);
 }
 .balance-pill.loading {
   opacity: 0.65;
@@ -221,8 +223,8 @@ onBeforeUnmount(() => {
 }
 .balance-key {
   padding-left: 7px;
-  border-left: 1px solid #f0e4d9;
-  color: #a09186;
+  border-left: 1px solid var(--palette-f0e4d9);
+  color: var(--palette-a09186);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -252,14 +254,14 @@ onBeforeUnmount(() => {
   place-items: center;
   border-radius: 50%;
   background: var(--primary-gradient);
-  color: #fff;
+  color: var(--palette-ffffff);
   font-size: var(--font-sm);
   font-weight: 700;
-  box-shadow: 0 3px 9px rgba(255, 94, 36, 0.18);
+  box-shadow: 0 3px 9px var(--palette-rgba-255-94-36-0-18);
 }
 .chevron {
   margin-right: 2px;
-  color: #a08775;
+  color: var(--palette-a08775);
   font-size: 13px;
   transition: transform 0.15s;
 }
@@ -274,9 +276,9 @@ onBeforeUnmount(() => {
   width: 190px;
   flex-direction: column;
   padding: 8px;
-  border: 1px solid #eadfd6;
+  border: 1px solid var(--palette-eadfd6);
   border-radius: var(--radius-lg);
-  background: #fff;
+  background: var(--palette-ffffff);
   box-shadow: var(--shadow-dropdown);
 }
 .user-summary {
@@ -285,13 +287,13 @@ onBeforeUnmount(() => {
   gap: 2px;
   margin: 0 4px 6px;
   padding: 7px 7px 10px;
-  border-bottom: 1px solid #f1e9e3;
+  border-bottom: 1px solid var(--palette-f1e9e3);
 }
 .user-summary strong {
   font-size: 13px;
 }
 .user-summary span {
-  color: #a09186;
+  color: var(--palette-a09186);
   font-size: 11px;
 }
 .user-dropdown a,
@@ -300,7 +302,7 @@ onBeforeUnmount(() => {
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: #4a4038;
+  color: var(--palette-4a4038);
   text-align: left;
   text-decoration: none;
   font: inherit;
@@ -313,7 +315,7 @@ onBeforeUnmount(() => {
   color: var(--primary);
 }
 .logout {
-  color: #d64b3f;
+  color: var(--palette-d64b3f);
 }
 .password-warning {
   margin: 4px;

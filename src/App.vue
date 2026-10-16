@@ -90,7 +90,7 @@ onBeforeUnmount(stopSidebarResize)
 }
 .sidebar-resizer {
   position: absolute;
-  z-index: 20;
+  z-index: var(--z-sticky);
   top: 14px;
   bottom: 14px;
   left: calc(14px + var(--sidebar-width, 232px));

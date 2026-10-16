@@ -226,7 +226,7 @@ npm run test:admin        # 管理后台 e2e（远程 API 契约 + 控制台 UI�
 cd backend && .venv/bin/pytest -q   # 后端测试
 ```
 
-日常提交前跑 `make preflight-lite`（约 70s，跳过 Docker 构建）；发布前跑完整 `make preflight`（约 90s）。按改动范围选择最小验证集的耗时矩阵见 [`docs/TESTING.md`](docs/TESTING.md)。
+日常提交前跑 `make preflight-lite`（跳过 Docker 构建，缓存环境约 3 分钟）；发布前跑完整 `make preflight`（缓存环境约 3–5 分钟；首次下载基础镜像和系统依赖可能更久）。按改动范围选择最小验证集的耗时矩阵见 [`docs/TESTING.md`](docs/TESTING.md)。
 
 真实 ASS + 通用分镜测试会调用付费模型和媒体供应商，必须显式开启：
 

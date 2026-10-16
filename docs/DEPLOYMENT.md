@@ -33,8 +33,8 @@ cp backend/.env.example backend/.env
 填写 `backend/.env`，并按项目现有供应商配置准备 `backend/.provider_config.py`。这两个文件均被 Git 忽略。然后运行：
 
 ```bash
-docker compose up -d --build
-docker compose ps
+make dev
+docker compose -f docker-compose.yml -f docker-compose.local-build.yml ps
 curl -fsS http://127.0.0.1:5173/api/health  # 对外仅返回 {"ok":true}
 ```
 
@@ -233,7 +233,7 @@ python3 scripts/migrate-runtime-secrets.py
 scripts/validate-secret-layout.sh
 ```
 
-脚本会把 JWT、数据库密码、模型 Key 和 TOS 凭据集中写入 `backend/.runtime_secrets.env`，把数据库密码单独写入 `backend/.postgres_password`，两者权限均为 `600`；随后从旧 `.env` 文件中移除敏感项。容器只读挂载 Secret，Docker metadata 中只保留空占位或 Secret 路径。轮换时修改 Secret 文件后滚动重建 backend 和 workers，禁止在命令行参数、聊天或日志中传值。
+脚本会把 JWT、数据库密码、模型 Key 和 TOS 凭据集中写入 `backend/.runtime_secrets.env`，把数据库密码单独写入 `backend/.postgres_password`，两者权限均为 `600`；backend/worker 运行 UID/GID 为 10001，发布脚本会把 runtime secret 属主设为 10001，数据库 password secret 保留数据库服务所需的宿主权限；随后从旧 `.env` 文件中移除敏感项。容器只读挂载 Secret，Docker metadata 中只保留空占位或 Secret 路径。轮换时修改 Secret 文件后滚动重建 backend 和 workers，禁止在命令行参数、聊天或日志中传值。
 
 启用单机Worker拆分时，在服务器 `.env.production` 增加：
 
@@ -264,13 +264,13 @@ WORKER_STALE_SECONDS=180
 
 `worker-image`、`worker-media`（仅视频）、`worker-export`、`worker-chat` 与 `worker-storyboard` 必须和 backend 使用同一个版本化后端镜像。图片和视频使用独立并发池，避免长视频轮询占满图片执行槽。12 vCPU / 8 GiB 的实测环境以图片32、视频32起步；供应商视频并发上限为200，若 429、失败率、数据库连接数和 P95 轮询延迟均稳定，可依次把视频提升到64、96。导出 Worker 建议3并发，每个任务内部最多20路流式下载；4核测试机建议图片8、视频8、导出1。分镜编排并发建议2；不要把 `JOB_EXECUTION_MODE` 切为 `worker` 却遗漏 `COMPOSE_PROFILES=workers`，否则新任务只会排队而无人领取。
 
-统一供应商配置启用 `AIGC_TOKEN` 时，聊天地址和默认文本模型必须来自同一个 `runtime_secrets` 配置组。任何核验命令都不得打印 Token。
+生产仅使用 `ALL_IN_ONE_*` 配置；旧 `AIGC_TOKEN` 与其他直连渠道配置在发布时清除。任何核验命令都不得打印 Token。
 
-当前测试服务器安全组/防火墙只需对验收人员开放 SSH `22/tcp` 和 Web `80/tcp`。后端 `8000` 只绑定回环地址，PostgreSQL/Redis 在服务器部署覆盖中不映射宿主机端口。
+当前测试服务器安全组/防火墙对验收人员开放 SSH `22/tcp`，Web `80/tcp` 用于跳转，`443/tcp` 用于 HTTPS。后端 `8000` 只绑定回环地址，PostgreSQL/Redis 在服务器部署覆盖中不映射宿主机端口。
 
 ## 5. 每次发布的标准流程
 
-### 5.0 可选正式域名 HTTPS
+### 5.0 生产 HTTPS 前置条件
 
 域名解析和证书就绪后，在服务器准备只读证书目录，文件名固定为 `fullchain.pem`、`privkey.pem`。发布环境设置 `TLS_DOMAIN`、`TLS_CERT_DIR`，使用：
 
@@ -280,7 +280,7 @@ TLS_CERT_DIR=/etc/letsencrypt/live/example.com \
 DEPLOY_TLS=1 DEPLOY_ENV=production ./scripts/deploy-local-images.sh
 ```
 
-部署脚本会校验证书文件，并组合 `docker-compose.tls.yml`：80 自动 308 跳转、443 仅启用 TLS 1.2/1.3、响应带 HSTS，后端 Refresh Cookie 自动启用 Secure。证书续期后需重建 frontend 使 Nginx 重新读取文件。没有 DNS 与证书控制权时禁止用自签证书冒充完成。
+部署脚本会校验证书文件，并组合 `docker-compose.tls.yml`：80 自动 308 跳转、443 仅启用 TLS 1.2/1.3、响应带 HSTS，后端 Refresh Cookie 自动启用 Secure，发布准备同时更新共享 runtime 配置，Worker 可正常启动。生产应用禁止在 Secure 未开启时启动；当前仍为 HTTP 的服务器测试环境必须先完成域名和证书配置。发布会验证证书链、域名和密钥匹配，解引用复制证书到忽略目录后只读挂载，并在切换前执行 nginx -t；续期后再次发布会平滑 reload。成功后保存非敏感 TLS 配置，后续普通发布和回滚默认沿用，避免意外退回 HTTP。没有 DNS 与证书控制权时禁止用自签证书冒充完成。
 
 ### 5.1 本地侧
 

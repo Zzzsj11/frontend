@@ -713,7 +713,7 @@ describe('digital human generation as headshots', () => {
     const imageApi = await import('../../src/api/imageGen')
     const store = useProjectStore()
     localStorage.setItem(
-      'mv:pending-dh',
+      'mv:pending-dh:anonymous',
       JSON.stringify({
         mode: 'uploaded',
         jobId: 'job-pending',
@@ -749,7 +749,7 @@ describe('digital human generation as headshots', () => {
       }),
     )
     expect(store.digitalHumans.map((h) => h.id)).toEqual(['restored'])
-    expect(localStorage.getItem('mv:pending-dh')).toBeNull()
+    expect(localStorage.getItem('mv:pending-dh:anonymous')).toBeNull()
     expect(store.dhGenerating).toBe(false)
   })
 
@@ -826,7 +826,7 @@ describe('digital human generation as headshots', () => {
     const dhCreation = calls.find((call) => call.url === '/api/digital-humans')
     expect(String(dhCreation!.body?.avatar_prompt)).toContain('单张正面头肩大头照')
     // 任务创建后留了恢复草稿，完成后又清理掉
-    expect(localStorage.getItem('mv:pending-dh')).toBeNull()
+    expect(localStorage.getItem('mv:pending-dh:anonymous')).toBeNull()
   })
 
   it('omits images without a user reference even if system humans are loaded', async () => {

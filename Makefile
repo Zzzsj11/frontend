@@ -1,12 +1,15 @@
 SHELL := /bin/bash
-.PHONY: setup dev stop lint lint-frontend lint-backend test test-backend test-frontend test-e2e smoke smoke-backend smoke-frontend smoke-real migration-check build docker-build preflight preflight-lite remote-test
+.PHONY: lock-backend setup dev stop lint lint-frontend lint-backend test test-backend test-frontend test-e2e smoke smoke-backend smoke-frontend smoke-real migration-check build docker-build preflight preflight-lite remote-test
+lock-backend:
+	backend/.venv/bin/pip-compile --no-emit-index-url --no-emit-trusted-host --output-file backend/requirements.lock backend/requirements.txt
 setup:
+	python3 -m venv backend/.venv
 	npm ci
 	cd backend && .venv/bin/pip install -r requirements-dev.txt
 dev:
 	docker compose -f docker-compose.yml -f docker-compose.local-build.yml up -d
 stop:
-	docker compose down
+	docker compose -f docker-compose.yml -f docker-compose.local-build.yml --profile workers down
 lint: lint-frontend lint-backend
 lint-frontend:
 	npm run format:check

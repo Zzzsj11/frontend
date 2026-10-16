@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
-from datetime import timedelta
+from datetime import timedelta, timezone
 from typing import Annotated
 
 import jwt
@@ -76,6 +76,7 @@ async def issue_tokens(user: UserModel, request: Request, response: Response) ->
                 id=f"refresh-{uuid.uuid4().hex}",
                 user_id=user.id,
                 token_hash=_token_hash(raw_refresh),
+                family_id=getattr(user, "_refresh_family_id", None) or uuid.uuid4().hex,
                 expires_at=now + timedelta(days=settings.refresh_token_days),
                 user_agent=request.headers.get("user-agent"),
                 ip_address=request.client.host if request.client else None,
@@ -128,6 +129,11 @@ async def require_user(
     set_owner(user.id)
     request.state.user_id = user.id
     await attach_admin_access(session, user)
+    from .agent_attribution import current_agent_attribution
+
+    if current_agent_attribution()[0] == "agent_test" and settings.app_env == "production":
+        if not is_super_admin(user) and user.username not in settings.agent_test_usernames:
+            raise HTTPException(403, "当前账号未获授权执行 Agent 开发测试")
     return user
 
 
@@ -150,23 +156,46 @@ async def rotate_refresh(raw_token: str | None) -> UserModel | None:
         return None
     now = utcnow()
     async with session_factory() as session:
-        result = await session.execute(
-            select(RefreshTokenModel).where(
+        token = await session.scalar(
+            select(RefreshTokenModel)
+            .where(
                 RefreshTokenModel.token_hash == _token_hash(raw_token),
-                RefreshTokenModel.deleted_at.is_(None),
-                RefreshTokenModel.revoked_at.is_(None),
                 RefreshTokenModel.expires_at > now,
             )
+            .with_for_update()
         )
-        token = result.scalar_one_or_none()
         if not token:
             return None
+        family_id = token.family_id or token.id
+        user = await session.get(UserModel, token.user_id)
+        if token.revoked_at is not None or token.deleted_at is not None:
+            revoked = token.revoked_at or token.deleted_at
+            if revoked.tzinfo is None:
+                revoked = revoked.replace(tzinfo=timezone.utc)
+            # 多个页签可能同时刷新，短窗口重复仅拒绝；超过窗口按已轮换凭证重用处理。
+            if (now - revoked).total_seconds() >= 5:
+                affected = await session.execute(
+                    update(RefreshTokenModel)
+                    .where(
+                        RefreshTokenModel.user_id == token.user_id,
+                        RefreshTokenModel.family_id == family_id,
+                        RefreshTokenModel.revoked_at.is_(None),
+                        RefreshTokenModel.deleted_at.is_(None),
+                    )
+                    .values(revoked_at=now, deleted_at=now, updated_at=now)
+                    .returning(RefreshTokenModel.id)
+                )
+                if affected.first() and user:
+                    user.auth_version += 1
+                await session.commit()
+            return None
+        token.family_id = family_id
         token.revoked_at = now
         token.deleted_at = now
-        user = await session.get(UserModel, token.user_id)
         await session.commit()
         if not user or user.deleted_at is not None or user.status != "active":
             return None
+        user._refresh_family_id = family_id
         return user
 
 

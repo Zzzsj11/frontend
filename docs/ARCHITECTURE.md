@@ -55,7 +55,10 @@ ASS 子项目关联歌曲音频后，可通过 `/api/tasks/{id}/video-exports` �
 
 子项目视频模型统一修改：视频编辑器顶部模型入口覆盖 ASS、定制通用、随机通用。`POST /api/tasks/{task_id}/video-model` 先预览能力适配，再携带预览摘要原子保存默认模型与全部活动分镜配置；开放目录中的 Seedance、Wan、MiniMax、Veo、Grok、Gemini 六个系列。排队/生成中的视频及大纲任务阻止修改，过期预览与旧页签生成请求返回 409。原素材、提示词与时间轴保留，手动新增分镜继承修改后的默认配置。
 
-
 2026-10-15 服务收口：生产只保留 All in one 模型调用。文本、大纲、逐镜提示词默认 Gemini 3.8 Flash，连续五次供应商失败后切换豆包 Seed 2.1 Pro，计数冷却两小时；图片默认 Nano Banana 2.1、备用 Seedream Pro，视频为平台 12 模型。提示词优化使用同一平台文本模型，视频本地提取首/中/尾三帧并转换音轨为 16kHz 单声道 PCM WAV，音视频参考最长 15 秒；不调用已退役的 MiniMax 专用优化接口。多参考优化主模型不可用时明确失败，不丢弃素材套用纯文本备用模型。
 
 旧渠道模型/供应商软删除；旧余额和旧模型实验接口返回 410；登录和恢复会话只刷新平台积分。人物创建和更新使用 TOS 原图，不再注册英和素材，线上补扫 cron 在版本发布后移除。旧请求/响应解析仅用于历史记录与隔离单元测试，不恢复旧服务。媒体存储仍用 TOS，合并导出仍由本系统执行。
+
+## 项目前端状态的职责边界
+
+`src/stores/project.ts` 保留唯一的公开 Pinia 工作区接口及 state/getters；actions 按职责放在 `src/stores/project/`：workspace、storyboard、outline、lines、characters、creation、media、export、player。各模块通过 `contracts.ts` 的显式上下文协作，避免循环推断和隐式全局状态；`shared.ts` 仅保留共享常量、待恢复工单集合及纯工具。播放器时钟变量归 player 模块。所有文件均小于 500 行，调用方无需更换 store，任务切换和登出仍统一取消 watcher。

@@ -22,7 +22,7 @@ def quota_date() -> date:
     return datetime.now(timezone).date()
 
 
-async def consume_daily_quota(db: AsyncSession, *, user_id: str, category: str, limit: int | None = None) -> int:
+async def consume_daily_quota(db: AsyncSession, *, user_id: str, category: str, limit: int | None = None, commit: bool = True) -> int:
     """Atomically consume one accepted model call from a user's natural-day quota."""
     if category not in QUOTA_LABELS:
         raise ValueError(f"未知限额分类：{category}")
@@ -64,5 +64,6 @@ async def consume_daily_quota(db: AsyncSession, *, user_id: str, category: str, 
     if consumed is None:
         await db.rollback()
         raise HTTPException(429, f"今日{QUOTA_LABELS[category]}调用量已达到上限（{limit}次），请明日再试")
-    await db.commit()
+    if commit:
+        await db.commit()
     return int(consumed)

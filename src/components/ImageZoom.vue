@@ -52,7 +52,7 @@ const show = () =>
   position: absolute;
   right: 5px;
   top: 5px;
-  z-index: 5;
+  z-index: var(--z-local-controls);
   display: grid;
   width: 26px;
   height: 26px;

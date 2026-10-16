@@ -37,7 +37,7 @@ npm run test:admin        # 管理后台 e2e（API 契约 + 控制台 UI）
 
 - 后端完整用户旅程：建项目 → 上传 → ASS 大纲/逐镜提示词 → 场景图/视频工单 → 用量 → 素材导出 → 对话；供应商与存储使用测试替身。
 - 后端关键边界：用户私有数据隔离、无人物通用分镜、普通用户管理权限与模型选项。
-- 浏览器旅程：登录 → ASS 上传 → 分镜可编辑 → 通用/随机/创意入口，并验证 GPT Image 2.5「精细 / 快速」均可选择。
+- 浏览器旅程：登录 → ASS 上传 → 分镜可编辑 → 通用/随机/创意入口，并验证 Nano Banana 2.1 / Seedream Pro均可选择。
 
 它不替代 `make preflight-lite` 或发布前 `make preflight`，也不验证 PostgreSQL、Redis、Worker、TOS 和真实供应商。涉及供应商、模型请求格式、异步任务或部署的大调整，在 `make smoke` 通过后再运行低成本真实冒烟：
 
@@ -45,20 +45,20 @@ npm run test:admin        # 管理后台 e2e（API 契约 + 控制台 UI）
 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5173 make smoke-real
 ```
 
-真实冒烟会明确检查目标地址，未设置 `PLAYWRIGHT_BASE_URL` 或 `REMOTE_API_BASE_URL` 时拒绝启动。它用一条 5 秒通用空镜验证真实文本提示词、GPT Image 2.5 快速模型、视频、播放器与素材导出；ASS 主流程由无费用集成冒烟覆盖，完整真实 E2E 仍可单独执行 ASS 阶段。所有请求自动携带本次唯一的 `X-Test-Run-Id`、`X-Agent-Name: code-agent`、`X-Agent-Run-Id`，会产生真实费用。
+真实冒烟会明确检查目标地址，未设置 `PLAYWRIGHT_BASE_URL` 或 `REMOTE_API_BASE_URL` 时拒绝启动。它用一条 5 秒通用空镜验证真实文本提示词、当前默认图片模型、视频、播放器与素材导出；ASS 主流程由无费用集成冒烟覆盖，完整真实 E2E 仍可单独执行 ASS 阶段。所有请求自动携带本次唯一的 `X-Test-Run-Id`、`X-Agent-Name: code-agent`、`X-Agent-Run-Id`，会产生真实费用。
 
-## 耗时与针对性验证（本机实测）
+## 耗时与针对性验证
 
-`make preflight` 全量约 3 分钟，各阶段实测：
+2026-10-16 扩展后的测试规模已超过 630 条后端和 250 条前端；计数以本次运行输出为准。缓存环境的 `make preflight-lite` 约 3 分钟，完整 `make preflight` 约 3–5 分钟。首次下载基础镜像、字体和媒体处理依赖会额外增加十余分钟，不能沿用早期百余条测试时的 70–90 秒估算。
 
-| 阶段            | 耗时 | 说明                                                   |
-| --------------- | ---- | ------------------------------------------------------ |
-| lint            | 11s  | 前端 prettier+eslint、后端 ruff                        |
-| migration-check | 3s   | Alembic 迁移一致性                                     |
-| test-backend    | 49s  | pytest 143 用例（纯执行 31s）+ coverage 卡口（约 18s） |
-| test-frontend   | 14s  | vitest 118 用例，启动/transform 占大头                 |
-| build           | 8s   | vue-tsc + vite                                         |
-| docker-build    | 87s  | 缓存命中态，占全量约一半                               |
+| 阶段            | 典型耗时                   | 说明                                        |
+| --------------- | -------------------------- | ------------------------------------------- |
+| lint            | 约 10 秒                   | 前后端格式和静态检查                        |
+| migration-check | 约 5 秒                    | PostgreSQL 迁移单 head 与升级               |
+| test-backend    | 约 2 分钟                  | 全量 pytest 与覆盖率                        |
+| test-frontend   | 约 30 秒                   | 用户侧和管理侧 Vitest                       |
+| build           | 约 10 秒                   | 类型检查和前端构建                          |
+| docker-build    | 缓存后数十秒，首次显著更久 | 固定基础镜像 digest、锁定依赖及系统媒体工具 |
 
 e2e 不在 preflight 内，按需触发：`test:e2e:user`（本地 mock 链路）约 6s；`test:admin` 约 10s；`test:remote:*` 分钟级；`test:e2e:real` 上限 90 分钟且产生真实费用。
 
@@ -72,7 +72,7 @@ e2e 不在 preflight 内，按需触发：`test:e2e:user`（本地 mock 链路�
 | 后端单模块              | `cd backend && .venv/bin/pytest -q tests/test_xxx.py` | 2~10s      |
 | 权限/隔离/API 契约      | 上述 + `tests/test_multi_user.py` `tests/test_api.py` | ~10s       |
 | models.py 或 migrations | `make migration-check` + 相关 pytest 文件             | ~15s       |
-| 日常提交前              | `make preflight-lite`（跳过 docker-build）            | ~85s       |
+| 日常提交前              | `make preflight-lite`（跳过 docker-build）            | ~3 分钟    |
 | 发布前                  | `make preflight` 全量 + 相关 e2e                      | ~3min      |
 | 用户旅程关键链路        | 追加 `npm run test:e2e:user`                          | ~6s        |
 | 重大调整后的主流程      | `make smoke`（无真实模型费用）                        | 分钟内     |
@@ -182,3 +182,11 @@ ADMIN_CONSOLE_E2E=1 npx playwright test e2e/admin/admin-console.spec.ts  # 远�
 - 分镜Worker改动：断开 `worker-storyboard` 后API仍能202入队且工单保持 `queued`；恢复Worker后可完成。执行中强制终止Worker后，工单须由PostgreSQL心跳判定为失租、attempt递增并重放；超过3次必须落失败终态，同时更新任务的 `outlineProgress`，不得无限重试或停留在 `outlining`。
 - 系统人物改动：默认分类男/女/儿童且只读、对所有用户可见、儿童提示词保持年龄造型一致、原图与缩略图均为 TOS URL；新增系统图片用 `scripts/sync-system-human-assets.py --asset CODE=/path/to/image` 上传，不得复制到项目目录。
 - 本机 `make preflight` 的 Docker 阶段经 `docker-compose.local-build.yml` 使用国内镜像代理；服务器部署不加载该文件。代理不可用时用 `LOCAL_NODE_BASE_IMAGE`、`LOCAL_NGINX_BASE_IMAGE` 临时覆盖，不得改服务器部署配置。
+
+## Agent 来源授权与完整用量归因
+
+生产环境仅超级管理员或 `AGENT_TEST_USERNAMES` 显式授权的账号可以携带 Agent 测试来源头；未授权请求返回 403，不会把它改记为普通业务。三个必需头仍为 `X-Agent-Name`、`X-Agent-Run-Id`、`X-Test-Run-Id`。账号授权不代替测试头，Agent 必须主动携带本次唯一批次。
+
+用量与文本调用日志直接保存来源、Agent 名称和批次；Worker 从持久工单恢复上下文。升级时能关联工单的历史日志按工单回填；无工单的历史调用来源不可推断，标为 `legacy_unknown`，不冒充普通业务。授权只能验证账号有测试资格，不能从没有来源头的普通交互中自动识别自动化客户端。
+
+刷新凭证按 family 轮换：旧凭证超过 5 秒缓冲窗口后被重用，会撤销该 family 的全部刷新凭证并提高账号访问凭证版本，已有 access token 随即失效；短窗口重复请求只拒绝，避免将多个页签的并发刷新立即判作盗用。测试不得输出原始凭证。

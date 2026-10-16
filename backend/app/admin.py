@@ -70,6 +70,7 @@ from .rbac import (
     SONG_EMOTIONS_READ,
     STORYBOARD_OPTIONS_MANAGE,
     STORYBOARD_OPTIONS_READ,
+    is_super_admin,
     require_permission,
     require_super_admin,
 )
@@ -1007,6 +1008,9 @@ def _llm_call_summary(x: LlmCallLogModel) -> dict:
         "generationJobId": x.generation_job_id,
         "promptKey": x.prompt_key,
         "promptVersion": x.prompt_version,
+        "generationOrigin": x.generation_origin,
+        "agentName": x.agent_name,
+        "agentRunId": x.agent_run_id,
         "createdAt": iso(x.created_at),
     }
 
@@ -1019,6 +1023,8 @@ async def llm_calls(
     operation: str | None = None,
     status: str | None = None,
     requestId: str | None = None,
+    origin: str | None = None,
+    agentRunId: str | None = None,
     limit: int = 50,
     offset: int = 0,
     db: AsyncSession = Db,
@@ -1027,6 +1033,10 @@ async def llm_calls(
     require_admin(user)
     limit, offset = max(1, min(limit, 200)), max(0, offset)
     conditions = [LlmCallLogModel.deleted_at.is_(None)]
+    if origin:
+        conditions.append(LlmCallLogModel.generation_origin == origin)
+    if agentRunId:
+        conditions.append(LlmCallLogModel.agent_run_id == agentRunId)
     if projectTaskId:
         conditions.append(LlmCallLogModel.project_task_id == projectTaskId)
     if storyboardLineId:
@@ -1419,7 +1429,7 @@ async def aigc_provider_models(user: CurrentUser):
     return {
         "provider": "all-in-one",
         "baseUrl": settings.all_in_one_base_url,
-        "apiKeySuffix": settings.all_in_one_api_key[-6:],
+        "apiKeySuffix": settings.all_in_one_api_key[-6:] if is_super_admin(user) else "",
         "count": len(models),
         "models": models,
     }

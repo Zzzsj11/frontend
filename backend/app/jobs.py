@@ -11,7 +11,7 @@ from typing import Any, Awaitable, Callable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .agent_attribution import current_agent_attribution
+from .agent_attribution import attribution_context, current_agent_attribution
 from .config import settings
 from .database import session_factory
 from .error_logging import _redact, redact_error_text
@@ -187,7 +187,11 @@ class JobManager:
 
     async def run_claimed(self, job: Job, runner: JobRunner) -> None:
         """Execute a job atomically claimed by an external worker."""
-        await self._run(job, runner)
+        async with session_factory() as session:
+            row = await session.get(GenerationJobModel, job.id)
+            attribution = (row.generation_origin, row.agent_name, row.agent_run_id) if row else ("business", "", "")
+        with attribution_context(*attribution):
+            await self._run(job, runner)
 
     async def _persist(self, job: Job, *, provider_confirmed_recovery: bool = False) -> None:
         job.updated_at = time.time()
@@ -223,7 +227,9 @@ class JobManager:
         job.progress = max(job.progress, min(progress, 99))
         job.updated_at = time.time()
         async with session_factory() as session:
-            model = await session.get(GenerationJobModel, job.id)
+            model = await session.get(GenerationJobModel, job.id, with_for_update=True)
+            if job.worker_id and (not model or model.worker_id != job.worker_id):
+                raise JobExpiredError("工单已被其他 Worker 接管")
             if model and model.status in {"failed", "cancelled"}:
                 job.status, job.phase = model.status, model.phase
                 job.error = model.error
@@ -300,6 +306,8 @@ class JobManager:
         """拿到执行槽位后才进入 running，供应商调用完成前一直占用槽位。"""
         job.status, job.progress, job.phase = "running", 5, "executing"
         await self._persist(job)
+        if job.worker_id:
+            await self.heartbeat(job)
         try:
             from .model_gateway import run_with_context
 
@@ -321,6 +329,11 @@ class JobManager:
             job.error = redact_error_text(f"{prefix}{exc}")
             if not getattr(exc, "usage_recorded", False):
                 async with session_factory() as session:
+                    if job.worker_id:
+                        owner = await session.get(GenerationJobModel, job.id, with_for_update=True)
+                        if not owner or owner.worker_id != job.worker_id:
+                            logger.warning("Ignoring stale worker failure persistence: job_id=%s", job.id)
+                            return
                     add_token_usage(
                         session,
                         operation=f"generation_{job.kind}_failed",
@@ -355,7 +368,9 @@ class JobManager:
             except Exception:
                 logger.exception("video metadata probe failed: job_id=%s", job.id)
         async with session_factory() as session:
-            model = await session.get(GenerationJobModel, job.id)
+            model = await session.get(GenerationJobModel, job.id, with_for_update=True)
+            if job.worker_id and (not model or model.worker_id != job.worker_id):
+                raise JobExpiredError("工单已被其他 Worker 接管，停止写入资产和用量")
             terminal = bool(not provider_confirmed_recovery and model and model.status in {"failed", "cancelled"})
             if job.kind in {"image", "video"}:
                 existing_usage = None
@@ -524,7 +539,9 @@ class JobManager:
         job.updated_at = time.time()
         job.provider_submitted_at = job.updated_at
         async with session_factory() as session:
-            model = await session.get(GenerationJobModel, job.id)
+            model = await session.get(GenerationJobModel, job.id, with_for_update=True)
+            if job.worker_id and (not model or model.worker_id != job.worker_id):
+                raise JobExpiredError("工单已被其他 Worker 接管，停止写入供应商任务")
             if model:
                 model.provider, model.provider_task_id = job.provider, job.provider_task_id
                 model.idempotency_key = job.idempotency_key

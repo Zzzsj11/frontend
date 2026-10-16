@@ -252,7 +252,7 @@ const onAudioTrackDown = (event: MouseEvent) => {
 .audio-toggle {
   border: 1px solid var(--border-dark);
   border-radius: var(--radius-sm);
-  background: #fff;
+  background: var(--palette-ffffff);
   padding: 6px 10px;
   color: var(--text-secondary);
   cursor: pointer;
@@ -287,7 +287,7 @@ const onAudioTrackDown = (event: MouseEvent) => {
   height: var(--timeline-row-height);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: #fff;
+  background: var(--palette-ffffff);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -363,25 +363,25 @@ const onAudioTrackDown = (event: MouseEvent) => {
 .clip-icon {
   display: inline-flex;
   color: var(--text-secondary);
-  z-index: 1;
+  z-index: var(--z-local);
 }
 .clip-index {
   font-size: 11px;
   color: var(--text-secondary);
-  z-index: 1;
+  z-index: var(--z-local);
 }
 .shot-clip .clip-thumb + .clip-index,
 .shot-clip .clip-thumb ~ .clip-index {
-  color: #fff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  color: var(--palette-ffffff);
+  text-shadow: 0 1px 2px var(--palette-rgba-0-0-0-0-6);
 }
 .audio-clip {
   flex-direction: row;
   justify-content: flex-start;
   padding: 0 12px;
-  background: linear-gradient(90deg, #dff3eb, #c5e8da);
-  border-color: #63a989;
-  color: #28634f;
+  background: linear-gradient(90deg, var(--palette-dff3eb), var(--palette-c5e8da));
+  border-color: var(--palette-63a989);
+  color: var(--palette-28634f);
   cursor: grab;
   white-space: nowrap;
 }
@@ -397,7 +397,7 @@ const onAudioTrackDown = (event: MouseEvent) => {
   bottom: 0;
   left: 0;
   width: 0;
-  z-index: 5;
+  z-index: var(--z-local-controls);
   pointer-events: none;
 }
 .playhead-label {
@@ -406,7 +406,7 @@ const onAudioTrackDown = (event: MouseEvent) => {
   left: 0;
   transform: translateX(-50%);
   background: var(--primary);
-  color: #fff;
+  color: var(--palette-ffffff);
   font-size: 11px;
   padding: 2px 8px;
   border-radius: var(--radius-sm);

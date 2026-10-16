@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it } from 'vitest'
 import ShotGenerationOptionsPopover from '../../src/components/ShotGenerationOptionsPopover.vue'
 import VideoModelSelect from '../../src/components/VideoModelSelect.vue'
@@ -9,6 +9,8 @@ import {
   VIDEO_MODEL_OPTIONS,
 } from '../../src/generationModels'
 import type { ShotGenOptions } from '../../src/types'
+
+enableAutoUnmount(afterEach)
 
 const options: ShotGenOptions = {
   resolution: '480p',
@@ -156,11 +158,11 @@ describe('ShotGenerationOptionsPopover', () => {
     ;(document.querySelector('button[aria-pressed="false"]') as HTMLButtonElement).click()
     expect(wrapper.emitted('update:modelValue')).toBeTruthy()
 
-    const overlay = document.querySelector('.options-overlay') as HTMLElement
+    const overlay = document.querySelector('.modal-mask') as HTMLElement
     expect(overlay).not.toBeNull()
-    overlay.click()
+    overlay.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true }))
     await wrapper.vm.$nextTick()
-    expect(document.querySelector('.options-overlay')).toBeNull()
+    expect(document.querySelector('.modal-mask')).toBeNull()
     wrapper.unmount()
   })
 
@@ -238,7 +240,7 @@ describe('ShotGenerationOptionsPopover', () => {
     ) as HTMLButtonElement
     confirm.click()
     await wrapper.vm.$nextTick()
-    expect(document.querySelector('.options-overlay')).toBeNull()
+    expect(document.querySelector('.modal-mask')).toBeNull()
     wrapper.unmount()
   })
 

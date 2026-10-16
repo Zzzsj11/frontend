@@ -615,12 +615,12 @@ const statusTone = (value: string) =>
   border: none;
   border-radius: var(--radius-pill);
   background: var(--primary-gradient);
-  color: #fff;
+  color: var(--palette-ffffff);
   padding: 9px 20px;
   font-size: var(--font-md);
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(255, 90, 44, 0.35);
+  box-shadow: 0 4px 12px var(--palette-rgba-255-90-44-0-35);
   transition:
     filter 0.15s,
     transform 0.1s;
@@ -696,7 +696,7 @@ const statusTone = (value: string) =>
   max-width: 560px;
   width: 100%;
   border-radius: var(--radius-sm);
-  background: #000;
+  background: var(--palette-000000);
 }
 .kling-table {
   width: 100%;

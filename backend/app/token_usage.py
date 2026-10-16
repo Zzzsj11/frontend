@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .agent_attribution import current_agent_attribution
 from .models import LlmCallLogModel, TokenUsageModel
 
 
@@ -42,9 +43,13 @@ def add_token_usage(
     request_id: str | None = None,
 ) -> tuple[TokenUsageModel, dict[str, Any]]:
     normalized = normalize_usage(usage)
+    origin, agent_name, agent_run_id = current_agent_attribution()
     item = TokenUsageModel(
         id=f"usage-{uuid.uuid4().hex}",
         user_id=user_id,
+        generation_origin=origin,
+        agent_name=agent_name,
+        agent_run_id=agent_run_id,
         project_id=project_id,
         project_task_id=project_task_id,
         storyboard_line_id=storyboard_line_id,
@@ -87,9 +92,13 @@ def add_llm_call_log(
 ) -> LlmCallLogModel:
     """落一条分镜 LLM 调用的全量留痕：请求消息快照、返回原文、耗时与 token 用量。"""
     normalized = normalize_usage(usage)
+    origin, agent_name, agent_run_id = current_agent_attribution()
     item = LlmCallLogModel(
         id=f"llm-{uuid.uuid4().hex}",
         user_id=user_id,
+        generation_origin=origin,
+        agent_name=agent_name,
+        agent_run_id=agent_run_id,
         project_id=project_id,
         project_task_id=project_task_id,
         storyboard_line_id=storyboard_line_id,

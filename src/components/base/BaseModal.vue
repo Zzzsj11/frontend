@@ -155,28 +155,28 @@ onBeforeUnmount(() => {
 .modal-mask {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--palette-rgba-0-0-0-0-45);
 }
 .modal-mask.level-nested {
-  z-index: 1100;
-  background: rgba(0, 0, 0, 0.6);
+  z-index: var(--z-modal-nested);
+  background: var(--palette-rgba-0-0-0-0-6);
 }
 .modal-mask.is-stacked {
   z-index: var(--z-modal-nested);
 }
 .modal-mask.is-under-modal {
-  z-index: 1000;
+  z-index: var(--z-modal);
 }
 .modal:focus {
   outline: none;
 }
 .modal-mask.mask-emphasized {
-  background: rgba(0, 0, 0, 0.62);
+  background: var(--palette-rgba-0-0-0-0-62);
 }
 .modal-mask.mask-media {
   background: var(--preview-mask);
