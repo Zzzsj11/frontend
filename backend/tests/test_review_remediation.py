@@ -405,14 +405,14 @@ async def test_manual_storyboard_cannot_reference_another_users_optimization(cli
 
 
 @pytest.mark.asyncio
-async def test_media_upload_probe_accepts_wav_but_cannot_follow_embedded_network_urls(monkeypatch):
+async def test_media_upload_probe_accepts_wav_but_cannot_follow_embedded_network_urls():
+    import asyncio
     import io
     import shutil
     import wave
 
     from fastapi import HTTPException
 
-    from app import providers
     from app.upload_validation import validate_av_content
 
     if not shutil.which("ffprobe"):
@@ -424,20 +424,27 @@ async def test_media_upload_probe_accepts_wav_but_cannot_follow_embedded_network
         audio.setframerate(8000)
         audio.writeframes(b"\x00\x00" * 800)
     await validate_av_content("valid.wav", "audio/wav", output.getvalue())
-    communicate = providers._communicate_bounded
-    errors = []
+    connections = []
 
-    async def observe(process, timeout_seconds=60):
-        result = await communicate(process, timeout_seconds)
-        errors.append(result[1].decode(errors="replace"))
-        return result
+    async def receive(_reader, writer):
+        connections.append(True)
+        writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
 
-    monkeypatch.setattr(providers, "_communicate_bounded", observe)
-    playlist = b"#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:10,\nhttp://127.0.0.1:9/private.ts\n#EXT-X-ENDLIST\n"
-    with pytest.raises(HTTPException) as failure:
-        await validate_av_content("disguised.mp4", "video/mp4", playlist)
-    assert failure.value.status_code == 422
-    assert "not on whitelist" in "".join(errors)
+    server = await asyncio.start_server(receive, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    playlist = (f"#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:10,\nhttp://127.0.0.1:{port}/private.ts\n#EXT-X-ENDLIST\n").encode()
+    try:
+        with pytest.raises(HTTPException) as failure:
+            await validate_av_content("disguised.mp4", "video/mp4", playlist)
+        assert failure.value.status_code == 422
+        # FFmpeg versions can reject HLS sniffing or its HTTP protocol. Neither may connect.
+        assert connections == []
+    finally:
+        server.close()
+        await server.wait_closed()
 
 
 @pytest.mark.asyncio
