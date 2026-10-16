@@ -319,21 +319,22 @@ class JobManager:
             else:
                 prefix = ""
             job.error = redact_error_text(f"{prefix}{exc}")
-            async with session_factory() as session:
-                add_token_usage(
-                    session,
-                    operation=f"generation_{job.kind}_failed",
-                    provider=str(getattr(exc, "provider", "")),
-                    model=str((job.request or {}).get("model") or ""),
-                    usage=getattr(exc, "usage", {}),
-                    user_id=job.user_id,
-                    project_id=job.project_id,
-                    project_task_id=job.project_task_id,
-                    storyboard_line_id=job.storyboard_line_id,
-                    generation_job_id=job.id,
-                    request_id=getattr(exc, "request_id", None),
-                )
-                await session.commit()
+            if not getattr(exc, "usage_recorded", False):
+                async with session_factory() as session:
+                    add_token_usage(
+                        session,
+                        operation=f"generation_{job.kind}_failed",
+                        provider=str(getattr(exc, "provider", "")),
+                        model=str(getattr(exc, "model", "") or (job.request or {}).get("model") or ""),
+                        usage=getattr(exc, "usage", {}),
+                        user_id=job.user_id,
+                        project_id=job.project_id,
+                        project_task_id=job.project_task_id,
+                        storyboard_line_id=job.storyboard_line_id,
+                        generation_job_id=job.id,
+                        request_id=getattr(exc, "request_id", None),
+                    )
+                    await session.commit()
 
     async def _persist_asset(self, job: Job, *, provider_confirmed_recovery: bool = False) -> None:
         if not job.result:

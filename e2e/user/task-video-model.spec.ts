@@ -1,27 +1,13 @@
 import { expect, test } from '@playwright/test'
+import videoCatalog from '../../backend/app/data/all_in_one_video_models_20261015.json' with { type: 'json' }
 
 for (const kind of ['ass', 'general', 'general_random']) {
-  for (const target of ['minimax-h3', 'minimax-h3-all-in-one']) {
+  for (const target of ['minimax-h3-all-in-one', 'gemini-omni-1.1-flash-preview-all-in-one']) {
     test(`${kind}: ${target} picker applies all lines and survives reload`, async ({ page }) => {
-      let model = 'doubao-seedance-2.0'
+      let model = 'doubao-seedance-2.0-all-in-one'
       let saves = 0
-      const entries = [
-        { id: model, name: 'SD2.0（英和）', modality: 'video', capabilities: {} },
-        {
-          id: 'minimax-h3',
-          name: 'H3（英和）',
-          modality: 'video',
-          capabilities: { resolutions: ['720p', '1080p'] },
-        },
-        { id: 'wan3.0-video', name: 'Wan3.0（英和）', modality: 'video', capabilities: {} },
-        {
-          id: 'minimax-h3-all-in-one',
-          name: 'H3（all in one）',
-          modality: 'video',
-          capabilities: { resolutions: ['720p', '1080p'] },
-        },
-        { id: 'veo-3.1', name: 'Veo', modality: 'video', capabilities: {} },
-      ]
+      const entries = videoCatalog.map((row) => ({ ...row, id: row.code }))
+      const targetName = entries.find((item) => item.id === target)!.name
       await page.route('**/api/**', async (route) => {
         const path = new URL(route.request().url()).pathname
         if (!path.startsWith('/api/')) return route.continue()
@@ -113,21 +99,20 @@ for (const kind of ['ass', 'general', 'general_random']) {
       await picker.click()
       await expect(page.getByRole('dialog', { name: '修改子项目视频模型' })).toBeVisible()
       await page.getByLabel('目标视频模型').click()
-      await expect(page.getByRole('option')).toHaveCount(4)
-      await expect(page.getByRole('option', { name: 'Veo' })).toHaveCount(0)
+      await expect(page.getByRole('option')).toHaveCount(12)
+      await expect(page.getByRole('option', { name: 'Veo 3.1', exact: true })).toHaveCount(1)
       await page
         .getByRole('option', {
-          name: target.endsWith('all-in-one') ? 'H3（all in one）' : 'H3（英和）',
+          name: targetName,
+          exact: true,
         })
         .click()
       await expect(page.getByText('第 1 镜：清晰度 480P → 720P')).toBeVisible()
       await page.getByRole('button', { name: '应用到全部分镜' }).click()
-      await expect(picker).toHaveText(
-        target.endsWith('all-in-one') ? /H3（all in one）/ : /H3（英和）/,
-      )
+      await expect(picker).toContainText(targetName)
       expect(saves).toBe(1)
       await mount()
-      await expect(page.getByRole('button', { name: /视频模型：H3/ })).toBeVisible()
+      await expect(page.getByRole('button', { name: `视频模型：${targetName}` })).toBeVisible()
       await page.evaluate(() => {
         const store = (
           window as unknown as { modelStore: { lines: Array<{ shot: { status: string } }> } }

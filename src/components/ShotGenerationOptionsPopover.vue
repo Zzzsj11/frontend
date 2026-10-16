@@ -35,6 +35,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: ShotGenOptions] }>()
 const root = ref<HTMLElement | null>(null)
 const popover = ref<HTMLElement | null>(null)
 const open = ref(false)
+const modelChangeError = ref('')
 const popoverStyle = ref<Record<string, string>>({})
 const resolutionChoices = computed<string[]>(() => {
   return props.mode === 'scene'
@@ -103,11 +104,39 @@ const updateRatio = (ratio: ShotGenOptions['ratio']) => {
   })
 }
 const updateVideoModel = (model: string) => {
-  const allowed = videoResolutionChoices(model, true) as ShotGenOptions['resolution'][]
+  modelChangeError.value = ''
+  const caps = videoModelCapabilities(model)
+  const currentMode = props.modelValue.h3Mode ?? DEFAULT_H3_MODE
+  const modes = caps.referenceModes as string[] | undefined
+  const unsupportedMode = modes?.length && !modes.includes(currentMode)
+  const hasDedicatedFrames = Boolean(
+    props.modelValue.h3FirstFrameUrl || props.modelValue.h3LastFrameUrl,
+  )
+  const refs = [
+    ['referenceImageUrls', 'referenceImage'],
+    ['referenceVideoUrls', 'referenceVideo'],
+    ['referenceAudioUrls', 'referenceAudio'],
+  ] as const
+  const hasReferences = refs.some(([field]) => props.modelValue[field]?.length)
+  const incompatibleReferences = refs.some(([field, capability]) => {
+    const max = (caps[capability] as { max?: number } | undefined)?.max
+    return typeof max === 'number' && (props.modelValue[field]?.length ?? 0) > max
+  })
+  if ((unsupportedMode && (hasDedicatedFrames || hasReferences)) || incompatibleReferences) {
+    modelChangeError.value =
+      '当前模式或参考素材与目标模型不兼容，请先处理参考素材或调整生成模式后再切换。原配置已保留。'
+    return
+  }
+  const nextMode = unsupportedMode ? (modes?.includes('auto') ? 'auto' : modes?.[0]) : currentMode
+  const allowed = videoResolutionChoices(
+    model,
+    ['auto', 'reference'].includes(nextMode ?? 'auto'),
+  ) as ShotGenOptions['resolution'][]
   const durations = videoDurationChoices(model)
   emit('update:modelValue', {
     ...props.modelValue,
     videoModel: model,
+    h3Mode: nextMode as ShotGenOptions['h3Mode'],
     ratio: videoRatioChoices(model).includes(props.modelValue.ratio)
       ? props.modelValue.ratio
       : (videoRatioChoices(model)[0] ?? '16:9'),
@@ -125,6 +154,7 @@ const updateVideoModel = (model: string) => {
   })
 }
 const restoreDefaults = () => {
+  modelChangeError.value = ''
   emit('update:modelValue', {
     ...props.modelValue,
     ratio: '16:9',
@@ -237,6 +267,9 @@ onBeforeUnmount(close)
               compact
               @update:model-value="updateImageModel"
             />
+            <p v-if="modelChangeError" class="model-change-error" role="alert">
+              {{ modelChangeError }}
+            </p>
           </fieldset>
 
           <fieldset class="option-group">
@@ -345,6 +378,11 @@ onBeforeUnmount(close)
 </template>
 
 <style scoped>
+.model-change-error {
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-size: var(--font-sm);
+}
 .options-root {
   position: relative;
   min-width: 0;

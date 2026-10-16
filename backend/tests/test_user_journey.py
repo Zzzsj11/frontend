@@ -65,7 +65,8 @@ def outline_result(segments, role_ids):
 
 
 def wait_for_job(client, job_id: str) -> dict:
-    deadline = time.monotonic() + 3
+    # 导出包含真实的异步进度采样，覆盖率采集或并行浏览器验收下也应留出完成窗口。
+    deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         response = client.get(f"/api/generations/{job_id}")
         assert response.status_code == 200
@@ -90,7 +91,11 @@ def wait_for_outline(client, task_id: str) -> dict:
 
 
 def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
-    from app import domain, main
+    from unittest.mock import AsyncMock
+
+    from app import domain, main, video_metadata
+
+    monkeypatch.setattr(video_metadata, "probe_video_url", AsyncMock(return_value={}))
 
     class MemoryStorage:
         objects = {}

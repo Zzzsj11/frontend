@@ -5,6 +5,40 @@ import pytest
 from app.storage import _validate_public_url, download_public_url, safe_key
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/users/attacker/../victim/private.mp4",
+        "/users/attacker/%2e%2e/victim/private.mp4",
+        "/users/attacker/%252e%252e/victim/private.mp4",
+        "/users/attacker%2f..%2fvictim/private.mp4",
+        "/users/attacker/..\\victim/private.mp4",
+        "/users/victim/nested/users/attacker/private.mp4",
+        "/untrusted-prefix/users/attacker/private.mp4",
+        "/users/attacker-2/private.mp4",
+    ],
+)
+def test_owned_tos_rejects_path_ambiguity(monkeypatch, path):
+    from dataclasses import replace
+
+    from app import storage
+
+    monkeypatch.setattr(storage, "settings", replace(storage.settings, tos_public_domain="owned.test"))
+    assert not storage.is_user_owned_tos_url("https://owned.test" + path, "attacker")
+
+
+def test_owned_tos_allows_only_exact_user_below_configured_prefix(monkeypatch):
+    from dataclasses import replace
+
+    from app import storage
+
+    monkeypatch.setattr(storage, "settings", replace(storage.settings, tos_public_domain="owned.test", tos_reference_prefix="mv/ref", tos_video_prefix="mv/video"))
+    for prefix in ("", "mv/ref/", "mv/video/"):
+        assert storage.is_user_owned_tos_url(f"https://owned.test/{prefix}users/user-1/creative/file.mp4", "user-1")
+    for base in ("http://owned.test", "https://other.test", "https://user@owned.test", "https://owned.test:8443", "https://owned.test:bad"):
+        assert not storage.is_user_owned_tos_url(base + "/users/user-1/file.mp4", "user-1")
+
+
 def test_safe_key_removes_path_traversal() -> None:
     key = safe_key("../../images", "../../avatar 中文.png")
     assert ".." not in key

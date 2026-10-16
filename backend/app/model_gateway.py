@@ -41,6 +41,10 @@ def current_owner() -> str:
     return _owner.get()
 
 
+def current_job_id() -> str:
+    return _job.get()
+
+
 def current_agent() -> tuple[str, str] | None:
     return _agent.get()
 

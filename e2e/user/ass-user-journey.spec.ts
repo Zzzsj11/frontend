@@ -365,6 +365,20 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await expect(page.getByRole('option')).toHaveCount(12)
   await expect(page.getByRole('option', { name: 'Veo 3.1', exact: true })).toHaveCount(1)
   await page.keyboard.press('Escape')
+  const videoSettings = page.getByRole('dialog', { name: '视频生成参数' })
+  await selectDropdown(videoSettings.getByLabel('视频模型'), 'H3')
+  await selectDropdown(videoSettings.getByLabel('H3 生成模式'), '首尾帧 FL2VA')
+  await videoSettings.getByPlaceholder('https://…/last.jpg').fill('https://tos.test/last.jpg')
+  await selectDropdown(videoSettings.getByLabel('视频模型'), 'Gemini Omni 1.1 Flash Preview')
+  await expect(videoSettings.getByRole('alert')).toContainText('原配置已保留')
+  await expect(videoSettings.getByLabel('视频模型')).toContainText('H3')
+  await expect(videoSettings.getByPlaceholder('https://…/last.jpg')).toHaveValue(
+    'https://tos.test/last.jpg',
+  )
+  await selectDropdown(videoSettings.getByLabel('H3 生成模式'), '纯文本 T2VA')
+  await selectDropdown(videoSettings.getByLabel('视频模型'), 'Gemini Omni 1.1 Flash Preview')
+  await expect(videoSettings.getByRole('alert')).toHaveCount(0)
+  await expect(videoSettings.getByLabel('视频模型')).toContainText('Gemini Omni')
   await page
     .getByRole('dialog', { name: '视频生成参数' })
     .getByRole('button', { name: '确定' })

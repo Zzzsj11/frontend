@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it } from 'vitest'
 import ShotGenerationOptionsPopover from '../../src/components/ShotGenerationOptionsPopover.vue'
+import VideoModelSelect from '../../src/components/VideoModelSelect.vue'
 import {
   DEFAULT_IMAGE_MODEL,
   DEFAULT_VIDEO_MODEL,
@@ -18,6 +19,99 @@ const options: ShotGenOptions = {
 }
 
 describe('ShotGenerationOptionsPopover', () => {
+  it('blocks incompatible references without losing the original mode or frames', async () => {
+    VIDEO_MODEL_OPTIONS.push({
+      value: 'minimax-h3-all-in-one',
+      label: 'H3',
+      capabilities: { h3Modes: ['auto', 'text', 'first_frame', 'first_last', 'reference'] },
+    })
+    VIDEO_MODEL_OPTIONS.push({
+      value: 'gemini-omni-1.1-flash-preview-all-in-one',
+      label: 'Gemini Omni',
+      capabilities: {
+        referenceModes: ['auto', 'text', 'first_frame', 'reference'],
+        referenceVideo: { max: 0 },
+        referenceAudio: { max: 0 },
+        resolutions: ['720p'],
+        durationOptions: [10],
+      },
+    })
+    const original: ShotGenOptions = {
+      ...options,
+      videoModel: 'minimax-h3-all-in-one',
+      h3Mode: 'first_last',
+      h3FirstFrameUrl: 'https://tos.test/first.png',
+      h3LastFrameUrl: 'https://tos.test/last.png',
+    }
+    const wrapper = mount(ShotGenerationOptionsPopover, {
+      props: { modelValue: original, mode: 'shot' },
+    })
+    await wrapper.get('[aria-label="调整生成参数"]').trigger('click')
+    wrapper
+      .findComponent(VideoModelSelect)
+      .vm.$emit('update:modelValue', 'gemini-omni-1.1-flash-preview-all-in-one')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('原配置已保留')
+    expect(document.querySelector('[aria-label="H3 生成模式"]')).not.toBeNull()
+    expect(original.h3LastFrameUrl).toBe('https://tos.test/last.png')
+
+    await wrapper.setProps({
+      modelValue: {
+        ...original,
+        h3Mode: 'reference',
+        referenceVideoUrls: ['https://tos.test/motion.mp4'],
+      },
+    })
+    wrapper
+      .findComponent(VideoModelSelect)
+      .vm.$emit('update:modelValue', 'gemini-omni-1.1-flash-preview-all-in-one')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+
+    await wrapper.setProps({
+      modelValue: { ...options, videoModel: original.videoModel, h3Mode: 'first_last' },
+    })
+    wrapper
+      .findComponent(VideoModelSelect)
+      .vm.$emit('update:modelValue', 'gemini-omni-1.1-flash-preview-all-in-one')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
+      videoModel: 'gemini-omni-1.1-flash-preview-all-in-one',
+      h3Mode: 'auto',
+      resolution: '720p',
+      duration: 10,
+    })
+    expect(document.querySelector('[role="alert"]')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('keeps first-frame full HD when only multi-reference mode has a lower limit', async () => {
+    VIDEO_MODEL_OPTIONS.push({
+      value: 'grok-video-1.5-all-in-one',
+      label: 'Grok Video 1.5',
+      capabilities: {
+        referenceModes: ['auto', 'text', 'first_frame', 'reference'],
+        resolutions: ['480p', '720p', '1080p'],
+        referenceResolutions: ['480p', '720p'],
+      },
+    })
+    const wrapper = mount(ShotGenerationOptionsPopover, {
+      props: {
+        modelValue: { ...options, resolution: '1080p', h3Mode: 'first_frame' },
+        mode: 'shot',
+      },
+    })
+    await wrapper.get('[aria-label="调整生成参数"]').trigger('click')
+    wrapper
+      .findComponent(VideoModelSelect)
+      .vm.$emit('update:modelValue', 'grok-video-1.5-all-in-one')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
+      h3Mode: 'first_frame',
+      resolution: '1080p',
+    })
+    wrapper.unmount()
+  })
   afterEach(() => {
     IMAGE_MODEL_OPTIONS.splice(0, IMAGE_MODEL_OPTIONS.length, {
       value: DEFAULT_IMAGE_MODEL,
