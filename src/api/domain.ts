@@ -423,7 +423,10 @@ export const createStoryboardLine = async (taskId: string, input: Record<string,
     }),
   )
 export const updateStoryboardLine = (id: string, input: Record<string, unknown>) =>
-  apiRequest(`/storyboard-lines/${id}`, { method: 'PATCH', body: JSON.stringify(input) })
+  apiRequest<Record<string, unknown>>(`/storyboard-lines/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
 export const deleteStoryboardLine = (id: string) =>
   apiRequest(`/storyboard-lines/${id}`, { method: 'DELETE' })
 export const reorderStoryboardLines = (taskId: string, lineIds: string[]) =>

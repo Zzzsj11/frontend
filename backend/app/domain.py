@@ -2091,6 +2091,10 @@ async def update_line(line_id: str, payload: StoryboardLineUpdate, user: Current
     data = payload.model_dump(exclude_unset=True, exclude={"digital_human_ids"})
     for key, value in data.items():
         setattr(line, key, value)
+    # A manual replacement resolves a failed prompt, while retaining its job history.
+    if line.generation_status == "failed" and {"scene_prompt", "shot_prompt"}.intersection(data) and (line.scene_prompt or "").strip() and (line.shot_prompt or "").strip():
+        line.generation_status, line.generation_error = "succeeded", None
+        line.generated_at = utcnow()
     if payload.digital_human_ids is not None:
         visible = await visible_humans(db, user.id, payload.digital_human_ids)
         if len({item.id for item in visible}) != len(set(payload.digital_human_ids)):
