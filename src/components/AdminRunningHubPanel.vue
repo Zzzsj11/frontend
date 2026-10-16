@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ImageZoom from './ImageZoom.vue'
 import BaseSelect from './base/BaseSelect.vue'
 import { formatChinaDateTime } from '../utils/dateTime'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
@@ -627,6 +628,10 @@ const statusTone = (value: string) =>
             :src="slot.preview || slot.value"
             class="slot-thumb"
             alt="参考图预览"
+          /><ImageZoom
+            v-if="slot.preview || slot.value.startsWith('http')"
+            :src="slot.preview || slot.value"
+            alt="参考图片"
           />
         </div>
       </div>
@@ -998,6 +1003,7 @@ const statusTone = (value: string) =>
   margin-top: 10px;
 }
 .slot {
+  position: relative;
   flex: 1;
   min-width: 200px;
   display: flex;

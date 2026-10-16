@@ -5,6 +5,7 @@ import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
 import BaseModal from './base/BaseModal.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
+import CharacterZoom from './CharacterZoom.vue'
 import VideoModelSelect from './VideoModelSelect.vue'
 import ImageModelSelect from './ImageModelSelect.vue'
 import type { ShotGenOptions } from '../types'
@@ -201,20 +202,20 @@ const cancel = () => {
           从已有角色库选择 <span class="optional">（可不选；选择后人物镜仅使用所选角色）</span>
         </p>
         <div class="role-picker" :class="{ filled: selectedHumanIds.length }">
-          <button
-            v-for="human in store.digitalHumans"
-            :key="human.id"
-            class="role-card"
-            :class="{ selected: selectedHumanIds.includes(human.id) }"
-            :title="`${human.name} · ${human.style}`"
-            @click="toggleHuman(human.id)"
-          >
-            <CharacterPortrait :src="human.avatar" :alt="human.name" />
-            <span>{{ human.name }}</span>
-            <span v-if="selectedHumanIds.includes(human.id)" class="role-check">
-              <AppIcon name="check" :size="10" />
-            </span>
-          </button>
+          <div v-for="human in store.digitalHumans" :key="human.id" class="role-card-wrap">
+            <button
+              class="role-card"
+              :class="{ selected: selectedHumanIds.includes(human.id) }"
+              :title="`${human.name} · ${human.style}`"
+              @click="toggleHuman(human.id)"
+            >
+              <CharacterPortrait :src="human.avatar" :alt="human.name" />
+              <span>{{ human.name }}</span>
+              <span v-if="selectedHumanIds.includes(human.id)" class="role-check">
+                <AppIcon name="check" :size="10" />
+              </span></button
+            ><CharacterZoom :human="human" :humans="store.digitalHumans" />
+          </div>
           <p v-if="!store.digitalHumans.length" class="role-empty">角色库暂无可选人物</p>
         </div>
       </div>
@@ -566,5 +567,16 @@ const cancel = () => {
   width: 100%;
   height: 70px;
   border-radius: var(--radius-sm);
+}
+.role-card-wrap {
+  position: relative;
+}
+.role-card-wrap {
+  flex: 1 1 124px;
+  max-width: 160px;
+}
+.role-card-wrap .role-card {
+  width: 100%;
+  max-width: none;
 }
 </style>

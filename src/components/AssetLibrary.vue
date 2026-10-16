@@ -5,6 +5,8 @@ import AppIcon from './AppIcon.vue'
 import BaseModal from './base/BaseModal.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
 import ImageZoom from './ImageZoom.vue'
+import CharacterZoom from './CharacterZoom.vue'
+import { openImageGallery } from '../composables/useImagePreview'
 import { confirmDialog } from '../composables/useConfirmDialog'
 
 const store = useProjectStore()
@@ -193,18 +195,19 @@ const editDesc = ref('')
 const editError = ref('')
 const regenBusy = computed(() => !!editing.value && store.dhRegeneratingId === editing.value.id)
 
-// 大图预览
-const previewImage = ref<{ src: string; alt: string } | null>(null)
+// 同一预览器展示原图，可切换当前人物列表。
 const showPreview = (dh: { originalAvatar?: string; avatar: string; name: string }) => {
-  previewImage.value = { src: dh.originalAvatar || dh.avatar, alt: dh.name }
+  const items = filtered.value.map((human) => ({
+    src: human.originalAvatar || human.avatar,
+    thumbnail: human.avatar,
+    alt: human.name,
+  }))
+  const index = items.findIndex((item) => item.src === (dh.originalAvatar || dh.avatar))
+  openImageGallery(
+    index < 0 ? [{ src: dh.originalAvatar || dh.avatar, alt: dh.name }] : items,
+    Math.max(0, index),
+  )
 }
-const closePreview = () => {
-  previewImage.value = null
-}
-
-window.addEventListener('keydown', (e: KeyboardEvent) => {
-  if (e.key === 'Escape' && previewImage.value) closePreview()
-})
 
 const openEdit = (id: string) => {
   const dh = store.digitalHumans.find((d) => d.id === id)
@@ -305,7 +308,11 @@ const removeDh = async () => {
           "
           @click="!store.dhGenerating && upFileRef?.click()"
         >
-          <img v-if="upAvatar" :src="upAvatar" alt="头像预览" />
+          <template v-if="upAvatar"
+            ><img :src="upAvatar" alt="头像预览" /><ImageZoom
+              :src="upAvatar"
+              alt="上传的人物参考图"
+          /></template>
           <template v-else>
             <AppIcon name="image" :size="24" />
             <span>上传人物参考图<br />（推荐）</span>
@@ -449,6 +456,7 @@ const removeDh = async () => {
       >
         <div class="dh-portrait" title="点击查看大图" @click="showPreview(dh)">
           <CharacterPortrait :src="dh.avatar" :alt="dh.name" />
+          <CharacterZoom :human="dh" :humans="filtered" />
           <span v-show="store.castIds.includes(dh.id)" class="dh-check"
             ><AppIcon name="check" :size="11" /> 已入阵容</span
           >
@@ -567,19 +575,6 @@ const removeDh = async () => {
       </div>
     </template>
   </BaseModal>
-
-  <!-- 大图预览 -->
-  <Teleport to="body">
-    <div v-if="previewImage" class="preview-mask" @click.self="closePreview">
-      <div class="preview-dialog">
-        <button class="preview-close" @click="closePreview">
-          <AppIcon name="close" :size="18" />
-        </button>
-        <img :src="previewImage.src" :alt="previewImage.alt" />
-        <span>{{ previewImage.alt }}</span>
-      </div>
-    </div>
-  </Teleport>
 </template>
 
 <style scoped>
@@ -1243,66 +1238,5 @@ const removeDh = async () => {
   width: 100%;
   height: 100%;
   border-radius: inherit;
-}
-
-/* 大图预览 */
-.preview-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 2000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 28px;
-  background: rgba(12, 12, 15, 0.82);
-  backdrop-filter: blur(4px);
-}
-.preview-dialog {
-  position: relative;
-  display: flex;
-  max-width: min(1200px, 92vw);
-  max-height: 92vh;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: var(--radius-lg);
-  background: #19191c;
-  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.55);
-}
-.preview-dialog img {
-  display: block;
-  max-width: 100%;
-  max-height: calc(92vh - 58px);
-  object-fit: contain;
-  border-radius: var(--radius-sm);
-  background: var(--border);
-}
-.preview-dialog span {
-  color: #fff;
-  text-align: center;
-  font-size: var(--font-sm);
-}
-.preview-close {
-  position: absolute;
-  top: 18px;
-  right: 18px;
-  z-index: 1;
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.62);
-  color: #fff;
-  cursor: pointer;
-  transition:
-    background 0.15s,
-    transform 0.15s;
-}
-.preview-close:hover {
-  background: var(--primary);
-  transform: scale(1.08);
 }
 </style>

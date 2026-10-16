@@ -158,3 +158,13 @@ SFC 块顺序固定（ESLint `vue/block-order` 强制）：`<script setup>` → 
 图片组件从模型目录读取可用选项，并按画幅过滤，当前开放 all in one Nano Banana 2.1 与 Seedream Pro；业务父组件在切换模型时同步清晰度。清晰度及参考图上限以服务端模型能力为准，不在各弹窗复制静态限制。
 
 普通单选下拉统一使用 `base/BaseSelect`，保留 `option` 插槽、`v-model`（含 `.number`）及 `change` 事件。它与模型选择器共用 Reka UI 的触发器、SVG 箭头、键盘导航和 Portal 菜单；禁止新增原生 `select` 或页面独立箭头样式。图片与视频的展示名称不包含渠道名称，内部模型标识保持不变。
+
+## 10. 图片与媒体预览
+
+图片预览统一使用 Root 挂载的 `ImagePreviewOverlay`，通过 `openImagePreview` / `openImageGallery` 或 `ImageZoom` 触发；人物使用 `CharacterZoom`，优先 `originalAvatar`，场景优先 `originalImageUrl`，历史封面优先 `originalCoverUrl`，没有原图字段时才回退展示地址。列表继续用缩略图，预览时才加载当前原图。
+
+编辑弹窗使用 `ShotMediaCards`：头像/场景图片区域打开大图，视频封面播放当前片段；卡片下方标签只展开编辑区。选角列表的预览按钮与选角按钮并列，禁止嵌套按钮或让放大冒泡触发选择/保存/生成。历史封面的放大也不改变选用版本。
+
+大图沿用 `BaseModal` 的 nested 层级及 media 主题，支持缩放/拖动/双指缩放、原始尺寸/适应窗口、图片切换、原图下载与加载重试。`useModalStack` 管理顶层 Esc、焦点、页面滚动锁；只关闭最上层弹窗，关闭后恢复焦点且不滚动下层表单。预览不持久化编辑草稿、不调用生成接口。
+
+平台原图下载通过 `GET /api/media/image-download` 获取 5 分钟有效的 TOS 签名附件链接，校验当前用户私有路径或可见系统人物；超级管理员可下载管理端可见的平台媒体。浏览器不持有存储密钥，也不依赖 TOS CORS。非平台参考图保留公开地址下载及打开原图的错误兜底。

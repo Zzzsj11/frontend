@@ -3,6 +3,7 @@ import ExportActions from './ExportActions.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatTime, useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
+import ImageZoom from './ImageZoom.vue'
 
 const store = useProjectStore()
 
@@ -274,6 +275,11 @@ const toggleFullscreen = () => {
       />
       <img v-else-if="currentImage" :src="currentImage" alt="视频预览" class="preview-img" />
       <p v-else class="preview-placeholder">生成视频后在此查看预览</p>
+      <ImageZoom
+        v-if="!currentVideoUrl && currentImage"
+        :src="store.currentLine?.scene.originalImageUrl || currentImage"
+        alt="当前场景原图"
+      />
       <!-- MV 歌词字幕（非中文歌词附中文翻译） -->
       <div
         v-if="store.currentLine?.lyrics"

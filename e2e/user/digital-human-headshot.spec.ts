@@ -388,11 +388,14 @@ test('上传参考原图生成竖版大头照，入库成功后展示，阵容�
   await expect(created).not.toHaveClass(/\bactive\b/)
   await created.hover()
   await created.getByRole('button', { name: '大图', exact: true }).click()
-  await expect(page.locator('.preview-dialog img')).toHaveAttribute(
+  const imagePreview = page.getByRole('dialog', { name: '图片大图预览', exact: true })
+  await expect(imagePreview.locator('.image-viewport img')).toHaveAttribute(
     'src',
     mock.jobs[0]!.result.urls[0]!,
   )
-  await page.locator('.preview-close').click()
+  await page.keyboard.press('Escape')
+  await expect(imagePreview).toHaveCount(0)
+  await expect(library).toBeVisible()
   await created.hover()
   await created.getByRole('button', { name: '加入阵容', exact: true }).click()
   await expect(library.locator('.cast-label')).toHaveText('当前阵容（1）：')
