@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import AppIcon from './AppIcon.vue'
-import { openImagePreview } from '../composables/useImagePreview'
+import {
+  openImageGallery,
+  openImagePreview,
+  type PreviewImage,
+} from '../composables/useImagePreview'
 
 /**
  * 图片「查看大图」触发按钮（P3b 单例化后不再自持弹层）。
@@ -9,13 +13,25 @@ import { openImagePreview } from '../composables/useImagePreview'
  * 交互约定：hover 仅显示右下角「查看大图」按钮（由 CSS 控制），点击按钮才打开大图，
  * 避免全屏预览浮层遮挡上层弹窗（如数字人详情）。
  */
-const props = withDefaults(defineProps<{ src?: string; alt?: string; label?: string }>(), {
-  src: undefined,
-  alt: '原图预览',
-  label: '查看大图',
-})
+const props = withDefaults(
+  defineProps<{
+    src?: string
+    alt?: string
+    label?: string
+    items?: PreviewImage[]
+    index?: number
+  }>(),
+  {
+    src: undefined,
+    alt: '原图预览',
+    label: '查看大图',
+    items: undefined,
+    index: 0,
+  },
+)
 
-const show = () => openImagePreview(props.src, props.alt)
+const show = () =>
+  props.items ? openImageGallery(props.items, props.index) : openImagePreview(props.src, props.alt)
 </script>
 
 <template>
@@ -35,21 +51,20 @@ const show = () => openImagePreview(props.src, props.alt)
 .image-zoom-trigger {
   position: absolute;
   right: 5px;
-  bottom: 5px;
+  top: 5px;
   z-index: 5;
   display: grid;
   width: 26px;
   height: 26px;
   place-items: center;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.68);
+  border: 1px solid var(--preview-border);
   border-radius: var(--radius-sm);
-  background: rgba(25, 25, 28, 0.68);
-  color: #fff;
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.2);
+  background: var(--preview-control);
+  color: var(--preview-text);
+  box-shadow: var(--shadow-card);
   cursor: pointer;
-  opacity: 0;
-  transform: translateY(3px) scale(0.94);
+  opacity: 1;
   transition:
     opacity 0.15s,
     transform 0.15s,
@@ -59,7 +74,7 @@ const show = () => openImagePreview(props.src, props.alt)
 .image-zoom-trigger:hover,
 .image-zoom-trigger:focus-visible {
   background: var(--primary, var(--primary));
-  box-shadow: 0 5px 16px rgba(255, 90, 44, 0.4);
+  box-shadow: var(--shadow-card);
   outline: none;
   transform: translateY(0) scale(1.08);
 }

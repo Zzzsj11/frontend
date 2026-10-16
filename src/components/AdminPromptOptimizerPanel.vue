@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ImageZoom from './ImageZoom.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   createPromptOptimizerTask,
@@ -419,6 +420,7 @@ onBeforeUnmount(() => {
           <img v-if="item.kind === 'image'" :src="item.thumbnailUrl || item.url" :alt="item.name" />
           <video v-else-if="item.kind === 'video'" :src="item.url" muted preload="metadata" />
           <div v-else class="audio-preview">♫</div>
+          <ImageZoom v-if="item.kind === 'image'" :src="item.url" :alt="item.name" />
           <div class="media-info">
             <b>{{ item.name }}</b>
             <small>{{ referenceLabel(item, index) }}</small>
@@ -839,7 +841,7 @@ header p,
 .media-info small {
   color: var(--text-muted);
 }
-.media-card > button {
+.media-card > button:not(.image-zoom-trigger) {
   position: absolute;
   top: 7px;
   right: 7px;

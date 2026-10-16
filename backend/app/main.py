@@ -48,6 +48,7 @@ from .domain import owned_line, owned_project, owned_task, project_audio_json, u
 from .domain import router as domain_router
 from .error_logging import record_api_error, request_payload
 from .h3_prompt_compiler import compile_h3_prompt
+from .image_download import router as image_download_router
 from .image_model_policy import validate_image_selection
 from .jobs import jobs
 from .media_constraints import normalize_video_duration
@@ -199,6 +200,7 @@ async def retired_supplier_routes(request: Request, call_next):
     return await call_next(request)
 
 
+app.include_router(image_download_router)
 app.include_router(mv_export_router)
 app.include_router(domain_router)
 app.include_router(task_video_model_router)

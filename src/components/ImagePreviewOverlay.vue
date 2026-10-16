@@ -1,110 +1,172 @@
 <script setup lang="ts">
-import { onBeforeUnmount, watch } from 'vue'
-import AppIcon from './AppIcon.vue'
-import { closeImagePreview, useImagePreview } from '../composables/useImagePreview'
-
-/** 全局唯一的图片预览遮罩（P3b）：全应用挂载一次（Root.vue），替代原每行一个的 ImageZoom 弹层 */
+import { computed, nextTick, ref, watch } from 'vue'
+import BaseModal from './base/BaseModal.vue'
+import ImagePreviewCanvas from './ImagePreviewCanvas.vue'
+import {
+  closeImagePreview,
+  selectPreviewImage,
+  useImagePreview,
+} from '../composables/useImagePreview'
+import { downloadImage } from '../api/downloadImage'
 const { state } = useImagePreview()
-
-const onKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Escape') closeImagePreview()
-}
+const downloading = ref(false),
+  downloadError = ref('')
+const thumbnailList = ref<HTMLElement>()
 watch(
-  () => state.open,
-  (open) => {
-    if (open) window.addEventListener('keydown', onKeydown)
-    else window.removeEventListener('keydown', onKeydown)
+  () => state.index,
+  () => {
+    void nextTick(() =>
+      thumbnailList.value
+        ?.querySelector<HTMLElement>('[aria-pressed="true"]')
+        ?.scrollIntoView?.({ block: 'nearest', inline: 'center' }),
+    )
   },
 )
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+const current = computed(() => state.items[state.index])
+watch(
+  () => state.src,
+  () => {
+    downloadError.value = ''
+  },
+)
+const move = (delta: number) =>
+  selectPreviewImage((state.index + delta + state.items.length) % state.items.length)
+const onKey = (e: KeyboardEvent) => {
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    move(-1)
+  }
+  if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    move(1)
+  }
+}
+const download = async () => {
+  if (downloading.value) return
+  downloading.value = true
+  downloadError.value = ''
+  try {
+    await downloadImage(state.src, state.alt)
+  } catch {
+    downloadError.value = '下载失败，请重试或打开原图保存'
+  } finally {
+    downloading.value = false
+  }
+}
 </script>
-
 <template>
-  <Teleport to="body">
-    <div
-      v-if="state.open"
-      class="image-zoom-mask"
-      role="dialog"
-      aria-modal="true"
-      :aria-label="state.alt"
-      @click.self="closeImagePreview"
-    >
-      <div class="image-zoom-dialog">
-        <button
-          class="image-zoom-close"
-          type="button"
-          title="关闭大图"
-          aria-label="关闭大图"
-          @click="closeImagePreview"
-        >
-          <AppIcon name="close" :size="18" />
-        </button>
-        <img :src="state.src" :alt="state.alt" />
-        <span>{{ state.alt }}</span>
+  <BaseModal
+    :open="state.open"
+    :title="state.alt"
+    aria-label="图片大图预览"
+    level="nested"
+    mask-variant="media"
+    width="1200px"
+    max-height="94vh"
+    @close="closeImagePreview"
+    @keydown="onKey"
+  >
+    <template #actions>
+      <button class="preview-action" :disabled="downloading" @click="download">
+        {{ downloading ? '下载中…' : '下载原图' }}
+      </button>
+    </template>
+    <div class="gallery">
+      <div v-if="downloadError" class="download-error" role="alert">
+        {{ downloadError }} <a :href="state.src" target="_blank" rel="noopener">打开原图</a>
       </div>
+      <ImagePreviewCanvas v-if="state.open" :src="state.src" :alt="state.alt" />
+      <div v-if="state.items.length > 1" class="gallery-navigation">
+        <button class="preview-action" aria-label="上一张" @click="move(-1)">‹</button>
+        <div ref="thumbnailList" class="gallery-thumbnails" aria-label="预览图片列表">
+          <button
+            v-for="(item, index) in state.items"
+            :key="`${item.src}-${index}`"
+            class="gallery-thumbnail"
+            :class="{ selected: index === state.index }"
+            :aria-label="`查看${item.alt}`"
+            :aria-pressed="index === state.index"
+            @click="selectPreviewImage(index)"
+          >
+            <img :src="item.thumbnail || item.src" alt="" /><span>{{ item.alt }}</span>
+          </button>
+        </div>
+        <button class="preview-action" aria-label="下一张" @click="move(1)">›</button>
+      </div>
+      <p class="gallery-caption">
+        {{ state.index + 1 }} / {{ state.items.length }} · {{ current?.alt }}
+      </p>
     </div>
-  </Teleport>
+  </BaseModal>
 </template>
-
 <style scoped>
-.image-zoom-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 2000;
+.gallery {
+  min-height: 0;
+  overflow-y: auto;
+}
+.preview-action {
+  border: 1px solid var(--preview-border);
+  border-radius: var(--radius-sm);
+  padding: 7px 12px;
+  background: var(--preview-control);
+  color: var(--preview-text);
+  cursor: pointer;
+}
+.gallery-navigation {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 28px;
-  background: rgba(12, 12, 15, 0.82);
-  backdrop-filter: blur(4px);
+  gap: 12px;
+  padding: 4px 16px;
 }
-.image-zoom-dialog {
-  position: relative;
+.gallery-thumbnails {
   display: flex;
-  max-width: min(1200px, 92vw);
-  max-height: 92vh;
-  flex-direction: column;
+  flex: 1;
   gap: 8px;
-  padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: var(--radius-lg);
-  background: #19191c;
-  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.55);
+  justify-content: flex-start;
+  overflow-x: auto;
 }
-.image-zoom-dialog img {
-  display: block;
-  max-width: 100%;
-  max-height: calc(92vh - 58px);
-  object-fit: contain;
-  border-radius: var(--radius-sm);
-  background: var(--border);
-}
-.image-zoom-dialog span {
-  color: #fff;
-  text-align: center;
-  font-size: var(--font-sm);
-}
-.image-zoom-close {
-  position: absolute;
-  top: 18px;
-  right: 18px;
-  z-index: 1;
-  display: grid;
-  width: 34px;
-  height: 34px;
+.gallery-thumbnail {
+  width: 100px;
   flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.62);
-  color: #fff;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  background: var(--preview-control);
+  color: var(--preview-text);
   cursor: pointer;
-  transition:
-    background 0.15s,
-    transform 0.15s;
 }
-.image-zoom-close:hover {
-  background: var(--primary, var(--primary));
-  transform: scale(1.08);
+.gallery-thumbnail:first-child {
+  margin-left: auto;
+}
+.gallery-thumbnail:last-child {
+  margin-right: auto;
+}
+.gallery-thumbnail.selected {
+  border-color: var(--primary);
+}
+.gallery-thumbnail img {
+  width: 100%;
+  height: 45px;
+  object-fit: contain;
+}
+.gallery-thumbnail span {
+  display: block;
+  font-size: var(--font-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gallery-caption {
+  text-align: center;
+  color: var(--preview-muted);
+  font-size: var(--font-sm);
+  margin: 8px;
+}
+.download-error {
+  color: var(--preview-text);
+  padding: 8px 16px;
+}
+.download-error a {
+  color: var(--preview-text);
 }
 </style>

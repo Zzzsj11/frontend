@@ -1,10 +1,12 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ShotDetailModal from '../../src/components/ShotDetailModal.vue'
 import { useProjectStore } from '../../src/stores/project'
 import type { ScriptLine } from '../../src/types'
+
+enableAutoUnmount(afterEach)
 
 describe('ShotDetailModal general MV character controls', () => {
   beforeEach(() => setActivePinia(createPinia()))

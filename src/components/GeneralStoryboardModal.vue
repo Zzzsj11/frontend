@@ -22,6 +22,7 @@ import {
 import AppIcon from './AppIcon.vue'
 import BaseModal from './base/BaseModal.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
+import CharacterZoom from './CharacterZoom.vue'
 import VideoModelSelect from './VideoModelSelect.vue'
 import ImageModelSelect from './ImageModelSelect.vue'
 import { MAX_VIDEO_DURATION, MIN_VIDEO_DURATION } from '../mediaConstraints'
@@ -534,18 +535,22 @@ const submit = async () => {
               <span v-else>（未选择时，人物镜由视频模型自由生成人物）</span>
             </p>
             <div class="cast-list">
-              <button
-                v-for="human in store.digitalHumans"
-                :key="human.id"
-                class="cast-item"
-                :class="{ active: selectedHumanIds.includes(human.id) }"
-                @click="toggleHuman(human.id)"
-              >
-                <CharacterPortrait :src="human.avatar" :alt="human.name" /><span>{{
-                  human.name
-                }}</span>
-                <AppIcon v-if="selectedHumanIds.includes(human.id)" name="check" :size="12" />
-              </button>
+              <div v-for="human in store.digitalHumans" :key="human.id" class="cast-item-wrap">
+                <button
+                  class="cast-item"
+                  :class="{ active: selectedHumanIds.includes(human.id) }"
+                  @click="toggleHuman(human.id)"
+                >
+                  <CharacterPortrait :src="human.avatar" :alt="human.name" /><span>{{
+                    human.name
+                  }}</span>
+                  <AppIcon
+                    v-if="selectedHumanIds.includes(human.id)"
+                    name="check"
+                    :size="12"
+                  /></button
+                ><CharacterZoom :human="human" :humans="store.digitalHumans" />
+              </div>
               <span v-if="!store.digitalHumans.length" class="empty-cast"
                 >角色库暂无可选人物，请先到角色阵容中添加数字人</span
               >
@@ -864,5 +869,8 @@ textarea {
   width: 100%;
   height: 68px;
   border-radius: var(--radius-sm);
+}
+.cast-item-wrap {
+  position: relative;
 }
 </style>

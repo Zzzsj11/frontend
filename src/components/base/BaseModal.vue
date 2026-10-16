@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import { onBeforeUnmount, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import {
+  isTopModal,
+  isStackedModal,
+  registerModal,
+  unregisterModal,
+} from '../../composables/useModalStack'
 import AppIcon from '../AppIcon.vue'
 
 /**
@@ -18,7 +24,7 @@ const props = withDefaults(
     /** primary=一级弹框(z-index 1000)；nested=弹框内二级弹层(z-index 1100) */
     level?: 'primary' | 'nested'
     /** emphasized 用于需要更强背景聚焦的编辑弹框。 */
-    maskVariant?: 'default' | 'emphasized'
+    maskVariant?: 'default' | 'emphasized' | 'media'
     width?: string
     maxHeight?: string
   }>(),
@@ -32,7 +38,12 @@ const props = withDefaults(
     maxHeight: '92vh',
   },
 )
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; keydown: [event: KeyboardEvent] }>()
+const modalId = Symbol('modal')
+const panel = ref<HTMLElement>()
+const topmost = computed(() => isTopModal(modalId))
+const stacked = computed(() => isStackedModal(modalId))
+let previousFocus: HTMLElement | null = null
 
 const requestClose = () => {
   if (props.loading) return
@@ -43,16 +54,52 @@ const onBackdropPointerDown = (event: PointerEvent) => {
   if (event.button === 0) requestClose()
 }
 const onKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Escape') requestClose()
+  if (!topmost.value || event.defaultPrevented) return
+  if (document.querySelector('[role="alertdialog"][aria-modal="true"]')) return
+  // Portal 下拉框由 Reka 处理 Esc/Tab；不能同时关闭所属编辑弹窗。
+  if (document.querySelector('.generation-model-menu[data-state="open"]')) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    requestClose()
+  }
+  if (event.key === 'Tab') {
+    const elements = Array.from(
+      panel.value?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), a[href], input, textarea, select, [tabindex="0"]',
+      ) || [],
+    ).filter((el) => el.getClientRects().length)
+    const target = event.shiftKey ? elements.at(-1) : elements[0]
+    if (
+      !elements.includes(document.activeElement as HTMLElement) ||
+      document.activeElement === (event.shiftKey ? elements[0] : elements.at(-1))
+    ) {
+      event.preventDefault()
+      ;(target || panel.value)?.focus()
+    }
+  }
 }
 watch(
   () => props.open,
   (open) => {
-    if (open) window.addEventListener('keydown', onKeydown)
-    else window.removeEventListener('keydown', onKeydown)
+    if (open) {
+      previousFocus = document.activeElement as HTMLElement
+      registerModal(modalId)
+      window.addEventListener('keydown', onKeydown)
+      void nextTick(() => panel.value?.focus({ preventScroll: true }))
+    } else {
+      unregisterModal(modalId)
+      window.removeEventListener('keydown', onKeydown)
+      void nextTick(() => {
+        if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true })
+      })
+    }
   },
+  { immediate: true },
 )
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+onBeforeUnmount(() => {
+  unregisterModal(modalId)
+  window.removeEventListener('keydown', onKeydown)
+})
 </script>
 
 <template>
@@ -60,15 +107,23 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
     <div
       v-if="open"
       class="modal-mask"
-      :class="[`level-${level}`, `mask-${maskVariant}`]"
+      :class="[
+        `level-${level}`,
+        `mask-${maskVariant}`,
+        { 'is-under-modal': !topmost, 'is-stacked': stacked },
+      ]"
       @pointerdown.self="onBackdropPointerDown"
     >
       <section
+        ref="panel"
         class="modal"
         :style="{ width, maxHeight }"
         role="dialog"
         aria-modal="true"
+        tabindex="-1"
+        :inert="!topmost"
         :aria-label="ariaLabel || title"
+        @keydown="emit('keydown', $event)"
       >
         <header class="modal-header">
           <h3>
@@ -111,8 +166,25 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   z-index: 1100;
   background: rgba(0, 0, 0, 0.6);
 }
+.modal-mask.is-stacked {
+  z-index: var(--z-modal-nested);
+}
+.modal-mask.is-under-modal {
+  z-index: 1000;
+}
+.modal:focus {
+  outline: none;
+}
 .modal-mask.mask-emphasized {
   background: rgba(0, 0, 0, 0.62);
+}
+.modal-mask.mask-media {
+  background: var(--preview-mask);
+  --surface: var(--preview-surface);
+  --text: var(--preview-text);
+  --text-secondary: var(--preview-muted);
+  --border: var(--preview-border);
+  --bg: var(--preview-control);
 }
 .modal {
   display: flex;

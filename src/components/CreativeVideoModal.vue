@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ImageZoom from './ImageZoom.vue'
 import BaseSelect from './base/BaseSelect.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
@@ -276,9 +277,11 @@ onBeforeUnmount(() => pollTimer && clearTimeout(pollTimer))
           <AppIcon name="plus" :size="18" />{{ uploading ? '上传中' : '添加素材' }}
         </button>
         <article v-for="(item, index) in media" :key="item.url">
-          <img v-if="item.kind === 'image'" :src="item.thumbnailUrl || item.url" alt="" /><span
-            v-else
-            >{{ item.kind === 'video' ? '视频' : '音频' }}</span
+          <img v-if="item.kind === 'image'" :src="item.thumbnailUrl || item.url" alt="" /><ImageZoom
+            v-if="item.kind === 'image'"
+            :src="item.url"
+            :alt="`参考图片 ${index + 1}`"
+          /><span v-if="item.kind !== 'image'">{{ item.kind === 'video' ? '视频' : '音频' }}</span
           ><button title="移除素材" @click="media.splice(index, 1)">×</button>
         </article>
       </div>

@@ -19,6 +19,16 @@ const press = (element: Element, button = 0) =>
   element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button }))
 
 describe('modal outside pointer interaction', () => {
+  it('leaves Escape to an open portal dropdown', () => {
+    const wrapper = mountModal()
+    const menu = document.createElement('div')
+    menu.className = 'generation-model-menu'
+    menu.dataset.state = 'open'
+    document.body.append(menu)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
+    expect(wrapper.emitted('close')).toBeUndefined()
+    menu.remove()
+  })
   it('closes from the backdrop but not from the dialog or right click', () => {
     const wrapper = mountModal()
     press(document.querySelector('[aria-label="内容"]')!)

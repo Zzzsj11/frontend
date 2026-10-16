@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ImageZoom from './ImageZoom.vue'
 import type { VideoBillingDetail } from '../api/adminVideoBilling'
 import BaseModal from './base/BaseModal.vue'
 
@@ -130,6 +131,11 @@ const money = (value: number) => `¥${value.toFixed(6)}`
                 />
                 <span v-else class="media-link">打开{{ reference.type }}</span>
               </a>
+              <ImageZoom
+                v-if="isImage(reference.type, reference.url)"
+                :src="reference.url"
+                :alt="reference.label"
+              />
               <b>{{ reference.label }}</b>
               <small>{{ reference.type }}</small>
               <small v-if="reference.providerUrl" class="provider-reference">
@@ -251,6 +257,7 @@ pre {
   gap: 10px;
 }
 .references article {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 5px;

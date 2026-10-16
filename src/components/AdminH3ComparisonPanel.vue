@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ImageZoom from './ImageZoom.vue'
 import BaseSelect from './base/BaseSelect.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
@@ -220,7 +221,12 @@ onBeforeUnmount(() => pollTimers.forEach((timer) => clearTimeout(timer)))
 
       <div v-if="visibleSources.length" class="source-grid">
         <article v-for="source in visibleSources" :key="source.lineId" class="source-card">
-          <img :src="source.coverUrl" :alt="`镜头 ${source.lineOrder + 1} 首帧`" />
+          <div class="image-preview-host">
+            <img :src="source.coverUrl" :alt="`镜头 ${source.lineOrder + 1} 首帧`" /><ImageZoom
+              :src="source.coverUrl"
+              :alt="`镜头 ${source.lineOrder + 1} 首帧`"
+            />
+          </div>
           <div class="source-info">
             <div class="source-title">
               <strong>镜头 {{ source.lineOrder + 1 }}</strong>
@@ -296,7 +302,12 @@ onBeforeUnmount(() => pollTimers.forEach((timer) => clearTimeout(timer)))
         <details>
           <summary>查看提示词与参考图</summary>
           <div class="prompt-detail">
-            <img v-if="sourceCover(preset)?.url" :src="sourceCover(preset)?.url" alt="参考首帧" />
+            <div v-if="sourceCover(preset)?.url" class="image-preview-host">
+              <img :src="sourceCover(preset)?.url" alt="参考首帧" /><ImageZoom
+                :src="sourceCover(preset)?.url"
+                alt="参考首帧"
+              />
+            </div>
             <div class="reference-detail">
               <span
                 v-for="media in preset.inputMedia.filter((item) => item.type === 'image')"

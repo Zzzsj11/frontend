@@ -5,6 +5,8 @@ import type { ShotAsset, ShotGenOptions } from '../types'
 import AppIcon from './AppIcon.vue'
 import BaseModal from './base/BaseModal.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
+import CharacterZoom from './CharacterZoom.vue'
+import ShotMediaCards from './ShotMediaCards.vue'
 import ImageZoom from './ImageZoom.vue'
 import ShotGenerationOptionsPopover from './ShotGenerationOptionsPopover.vue'
 import { confirmDialog } from '../composables/useConfirmDialog'
@@ -109,16 +111,20 @@ const shotCover = computed(() => {
   const line = store.editingLine
   return line ? store.coverOf(line) : undefined
 })
-const shotOriginalCover = computed(() => {
-  const line = store.editingLine
-  return (
-    line?.shot.assets.find((asset) => asset.id === line.shot.currentAssetId)?.originalCoverUrl ||
-    shotCover.value
-  )
-})
+const historyCoverImages = computed(() =>
+  (store.editingLine?.shot.assets || [])
+    .filter((asset) => asset.originalCoverUrl || asset.coverUrl)
+    .map((asset) => ({
+      src: asset.originalCoverUrl || asset.coverUrl!,
+      thumbnail: asset.coverUrl,
+      alt: `视频版本 ${store.editingLine!.shot.assets.indexOf(asset) + 1} · 封面原图`,
+    })),
+)
 const currentShotAsset = computed(() => {
   const line = store.editingLine
-  return line?.shot.assets.find((asset) => asset.id === line.shot.currentAssetId)
+  return (
+    line?.shot.assets.find((asset) => asset.id === line.shot.currentAssetId) || line?.shot.assets[0]
+  )
 })
 const isH3Asset = (asset?: ShotAsset) => Boolean(asset?.model?.startsWith('minimax-h3'))
 
@@ -156,9 +162,17 @@ const closePreview = () => {
   previewAsset.value = null
 }
 
-// 点击分镜预览：选中并展开分镜调整面板；历史片段仍可在展开后的列表中点击预览
+// 当前片段只预览播放，不改变版本选择或编辑草稿。
 const onShotPreviewClick = () => {
-  activeTab.value = 'shot'
+  if (currentShotAsset.value) {
+    previewAsset.value = currentShotAsset.value
+    previewIndex.value = Math.max(
+      0,
+      store.editingLine?.shot.assets.findIndex(
+        (asset) => asset.id === currentShotAsset.value?.id,
+      ) ?? 0,
+    )
+  } else activeTab.value = 'shot'
 }
 
 /** 预览片段的真实可播放视频地址（mock:// 假地址除外，退化为展示封面） */
@@ -255,96 +269,17 @@ const cancel = () => store.closeEditor()
           {{ showsCast ? '选择人物、视频或场景，调整对应内容' : '选择视频或场景，调整对应内容' }}
         </p>
 
-        <!-- 三个预览：人物 / 分镜 / 场景 -->
-        <div class="preview-cards" :class="{ 'without-cast': !showsCast }">
-          <!-- 人物 -->
-          <div v-if="showsCast" class="pcard" :class="{ open: activeTab === 'cast' }">
-            <div class="pcard-media" title="点击展开人物调整" @click="activeTab = 'cast'">
-              <div v-if="castOfLine.length" class="pcard-avatars">
-                <CharacterPortrait
-                  v-for="dh in castOfLine"
-                  :key="dh.id"
-                  :src="dh.avatar"
-                  :alt="dh.name"
-                  :title="dh.name"
-                />
-              </div>
-              <span v-else class="pcard-empty"><AppIcon name="user" :size="24" />空镜头</span>
-            </div>
-            <button
-              class="pcard-tab"
-              :class="{ active: activeTab === 'cast' }"
-              @click="activeTab = 'cast'"
-            >
-              <AppIcon name="users" :size="13" />
-              人物
-              <span class="pcard-count">{{ castOfLine.length }}</span>
-            </button>
-          </div>
-
-          <!-- 视频预览 -->
-          <div class="pcard" :class="{ open: activeTab === 'shot' }">
-            <div class="pcard-media" title="点击展开视频调整" @click="onShotPreviewClick">
-              <img v-if="shotCover" :src="shotCover" alt="视频预览" />
-              <video v-else-if="shotVideo" :src="shotVideo" preload="metadata" muted />
-              <span v-else class="pcard-empty"><AppIcon name="movie" :size="24" />暂无视频</span>
-              <ImageZoom :src="shotOriginalCover" alt="视频封面原图预览" />
-              <span v-if="shotAssetTotal > 1" class="pcard-badge">{{ shotAssetTotal }} 版</span>
-              <span v-if="isH3Asset(currentShotAsset)" class="model-badge">H3</span>
-              <div v-if="store.editingLine.shot.status === 'generating'" class="pcard-loading">
-                <span class="spinner light" />
-              </div>
-              <div
-                v-else-if="store.editingLine.shot.status === 'failed'"
-                class="pcard-failed"
-                :title="store.editingLine.shot.error || '未知原因'"
-              >
-                <AppIcon name="alert" :size="18" />
-                <span>视频生成失败</span>
-              </div>
-            </div>
-            <button
-              class="pcard-tab"
-              :class="{ active: activeTab === 'shot' }"
-              @click="activeTab = 'shot'"
-            >
-              <AppIcon name="movie" :size="13" />
-              视频
-            </button>
-          </div>
-
-          <!-- 场景预览 -->
-          <div class="pcard" :class="{ open: activeTab === 'scene' }">
-            <div class="pcard-media" title="点击展开场景调整" @click="activeTab = 'scene'">
-              <img
-                v-if="store.editingLine.scene.imageUrl"
-                :src="store.editingLine.scene.imageUrl"
-                alt="场景预览"
-              />
-              <span v-else class="pcard-empty"><AppIcon name="scene" :size="24" />暂无场景</span>
-              <ImageZoom :src="store.editingLine.scene.originalImageUrl" alt="场景原图预览" />
-              <div v-if="store.editingLine.scene.status === 'generating'" class="pcard-loading">
-                <span class="spinner light" />
-              </div>
-              <div
-                v-else-if="store.editingLine.scene.status === 'failed'"
-                class="pcard-failed"
-                :title="store.editingLine.scene.error || '未知原因'"
-              >
-                <AppIcon name="alert" :size="18" />
-                <span>场景图生成失败</span>
-              </div>
-            </div>
-            <button
-              class="pcard-tab"
-              :class="{ active: activeTab === 'scene' }"
-              @click="activeTab = 'scene'"
-            >
-              <AppIcon name="scene" :size="13" />
-              场景
-            </button>
-          </div>
-        </div>
+        <ShotMediaCards
+          :line="store.editingLine"
+          :humans="castOfLine"
+          :shows-cast="showsCast"
+          :active-tab="activeTab"
+          :cover="shotCover"
+          :video="shotVideo"
+          :versions="shotAssetTotal"
+          @edit="activeTab = $event"
+          @video="onShotPreviewClick"
+        />
 
         <!-- 人物调整面板 -->
         <div v-if="showsCast && activeTab === 'cast'" class="tab-panel">
@@ -361,20 +296,20 @@ const cancel = () => store.closeEditor()
           </div>
           <div class="cast-row">
             <template v-if="store.castHumans.length">
-              <button
-                v-for="dh in store.castHumans"
-                :key="dh.id"
-                class="cast-pick"
-                :class="{ active: store.editingLine.digitalHumanIds.includes(dh.id) }"
-                title="点击切换该角色的出演状态"
-                @click="store.toggleLineHuman(store.editingLine.id, dh.id)"
-              >
-                <CharacterPortrait :src="dh.avatar" :alt="dh.name" />
-                <span>{{ dh.name }}</span>
-                <span v-if="store.editingLine.digitalHumanIds.includes(dh.id)" class="pick-mark"
-                  ><AppIcon name="check" :size="12"
-                /></span>
-              </button>
+              <div v-for="dh in store.castHumans" :key="dh.id" class="cast-pick-wrap">
+                <button
+                  class="cast-pick"
+                  :class="{ active: store.editingLine.digitalHumanIds.includes(dh.id) }"
+                  title="点击切换该角色的出演状态"
+                  @click="store.toggleLineHuman(store.editingLine.id, dh.id)"
+                >
+                  <CharacterPortrait :src="dh.avatar" :alt="dh.name" />
+                  <span>{{ dh.name }}</span>
+                  <span v-if="store.editingLine.digitalHumanIds.includes(dh.id)" class="pick-mark"
+                    ><AppIcon name="check" :size="12"
+                  /></span></button
+                ><CharacterZoom :human="dh" :humans="store.castHumans" />
+              </div>
             </template>
             <span v-else class="cast-none">角色阵容为空，请先到资产库挑选本 MV 的统一角色</span>
           </div>
@@ -427,6 +362,12 @@ const cancel = () => store.closeEditor()
                   <ImageZoom
                     :src="asset.originalCoverUrl || asset.coverUrl"
                     :alt="`片段 v${i + 1} 原图预览`"
+                    :items="historyCoverImages"
+                    :index="
+                      historyCoverImages.findIndex(
+                        (item) => item.src === (asset.originalCoverUrl || asset.coverUrl),
+                      )
+                    "
                   />
                 </div>
                 <div class="asset-meta">
@@ -585,122 +526,6 @@ const cancel = () => store.closeEditor()
   color: var(--text-secondary);
 }
 
-/* 三个预览卡片：人物 / 分镜 / 场景 */
-.preview-cards {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-}
-.preview-cards.without-cast {
-  grid-template-columns: repeat(2, 1fr);
-}
-.pcard {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
-}
-.pcard.open {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 1px var(--primary);
-}
-.pcard-media {
-  position: relative;
-  height: 96px;
-  background: var(--surface-dark);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  overflow: hidden;
-}
-.pcard-media > img,
-.pcard-media > video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.pcard-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  color: var(--text-secondary);
-  font-size: var(--font-sm);
-}
-/* 人物预览：出演角色头像并排（多个时轻微重叠） */
-.pcard-avatars {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px;
-  gap: 0;
-}
-.pcard-avatars img {
-  width: 96px;
-  height: 54px;
-  border-radius: var(--radius-sm);
-  object-fit: contain;
-  border: 2px solid #fff;
-  margin-left: -12px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-}
-.pcard-avatars img:first-child {
-  margin-left: 0;
-}
-.pcard-badge {
-  position: absolute;
-  right: 5px;
-  top: 5px;
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: var(--radius-sm);
-}
-.model-badge,
-.asset-model-badge {
-  position: absolute;
-  left: 5px;
-  top: 5px;
-  z-index: 1;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 90, 44, 0.92);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
-  padding: 3px 6px;
-}
-.asset-model-badge {
-  left: 3px;
-  top: 3px;
-  padding: 2px 5px;
-}
-.pcard-loading {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.pcard-failed {
-  position: absolute;
-  inset: 0;
-  background: rgba(198, 40, 40, 0.62);
-  color: #fff;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  font-size: var(--font-sm);
-  font-weight: 600;
-}
 .gen-error {
   margin: 0;
   padding: 8px 12px 0;
@@ -710,49 +535,6 @@ const cancel = () => store.closeEditor()
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-/* 每张卡片下方的 tab 标签，点击展开对应参数 */
-.pcard-tab {
-  width: 100%;
-  border: none;
-  border-top: 1px solid var(--border);
-  background: #fff;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
-  padding: 6px 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  cursor: pointer;
-  transition:
-    background 0.15s,
-    color 0.15s;
-}
-.pcard-tab:hover {
-  color: var(--primary);
-}
-.pcard-tab.active {
-  background: var(--primary);
-  color: #fff;
-}
-.pcard-count {
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: var(--radius-sm);
-  background: var(--primary-light);
-  color: var(--primary);
-  font-size: 11px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.pcard-tab.active .pcard-count {
-  background: rgba(255, 255, 255, 0.25);
-  color: #fff;
-}
-
 /* 展开的调整面板 */
 .tab-panel {
   margin-top: 10px;
@@ -1124,5 +906,18 @@ img.preview-media {
   width: 24px;
   height: 32px;
   border-radius: var(--radius-sm);
+}
+.cast-pick-wrap {
+  position: relative;
+}
+.asset-model-badge {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--primary);
+  color: var(--preview-text);
+  font-size: var(--font-sm);
 }
 </style>

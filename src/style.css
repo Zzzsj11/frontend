@@ -42,6 +42,12 @@
   --shadow-modal: 0 24px 70px rgba(0, 0, 0, 0.24);
   /* 弹层层级 */
   --z-modal-nested: 1100;
+  --preview-mask: rgba(8, 10, 14, 0.88);
+  --preview-surface: #171a20;
+  --preview-text: #f5f6fa;
+  --preview-muted: #b8bdc8;
+  --preview-border: #3c424e;
+  --preview-control: #292e38;
   /* 字号 */
   --font-sm: 12px;
   --font-md: 14px;
@@ -264,4 +270,8 @@ label .app-select {
 .generation-model-item[data-disabled] {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.image-preview-host {
+  position: relative;
 }
