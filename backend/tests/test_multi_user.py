@@ -81,8 +81,8 @@ def test_system_human_runtime_identity_is_headshot_only() -> None:
 def test_uploaded_character_keeps_its_category_and_is_visible_immediately(client, monkeypatch) -> None:
     from app import domain
 
-    monkeypatch.setattr(domain, "is_tos_url", lambda url: url.startswith("https://tos.test/"))
-    _, headers = create_and_login_user(client, "uploaded-role-viewer")
+    user_id, headers = create_and_login_user(client, "uploaded-role-viewer")
+    monkeypatch.setattr(domain, "is_user_owned_tos_url", lambda url, owner: owner == user_id and url.startswith(f"https://tos.test/users/{user_id}/"))
     style = client.post("/api/digital-human-styles", headers=headers, json={"name": "用户上传"})
     assert style.status_code == 201
     created = client.post(
@@ -92,8 +92,8 @@ def test_uploaded_character_keeps_its_category_and_is_visible_immediately(client
             "name": "上传角色",
             "style_id": style.json()["id"],
             "description": "上传测试角色",
-            "avatar_url": "https://tos.test/users/uploaded-role-viewer/digital-humans/original.jpg",
-            "avatar_thumbnail_url": "https://tos.test/users/uploaded-role-viewer/digital-humans/thumbnail.jpg",
+            "avatar_url": f"https://tos.test/users/{user_id}/digital-humans/original.jpg",
+            "avatar_thumbnail_url": f"https://tos.test/users/{user_id}/digital-humans/thumbnail.jpg",
             "source": "uploaded",
         },
     )

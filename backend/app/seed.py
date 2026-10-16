@@ -6,7 +6,6 @@ from sqlalchemy import select, update
 
 from .config import settings
 from .database import session_factory
-from .error_logging import log_background_error
 from .headshot_assets import HEADSHOT_ASSETS
 from .models import (
     AdminPermissionModel,
@@ -872,52 +871,6 @@ async def seed_system_data() -> None:
         await seed_prompts(session)
         await seed_storyboard_options(session)
         await session.commit()
-
-
-async def ensure_pending_asset_avatars() -> None:
-    """补齐数字人在英合账号下的 asset://，供 cron 幂等执行。"""
-    if settings.llm_channel == "all-in-one":
-        return
-    import asyncio
-
-    from .providers import create_real_face_asset
-
-    async with session_factory() as session:
-        pending = (
-            (
-                await session.execute(
-                    select(DigitalHumanModel).where(
-                        DigitalHumanModel.deleted_at.is_(None),
-                        DigitalHumanModel.asset_avatar_url.is_(None),
-                        DigitalHumanModel.avatar_url.isnot(None),
-                        DigitalHumanModel.avatar_url != "",
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-    semaphore = asyncio.Semaphore(4)
-
-    async def sync_human(human: DigitalHumanModel) -> None:
-        async with semaphore:
-            try:
-                asset_url = await create_real_face_asset(human.avatar_url, name=f"mv-{human.asset_code or human.id}")
-            except Exception as exc:
-                await log_background_error(
-                    user_id=human.user_id,
-                    path="/v3/assets",
-                    error_type="AssetError",
-                    message=f"digital human yinghe asset create failed: {human.id}: {exc}",
-                )
-                return
-        async with session_factory() as session:
-            current = await session.get(DigitalHumanModel, human.id)
-            if current and current.asset_avatar_url is None:
-                current.asset_avatar_url = asset_url
-                await session.commit()
-
-    await asyncio.gather(*(sync_human(human) for human in pending))
 
 
 async def recover_stale_storyboard_generation() -> None:

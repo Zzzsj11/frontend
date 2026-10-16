@@ -9,8 +9,7 @@ import GeneralStoryboardModal from './GeneralStoryboardModal.vue'
 import CreativeVideoModal from './CreativeVideoModal.vue'
 import AppIcon from './AppIcon.vue'
 import StoryboardOutlineModal from './StoryboardOutlineModal.vue'
-import { apiRequest } from '../api/client'
-import type { AccountBalance } from '../stores/auth'
+import { useAuthStore } from '../stores/auth'
 import { confirmDialog } from '../composables/useConfirmDialog'
 import { normalizeShotOptions } from '../mediaConstraints'
 import {
@@ -22,6 +21,7 @@ import {
 import { estimateVideoBatchCost, estimateVideoBatchCostByProvider } from '../utils/videoBatchCost'
 
 const store = useProjectStore()
+const auth = useAuthStore()
 const lineListRef = ref<HTMLDivElement>()
 const checkingBatchCost = ref(false)
 const addingSingleVideo = ref(false)
@@ -193,9 +193,7 @@ const confirmBatchGenerate = async () => {
           VIDEO_MODEL_OPTIONS.find((option) => option.value === code)?.label || code || 'SD2.0',
       )
       .join('、')
-    const balance = Object.keys(providerEstimates).length
-      ? await apiRequest<AccountBalance>('/account/balance')
-      : null
+    const balance = Object.keys(providerEstimates).length ? await auth.loadBalance() : null
     const balanceLines: string[] = []
     let sufficient = true
     let balanceUnavailable = false
@@ -479,7 +477,7 @@ const confirmBatchGenerate = async () => {
   width: 72px;
   height: 6px;
   border-radius: 3px;
-  background: #dbe7f8;
+  background: var(--palette-dbe7f8);
   overflow: hidden;
 }
 .generation-progress-fill {
@@ -504,9 +502,9 @@ const confirmBatchGenerate = async () => {
   margin-top: 12px;
   padding: 9px 12px;
   border-radius: var(--radius-sm);
-  background: #f2f7ff;
-  border: 1px solid #d4e3fb;
-  color: #35608f;
+  background: var(--palette-f2f7ff);
+  border: 1px solid var(--palette-d4e3fb);
+  color: var(--palette-35608f);
   font-size: var(--font-sm);
 }
 .outline-banner.error {
@@ -517,7 +515,7 @@ const confirmBatchGenerate = async () => {
 .outline-banner.warning {
   background: var(--warning-light);
   border-color: var(--warning-border);
-  color: #96621a;
+  color: var(--palette-96621a);
 }
 .banner-text {
   min-width: 0;
@@ -540,7 +538,7 @@ const confirmBatchGenerate = async () => {
   flex-basis: 100%;
   height: 6px;
   border-radius: 3px;
-  background: #dbe7f8;
+  background: var(--palette-dbe7f8);
   overflow: hidden;
 }
 .outline-progress-fill {
@@ -590,7 +588,7 @@ const confirmBatchGenerate = async () => {
   height: 18px;
   border-radius: var(--radius-sm);
   background: var(--primary);
-  color: #fff;
+  color: var(--palette-ffffff);
   font-size: 11px;
   padding: 0 5px;
 }

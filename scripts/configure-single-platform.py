@@ -37,6 +37,9 @@ DEFAULTS = {
 def main():
     if os.getenv("DEPLOY_ENV") != "production":
         raise SystemExit("This configuration migration is only for production deployment")
+    defaults = dict(DEFAULTS)
+    if os.getenv("DEPLOY_TLS") == "1":
+        defaults["REFRESH_COOKIE_SECURE"] = "true"
     runtime = ROOT / "backend/.runtime_secrets.env"
     if not runtime.is_file():
         raise SystemExit("Missing production runtime secrets file")
@@ -54,12 +57,14 @@ def main():
         for line in old.splitlines():
             match = re.match(r"^\s*([A-Z][A-Z0-9_]*)\s*=", line)
             key = match.group(1) if match else ""
-            if key in DEFAULTS or key in LEGACY_KEYS or key.startswith(PREFIXES):
+            if key in defaults or key in LEGACY_KEYS or key.startswith(PREFIXES):
                 removed += 1
                 continue
             retained.append(line)
         if path == runtime:
-            retained.extend(key + "=" + value for key, value in DEFAULTS.items())
+            if not any(re.match(r"^\s*AGENT_TEST_USERNAMES\s*=", line) for line in retained):
+                retained.append("AGENT_TEST_USERNAMES=dev01")
+            retained.extend(key + "=" + value for key, value in defaults.items())
         new = "\n".join(retained) + "\n"
         if old != new:
             target = backup / ("root-" if path.parent == ROOT else "backend-")

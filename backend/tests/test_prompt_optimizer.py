@@ -273,7 +273,8 @@ def test_gemini_preserves_multimedia_content_types(monkeypatch) -> None:
             ],
         )
     )
-    content = captured["messages"][0]["content"]
+    assert captured["messages"][0]["role"] == "system"
+    content = captured["messages"][1]["content"]
     assert [item["type"] for item in content[1:]] == ["image_url", "video_url", "audio_url"]
 
 

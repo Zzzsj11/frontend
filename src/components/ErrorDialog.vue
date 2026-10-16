@@ -107,11 +107,11 @@ async function copyAllErrors() {
 .error-mask {
   position: fixed;
   inset: 0;
-  z-index: 2000;
+  z-index: var(--z-toast);
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(20, 24, 32, 0.58);
+  background: var(--palette-rgba-20-24-32-0-58);
   backdrop-filter: blur(3px);
 }
 .error-dialog {
@@ -150,7 +150,7 @@ dl {
   gap: 6px 12px;
   padding: 10px 12px;
   border-radius: var(--radius-sm);
-  background: #f7f7f8;
+  background: var(--palette-f7f7f8);
   text-align: left;
   font-size: var(--font-sm);
 }

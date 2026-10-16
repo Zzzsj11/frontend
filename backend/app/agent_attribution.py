@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from contextvars import ContextVar
 
 from fastapi import Request, Response
@@ -30,3 +31,14 @@ async def agent_attribution_middleware(request: Request, call_next: RequestRespo
         _origin.reset(origin_token)
         _agent_name.reset(name_token)
         _agent_run_id.reset(run_token)
+
+
+@contextmanager
+def attribution_context(origin: str, name: str, run_id: str):
+    tokens = (_origin.set(origin), _agent_name.set(name), _agent_run_id.set(run_id))
+    try:
+        yield
+    finally:
+        _origin.reset(tokens[0])
+        _agent_name.reset(tokens[1])
+        _agent_run_id.reset(tokens[2])

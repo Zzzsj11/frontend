@@ -41,8 +41,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 .confirm-mask {
   position: fixed;
   inset: 0;
-  z-index: 1200;
-  background: rgba(20, 20, 20, 0.48);
+  z-index: var(--z-dropdown);
+  background: var(--palette-rgba-20-20-20-0-48);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -51,7 +51,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 .confirm-card {
   width: 420px;
   max-width: 100%;
-  background: #fff;
+  background: var(--palette-ffffff);
   border-radius: var(--radius-lg);
   padding: 24px;
   box-shadow: var(--shadow-modal);
@@ -70,7 +70,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   justify-content: center;
 }
 .confirm-icon.danger {
-  background: rgba(238, 51, 51, 0.08);
+  background: var(--palette-rgba-238-51-51-0-08);
   color: var(--danger);
 }
 .confirm-content h3 {
@@ -102,7 +102,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 }
 .confirm-cancel {
   border: 1px solid var(--border-dark);
-  background: #fff;
+  background: var(--palette-ffffff);
   color: var(--text-secondary);
 }
 .confirm-cancel:hover {
@@ -112,12 +112,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 .confirm-submit {
   border: 0;
   background: var(--primary-gradient);
-  color: #fff;
-  box-shadow: 0 4px 12px rgba(255, 90, 44, 0.28);
+  color: var(--palette-ffffff);
+  box-shadow: 0 4px 12px var(--palette-rgba-255-90-44-0-28);
 }
 .confirm-submit.danger {
   background: var(--danger-gradient);
-  box-shadow: 0 4px 12px rgba(229, 57, 53, 0.25);
+  box-shadow: 0 4px 12px var(--palette-rgba-229-57-53-0-25);
 }
 .confirm-fade-enter-active,
 .confirm-fade-leave-active {

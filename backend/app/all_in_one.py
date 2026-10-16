@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any
 
@@ -149,7 +150,7 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
             body = response.json()
             await jobs.record_provider_response(job, "submission", body)
     except ProviderError as exc:
-        if getattr(exc, "submission_certain", False):
+        if getattr(exc, "submission_certain", False) and not _content_rejection(exc):
             from .image_failover import record_outcome
 
             await record_outcome(job, succeeded=False)
@@ -191,13 +192,29 @@ async def resume(job: Any) -> dict[str, Any]:
             from .image_failover import record_outcome
 
             await record_outcome(job, succeeded=True)
-            return await store_result(job, data)
+            try:
+                return await store_result(job, data)
+            except Exception as exc:
+                # 上游已交付并可能扣费，归档失败不能抹掉供应商用量。
+                exc.usage = data.get("usage") or {}
+                exc.provider = PROVIDER
+                exc.request_id = job.provider_task_id
+                raise
         if data["status"] in {"FAILED", "CANCELLED"}:
             await jobs.record_provider_response(job, "terminal", data)
             from .image_failover import record_outcome
 
-            await record_outcome(job, succeeded=False)
-            raise ProviderError(data["failReason"] or "all in one 生成失败")
+            if data["status"] == "FAILED" and not _content_rejection(data.get("failReason")):
+                await record_outcome(job, succeeded=False)
+            error = ProviderError(data["failReason"] or "all in one 生成失败")
+            error.usage = data.get("usage") or {}
+            error.provider = PROVIDER
+            error.request_id = job.provider_task_id
+            raise error
         await jobs.update_progress(job, min(90, job.progress + 2))
         await asyncio.sleep(POLL_INTERVAL_SECONDS)
     raise ProviderError("all in one 生成等待超过2小时，请核查原任务；未重新提交")
+
+
+def _content_rejection(value: Any) -> bool:
+    return bool(re.search(r"sensitive|moderation|violat|content.?policy|content.?filter|content.?safety|usage policy|审核|违规|敏感", str(value), re.I))

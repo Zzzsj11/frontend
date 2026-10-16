@@ -634,9 +634,9 @@ header p,
 .config-warning,
 .form-error {
   border-radius: var(--radius-xs);
-  background: #fff4ed;
+  background: var(--palette-fff4ed);
   padding: 9px 11px;
-  color: #b42318;
+  color: var(--palette-b42318);
   font-size: 12px;
 }
 .field-label {
@@ -903,7 +903,7 @@ header p,
   border-radius: var(--radius-sm);
   background: var(--primary-gradient);
   padding: 12px;
-  color: #fff;
+  color: var(--palette-ffffff);
   font-weight: 700;
   cursor: pointer;
 }
@@ -955,9 +955,9 @@ header p,
   resize: none;
   border: 0;
   outline: 0;
-  background: #101828;
+  background: var(--palette-101828);
   padding: 20px;
-  color: #e4e7ec;
+  color: var(--palette-e4e7ec);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   line-height: 1.7;
@@ -986,7 +986,7 @@ header p,
   margin-top: 8px;
 }
 .error-state {
-  color: #b42318;
+  color: var(--palette-b42318);
 }
 .spinner {
   width: 28px;

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import AdminPermissionModel, AdminRoleModel, AdminRolePermissionModel, UserAdminRoleModel, UserModel
@@ -17,40 +17,21 @@ STORYBOARD_OPTIONS_MANAGE = "storyboard_options.manage"
 async def load_admin_access(db: AsyncSession, user: UserModel) -> tuple[list[str], list[str]]:
     if user.role != "admin":
         return [], []
-    role_codes = list(
-        (
-            await db.execute(
-                select(AdminRoleModel.code)
-                .join(UserAdminRoleModel, UserAdminRoleModel.role_id == AdminRoleModel.id)
-                .where(
-                    UserAdminRoleModel.user_id == user.id,
-                    UserAdminRoleModel.deleted_at.is_(None),
-                    AdminRoleModel.deleted_at.is_(None),
-                )
+    rows = (
+        await db.execute(
+            select(AdminRoleModel.code, AdminPermissionModel.code)
+            .select_from(UserAdminRoleModel)
+            .join(AdminRoleModel, AdminRoleModel.id == UserAdminRoleModel.role_id)
+            .outerjoin(AdminRolePermissionModel, and_(AdminRolePermissionModel.role_id == AdminRoleModel.id, AdminRolePermissionModel.deleted_at.is_(None)))
+            .outerjoin(AdminPermissionModel, and_(AdminPermissionModel.id == AdminRolePermissionModel.permission_id, AdminPermissionModel.deleted_at.is_(None)))
+            .where(
+                UserAdminRoleModel.user_id == user.id,
+                UserAdminRoleModel.deleted_at.is_(None),
+                AdminRoleModel.deleted_at.is_(None),
             )
         )
-        .scalars()
-        .all()
-    )
-    permissions = list(
-        (
-            await db.execute(
-                select(AdminPermissionModel.code)
-                .join(AdminRolePermissionModel, AdminRolePermissionModel.permission_id == AdminPermissionModel.id)
-                .join(UserAdminRoleModel, UserAdminRoleModel.role_id == AdminRolePermissionModel.role_id)
-                .where(
-                    UserAdminRoleModel.user_id == user.id,
-                    UserAdminRoleModel.deleted_at.is_(None),
-                    AdminRolePermissionModel.deleted_at.is_(None),
-                    AdminPermissionModel.deleted_at.is_(None),
-                )
-                .distinct()
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return sorted(role_codes), sorted(permissions)
+    ).all()
+    return sorted({role for role, _ in rows}), sorted({permission for _, permission in rows if permission})
 
 
 async def attach_admin_access(db: AsyncSession, user: UserModel) -> None:

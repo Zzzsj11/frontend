@@ -104,7 +104,10 @@ export async function apiRequest<T>(
         }
       }
     }
-    if (!response) throw reportApiError(error, '网络连接失败')
+    if (!response) {
+      if (isPollingHeaders(headers)) throw new ApiError('生成状态查询暂时中断，将继续等待')
+      throw reportApiError(error, '网络连接失败')
+    }
   }
   // 撞上部署重启窗口：按预算重试等待新 backend 就绪，用户无感
   const agentMutation =
@@ -155,7 +158,12 @@ export async function apiRequest<T>(
       response.status,
       body.errorCode,
     )
-    throw silentStatuses.includes(response.status) ? error : reportApiError(error)
+    const transientPollingError =
+      isPollingHeaders(headers) &&
+      (response.status === 408 || response.status === 429 || response.status >= 500)
+    throw silentStatuses.includes(response.status) || transientPollingError
+      ? error
+      : reportApiError(error)
   }
   return body as T
 }

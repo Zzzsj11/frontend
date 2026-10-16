@@ -113,6 +113,7 @@ class Settings:
     jwt_secret: str = os.getenv("JWT_SECRET", "development-only-change-me-at-least-32-bytes")
     access_token_minutes: int = int(os.getenv("ACCESS_TOKEN_MINUTES", "15"))
     refresh_token_days: int = int(os.getenv("REFRESH_TOKEN_DAYS", "14"))
+    agent_test_usernames: tuple[str, ...] = tuple(name.strip() for name in os.getenv("AGENT_TEST_USERNAMES", "").split(",") if name.strip())
     refresh_cookie_secure: bool = os.getenv("REFRESH_COOKIE_SECURE", "false").lower() == "true"
     login_rate_limit_attempts: int = max(3, int(os.getenv("LOGIN_RATE_LIMIT_ATTEMPTS", "8")))
     login_rate_limit_window_seconds: int = max(30, int(os.getenv("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "300")))
@@ -229,6 +230,8 @@ def validate_runtime_security() -> None:
     if "*" in settings.cors_origins:
         raise RuntimeError("启用凭证时 APP_CORS_ORIGINS 禁止使用通配符")
     if settings.app_env == "production":
+        if not settings.refresh_cookie_secure:
+            raise RuntimeError("生产环境必须启用 HTTPS 和 REFRESH_COOKIE_SECURE=true")
         if settings.llm_channel != "all-in-one" or not all(model.endswith("-all-in-one") for model in (settings.llm_model, settings.general_outline_llm_model)):
             raise RuntimeError("生产环境仅允许 All in one 文本模型")
         if os.getenv("MODEL_GATEWAY_URL", ""):

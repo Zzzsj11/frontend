@@ -10,7 +10,7 @@ current="$(crontab -l 2>/dev/null | grep -v "$marker" || true)"
   if ! systemctl is-enabled mv-agent-metrics.timer >/dev/null 2>&1; then
     printf '* * * * * PROJECT_DIR=%q %q >> %q 2>&1 %s\n' "$root" "$root/scripts/collect-server-metrics.sh" "$logs/server-metrics-cron.log" "$marker"
   fi
-  printf '15 3 * * * BACKUP_DIR=%q %q >> %q 2>&1 %s\n' "$backups" "$root/scripts/backup-postgres.sh" "$logs/backup-cron.log" "$marker"
+  printf '15 3 * * * BACKUP_DIR=%q BACKUP_TOS_BUCKET=%q BACKUP_TOS_PREFIX=%q %q >> %q 2>&1 %s\n' "$backups" "${BACKUP_TOS_BUCKET:-}" "${BACKUP_TOS_PREFIX:-mv-agent/database}" "$root/scripts/backup-postgres.sh" "$logs/backup-cron.log" "$marker"
   printf '15 4 * * 0 BACKUP_DIR=%q %q >> %q 2>&1 %s\n' "$backups" "$root/scripts/verify-latest-backup.sh" "$logs/backup-verify-cron.log" "$marker"
 } | crontab -
 echo "installed health, backup, restore verification, and metrics cron fallback (systemd timer preferred)"

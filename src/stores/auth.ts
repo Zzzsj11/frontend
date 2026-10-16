@@ -42,6 +42,11 @@ export interface AllInOneCredits {
   updatedAt?: string
   message?: string
 }
+const balanceRequests = new WeakMap<
+  object,
+  { userId: string; promise: Promise<AccountBalance | null> }
+>()
+
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null as AuthUser | null,
@@ -51,7 +56,16 @@ export const useAuthStore = defineStore('auth', {
     balanceLoading: false,
     allInOneCredits: null as AllInOneCredits | null,
   }),
-  getters: { authenticated: (state) => Boolean(state.user) },
+  getters: {
+    authenticated: (state) => Boolean(state.user),
+    canAccessAdmin: (state) =>
+      Boolean(
+        state.user?.isSuperAdmin ||
+        state.user?.permissions?.some((permission) =>
+          ['song_emotions.read', 'storyboard_options.read'].includes(permission),
+        ),
+      ),
+  },
   actions: {
     async initialize() {
       if (!this.ready) {
@@ -74,25 +88,37 @@ export const useAuthStore = defineStore('auth', {
         this.ready = true
       }
     },
-    async loadBalance(force = false) {
-      if (!this.user || this.balanceLoading) return
+    async loadBalance(force = false): Promise<AccountBalance | null> {
+      const userId = this.user?.id
+      if (!userId) return null
+      const pending = balanceRequests.get(this)
+      if (pending?.userId === userId) return pending.promise
       this.balanceLoading = true
-      try {
-        this.balance = await apiRequest<AccountBalance>(
-          `/account/balance${force ? '?force=true' : ''}`,
-        )
-      } finally {
-        this.balanceLoading = false
-      }
+      const promise = apiRequest<AccountBalance>(`/account/balance${force ? '?force=true' : ''}`)
+        .then((balance) => {
+          if (this.user?.id !== userId) return null
+          this.balance = balance
+          return balance
+        })
+        .finally(() => {
+          if (balanceRequests.get(this)?.promise === promise) {
+            balanceRequests.delete(this)
+            this.balanceLoading = false
+          }
+        })
+      balanceRequests.set(this, { userId, promise })
+      return promise
     },
     async loadAllInOneCredits() {
-      if (!this.user) return
-      this.allInOneCredits = await apiRequest<AllInOneCredits>(
+      const userId = this.user?.id
+      if (!userId) return
+      const credits = await apiRequest<AllInOneCredits>(
         '/account/all-in-one-credits',
         {},
         true,
         [404],
       ).catch(() => ({ available: false, message: '平台积分暂不可用' }))
+      if (this.user?.id === userId) this.allInOneCredits = credits
     },
     async logout() {
       const uid = this.user?.id
@@ -106,6 +132,7 @@ export const useAuthStore = defineStore('auth', {
         localStorage.removeItem(`mv_sidebar_task_${uid}`)
       }
       localStorage.removeItem('mv:pending-dh')
+      if (uid) localStorage.removeItem(`mv:pending-dh:${uid}`)
       // 清空工作区内存现场（项目列表/分镜/角色/缓存），防止下一账号看到上一账号数据
       useProjectStore().resetWorkspace()
     },

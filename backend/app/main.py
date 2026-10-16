@@ -50,7 +50,7 @@ from .error_logging import record_api_error, request_payload
 from .h3_prompt_compiler import compile_h3_prompt
 from .image_download import router as image_download_router
 from .image_model_policy import validate_image_selection
-from .jobs import jobs
+from .jobs import Job, jobs
 from .media_constraints import normalize_video_duration
 from .models import (
     AiModelModel,
@@ -101,6 +101,8 @@ async def probe_audio_duration(content: bytes) -> float:
         path.write_bytes(content)
         process = await asyncio.create_subprocess_exec(
             "ffprobe",
+            "-protocol_whitelist",
+            "file,pipe",
             "-v",
             "error",
             "-show_entries",
@@ -111,7 +113,12 @@ async def probe_audio_duration(content: bytes) -> float:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await process.communicate()
+        from .providers import _communicate_bounded
+
+        try:
+            stdout, stderr = await _communicate_bounded(process, 30)
+        except TimeoutError as exc:
+            raise HTTPException(422, "音频解析超时") from exc
         if process.returncode != 0:
             raise HTTPException(422, f"MP3 文件无法解析：{stderr.decode(errors='ignore')[:120]}")
         try:
@@ -408,7 +415,7 @@ async def auth_login(payload: LoginCreate, request: Request, response: Response)
         attempts = max(await asyncio.gather(*(login_attempt_count(identity) for identity in identities)))
     except Exception:
         logger.exception("登录限流存储不可用")
-        attempts = 1
+        raise HTTPException(503, "登录服务暂不可用，请稍后重试", headers={"Retry-After": "5"}) from None
     if attempts >= settings.login_rate_limit_attempts:
         raise HTTPException(
             429,
@@ -487,6 +494,9 @@ async def upload(user: CurrentUser, file: UploadFile = File(...), category: str 
         url = await storage.put_bytes(key, content, file.content_type)
         thumbnail_url = await storage.put_bytes(f"{key.rsplit('.', 1)[0]}-thumbnail.jpg", thumbnail, "image/jpeg")
     else:
+        from .upload_validation import validate_av_content
+
+        await validate_av_content(file.filename or "", file.content_type or "", content)
         url = await get_storage().put_bytes(key, content, file.content_type)
         thumbnail_url = None
     return {"url": url, "thumbnailUrl": thumbnail_url, "key": key, "filename": file.filename}
@@ -840,6 +850,14 @@ async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str], *,
 
 @app.post("/api/generations/videos", status_code=202)
 async def create_video_generation(payload: VideoGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
+    job = await _enqueue_video_generation(payload, user, db)
+    await db.commit()
+    await jobs.dispatch(job, lambda item: generate_video(payload, item))
+    return job.public()
+
+
+async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserModel, db: AsyncSession) -> Job:
+    await db.scalar(select(UserModel.id).where(UserModel.id == user.id).with_for_update())
     model, provider = await require_active_model(db, payload.model or settings.video_model, "video")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
     if task_id:
@@ -856,22 +874,14 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
     is_h3 = bool((model.capabilities or {}).get("h3Modes"))
     if is_h3:
         validate_h3_mode_inputs(payload)
-    await _check_concurrency(db, user.id, "video", settings.video_generation_concurrency)
     identity_indices = await _identity_reference_indices(db, payload.image_urls, user_id=user.id)
     if (model.capabilities or {}).get("providerProtocol") == "kling-native":
         try:
             kling_image_inputs(payload, identity_reference=bool(identity_indices))
         except ProviderError as exc:
             raise HTTPException(422, str(exc)) from exc
-    await consume_daily_quota(db, user_id=user.id, category="video")
-    # 日额度消费会提交事务，重新取得配置锁直到工单落库。
-    if task_id:
-        await lock_video_task(db, task_id)
-        await db.refresh(task)
-        if line:
-            await db.refresh(line)
-        if (task.storyboard_config or {}).get("videoModelRevision") and line and (line.shot_options or {}).get("videoModel") != payload.model:
-            raise HTTPException(409, "该分镜的视频模型已更新，请刷新页面后再生成")
+    await consume_daily_quota(db, user_id=user.id, category="video", commit=False)
+    await _check_concurrency(db, user.id, "video", settings.video_generation_concurrency)
     if identity_indices:
         wardrobe = dict((line.shot_options or {}).get("wardrobeByCharacter") or {}) if line else {}
         task_config = dict(task.storyboard_config or {}) if task else {}
@@ -932,16 +942,16 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
                 "_referenceAudioCount": len(payload.audio_urls),
             }
         )
-    job = await jobs.create(
+    job = await jobs.enqueue(
+        db,
         "video",
         snapshot,
-        lambda item: generate_video(payload, item),
         user_id=user.id,
         project_id=project_id,
         project_task_id=task_id,
         storyboard_line_id=line_id,
     )
-    return job.public()
+    return job
 
 
 @app.post("/api/generations/videos/batch", status_code=202)
@@ -955,7 +965,12 @@ async def create_video_generations_batch(
         estimate = await ensure_video_batch_balance(payload.items)
     except ValueError as exc:
         raise HTTPException(402, str(exc)) from exc
-    jobs_output = [await create_video_generation(item, user, db) for item in payload.items]
+    # 整批工单与日配额同事务：任何一项校验/额度失败，都不会留下已开始收费的前半批。
+    pending = [(item, await _enqueue_video_generation(item, user, db)) for item in payload.items]
+    await db.commit()
+    for request, job in pending:
+        await jobs.dispatch(job, lambda item, payload=request: generate_video(payload, item))
+    jobs_output = [job.public() for _, job in pending]
     return {"count": len(jobs_output), "jobs": jobs_output, **estimate}
 
 

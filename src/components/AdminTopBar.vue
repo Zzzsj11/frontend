@@ -83,7 +83,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .admin-topbar {
   position: relative;
-  z-index: 500;
+  z-index: var(--z-admin-header);
   display: flex;
   min-height: 64px;
   flex: 0 0 auto;
@@ -91,20 +91,20 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 20px;
   padding: 0 28px;
-  border-bottom: 1px solid #e4e7ec;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+  border-bottom: 1px solid var(--palette-e4e7ec);
+  background: var(--palette-rgba-255-255-255-0-96);
+  box-shadow: 0 1px 2px var(--palette-rgba-16-24-40-0-03);
 }
 .page-identity p {
   margin: 0 0 2px;
-  color: #667085;
+  color: var(--palette-667085);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.08em;
 }
 .page-identity h1 {
   margin: 0;
-  color: #1d2939;
+  color: var(--palette-1d2939);
   font-size: 20px;
   line-height: 1.2;
 }
@@ -116,10 +116,10 @@ onBeforeUnmount(() => {
 .icon-button,
 .refresh-button,
 .admin-user-trigger {
-  border: 1px solid #dfe3e8;
+  border: 1px solid var(--palette-dfe3e8);
   border-radius: 7px;
-  background: #fff;
-  color: #475467;
+  background: var(--palette-ffffff);
+  color: var(--palette-475467);
 }
 .icon-button {
   display: grid;
@@ -131,7 +131,7 @@ onBeforeUnmount(() => {
 .icon-button:hover,
 .refresh-button:hover:not(:disabled),
 .admin-user-trigger:hover {
-  border-color: #ffb18f;
+  border-color: var(--palette-ffb18f);
   color: var(--primary);
 }
 .refresh-button {
@@ -165,8 +165,8 @@ onBeforeUnmount(() => {
   height: 27px;
   place-items: center;
   border-radius: 6px;
-  background: #344054;
-  color: #fff;
+  background: var(--palette-344054);
+  color: var(--palette-ffffff);
   font-size: 12px;
   font-weight: 700;
 }
@@ -180,17 +180,17 @@ onBeforeUnmount(() => {
 .admin-user-copy b {
   max-width: 92px;
   overflow: hidden;
-  color: #344054;
+  color: var(--palette-344054);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .admin-user-copy small {
-  color: #98a2b3;
+  color: var(--palette-98a2b3);
   font-size: 10px;
 }
 .menu-chevron {
-  color: #98a2b3;
+  color: var(--palette-98a2b3);
   transform: rotate(90deg);
   transition: transform 0.15s;
 }
@@ -205,10 +205,10 @@ onBeforeUnmount(() => {
   width: 156px;
   flex-direction: column;
   padding: 6px;
-  border: 1px solid #e4e7ec;
+  border: 1px solid var(--palette-e4e7ec);
   border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 12px 28px rgba(16, 24, 40, 0.14);
+  background: var(--palette-ffffff);
+  box-shadow: 0 12px 28px var(--palette-rgba-16-24-40-0-14);
 }
 .admin-user-dropdown a,
 .admin-user-dropdown button {
@@ -216,7 +216,7 @@ onBeforeUnmount(() => {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #344054;
+  color: var(--palette-344054);
   font: inherit;
   font-size: 12px;
   text-align: left;
@@ -225,10 +225,10 @@ onBeforeUnmount(() => {
 }
 .admin-user-dropdown a:hover,
 .admin-user-dropdown button:hover {
-  background: #f2f4f7;
+  background: var(--palette-f2f4f7);
 }
 .admin-user-dropdown .logout {
-  color: #d92d20;
+  color: var(--palette-d92d20);
 }
 @media (max-width: 720px) {
   .admin-topbar {

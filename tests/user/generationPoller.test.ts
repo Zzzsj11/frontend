@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { errorBus } from '../../src/errorBus'
 import {
   PollingCancelledError,
   abortableSleep,
@@ -28,6 +29,32 @@ describe('generationPoller 统一轮询调度器', () => {
     expect(String(request.mock.calls[1][0])).toBe('/api/generations/observed')
     expect(JSON.parse(String(request.mock.calls[1][1]?.body))).toEqual({ ids: ['job-ok'] })
   })
+
+  it('相同工单的多个订阅都能结束，不覆盖原 Promise', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      json([{ id: 'job-shared', status: 'succeeded', result: 'done' }]),
+    )
+    const results = await Promise.all([
+      watchGenerationJob('job-shared', { select: (s) => s.result }),
+      watchGenerationJob('job-shared', { select: (s) => s.result }),
+    ])
+    expect(results).toEqual(['done', 'done'])
+  })
+
+  it('临时网络故障后继续查询，直到后端返回成功', async () => {
+    const showError = vi.spyOn(errorBus, 'show')
+    const request = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockImplementation(async () =>
+        json([{ id: 'job-retry-network', status: 'succeeded', result: 'recovered' }]),
+      )
+    await expect(
+      watchGenerationJob('job-retry-network', { select: (s) => s.result, timeoutMs: 10000 }),
+    ).resolves.toBe('recovered')
+    expect(request.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(showError).not.toHaveBeenCalled()
+  }, 10000)
 
   it('轮询到 failed 后以任务 error 文案 reject', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(

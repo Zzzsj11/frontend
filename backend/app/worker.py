@@ -15,7 +15,7 @@ from .chat import chat_manager
 from .config import settings, validate_runtime_security
 from .database import close_database, init_database, session_factory
 from .domain import _run_material_export, run_storyboard_job
-from .jobs import Job, jobs
+from .jobs import Job, JobExpiredError, jobs
 from .models import GenerationJobModel, ProjectTaskModel, WorkerInstanceModel, utcnow
 from .providers import ProviderError, generate_image, generate_video, resume_generation, validate_media_job_source
 from .redis_store import close_redis, wait_for_worker_wakeup
@@ -24,6 +24,7 @@ from .schemas import ImageGenerationCreate, VideoGenerationCreate
 logger = logging.getLogger("mvagent.worker")
 REPLAYABLE_INTERNAL_KINDS = {"ass_outline", "general_outline", "ass_segment_retry", "storyboard_line", "billing_reconcile", "prompt_optimization", "mv_export"}
 MAX_INTERNAL_ATTEMPTS = 3
+STALE_RECOVERY_INTERVAL_SECONDS = 15
 
 
 def _claim_priority(model: GenerationJobModel, active_by_task: dict[str, int]) -> tuple[int, object]:
@@ -61,6 +62,8 @@ async def _claim(kinds: tuple[str, ...], providers: tuple[str, ...], worker_id: 
             .with_for_update(skip_locked=True)
             .limit(100)
         )
+        if providers:
+            query = query.where(func.coalesce(GenerationJobModel.request["_provider"].as_string(), "internal").in_(providers))
         if "mv_export" in kinds:
             # 成片编码只占一个 Worker 槽位，其余槽位继续处理素材 ZIP。
             rendering = await session.scalar(
@@ -162,8 +165,9 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
             elif (
                 model.phase == "submitting_provider"
                 and model.idempotency_key
-                and provider != "toapis"
-                and (model.kind == "image" or (model.kind == "video" and provider != "runninghub"))
+                and model.attempt < MAX_INTERNAL_ATTEMPTS
+                and (provider == "all-in-one" or bool((model.request or {}).get("_modelGateway")))
+                and model.kind in {"image", "video"}
             ):
                 # Only replay suppliers with proven idempotent creation. ToAPIs
                 # supports business-ID lookup, but does not promise deduplication.
@@ -307,7 +311,10 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
 
     async def instance_heartbeat() -> None:
         while True:
-            await update_instance()
+            try:
+                await update_instance()
+            except Exception:
+                logger.exception("Worker 实例心跳失败，将重试")
             await asyncio.sleep(max(5.0, min(15.0, settings.worker_stale_seconds / 3)))
 
     instance_heartbeat_task = asyncio.create_task(instance_heartbeat())
@@ -319,34 +326,49 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
             async def heartbeat() -> None:
                 while True:
                     await asyncio.sleep(heartbeat_interval)
-                    await jobs.heartbeat(job)
-                    if job.kind in REPLAYABLE_INTERNAL_KINDS - {"mv_export"} and job.project_task_id:
-                        async with session_factory() as session:
-                            task = await session.get(ProjectTaskModel, job.project_task_id)
-                            if task and task.deleted_at is None:
-                                config = dict(task.storyboard_config or {})
-                                progress = dict(config.get("outlineProgress") or {})
-                                progress.update(heartbeatAt=utcnow().isoformat(), jobId=job.id)
-                                config["outlineProgress"] = progress
-                                task.storyboard_config = config
-                                await session.commit()
+                    try:
+                        await jobs.heartbeat(job)
+                        if job.kind in REPLAYABLE_INTERNAL_KINDS - {"mv_export"} and job.project_task_id:
+                            async with session_factory() as session:
+                                task = await session.get(ProjectTaskModel, job.project_task_id)
+                                if task and task.deleted_at is None:
+                                    config = dict(task.storyboard_config or {})
+                                    progress = dict(config.get("outlineProgress") or {})
+                                    progress.update(heartbeatAt=utcnow().isoformat(), jobId=job.id)
+                                    config["outlineProgress"] = progress
+                                    task.storyboard_config = config
+                                    await session.commit()
+                    except JobExpiredError:
+                        execution_task.cancel()
+                        return
+                    except Exception:
+                        logger.exception("工单心跳失败，将重试: %s", job.id)
 
+            execution_task = asyncio.create_task(jobs.run_claimed(job, _runner(job)))
             heartbeat_task = asyncio.create_task(heartbeat())
             try:
-                await jobs.run_claimed(job, _runner(job))
+                await execution_task
             finally:
                 heartbeat_task.cancel()
                 await asyncio.gather(heartbeat_task, return_exceptions=True)
 
-    next_export_recovery = loop.time() + 15
+    next_stale_recovery = loop.time() + STALE_RECOVERY_INTERVAL_SECONDS
     try:
         while not stop.is_set():
             # 重启当刻租约可能尚未过期，不能只在启动时扫描一次。
-            if "mv_export" in kinds and loop.time() >= next_export_recovery:
-                await _recover_stale(("mv_export",), providers)
-                next_export_recovery = loop.time() + 15
+            if loop.time() >= next_stale_recovery:
+                try:
+                    await _recover_stale(kinds, providers)
+                except Exception:
+                    logger.exception("过期工单巡检失败，将重试")
+                next_stale_recovery = loop.time() + STALE_RECOVERY_INTERVAL_SECONDS
             if len(active) < concurrency:
-                job = await _claim(kinds, providers, worker_id)
+                try:
+                    job = await _claim(kinds, providers, worker_id)
+                except Exception:
+                    logger.exception("领取工单失败，将重试")
+                    await asyncio.sleep(max(0.05, min(5.0, settings.worker_poll_seconds)))
+                    job = None
                 if job:
                     task = asyncio.create_task(execute(job))
                     active.add(task)

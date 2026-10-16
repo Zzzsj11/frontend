@@ -87,7 +87,7 @@ async def call_gemini(*, prompt: str, duration: int, ratio: str, media: list[dic
         )
     payload = {
         "model": settings.prompt_optimizer_gemini_model,
-        "messages": [{"role": "user", "content": content}],
+        "messages": [{"role": "system", "content": SYSTEM_INSTRUCTION}, {"role": "user", "content": content}],
         "stream": False,
         "max_tokens": 7000,
     }
@@ -211,13 +211,13 @@ async def _call_platform(*, prompt: str, duration: int, ratio: str, media: list[
         if model != settings.llm_model and media:
             # Text-only backup must not silently discard multimodal evidence.
             raise RuntimeError("多参考优化主模型暂不可用，请稍后重试；不会将参考素材交给纯文本备用模型")
-        content = [{"type": "text", "text": SYSTEM_INSTRUCTION + "\n\n" + enrich_prompt(prompt, duration, ratio, media)}]
+        content = [{"type": "text", "text": enrich_prompt(prompt, duration, ratio, media)}]
         content.extend(await content_parts(media, model_gateway.current_owner()))
         snapshot = await _job_snapshot(
             "_optimizationRequest",
             {
                 "model": model,
-                "messages": [{"role": "user", "content": content}],
+                "messages": [{"role": "system", "content": SYSTEM_INSTRUCTION}, {"role": "user", "content": content}],
                 "options": completion_options(model, 7000),
                 "idempotencyKey": f"aio-{model_gateway.current_job_id()}:prompt-optimization:v1" if model_gateway.current_job_id() else None,
             },
@@ -248,7 +248,7 @@ async def _call_platform(*, prompt: str, duration: int, ratio: str, media: list[
         if not result["prompt"].strip():
             raise RuntimeError("文本模型未返回提示词")
     except Exception as exc:
-        if cached is None and not isinstance(exc, LlmContentPolicyError):
+        if cached is None and not isinstance(exc, LlmContentPolicyError) and not (result and not str(result.get("prompt") or "").strip()):
             await record_failure(model)
         raise OptimizationCallError(exc, model, messages, result) from exc
     if cached is None:
