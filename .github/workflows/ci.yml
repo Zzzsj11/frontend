@@ -36,6 +36,8 @@ jobs:
           {
             DATABASE_URL: 'postgresql+asyncpg://mvagent:mvagent@127.0.0.1:5432/mvagent_ci',
             REDIS_URL: 'redis://127.0.0.1:6379/0',
+            ALL_IN_ONE_API_KEY: 'test-only-ci-no-generation',
+            ALL_IN_ONE_BASE_URL: 'http://127.0.0.1:9',
           }
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e:smoke
