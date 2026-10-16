@@ -1950,3 +1950,30 @@ describe('playback clock driven by the registered video element', () => {
     store.registerVideoEl(null)
   })
 })
+
+describe('manual prompt recovery', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('clears a failed prompt only after the server accepts the manual replacement', async () => {
+    setActivePinia(createPinia())
+    const store = useProjectStore()
+    store.lines = [
+      {
+        id: 'manual-recovery',
+        generationStatus: 'failed',
+        generationError: '审核拒绝',
+        generationErrorSummary: '失败',
+      },
+    ] as ScriptLine[]
+    const save = vi
+      .spyOn(domainApi, 'updateStoryboardLine')
+      .mockResolvedValue({ generationStatus: 'succeeded' })
+    await store.persistManualPrompt('manual-recovery', { shot_prompt: '成年朋友交谈' })
+    expect(save).toHaveBeenCalledWith('manual-recovery', { shot_prompt: '成年朋友交谈' })
+    expect(store.lines[0].generationStatus).toBe('succeeded')
+    expect(store.lines[0].generationError).toBeUndefined()
+    store.lines[0].generationStatus = 'running'
+    await store.persistManualPrompt('manual-recovery', { scene_prompt: '街景' })
+    expect(store.lines[0].generationStatus).toBe('running')
+  })
+})

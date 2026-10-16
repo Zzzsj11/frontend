@@ -1352,7 +1352,7 @@ export const useProjectStore = defineStore('project', {
       const line = this.lines.find((l) => l.id === lineId)
       if (line) {
         line.scenePrompt = scenePrompt
-        void api.updateStoryboardLine(lineId, { scene_prompt: scenePrompt })
+        void this.persistManualPrompt(lineId, { scene_prompt: scenePrompt })
       }
     },
 
@@ -1360,7 +1360,18 @@ export const useProjectStore = defineStore('project', {
       const line = this.lines.find((l) => l.id === lineId)
       if (line) {
         line.shotPrompt = shotPrompt
-        void api.updateStoryboardLine(lineId, { shot_prompt: shotPrompt })
+        void this.persistManualPrompt(lineId, { shot_prompt: shotPrompt })
+      }
+    },
+
+    async persistManualPrompt(lineId: string, input: Record<string, unknown>) {
+      const saved = await api.updateStoryboardLine(lineId, input)
+      const line = this.lines.find((item) => item.id === lineId)
+      if (line?.generationStatus === 'failed' && saved.generationStatus === 'succeeded') {
+        line.generationStatus = 'succeeded'
+        line.generationError = undefined
+        line.generationErrorSummary = undefined
+        line.generationFailedAt = undefined
       }
     },
 
