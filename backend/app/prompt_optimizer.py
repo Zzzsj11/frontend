@@ -202,7 +202,7 @@ async def _job_snapshot(key: str, value: dict | None = None) -> dict | None:
 async def _call_platform(*, prompt: str, duration: int, ratio: str, media: list[dict[str, Any]], agent_name: str, agent_run_id: str) -> dict[str, Any]:
     from .all_in_one import chat_client, upstream_model
     from .llm_failover import choose_model, record_failure, record_success
-    from .llm_policy import check_provider_text, completion_options
+    from .llm_policy import LlmContentPolicyError, check_provider_text, completion_options
     from .optimizer_media import content_parts
 
     snapshot = await _job_snapshot("_optimizationRequest")
@@ -248,7 +248,7 @@ async def _call_platform(*, prompt: str, duration: int, ratio: str, media: list[
         if not result["prompt"].strip():
             raise RuntimeError("文本模型未返回提示词")
     except Exception as exc:
-        if cached is None:
+        if cached is None and not isinstance(exc, LlmContentPolicyError):
             await record_failure(model)
         raise OptimizationCallError(exc, model, messages, result) from exc
     if cached is None:
