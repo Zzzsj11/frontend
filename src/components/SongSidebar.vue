@@ -388,7 +388,7 @@ onMounted(() => {
   gap: 6px;
   width: 100%;
   border: 1px solid var(--border-dark);
-  background: #fff;
+  background: var(--palette-ffffff);
   color: var(--text);
   border-radius: var(--radius-sm);
   padding: 9px 12px;
@@ -427,7 +427,7 @@ onMounted(() => {
 .create-ok {
   border: none;
   background: var(--primary);
-  color: #fff;
+  color: var(--palette-ffffff);
   border-radius: var(--radius-sm);
   padding: 0 14px;
   font-size: 13px;
@@ -491,11 +491,11 @@ onMounted(() => {
   font-family: inherit;
 }
 .song-folder:hover {
-  background: rgba(0, 0, 0, 0.045);
+  background: var(--palette-rgba-0-0-0-0-045);
 }
 .song-folder.current {
   color: var(--text);
-  background: rgba(255, 90, 44, 0.055);
+  background: var(--palette-rgba-255-90-44-0-055);
   box-shadow: inset 3px 0 0 var(--primary);
 }
 .folder-chevron {
@@ -558,7 +558,7 @@ onMounted(() => {
   font-family: inherit;
 }
 .task-item:hover {
-  background: rgba(0, 0, 0, 0.045);
+  background: var(--palette-rgba-0-0-0-0-045);
 }
 .task-item.active {
   background: var(--primary-light);
@@ -622,7 +622,7 @@ onMounted(() => {
 }
 .empty-actions button,
 .state-btn {
-  border: 1px solid rgba(255, 90, 44, 0.35);
+  border: 1px solid var(--palette-rgba-255-90-44-0-35);
   border-radius: var(--radius-sm);
   background: var(--primary-light);
   color: var(--primary);
@@ -633,7 +633,7 @@ onMounted(() => {
 .empty-actions button:hover,
 .state-btn:hover {
   border-color: var(--primary);
-  background: rgba(255, 90, 44, 0.14);
+  background: var(--palette-rgba-255-90-44-0-14);
 }
 .sidebar-state {
   min-height: 150px;
@@ -704,11 +704,11 @@ onMounted(() => {
     color 0.12s;
 }
 .row-act:hover {
-  background: rgba(0, 0, 0, 0.08);
+  background: var(--palette-rgba-0-0-0-0-08);
   color: var(--text);
 }
 .row-act.danger:hover {
-  background: rgba(229, 57, 53, 0.12);
+  background: var(--palette-rgba-229-57-53-0-12);
   color: var(--danger);
 }
 .row-act:focus-visible,
@@ -717,7 +717,7 @@ onMounted(() => {
 .create-btn:focus-visible,
 .empty-actions button:focus-visible,
 .state-btn:focus-visible {
-  outline: 2px solid rgba(255, 90, 44, 0.45);
+  outline: 2px solid var(--palette-rgba-255-90-44-0-45);
   outline-offset: 1px;
 }
 .rename-input {
@@ -730,7 +730,7 @@ onMounted(() => {
   font-size: 13px;
   font-family: inherit;
   color: var(--text);
-  background: #fff;
+  background: var(--palette-ffffff);
   outline: none;
 }
 .rename-input.task-rename {
@@ -746,6 +746,6 @@ onMounted(() => {
 .task-item.drag-over {
   outline: 2px dashed var(--primary);
   outline-offset: -2px;
-  background: rgba(255, 90, 44, 0.06);
+  background: var(--palette-rgba-255-90-44-0-06);
 }
 </style>

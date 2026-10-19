@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { useAuthStore } from '../../src/stores/auth'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ScriptEditor from '../../src/components/ScriptEditor.vue'
@@ -38,7 +39,16 @@ const pendingLine = (id: string): ScriptLine =>
   }) as ScriptLine
 
 describe('ScriptEditor batch generation confirmation', () => {
-  beforeEach(() => setActivePinia(createPinia()))
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    useAuthStore().user = {
+      id: 'test-user',
+      username: 'test-user',
+      displayName: 'Test',
+      role: 'user',
+      mustChangePassword: false,
+    }
+  })
   afterEach(() => vi.restoreAllMocks())
 
   it('汇总待生成条数、秒数和费用，确认后才批量生成', async () => {

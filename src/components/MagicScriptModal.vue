@@ -423,7 +423,7 @@ const cancel = () => {
 .dropzone.filled {
   border-style: solid;
   border-color: var(--primary);
-  background: #fff;
+  background: var(--palette-ffffff);
 }
 .file-icon {
   display: inline-flex;
@@ -466,8 +466,8 @@ const cancel = () => {
   margin-top: 16px;
 }
 .role-picker.filled {
-  border-color: rgba(255, 90, 44, 0.45);
-  background: #fff;
+  border-color: var(--palette-rgba-255-90-44-0-45);
+  background: var(--palette-ffffff);
 }
 .role-card {
   position: relative;
@@ -476,7 +476,7 @@ const cancel = () => {
   max-width: 160px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: #fff;
+  background: var(--palette-ffffff);
   padding: 3px;
   color: var(--text-secondary);
   cursor: pointer;
@@ -517,7 +517,7 @@ const cancel = () => {
   height: 18px;
   border-radius: 50%;
   background: var(--primary);
-  color: #fff;
+  color: var(--palette-ffffff);
   display: inline-flex;
   align-items: center;
   justify-content: center;

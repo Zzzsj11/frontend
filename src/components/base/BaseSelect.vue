@@ -85,12 +85,12 @@ const update = (key: string) => {
 </script>
 <template>
   <BaseModelSelect
+    :id="id"
     class="app-select"
     :model-value="selected()"
     :groups="groups()"
     :icon="null"
     :disabled="disabled"
-    :id="id"
     :required="required"
     :name="undefined"
     :aria-label="String(attrs['aria-label'] || '')"

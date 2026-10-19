@@ -426,7 +426,7 @@ const addingUnderName = computed(() => {
   gap: 4px;
   border: 1px solid var(--primary);
   background: var(--primary);
-  color: #fff;
+  color: var(--palette-ffffff);
   border-radius: var(--radius-sm);
   padding: 6px 12px;
   font-size: var(--font-md);

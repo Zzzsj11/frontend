@@ -371,13 +371,20 @@ export async function streamStoryboardOutline(
         .find((line) => line.startsWith('data: '))
         ?.slice(6)
       if (!raw) continue
-      const payload = JSON.parse(raw) as {
+      const payload = parseStreamEvent(raw) as {
         type: string
         taskId: string
         status: string
         progress: OutlineProgress
       }
-      if (payload.type === 'outline') onEvent(payload)
+      if (
+        payload?.type === 'outline' &&
+        typeof payload.taskId === 'string' &&
+        typeof payload.status === 'string' &&
+        payload.progress &&
+        typeof payload.progress === 'object'
+      )
+        onEvent(payload)
     }
   }
 }
@@ -410,8 +417,9 @@ export async function streamMaterialExport(
         .find((line) => line.startsWith('data: '))
         ?.slice(6)
       if (!raw) continue
-      const payload = JSON.parse(raw) as { type: string; export: MaterialExport }
-      if (payload.type === 'export') onExport(payload.export)
+      const payload = parseStreamEvent(raw) as { type: string; export: MaterialExport }
+      if (payload?.type === 'export' && payload.export && typeof payload.export.id === 'string')
+        onExport(payload.export)
     }
   }
 }
@@ -624,3 +632,12 @@ export const changeTaskVideoModel = (taskId: string, model: string, previewToken
     method: 'POST',
     body: JSON.stringify({ model, apply: Boolean(previewToken), preview_token: previewToken }),
   })
+
+// 单条畸形 SSE 不应丢掉后续已完成事件。
+function parseStreamEvent(raw: string): unknown {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}

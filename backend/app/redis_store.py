@@ -156,6 +156,8 @@ async def wait_for_worker_wakeup(timeout_seconds: float) -> None:
     except TimeoutError:
         return
     except Exception:
+        # Redis 不可达时仍保持数据库轮询间隔，避免空转抢占 CPU。
+        await asyncio.sleep(max(0.05, min(5.0, timeout_seconds)))
         return
     finally:
         try:
@@ -194,11 +196,20 @@ async def acquire_execution_lease(pool: str, limit: int, ttl_seconds: int) -> st
         return "redis-unavailable"
 
 
+_RENEW_POOL_LEASE = """
+local key, token, expires, ttl = KEYS[1], ARGV[1], ARGV[2], tonumber(ARGV[3])
+if not redis.call('ZSCORE', key, token) then return 0 end
+redis.call('ZADD', key, 'XX', expires, token)
+redis.call('EXPIRE', key, math.max(1, ttl))
+return 1
+"""
+
+
 async def renew_execution_lease(pool: str, token: str, ttl_seconds: int) -> None:
     if token == "redis-unavailable":
         return
     try:
-        await redis.zadd(f"execution-pool:{pool}", {token: int(time.time() * 1000) + ttl_seconds * 1000}, xx=True)
+        await redis.eval(_RENEW_POOL_LEASE, 1, f"execution-pool:{pool}", token, int(time.time() * 1000) + ttl_seconds * 1000, ttl_seconds)
     except Exception:
         return
 

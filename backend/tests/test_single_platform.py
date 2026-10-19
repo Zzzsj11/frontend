@@ -65,7 +65,8 @@ async def test_platform_optimizer_preserves_headers_usage_and_request(monkeypatc
     request = create.call_args.kwargs
     assert request["model"] == "gemini-3.8-flash"
     assert request["extra_headers"] == {"X-Agent-Name": "code-agent", "X-Agent-Run-Id": "run-1", "X-Test-Run-Id": "run-1"}
-    assert part in request["messages"][0]["content"]
+    assert request["messages"][0]["role"] == "system"
+    assert part in request["messages"][1]["content"]
     assert result["usage"]["total_tokens"] == 42
     assert result["provider"] == "all-in-one"
     assert result["requestSnapshot"] == request["messages"]

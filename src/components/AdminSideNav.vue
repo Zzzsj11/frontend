@@ -74,15 +74,15 @@ const isOpen = (group: AdminNavGroup) =>
   flex-direction: column;
   padding: 18px 12px 12px;
   min-height: 0;
-  background: #101828;
-  border-right: 1px solid #1d2939;
+  background: var(--palette-101828);
+  border-right: 1px solid var(--palette-1d2939);
 }
 .brand {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 4px 8px 16px;
-  color: #f2f4f7;
+  color: var(--palette-f2f4f7);
   text-decoration: none;
 }
 .brand-mark {
@@ -93,7 +93,7 @@ const isOpen = (group: AdminNavGroup) =>
   place-items: center;
   border-radius: 10px;
   background: var(--primary-gradient);
-  color: #fff;
+  color: var(--palette-ffffff);
   font-size: 18px;
   font-weight: 700;
 }
@@ -108,7 +108,7 @@ const isOpen = (group: AdminNavGroup) =>
 }
 .brand-text small {
   font-size: 11px;
-  color: #98a2b3;
+  color: var(--palette-98a2b3);
 }
 .nav-groups {
   display: flex;
@@ -130,14 +130,14 @@ const isOpen = (group: AdminNavGroup) =>
   border-radius: var(--radius-xs);
   background: transparent;
   padding: 12px 8px 6px;
-  color: #98a2b3;
+  color: var(--palette-98a2b3);
   font-size: var(--font-sm);
   font-weight: 600;
   letter-spacing: 0.08em;
   cursor: pointer;
 }
 .group-title:hover {
-  color: #f2f4f7;
+  color: var(--palette-f2f4f7);
 }
 .chev {
   transition: transform 0.15s;
@@ -156,7 +156,7 @@ const isOpen = (group: AdminNavGroup) =>
   border-radius: var(--radius-sm);
   background: transparent;
   padding: 8px 10px 8px 14px;
-  color: #d0d5dd;
+  color: var(--palette-d0d5dd);
   font-size: 13px;
   text-align: left;
   cursor: pointer;
@@ -165,12 +165,12 @@ const isOpen = (group: AdminNavGroup) =>
     color 0.12s;
 }
 .nav-item:hover {
-  background: #1d2939;
-  color: #fff;
+  background: var(--palette-1d2939);
+  color: var(--palette-ffffff);
 }
 .nav-item.on {
-  background: rgba(255, 90, 44, 0.16);
-  color: #ffb18f;
+  background: var(--palette-rgba-255-90-44-0-16);
+  color: var(--palette-ffb18f);
   font-weight: 600;
   box-shadow: inset 3px 0 0 var(--primary);
 }
@@ -179,7 +179,7 @@ const isOpen = (group: AdminNavGroup) =>
     max-height: 190px;
     padding: 10px;
     border-right: 0;
-    border-bottom: 1px solid #1d2939;
+    border-bottom: 1px solid var(--palette-1d2939);
   }
   .brand {
     padding-bottom: 8px;

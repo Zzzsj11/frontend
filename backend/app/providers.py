@@ -13,7 +13,7 @@ import weakref
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator, Awaitable, Callable
 from urllib.parse import urlparse
 
 import httpx
@@ -204,6 +204,7 @@ def _raise_for_status(response: httpx.Response) -> None:
         response.raise_for_status()
         return
     except httpx.HTTPStatusError as exc:
+        error_type = ProviderSubmissionUncertainError if response.status_code >= 500 or response.status_code == 408 else ProviderRejectedError
         try:
             body = response.json()
             data = body.get("data") if isinstance(body, dict) else None
@@ -212,15 +213,15 @@ def _raise_for_status(response: httpx.Response) -> None:
         except Exception:
             raw_body = str(_redact(response.text.strip()))
             suffix = f"；供应商响应：{raw_body[:_PROVIDER_ERROR_BODY_MAX_CHARS]}" if raw_body else ""
-            raise ProviderRejectedError(f"{exc}{suffix}") from exc
+            raise error_type(f"{exc}{suffix}") from exc
         body_text = _provider_error_body(body)
         body_suffix = f"；供应商响应：{body_text}"
         friendly = _AIGC_FRIENDLY_ERRORS.get(code)
         if friendly:
-            raise ProviderRejectedError(f"{friendly}{body_suffix}") from exc
+            raise error_type(f"{friendly}{body_suffix}") from exc
         if msg:
-            raise ProviderRejectedError(f"{translate_provider_error(msg)}{body_suffix}") from exc
-        raise ProviderRejectedError(f"{exc}{body_suffix}") from exc
+            raise error_type(f"{translate_provider_error(msg)}{body_suffix}") from exc
+        raise error_type(f"{exc}{body_suffix}") from exc
 
 
 def _headers(api_key: str, *, x_api_key: bool = False) -> dict[str, str]:
@@ -442,10 +443,12 @@ class ProviderPollScheduler:
         try:
             return await future
         finally:
-            self._remove(job.id)
+            self._remove(job.id, future)
 
-    def _remove(self, job_id: str) -> None:
-        self._entries.pop(job_id, None)
+    def _remove(self, job_id: str, future: asyncio.Future | None = None) -> None:
+        entry = self._entries.get(job_id)
+        if entry and (future is None or entry.future is future):
+            self._entries.pop(job_id, None)
 
     def _take_batch(self) -> list[_ScheduledPoll]:
         if self._round_remaining <= 0:
@@ -462,16 +465,37 @@ class ProviderPollScheduler:
         return batch
 
     async def _run(self) -> None:
-        async with httpx.AsyncClient(timeout=60) as client:
-            while self._entries:
-                await asyncio.sleep(self.tick_seconds)
-                now = time.monotonic()
-                for job_id, entry in list(self._entries.items()):
-                    if now >= entry.deadline:
-                        self._finish_error(job_id, ProviderError(entry.timeout_error))
-                batch = self._take_batch()
-                if batch:
-                    await asyncio.gather(*(self._query_one(client, entry) for entry in batch))
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                while self._entries:
+                    await asyncio.sleep(self.tick_seconds)
+                    now = time.monotonic()
+                    for job_id, entry in list(self._entries.items()):
+                        if now >= entry.deadline:
+                            self._finish_error(job_id, ProviderError(entry.timeout_error))
+                    batch = self._take_batch()
+                    if batch:
+                        results = await asyncio.gather(*(self._query_one(client, entry) for entry in batch), return_exceptions=True)
+                        for entry, result in zip(batch, results, strict=True):
+                            if isinstance(result, asyncio.CancelledError):
+                                self._finish_error(entry.job.id, ProviderError("该任务的轮询已取消"))
+                            elif isinstance(result, Exception):
+                                self._finish_error(entry.job.id, result)
+        except asyncio.CancelledError:
+            for job_id in list(self._entries):
+                self._finish_error(job_id, ProviderError("轮询调度已取消"))
+            raise
+        except Exception as exc:
+            for job_id in list(self._entries):
+                self._finish_error(job_id, ProviderError(f"轮询调度异常：{_redact(str(exc))}"))
+        finally:
+            self._runner = None
+            if self._entries:
+                # 客户端关闭的 await 窗口仍可能注册新任务，不能留在已退出的调度器中。
+                self._runner = asyncio.create_task(self._run())
+            else:
+                self._queue.clear()
+                self._round_remaining = self._round_batch_size = 0
 
     async def _query_one(self, client: httpx.AsyncClient, entry: _ScheduledPoll) -> None:
         job_id = entry.job.id
@@ -771,18 +795,7 @@ async def _query_kling_task(base: str, headers: dict[str, str], task_id: str) ->
 
 
 async def _poll_kling(base: str, headers: dict[str, str], job: Job) -> dict[str, Any]:
-    deadline = time.monotonic() + _remaining_video_job_timeout(job)
-    consecutive_errors = 0
-    while time.monotonic() < deadline:
-        await asyncio.sleep(H3_POLL_INTERVAL_SECONDS)
-        try:
-            task = await _query_kling_task(base, headers, job.provider_task_id or "")
-        except (httpx.HTTPError, ValueError, ProviderError) as exc:
-            consecutive_errors += 1
-            if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS:
-                raise ProviderError(f"Kling 状态查询连续失败：{exc}") from exc
-            continue
-        consecutive_errors = 0
+    async for task in _video_task_updates(job, lambda: _query_kling_task(base, headers, job.provider_task_id or ""), "Kling"):
         status = str(task.get("task_status") or task.get("status") or "").lower()
         await jobs.update_progress(job, job.progress + 3)
         if status in {"succeed", "succeeded", "success"}:
@@ -790,7 +803,6 @@ async def _poll_kling(base: str, headers: dict[str, str], job: Job) -> dict[str,
         if status in {"failed", "fail", "cancelled", "canceled"}:
             reason = task.get("task_status_msg") or task.get("message") or f"Kling 生成任务状态：{status}"
             raise ProviderError(f"Kling 生成失败：{reason}")
-    raise ProviderError("视频生成超过20分钟，已判定失败，请重新生成")
 
 
 async def _store_kling_result(job: Job, task: dict[str, Any]) -> dict[str, Any]:
@@ -956,10 +968,7 @@ async def generate_wan_video(request: VideoGenerationCreate, job: Job) -> dict[s
 
 
 async def _query_happyhorse_task(base: str, headers: dict[str, str], task_id: str) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.get(f"{base}/video/generation/tasks/{task_id}", headers=headers)
-        _raise_for_status(response)
-        return _unwrap(response.json())
+    return await _query_wan_task(base, headers, task_id)
 
 
 async def _poll_happyhorse(base: str, headers: dict[str, str], job: Job) -> dict[str, Any]:
@@ -1094,22 +1103,15 @@ def _direct_h3_content(request: VideoGenerationCreate, mode: str) -> list[dict[s
 
 
 async def _poll_direct_h3(base: str, headers: dict[str, str], job: Job) -> dict[str, Any]:
-    deadline = time.monotonic() + _remaining_video_job_timeout(job)
-    consecutive_errors = 0
     async with httpx.AsyncClient(timeout=60) as client:
-        while time.monotonic() < deadline:
-            await asyncio.sleep(H3_POLL_INTERVAL_SECONDS)
-            try:
-                response = await client.get(f"{base}/video/generation/tasks/{job.provider_task_id}", headers=headers)
-                _raise_for_status(response)
-                body = _unwrap(response.json())
-                task = body.get("task") if isinstance(body.get("task"), dict) else body
-            except (httpx.HTTPError, ValueError, ProviderError) as exc:
-                consecutive_errors += 1
-                if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS:
-                    raise ProviderError(f"H3 状态查询连续失败：{exc}") from exc
-                continue
-            consecutive_errors = 0
+
+        async def query() -> dict[str, Any]:
+            response = await client.get(f"{base}/video/generation/tasks/{job.provider_task_id}", headers=headers)
+            _raise_for_status(response)
+            body = _unwrap(response.json())
+            return body.get("task") if isinstance(body.get("task"), dict) else body
+
+        async for task in _video_task_updates(job, query, "H3"):
             status = str(task.get("status") or "").lower()
             await jobs.update_progress(job, job.progress + 3)
             if status == "succeeded":
@@ -1117,7 +1119,6 @@ async def _poll_direct_h3(base: str, headers: dict[str, str], job: Job) -> dict[
             if status in {"failed", "cancelled"}:
                 reason = task.get("error") or task.get("message") or f"H3 生成任务状态：{status}"
                 raise ProviderError(f"H3 生成失败：{reason}")
-    raise ProviderError("视频生成超过20分钟，已判定失败，请重新生成")
 
 
 async def generate_direct_h3_video(request: VideoGenerationCreate, job: Job) -> dict[str, Any]:
@@ -1307,18 +1308,7 @@ async def _query_gemini_omni_task(base: str, headers: dict[str, str], task_id: s
 
 
 async def _poll_gemini_omni(base: str, headers: dict[str, str], job: Job) -> dict[str, Any]:
-    deadline = time.monotonic() + _remaining_video_job_timeout(job)
-    consecutive_errors = 0
-    while time.monotonic() < deadline:
-        await asyncio.sleep(H3_POLL_INTERVAL_SECONDS)
-        try:
-            task = await _query_gemini_omni_task(base, headers, job.provider_task_id or "")
-        except (httpx.HTTPError, ValueError, ProviderError) as exc:
-            consecutive_errors += 1
-            if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS:
-                raise ProviderError(f"英和海外视频状态查询连续失败：{exc}") from exc
-            continue
-        consecutive_errors = 0
+    async for task in _video_task_updates(job, lambda: _query_gemini_omni_task(base, headers, job.provider_task_id or ""), "英和海外视频"):
         status = str(task.get("status") or task.get("task_status") or task.get("state") or "").lower()
         await jobs.update_progress(job, int(task.get("progress") or job.progress + 3))
         if status in {"succeed", "succeeded", "success", "completed", "done"}:
@@ -1327,7 +1317,6 @@ async def _poll_gemini_omni(base: str, headers: dict[str, str], job: Job) -> dic
             error = task.get("error") if isinstance(task.get("error"), dict) else {}
             reason = task.get("failReason") or task.get("message") or error.get("message") or f"任务状态：{status}"
             raise ProviderError(f"英和海外视频生成失败：{translate_provider_error(str(reason))}")
-    raise ProviderError("视频生成超过20分钟，已判定失败，请重新生成")
 
 
 def _gemini_omni_video_url(task: dict[str, Any]) -> str:
@@ -1473,18 +1462,7 @@ async def _query_toapis_video_task(base: str, headers: dict[str, str], task_id: 
 
 
 async def _poll_toapis_video(base: str, headers: dict[str, str], job: Job) -> dict[str, Any]:
-    deadline = time.monotonic() + _remaining_video_job_timeout(job)
-    consecutive_errors = 0
-    while time.monotonic() < deadline:
-        await asyncio.sleep(H3_POLL_INTERVAL_SECONDS)
-        try:
-            task = await _query_toapis_video_task(base, headers, job.provider_task_id or "")
-        except (httpx.HTTPError, ValueError, ProviderError) as exc:
-            consecutive_errors += 1
-            if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS:
-                raise ProviderError(f"ToAPIs 状态查询连续失败：{exc}") from exc
-            continue
-        consecutive_errors = 0
+    async for task in _video_task_updates(job, lambda: _query_toapis_video_task(base, headers, job.provider_task_id or ""), "ToAPIs"):
         status = str(task.get("status") or "").lower()
         await jobs.update_progress(job, int(task.get("progress") or job.progress + 3))
         if status == "completed":
@@ -1501,7 +1479,6 @@ async def _poll_toapis_video(base: str, headers: dict[str, str], job: Job) -> di
             reason = error.get("message") or task.get("message") or "供应商未返回失败原因"
             model = str((job.request or {}).get("model") or "ToAPIs 视频")
             raise ProviderError(f"{model} 生成失败：{translate_provider_error(str(reason))}；供应商响应：{_provider_error_body(task)}")
-    raise ProviderError("视频生成超过20分钟，已判定失败，请重新生成")
 
 
 async def _store_toapis_video_result(job: Job, task: dict[str, Any]) -> dict[str, Any]:
@@ -1640,18 +1617,7 @@ def _h3_megapixels(resolution: str, capabilities: dict[str, Any] | None = None) 
 
 
 async def _poll_runninghub(job: Job) -> dict[str, Any]:
-    deadline = time.monotonic() + _remaining_video_job_timeout(job)
-    consecutive_errors = 0
-    while time.monotonic() < deadline:
-        await asyncio.sleep(H3_POLL_INTERVAL_SECONDS)
-        try:
-            data = await runninghub_query_task(job.provider_task_id or "")
-        except RunningHubError as exc:
-            consecutive_errors += 1
-            if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS:
-                raise ProviderError(f"RunningHub 状态查询连续失败：{exc}") from exc
-            continue
-        consecutive_errors = 0
+    async for data in _video_task_updates(job, lambda: runninghub_query_task(job.provider_task_id or ""), "RunningHub", errors=(RunningHubError,)):
         status = str(data.get("status") or "").upper()
         await jobs.update_progress(job, job.progress + 3)
         if status == "SUCCESS":
@@ -1659,7 +1625,6 @@ async def _poll_runninghub(job: Job) -> dict[str, Any]:
         if status in {"FAILED", "CANCELLED"} or "FAIL" in status:
             reason = data.get("errorMessage") or data.get("failedReason") or f"H3 生成任务状态：{status}"
             raise ProviderError(f"H3 生成失败：{reason}")
-    raise ProviderError("视频生成超过20分钟，已判定失败，请重新生成")
 
 
 async def _h3_media_duration(content: bytes, suffix: str) -> float:
@@ -1668,6 +1633,8 @@ async def _h3_media_duration(content: bytes, suffix: str) -> float:
         handle.flush()
         process = await asyncio.create_subprocess_exec(
             "ffprobe",
+            "-protocol_whitelist",
+            "file,pipe",
             "-v",
             "error",
             "-show_entries",
@@ -1678,7 +1645,7 @@ async def _h3_media_duration(content: bytes, suffix: str) -> float:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await process.communicate()
+        stdout, stderr = await _communicate_bounded(process)
     if process.returncode != 0:
         raise ProviderError(f"H3 参考媒体无法读取时长：{stderr.decode(errors='ignore')[:200]}")
     try:
@@ -2005,6 +1972,8 @@ async def _video_first_frame(video_url: str, task_id: str, user_id: str | None) 
             "-y",
             "-ss",
             "0",
+            "-protocol_whitelist",
+            "file,pipe",
             "-i",
             str(video_path),
             "-frames:v",
@@ -2015,7 +1984,44 @@ async def _video_first_frame(video_url: str, task_id: str, user_id: str | None) 
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await process.communicate()
+        _, stderr = await _communicate_bounded(process)
         if process.returncode or not cover_path.is_file():
             raise ProviderError(f"提取视频首帧失败：{stderr.decode(errors='replace')[:300]}")
         return await put_image_with_thumbnail(safe_key(f"users/{user_id}/generated/covers", f"{task_id}.jpg"), cover_path.read_bytes(), "image/jpeg")
+
+
+async def _communicate_bounded(process, timeout_seconds: float = 60):
+    """探测/首帧子进程超时或取消时回收，避免占满 Worker。"""
+    try:
+        return await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
+    except (TimeoutError, asyncio.CancelledError):
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+        await process.wait()
+        raise
+
+
+async def _video_task_updates(
+    job: Job,
+    query: Callable[[], Awaitable[dict[str, Any]]],
+    label: str,
+    *,
+    errors: tuple[type[Exception], ...] = (httpx.HTTPError, ValueError, ProviderError),
+) -> AsyncIterator[dict[str, Any]]:
+    """历史协议共享超时/重试调度，各协议仅解释自己的终态和结果。"""
+    deadline = time.monotonic() + _remaining_video_job_timeout(job)
+    consecutive_errors = 0
+    while time.monotonic() < deadline:
+        await asyncio.sleep(H3_POLL_INTERVAL_SECONDS)
+        try:
+            task = await query()
+        except errors as exc:
+            consecutive_errors += 1
+            if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS:
+                raise ProviderError(f"{label} 状态查询连续失败：{exc}") from exc
+            continue
+        consecutive_errors = 0
+        yield task
+    raise ProviderError("视频生成超过20分钟，已判定失败，请重新生成")

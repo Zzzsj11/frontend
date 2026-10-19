@@ -39,6 +39,7 @@ class UserModel(LifecycleMixin, Base):
 
 class RefreshTokenModel(LifecycleMixin, Base):
     __tablename__ = "refresh_tokens"
+    family_id: Mapped[str] = mapped_column(String(80), default="", server_default="", index=True)
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
@@ -257,19 +258,19 @@ class SceneAssetModel(LifecycleMixin, Base):
     __tablename__ = "scene_assets"
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     storyboard_line_id: Mapped[str] = mapped_column(ForeignKey("storyboard_lines.id"), index=True)
-    generation_job_id: Mapped[str | None] = mapped_column(ForeignKey("generation_jobs.id"), nullable=True)
+    generation_job_id: Mapped[str | None] = mapped_column(ForeignKey("generation_jobs.id"), nullable=True, index=True)
     image_url: Mapped[str] = mapped_column(Text)
     image_thumbnail_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     prompt: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(32), default="ready")
-    is_current: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 
 
 class ShotAssetModel(LifecycleMixin, Base):
     __tablename__ = "shot_assets"
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     storyboard_line_id: Mapped[str] = mapped_column(ForeignKey("storyboard_lines.id"), index=True)
-    generation_job_id: Mapped[str | None] = mapped_column(ForeignKey("generation_jobs.id"), nullable=True)
+    generation_job_id: Mapped[str | None] = mapped_column(ForeignKey("generation_jobs.id"), nullable=True, index=True)
     model_code: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
     cover_url: Mapped[str] = mapped_column(Text)
     cover_thumbnail_url: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -287,19 +288,19 @@ class ShotAssetModel(LifecycleMixin, Base):
     ratio: Mapped[str] = mapped_column(String(32), default="16:9")
     prompt: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(32), default="ready")
-    is_current: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 
 
 class VoiceAssetModel(LifecycleMixin, Base):
     __tablename__ = "voice_assets"
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     storyboard_line_id: Mapped[str] = mapped_column(ForeignKey("storyboard_lines.id"), index=True)
-    generation_job_id: Mapped[str | None] = mapped_column(ForeignKey("generation_jobs.id"), nullable=True)
+    generation_job_id: Mapped[str | None] = mapped_column(ForeignKey("generation_jobs.id"), nullable=True, index=True)
     audio_url: Mapped[str] = mapped_column(Text)
     duration: Mapped[float] = mapped_column(Float)
     voice_config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String(32), default="ready")
-    is_current: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 
 
 class MaterialExportModel(LifecycleMixin, Base):
@@ -346,6 +347,9 @@ class ChatMessageModel(LifecycleMixin, Base):
 
 class TokenUsageModel(LifecycleMixin, Base):
     __tablename__ = "token_usage_records"
+    generation_origin: Mapped[str] = mapped_column(String(32), default="business", server_default="business", index=True)
+    agent_name: Mapped[str] = mapped_column(String(80), default="", server_default="", index=True)
+    agent_run_id: Mapped[str] = mapped_column(String(160), default="", server_default="", index=True)
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
@@ -414,6 +418,9 @@ class LlmCallLogModel(LifecycleMixin, Base):
     """分镜 LLM 调用全量留痕：请求消息、返回原文、耗时与 token 用量。"""
 
     __tablename__ = "llm_call_logs"
+    generation_origin: Mapped[str] = mapped_column(String(32), default="business", server_default="business", index=True)
+    agent_name: Mapped[str] = mapped_column(String(80), default="", server_default="", index=True)
+    agent_run_id: Mapped[str] = mapped_column(String(160), default="", server_default="", index=True)
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)

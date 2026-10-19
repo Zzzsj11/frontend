@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import BaseSelect from './base/BaseSelect.vue'
 import { computed, ref, watch } from 'vue'
-import { apiRequest } from '../api/client'
-import type { AccountBalance } from '../stores/auth'
+import { useAuthStore } from '../stores/auth'
 import type {
   GeneralGender,
   GeneralStoryboardRequest,
@@ -45,6 +44,7 @@ import {
 
 const props = withDefaults(defineProps<{ random?: boolean }>(), { random: false })
 const store = useProjectStore()
+const auth = useAuthStore()
 void loadGenerationModels()
 const genre = ref('')
 const secondary = ref('')
@@ -236,7 +236,8 @@ const submit = async () => {
         if (confirmed) void store.runRandomGeneralStoryboard(request)
         return
       }
-      const balance = await apiRequest<AccountBalance>('/account/balance')
+      const balance = await auth.loadBalance()
+      if (!balance) throw new Error('余额暂不可用，请重试')
       const providerCode = videoProviderForModel(request.videoModel)
       const providerBalance =
         providerCode === 'runninghub' ? balance : (balance.providers?.[providerCode] ?? balance)
@@ -691,15 +692,15 @@ const submit = async () => {
   height: 18px;
   border: 0;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
+  background: var(--palette-rgba-0-0-0-0-6);
+  color: var(--palette-ffffff);
 }
 .image-add {
   width: 58px;
   height: 72px;
   border: 1px dashed var(--border-dark);
   border-radius: var(--radius-sm);
-  background: #fff;
+  background: var(--palette-ffffff);
   color: var(--text-secondary);
 }
 .cast-item {
@@ -707,7 +708,7 @@ const submit = async () => {
   width: 62px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: #fff;
+  background: var(--palette-ffffff);
   padding: 4px;
   color: var(--text-secondary);
   cursor: pointer;
@@ -734,7 +735,7 @@ const submit = async () => {
   right: 5px;
   top: 5px;
   background: var(--primary);
-  color: #fff;
+  color: var(--palette-ffffff);
   border-radius: 50%;
   padding: 2px;
 }
@@ -768,7 +769,7 @@ textarea {
   width: 100%;
   border: 1px solid var(--border-dark);
   border-radius: var(--radius-sm);
-  background: #fff;
+  background: var(--palette-ffffff);
   padding: 9px 10px;
   font: inherit;
   color: var(--text);
@@ -795,7 +796,7 @@ textarea {
 .cancel-btn {
   border: 1px solid var(--border-dark);
   border-radius: var(--radius-pill);
-  background: #fff;
+  background: var(--palette-ffffff);
   padding: 9px 20px;
   cursor: pointer;
 }

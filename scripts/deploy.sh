@@ -3,15 +3,32 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"; cd "$root"
 version="${1:?usage: scripts/deploy.sh VERSION}"; env_name="${DEPLOY_ENV:-production}"
 env_file=".env.${env_name}"; test -f "$env_file" || { echo "missing $env_file"; exit 1; }
-if [[ "$env_name" == "production" ]]; then "$root/scripts/validate-secret-layout.sh"; fi
+if [[ "$env_name" == "production" ]]; then
+  "$root/scripts/validate-secret-layout.sh"
+  # Compose 文件型 secrets 保留宿主属主；应用 UID 必须能读取 0600 密钥。
+  chown 10001:10001 "$root/backend/.runtime_secrets.env"
+fi
 previous="$(cat .deployed-version 2>/dev/null || true)"
 printf '%s\n' "$previous" > .previous-version
 mkdir -p .deployment
 if [[ ! -f .deployment/info.json ]]; then
   printf '{"version":null,"deployedAt":null}\n' > .deployment/info.json
 fi
+# 复用上次成功部署的非敏感 TLS 配置，普通发布/回滚不应意外退回 HTTP。
+if [[ -f .deployment/tls.env ]]; then
+  while IFS='=' read -r setting value; do
+    case "$setting" in
+      DEPLOY_TLS) export DEPLOY_TLS="${DEPLOY_TLS:-$value}" ;;
+      TLS_DOMAIN) export TLS_DOMAIN="${TLS_DOMAIN:-$value}" ;;
+      TLS_CERT_DIR) export TLS_CERT_DIR="${TLS_CERT_DIR:-$value}" ;;
+    esac
+  done < .deployment/tls.env
+fi
 export RELEASE_VERSION="$version"
 compose=(docker compose --env-file "$env_file" -f docker-compose.yml -f "docker-compose.${env_name}.yml")
+if [[ "${RUN_MIGRATIONS:-1}" == "0" ]]; then
+  compose+=(-f docker-compose.rollback.yml)
+fi
 if [[ "${DEPLOY_TLS:-0}" == "1" ]]; then
   : "${TLS_DOMAIN:?set TLS_DOMAIN when DEPLOY_TLS=1}"
   : "${TLS_CERT_DIR:?set TLS_CERT_DIR when DEPLOY_TLS=1}"
@@ -19,10 +36,32 @@ if [[ "${DEPLOY_TLS:-0}" == "1" ]]; then
     echo "TLS_CERT_DIR must contain readable fullchain.pem and privkey.pem" >&2
     exit 1
   }
+  source_tls_dir="$TLS_CERT_DIR"
+  verify_name=(-verify_hostname "$TLS_DOMAIN")
+  if [[ "$TLS_DOMAIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then verify_name=(-verify_ip "$TLS_DOMAIN"); fi
+  openssl verify -purpose sslserver "${verify_name[@]}" -untrusted "$source_tls_dir/fullchain.pem" "$source_tls_dir/fullchain.pem" >/dev/null
+  cert_public="$(openssl x509 -in "$source_tls_dir/fullchain.pem" -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256)"
+  key_public="$(openssl pkey -in "$source_tls_dir/privkey.pem" -passin pass: -pubout -outform DER | openssl dgst -sha256)"
+  [[ "$cert_public" == "$key_public" ]] || { echo 'TLS certificate and key do not match' >&2; exit 1; }
+  # Let's Encrypt live/ 中的文件通常是符号链接；只挂载 live 子目录会使链接失效。
+  install -d -m 700 "$root/.deployment/tls"
+  if [[ "$(cd "$source_tls_dir" && pwd -P)" != "$(cd "$root/.deployment/tls" && pwd -P)" ]]; then
+    install -m 600 "$source_tls_dir/fullchain.pem" "$root/.deployment/tls/fullchain.pem"
+    install -m 600 "$source_tls_dir/privkey.pem" "$root/.deployment/tls/privkey.pem"
+  fi
+  export TLS_CERT_DIR="$root/.deployment/tls"
   compose+=(-f docker-compose.tls.yml)
 fi
 if [[ "${DEPLOY_SKIP_PULL:-0}" != "1" ]]; then
   "${compose[@]}" pull
+fi
+
+# 先在一次性容器验证运行配置与 Secret 读取权限；失败时不切换任何服务。
+# 只导入配置，不启动应用、不执行迁移，也不会恢复或触发模型工单。
+"${compose[@]}" run --rm -T --no-deps --entrypoint python backend \
+  -c 'from app.config import validate_runtime_security; validate_runtime_security()'
+if [[ "${DEPLOY_TLS:-0}" == "1" ]]; then
+  "${compose[@]}" run --rm -T --no-deps frontend nginx -t
 fi
 
 # A brand-new server has no data containers yet. Start durable dependencies
@@ -40,6 +79,9 @@ done
 
 # 先更新 frontend：新的 nginx（运行时解析 backend 上游）就绪后，后续 backend 切换才不会 502
 "${compose[@]}" up -d --no-deps frontend
+if [[ "${DEPLOY_TLS:-0}" == "1" ]]; then
+  "${compose[@]}" exec -T frontend nginx -s reload
+fi
 
 # 平滑切换 backend：用新版本起 green 一次性容器（compose run 继承服务的环境/密钥/网络别名），
 # 健康后再重建正式容器 —— 整个窗口内始终有健康上游，消除 502 窗口
@@ -68,6 +110,8 @@ for _ in {1..30}; do curl -fsS http://127.0.0.1:8000/api/health >/dev/null && br
 curl -fsS http://127.0.0.1:8000/api/health >/dev/null
 docker rm -f "$green" >/dev/null || echo "warn: failed to remove $green" >&2
 
+execution_mode="$("${compose[@]}" config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["backend"]["environment"].get("JOB_EXECUTION_MODE", "inline"))')"
+if [[ "$execution_mode" == "worker" ]]; then
 # 单机逐类排空：旧进程先收到 SIGTERM、停止领取并在各自 stop_grace_period 内完成
 # 在途任务，再启动同类新进程。供应商不支持创建幂等键时，不让新旧版本并行提交
 # 比缩短发布耗时更重要；该类排空期间新任务继续安全留在 PostgreSQL 队列。
@@ -81,8 +125,19 @@ for worker in worker-chat worker-storyboard worker-image worker-media worker-exp
   [[ "$status" == '"Health":"healthy"' ]] || { echo "$worker failed health check" >&2; exit 1; }
 done
 
+else
+  # 显式服务名会越过 profiles；inline 模式必须停止遗留 Worker。
+  "${compose[@]}" stop worker-chat worker-storyboard worker-image worker-media worker-export
+  export COMPOSE_PROFILES=""
+fi
+
 # 兜底其余服务（postgres/redis 配置漂移等），无变化时为空操作
 "${compose[@]}" up -d --remove-orphans
+if [[ "${DEPLOY_TLS:-0}" == "1" ]]; then
+  curl -fsS --resolve "$TLS_DOMAIN:443:127.0.0.1" "https://$TLS_DOMAIN/api/health" >/dev/null
+  (umask 077; printf 'DEPLOY_TLS=1\nTLS_DOMAIN=%s\nTLS_CERT_DIR=%s\n' "$TLS_DOMAIN" "$source_tls_dir" > .deployment/tls.env.tmp)
+  mv .deployment/tls.env.tmp .deployment/tls.env
+fi
 printf '%s\n' "$version" > .deployed-version
 deployed_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 printf '{"version":"%s","deployedAt":"%s"}\n' "$version" "$deployed_at" > .deployment/info.json.tmp

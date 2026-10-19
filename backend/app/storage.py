@@ -73,7 +73,7 @@ def is_user_owned_tos_url(url: str, user_id: str) -> bool:
         return False
     if "\\" in path or any(part in {".", ".."} for part in path.split("/")):
         return False
-    prefixes = {"", settings.tos_reference_prefix.strip("/"), settings.tos_video_prefix.strip("/")}
+    prefixes = {"", "mv-agent/references", "mv-agent/generated-videos", settings.tos_reference_prefix.strip("/"), settings.tos_video_prefix.strip("/")}
     return any(path.startswith(f"/{prefix + '/' if prefix else ''}users/{user_id}/") for prefix in prefixes)
 
 
@@ -221,7 +221,7 @@ _TRUSTED_PROXY_DNS_HOSTS = frozenset({"files.toapis.cn"})
 _PROXY_DNS_RANGE = ipaddress.ip_network("198.18.0.0/15")
 
 
-async def _validate_public_url(url: str) -> None:
+async def _validate_public_url(url: str) -> str:
     parsed = urlparse(url)
     hostname = (parsed.hostname or "").lower()
     scheme_allowed = parsed.scheme == "https" or (parsed.scheme == "http" and hostname in _HTTP_PUBLIC_URL_ALLOWLIST)
@@ -235,14 +235,28 @@ async def _validate_public_url(url: str) -> None:
             continue
         if not address.is_global:
             raise ValueError("禁止访问内网、回环或链路本地地址")
+    if not addresses:
+        raise ValueError("远程地址未解析到可用 IP")
+    return str(addresses[0][4][0])
+
+
+def _pinned_request(url: str, address: str) -> tuple[httpx.URL, dict]:
+    original = httpx.URL(url)
+    # 保留 HTTP Host 与 TLS SNI/证书校验，但连接使用刚校验过的 IP。
+    # 禁止连接复用，避免共享 IP 的不同主机复用错误的 TLS 身份。
+    return original.copy_with(host=address), {
+        "headers": {"Host": original.netloc.decode("ascii"), "Connection": "close"},
+        "extensions": {"sni_hostname": original.host},
+    }
 
 
 async def download_public_url(url: str, max_bytes: int = 500 * 1024 * 1024) -> tuple[str, bytes, str]:
     current = url
-    async with httpx.AsyncClient(timeout=180, follow_redirects=False) as client:
+    async with httpx.AsyncClient(timeout=180, follow_redirects=False, trust_env=False) as client:
         for _ in range(4):
-            await _validate_public_url(current)
-            async with client.stream("GET", current) as response:
+            address = await _validate_public_url(current)
+            target, options = _pinned_request(current, address)
+            async with client.stream("GET", target, **options) as response:
                 if response.is_redirect:
                     location = response.headers.get("location")
                     if not location:
@@ -275,11 +289,12 @@ async def download_public_url_to_path(
     current = url
     target = Path(destination)
     owned_client = client is None
-    active_client = client or httpx.AsyncClient(timeout=180, follow_redirects=False)
+    active_client = client or httpx.AsyncClient(timeout=180, follow_redirects=False, trust_env=False)
     try:
         for _ in range(4):
-            await _validate_public_url(current)
-            async with active_client.stream("GET", current) as response:
+            address = await _validate_public_url(current)
+            pinned_url, options = _pinned_request(current, address)
+            async with active_client.stream("GET", pinned_url, **options) as response:
                 if response.is_redirect:
                     location = response.headers.get("location")
                     if not location:

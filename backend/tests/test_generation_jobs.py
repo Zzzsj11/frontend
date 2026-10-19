@@ -1141,6 +1141,7 @@ async def test_worker_recovers_idempotent_submit_but_not_legacy_uncertain_submit
             "UPDATE generation_jobs SET phase = 'submitting_provider', idempotency_key = ?, lease_expires_at = ? WHERE id = ?",
             ("job-idempotent-image:image", stale.strftime("%Y-%m-%d %H:%M:%S.%f"), "job-idempotent-image"),
         )
+        connection.execute("UPDATE generation_jobs SET request = ? WHERE id = ?", ('{"_provider":"all-in-one"}', "job-idempotent-image"))
         connection.commit()
     finally:
         connection.close()
@@ -1469,14 +1470,14 @@ def test_translate_provider_error_english_to_chinese() -> None:
 def test_non_json_provider_error_redacts_credentials() -> None:
     import httpx
 
-    from app.providers import ProviderRejectedError, _raise_for_status
+    from app.providers import ProviderSubmissionUncertainError, _raise_for_status
 
     response = httpx.Response(
         500,
         request=httpx.Request("POST", "https://provider.test/tasks"),
         text="upstream Bearer secret-token-value sk_exampleSecret12345?token=signed-value",
     )
-    with pytest.raises(ProviderRejectedError) as captured:
+    with pytest.raises(ProviderSubmissionUncertainError) as captured:
         _raise_for_status(response)
     message = str(captured.value)
     assert "secret-token-value" not in message
@@ -2247,10 +2248,19 @@ def test_h3_endpoint_enforces_official_reference_capabilities(client) -> None:
     assert "不能单独使用" in audio_only.json()["detail"]
 
 
-def test_create_human_registers_asset_avatar(client, monkeypatch) -> None:
+@pytest.fixture
+def owned_avatar_tos(monkeypatch):
+    """Legacy asset adapter tests use an explicit test-only media origin."""
+    from app import storage
+
+    monkeypatch.setattr(storage, "settings", dataclasses.replace(storage.settings, tos_public_domain="avatars.tos.test"))
+
+
+def test_create_human_registers_asset_avatar(client, monkeypatch, owned_avatar_tos) -> None:
     """用户上传人物时自动注册英合 asset://。"""
     from app import domain
 
+    user_id = client.get("/api/auth/me").json()["id"]
     created: list[str] = []
 
     async def fake_create_asset(public_url: str, *, name: str) -> str:
@@ -2261,7 +2271,7 @@ def test_create_human_registers_asset_avatar(client, monkeypatch) -> None:
     payload = {
         "name": "上传人物-测试",
         "description": "t",
-        "avatar_url": "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/face.jpg",
+        "avatar_url": f"https://avatars.tos.test/users/{user_id}/face.jpg",
         "source": "uploaded",
     }
     response = client.post("/api/digital-humans", json=payload)
@@ -2274,8 +2284,9 @@ def test_create_human_registers_asset_avatar(client, monkeypatch) -> None:
     assert domain._sync_human_asset_avatar is not None  # 引用保证函数存在
 
 
-def test_update_human_re_registers_asset_avatar_on_avatar_change(client, monkeypatch) -> None:
+def test_update_human_re_registers_asset_avatar_on_avatar_change(client, monkeypatch, owned_avatar_tos) -> None:
     """换图（重新生成形象）后旧资产失效，自动用新图重新注册 asset。"""
+    user_id = client.get("/api/auth/me").json()["id"]
     created: list[str] = []
 
     async def fake_create_asset(public_url: str, *, name: str) -> str:
@@ -2285,19 +2296,19 @@ def test_update_human_re_registers_asset_avatar_on_avatar_change(client, monkeyp
     monkeypatch.setattr("app.providers.create_real_face_asset", fake_create_asset)
     first = client.post(
         "/api/digital-humans",
-        json={"name": "换图人物", "description": "t", "avatar_url": "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/old.jpg", "source": "uploaded"},
+        json={"name": "换图人物", "description": "t", "avatar_url": f"https://avatars.tos.test/users/{user_id}/old.jpg", "source": "uploaded"},
     ).json()
     assert first["assetAvatarUrl"] == "asset://user-1"
 
     second = client.patch(
         f"/api/digital-humans/{first['id']}",
-        json={"avatar_url": "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/new.jpg"},
+        json={"avatar_url": f"https://avatars.tos.test/users/{user_id}/new.jpg"},
     )
     assert second.status_code == 200, second.text
     assert second.json()["assetAvatarUrl"] == "asset://user-2"
     assert created == [
-        "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/old.jpg",
-        "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/new.jpg",
+        f"https://avatars.tos.test/users/{user_id}/old.jpg",
+        f"https://avatars.tos.test/users/{user_id}/new.jpg",
     ]
 
     # 未换图时（只改名字）不重新注册资产
@@ -2306,8 +2317,9 @@ def test_update_human_re_registers_asset_avatar_on_avatar_change(client, monkeyp
     assert len(created) == 2
 
 
-def test_create_human_asset_failure_degrades_gracefully(client, monkeypatch) -> None:
+def test_create_human_asset_failure_degrades_gracefully(client, monkeypatch, owned_avatar_tos) -> None:
     """资产注册失败不阻断数字人创建：接口正常返回，assetAvatarUrl 为空，后续由启动任务兜底。"""
+    user_id = client.get("/api/auth/me").json()["id"]
     from app.providers import ProviderError
 
     async def boom(public_url: str, *, name: str) -> str:
@@ -2316,7 +2328,7 @@ def test_create_human_asset_failure_degrades_gracefully(client, monkeypatch) -> 
     monkeypatch.setattr("app.providers.create_real_face_asset", boom)
     response = client.post(
         "/api/digital-humans",
-        json={"name": "降级人物", "description": "t", "avatar_url": "https://media-generate-chouka.tos-cn-beijing.volces.com/uploaded/face.jpg", "source": "uploaded"},
+        json={"name": "降级人物", "description": "t", "avatar_url": f"https://avatars.tos.test/users/{user_id}/face.jpg", "source": "uploaded"},
     )
     assert response.status_code == 201, response.text
     assert response.json()["assetAvatarUrl"] is None

@@ -17,6 +17,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    stop_grace_period: 60s
     ports:
       - '127.0.0.1:${BACKEND_PORT:-8000}:8000'
     env_file:
@@ -27,8 +28,13 @@ services:
     environment:
       APP_HOST: 0.0.0.0
       APP_PORT: 8000
-      APP_CORS_ORIGINS: http://120.24.38.200:${FRONTEND_PORT:-5173},http://localhost:${FRONTEND_PORT:-5173}
-      DATABASE_URL: postgresql+asyncpg://mvagent:mvagent@postgres:5432/${POSTGRES_DB:-mvagent}
+      APP_CORS_ORIGINS: ${APP_CORS_ORIGINS:-http://localhost:5173}
+      DATABASE_URL: ''
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-mvagent}
+      POSTGRES_DB: ${POSTGRES_DB:-mvagent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mvagent}
       REDIS_URL: redis://redis:6379/0
       LLM_API_MODE: ${LLM_API_MODE:-openai}
       OUTLINE_PROTOCOL_VERSION: ${OUTLINE_PROTOCOL_VERSION:-v2}
@@ -72,7 +78,12 @@ services:
         required: false
     environment:
       APP_ENV: ${APP_ENV:-development}
-      DATABASE_URL: postgresql+asyncpg://mvagent:mvagent@postgres:5432/${POSTGRES_DB:-mvagent}
+      DATABASE_URL: ''
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-mvagent}
+      POSTGRES_DB: ${POSTGRES_DB:-mvagent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mvagent}
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:-development-only-change-me-at-least-32-bytes}
       STORAGE_BACKEND: tos
@@ -89,7 +100,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'kill -0 1']
+      test: ['CMD', 'python', '-m', 'app.worker_health']
       interval: 15s
       timeout: 3s
       retries: 3
@@ -107,7 +118,8 @@ services:
   worker-chat:
     extends: worker-media
     stop_grace_period: 2m
-    command: ['--kinds', 'chat,prompt_optimization', '--concurrency', '${CHAT_WORKER_CONCURRENCY:-2}']
+    command:
+      ['--kinds', 'chat,prompt_optimization', '--concurrency', '${CHAT_WORKER_CONCURRENCY:-2}']
 
   worker-storyboard:
     extends: worker-media
@@ -121,25 +133,25 @@ services:
       ]
 
   postgres:
-    image: postgres:16
+    image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
       POSTGRES_DB: ${POSTGRES_DB:-mvagent}
-      POSTGRES_USER: mvagent
-      POSTGRES_PASSWORD: mvagent
+      POSTGRES_USER: ${POSTGRES_USER:-mvagent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mvagent}
     ports:
-      - '${POSTGRES_PORT:-5433}:5432'
+      - '127.0.0.1:${POSTGRES_PORT:-5433}:5432'
     volumes:
       - mvagent_postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U mvagent -d mvagent']
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 5s
       timeout: 3s
       retries: 20
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     restart: unless-stopped
     command: redis-server --appendonly yes
     ports:

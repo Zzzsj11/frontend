@@ -49,7 +49,7 @@ const submit = async () => {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  background: #f6f7fa;
+  background: var(--palette-f6f7fa);
 }
 form {
   width: 360px;
@@ -59,7 +59,7 @@ form {
   display: flex;
   flex-direction: column;
   gap: 15px;
-  box-shadow: 0 15px 50px #0001;
+  box-shadow: 0 15px 50px var(--palette-00000011);
 }
 label {
   display: flex;
@@ -75,7 +75,7 @@ button {
 button {
   border: 0;
   background: var(--primary-hover);
-  color: #fff;
+  color: var(--palette-ffffff);
 }
 p {
   color: var(--danger);

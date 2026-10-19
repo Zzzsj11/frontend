@@ -598,7 +598,7 @@ const cancel = () => store.closeEditor()
   gap: 6px;
   border: 1px solid var(--border-dark);
   border-radius: var(--radius-pill);
-  background: #fff;
+  background: var(--palette-ffffff);
   color: var(--text);
   font-size: 13px;
   padding: 3px 10px 3px 4px;
@@ -703,8 +703,8 @@ const cancel = () => store.closeEditor()
   position: absolute;
   right: 3px;
   bottom: 3px;
-  background: rgba(0, 0, 0, 0.65);
-  color: #fff;
+  background: var(--palette-rgba-0-0-0-0-65);
+  color: var(--palette-ffffff);
   font-size: 10px;
   padding: 1px 5px;
   border-radius: var(--radius-sm);
@@ -715,8 +715,8 @@ const cancel = () => store.closeEditor()
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  background: rgba(0, 0, 0, 0.35);
+  color: var(--palette-ffffff);
+  background: var(--palette-rgba-0-0-0-0-35);
   opacity: 0;
   transition: opacity 0.15s;
 }
@@ -724,7 +724,7 @@ const cancel = () => store.closeEditor()
   opacity: 1;
 }
 .asset-thumb:hover {
-  border-color: rgba(255, 90, 44, 0.4);
+  border-color: var(--palette-rgba-255-90-44-0-4);
 }
 .asset-thumb.active {
   border-color: var(--primary);
@@ -748,7 +748,7 @@ const cancel = () => store.closeEditor()
 .lyrics-input:focus,
 .prompt-input:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(255, 90, 44, 0.12);
+  box-shadow: 0 0 0 2px var(--palette-rgba-255-90-44-0-12);
 }
 .lyrics-input:disabled {
   cursor: not-allowed;
@@ -772,7 +772,7 @@ const cancel = () => store.closeEditor()
   flex-direction: column;
   border: 1px solid var(--border-dark);
   border-radius: var(--radius-sm);
-  background: #fff;
+  background: var(--palette-ffffff);
   overflow: visible;
   transition:
     border-color 0.15s,
@@ -787,7 +787,7 @@ const cancel = () => store.closeEditor()
 }
 .prompt-editor:focus-within {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(255, 90, 44, 0.12);
+  box-shadow: 0 0 0 2px var(--palette-rgba-255-90-44-0-12);
 }
 .prompt-editor .prompt-input {
   border: none;
@@ -802,8 +802,8 @@ const cancel = () => store.closeEditor()
   flex-shrink: 0;
   margin: 0;
   padding: 6px 12px;
-  background: #fff;
-  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.06);
+  background: var(--palette-ffffff);
+  box-shadow: 0 2px 7px var(--palette-rgba-0-0-0-0-06);
 }
 /* 分镜提示词框加大，方便编写较长的镜头描述 */
 .prompt-input.prompt-shot {
@@ -817,7 +817,7 @@ const cancel = () => store.closeEditor()
 .btn-cancel {
   border: 1px solid var(--border-dark);
   border-radius: var(--radius-pill);
-  background: #fff;
+  background: var(--palette-ffffff);
   color: var(--text);
   font-size: var(--font-md);
   padding: 7px 20px;
@@ -865,7 +865,7 @@ img.preview-media {
   object-fit: cover;
 }
 .preview-placeholder {
-  color: #666;
+  color: var(--palette-666666);
   font-size: 13px;
   padding: 0 24px;
   text-align: center;
@@ -878,10 +878,10 @@ img.preview-media {
   margin: 0;
   padding: 18px 16px 10px;
   text-align: center;
-  color: #fff;
+  color: var(--palette-ffffff);
   font-size: 15px;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.55));
+  text-shadow: 0 1px 4px var(--palette-rgba-0-0-0-0-8);
+  background: linear-gradient(transparent, var(--palette-rgba-0-0-0-0-55));
 }
 .lyric-caption .cap-line {
   margin: 0;
@@ -895,9 +895,9 @@ img.preview-media {
   width: 96px;
   height: 54px;
   margin-left: -12px;
-  border: 2px solid #fff;
+  border: 2px solid var(--palette-ffffff);
   border-radius: var(--radius-sm);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 6px var(--palette-rgba-0-0-0-0-3);
 }
 .pcard-avatars .character-portrait:first-child {
   margin-left: 0;

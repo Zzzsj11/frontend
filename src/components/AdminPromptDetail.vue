@@ -293,7 +293,7 @@ button:disabled {
 button.primary {
   background: var(--primary);
   border-color: var(--primary);
-  color: #fff;
+  color: var(--palette-ffffff);
 }
 button.primary:hover:not(:disabled) {
   background: var(--primary-hover);

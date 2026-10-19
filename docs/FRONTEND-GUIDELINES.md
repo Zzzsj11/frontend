@@ -8,15 +8,15 @@
 
 技术栈基线：Vue 3 SFC + `<script setup lang="ts">` + Pinia（选项式 store）+ Vue Router + Vite。**禁止新增 Options API 组件**。
 
-| 目录 | 职责 | 约束 |
-|---|---|---|
-| `src/views/` | 路由级页面 | 只组合组件与读取 store，不写业务逻辑 |
-| `src/components/` | 业务组件 | 可访问 store |
+| 目录                   | 职责                           | 约束                                    |
+| ---------------------- | ------------------------------ | --------------------------------------- |
+| `src/views/`           | 路由级页面                     | 只组合组件与读取 store，不写业务逻辑    |
+| `src/components/`      | 业务组件                       | 可访问 store                            |
 | `src/components/base/` | 无业务基础组件（BaseModal 等） | 禁止访问 store，只通过 props/emits 通信 |
-| `src/stores/` | Pinia 状态 | 跨组件状态才入 store |
-| `src/api/` | 所有 HTTP 调用 | 组件内禁止直接 fetch/axios |
-| `src/composables/` | 可复用组合式函数 | 命名 `useXxx.ts` |
-| `src/types/` | 跨模块 TypeScript 类型 | 集中定义，组件/store 复用 |
+| `src/stores/`          | Pinia 状态                     | 跨组件状态才入 store                    |
+| `src/api/`             | 所有 HTTP 调用                 | 组件内禁止直接 fetch/axios              |
+| `src/composables/`     | 可复用组合式函数               | 命名 `useXxx.ts`                        |
+| `src/types/`           | 跨模块 TypeScript 类型         | 集中定义，组件/store 复用               |
 
 单文件行数上限：组件 ≤ 300 行，超出须拆分子组件或 composable；store ≤ 500 行，超出按领域拆分。
 
@@ -68,12 +68,12 @@ SFC 块顺序固定（ESLint `vue/block-order` 强制）：`<script setup>` → 
 
 **组件内禁止硬编码色值、圆角、阴影、z-index**，一律使用设计令牌（定义见 `src/style.css` `:root`）：
 
-| 类别 | 令牌 |
-|---|---|
+| 类别 | 令牌                                                                                                                                                                      |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 色彩 | `--primary` `--primary-hover` `--primary-gradient` `--success` `--warning` `--danger` 及各自 `-light` 底色；`--text` `--text-secondary` `--bg` `--border` `--border-dark` |
-| 圆角 | `--radius-sm`(8) `--radius-md`(12) `--radius-lg`(16) `--radius-pill`(20) |
-| 阴影 | `--shadow-card` `--shadow-dropdown` `--shadow-modal` |
-| 字号 | `--font-sm`(12) `--font-md`(14) `--font-lg`(17) |
+| 圆角 | `--radius-sm`(8) `--radius-md`(12) `--radius-lg`(16) `--radius-pill`(20)                                                                                                  |
+| 阴影 | `--shadow-card` `--shadow-dropdown` `--shadow-modal`                                                                                                                      |
+| 字号 | `--font-sm`(12) `--font-md`(14) `--font-lg`(17)                                                                                                                           |
 
 ```css
 /* ✅ 正例 */
@@ -91,14 +91,15 @@ SFC 块顺序固定（ESLint `vue/block-order` 强制）：`<script setup>` → 
 
 ### z-index 层级表（成文固定，新增弹层必须查表）
 
-| 层级 | 用途 |
-|---|---|
-| 0~20 | 工作区内部元素（拖拽柄、时间轴刻度等） |
-| 600 | 顶部菜单栏 AppHeader |
-| 1000 | 一级弹框遮罩（BaseModal 默认档） |
+| 层级 | 用途                                         |
+| ---- | -------------------------------------------- |
+| 0~20 | 工作区内部元素（拖拽柄、时间轴刻度等）       |
+| 500  | 后台顶部 AdminTopBar                         |
+| 600  | 顶部菜单栏 AppHeader                         |
+| 1000 | 一级弹框遮罩（BaseModal 默认档）             |
 | 1100 | 弹框内二级弹层（BaseModal `level="nested"`） |
-| 1200 | 全局确认对话框 ConfirmDialog |
-| 2000 | 全局错误对话框 ErrorDialog |
+| 1200 | 全局确认对话框 ConfirmDialog                 |
+| 2000 | 全局错误对话框 ErrorDialog                   |
 
 禁止自创层级值；确认框与错误框必须高于一切业务弹框。
 
@@ -114,7 +115,8 @@ SFC 块顺序固定（ESLint `vue/block-order` 强制）：`<script setup>` → 
 ```vue
 <!-- ✅ 正例 -->
 <BaseModal :open="store.magicOpen" title="ASS 视频" :loading="store.magicLoading" @close="cancel">
-  <template #body>…</template>
+  <!-- 主体使用默认插槽 -->
+  <div class="modal-body">…</div>
   <template #footer>…</template>
 </BaseModal>
 
@@ -142,12 +144,12 @@ SFC 块顺序固定（ESLint `vue/block-order` 强制）：`<script setup>` → 
 
 ## 8. 工程化卡口
 
-| 工具 | 配置 | 强制点 |
-|---|---|---|
-| Prettier | `.prettierrc.json` | `make lint-frontend` 中 `format:check`，唯一格式来源 |
-| ESLint | `eslint.config.js` | `vue/recommended` + `vue/block-order` + `vue/define-macros-order`；格式类规则已关闭（交 Prettier） |
-| vue-tsc | `npm run build` | strict 类型检查 |
-| vitest | `npm test` | 单测随 `make preflight` 执行 |
+| 工具     | 配置               | 强制点                                                                                             |
+| -------- | ------------------ | -------------------------------------------------------------------------------------------------- |
+| Prettier | `.prettierrc.json` | `make lint-frontend` 中 `format:check`，唯一格式来源                                               |
+| ESLint   | `eslint.config.js` | `vue/recommended` + `vue/block-order` + `vue/define-macros-order`；格式类规则已关闭（交 Prettier） |
+| vue-tsc  | `npm run build`    | strict 类型检查                                                                                    |
+| vitest   | `npm test`         | 单测随 `make preflight` 执行                                                                       |
 
 存量宽松项（`no-explicit-any` 等为 warn）在存量整改完成后收紧为 error，届时更新本章节。
 
@@ -168,3 +170,9 @@ SFC 块顺序固定（ESLint `vue/block-order` 强制）：`<script setup>` → 
 大图沿用 `BaseModal` 的 nested 层级及 media 主题，支持缩放/拖动/双指缩放、原始尺寸/适应窗口、图片切换、原图下载与加载重试。`useModalStack` 管理顶层 Esc、焦点、页面滚动锁；只关闭最上层弹窗，关闭后恢复焦点且不滚动下层表单。预览不持久化编辑草稿、不调用生成接口。
 
 平台原图下载通过 `GET /api/media/image-download` 获取 5 分钟有效的 TOS 签名附件链接，校验当前用户私有路径或可见系统人物；超级管理员可下载管理端可见的平台媒体。浏览器不持有存储密钥，也不依赖 TOS CORS。非平台参考图保留公开地址下载及打开原图的错误兜底。
+
+### 现有界面的令牌迁移
+
+历史色彩已经集中到 `src/style.css` 的精确色板；迁移保持原颜色值，新增组件仍优先使用 `--primary`、`--text`、`--surface` 等语义令牌。SVG data URL 中编码的资源颜色不作 CSS 变量替换。
+
+层级统一为：局部内容 1/2/5、sticky 20、后台顶部 500、顶部菜单及局部控件 600、主弹窗 1000、嵌套弹窗 1100、确认框及 Portal 下拉 1200、错误通知 2000，分别使用对应 `--z-*` 令牌；局部层级受父 stacking context 约束，不得用更大的魔法数字绕过弹层栈。

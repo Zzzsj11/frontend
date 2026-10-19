@@ -2,12 +2,12 @@
 
 本文给维护人员和 Code Agent 提供可直接照做的部署手册。当前只维护两个环境：
 
-| 环境           | 用途                                     | 入口                    | 数据             |
-| -------------- | ---------------------------------------- | ----------------------- | ---------------- |
-| 本地开发环境   | 开发、单元测试、完整预检                 | `http://127.0.0.1:5173` | 本地 Docker 卷   |
-| 服务器测试环境 | 业务方手工验收、远程 API/Playwright 回归 | `http://120.24.38.200`  | 服务器 Docker 卷 |
+| 环境           | 用途                                     | 入口                     | 数据             |
+| -------------- | ---------------------------------------- | ------------------------ | ---------------- |
+| 本地开发环境   | 开发、单元测试、完整预检                 | `http://127.0.0.1:5173`  | 本地 Docker 卷   |
+| 服务器测试环境 | 业务方手工验收、远程 API/Playwright 回归 | `https://mv.epaipix.com` | 服务器 Docker 卷 |
 
-v1.0.0 完成前不建设预发布或正式生产环境，也不通过域名执行业务回归。远程测试固定使用服务器 IP 和 HTTP `80` 端口。当前发布方式是在服务器从 Git 获取指定提交，并在服务器本地构建带 Git SHA 的版本化镜像。
+2026-10-19 起使用正式域名 `mv.epaipix.com`，HTTP `80` 自动跳转 HTTPS `443`。测试与正式共用现有 TOS 账号/Bucket，通过 `mv/test/`、`mv/production/` 对象目录隔离；历史对象保留原址。当前发布方式是在服务器从 Git 获取指定提交，并在服务器本地构建带 Git SHA 的版本化镜像。
 
 ## 1. 部署原则
 
@@ -33,8 +33,8 @@ cp backend/.env.example backend/.env
 填写 `backend/.env`，并按项目现有供应商配置准备 `backend/.provider_config.py`。这两个文件均被 Git 忽略。然后运行：
 
 ```bash
-docker compose up -d --build
-docker compose ps
+make dev
+docker compose -f docker-compose.yml -f docker-compose.local-build.yml ps
 curl -fsS http://127.0.0.1:5173/api/health  # 对外仅返回 {"ok":true}
 ```
 
@@ -233,7 +233,7 @@ python3 scripts/migrate-runtime-secrets.py
 scripts/validate-secret-layout.sh
 ```
 
-脚本会把 JWT、数据库密码、模型 Key 和 TOS 凭据集中写入 `backend/.runtime_secrets.env`，把数据库密码单独写入 `backend/.postgres_password`，两者权限均为 `600`；随后从旧 `.env` 文件中移除敏感项。容器只读挂载 Secret，Docker metadata 中只保留空占位或 Secret 路径。轮换时修改 Secret 文件后滚动重建 backend 和 workers，禁止在命令行参数、聊天或日志中传值。
+脚本会把 JWT、数据库密码、模型 Key 和 TOS 凭据集中写入 `backend/.runtime_secrets.env`，把数据库密码单独写入 `backend/.postgres_password`，两者权限均为 `600`；backend/worker 运行 UID/GID 为 10001，发布脚本会把 runtime secret 属主设为 10001，数据库 password secret 保留数据库服务所需的宿主权限；随后从旧 `.env` 文件中移除敏感项。容器只读挂载 Secret，Docker metadata 中只保留空占位或 Secret 路径。轮换时修改 Secret 文件后滚动重建 backend 和 workers，禁止在命令行参数、聊天或日志中传值。
 
 启用单机Worker拆分时，在服务器 `.env.production` 增加：
 
@@ -264,13 +264,13 @@ WORKER_STALE_SECONDS=180
 
 `worker-image`、`worker-media`（仅视频）、`worker-export`、`worker-chat` 与 `worker-storyboard` 必须和 backend 使用同一个版本化后端镜像。图片和视频使用独立并发池，避免长视频轮询占满图片执行槽。12 vCPU / 8 GiB 的实测环境以图片32、视频32起步；供应商视频并发上限为200，若 429、失败率、数据库连接数和 P95 轮询延迟均稳定，可依次把视频提升到64、96。导出 Worker 建议3并发，每个任务内部最多20路流式下载；4核测试机建议图片8、视频8、导出1。分镜编排并发建议2；不要把 `JOB_EXECUTION_MODE` 切为 `worker` 却遗漏 `COMPOSE_PROFILES=workers`，否则新任务只会排队而无人领取。
 
-统一供应商配置启用 `AIGC_TOKEN` 时，聊天地址和默认文本模型必须来自同一个 `runtime_secrets` 配置组。任何核验命令都不得打印 Token。
+生产仅使用 `ALL_IN_ONE_*` 配置；旧 `AIGC_TOKEN` 与其他直连渠道配置在发布时清除。任何核验命令都不得打印 Token。
 
-当前测试服务器安全组/防火墙只需对验收人员开放 SSH `22/tcp` 和 Web `80/tcp`。后端 `8000` 只绑定回环地址，PostgreSQL/Redis 在服务器部署覆盖中不映射宿主机端口。
+当前测试服务器安全组/防火墙对验收人员开放 SSH `22/tcp`，Web `80/tcp` 用于跳转，`443/tcp` 用于 HTTPS。后端 `8000` 只绑定回环地址，PostgreSQL/Redis 在服务器部署覆盖中不映射宿主机端口。
 
 ## 5. 每次发布的标准流程
 
-### 5.0 可选正式域名 HTTPS
+### 5.0 生产 HTTPS 前置条件
 
 域名解析和证书就绪后，在服务器准备只读证书目录，文件名固定为 `fullchain.pem`、`privkey.pem`。发布环境设置 `TLS_DOMAIN`、`TLS_CERT_DIR`，使用：
 
@@ -280,7 +280,7 @@ TLS_CERT_DIR=/etc/letsencrypt/live/example.com \
 DEPLOY_TLS=1 DEPLOY_ENV=production ./scripts/deploy-local-images.sh
 ```
 
-部署脚本会校验证书文件，并组合 `docker-compose.tls.yml`：80 自动 308 跳转、443 仅启用 TLS 1.2/1.3、响应带 HSTS，后端 Refresh Cookie 自动启用 Secure。证书续期后需重建 frontend 使 Nginx 重新读取文件。没有 DNS 与证书控制权时禁止用自签证书冒充完成。
+部署脚本会校验证书文件，并组合 `docker-compose.tls.yml`：80 自动 308 跳转、443 仅启用 TLS 1.2/1.3、响应带 HSTS，后端 Refresh Cookie 自动启用 Secure，发布准备同时更新共享 runtime 配置，Worker 可正常启动。生产应用禁止在 Secure 未开启时启动；当前仍为 HTTP 的服务器测试环境必须先完成域名和证书配置。发布会验证证书链、域名和密钥匹配，解引用复制证书到忽略目录后只读挂载，并在切换前执行 nginx -t；续期后再次发布会平滑 reload。成功后保存非敏感 TLS 配置，后续普通发布和回滚默认沿用，避免意外退回 HTTP。没有 DNS 与证书控制权时禁止用自签证书冒充完成。
 
 ### 5.1 本地侧
 
@@ -422,7 +422,7 @@ BACKUP_DIR=/var/lib/docker/mv-agent-maintenance/backups \
 crontab -l
 ```
 
-该脚本安装每5分钟健康检查、每分钟宿主机资源采样、每日03:15 PostgreSQL备份及每周日04:15隔离恢复验证。测试服务器把日志和本机备份放在200 GB数据盘的 `/var/lib/docker/mv-agent-maintenance/`，避免占满40 GB系统盘。资源采样读取默认路由公网网卡，只把发送字节增量计入自然月流量；配额按 `300 × 1024³` 字节计算。备份还需按 [`BACKUP-RESTORE.md`](BACKUP-RESTORE.md) 同步到独立对象存储。
+该脚本安装每5分钟健康检查、每分钟宿主机资源采样、每日03:15 PostgreSQL备份及每周日04:15隔离恢复验证。测试服务器把日志和本机备份放在200 GB数据盘的 `/var/lib/docker/mv-agent-maintenance/`，避免占满40 GB系统盘。资源采样读取默认路由公网网卡，只把发送字节增量计入自然月流量；配额按 `300 × 1024³` 字节计算。备份还需按 [`BACKUP-RESTORE.md`](BACKUP-RESTORE.md) 同步到 TOS 备份目录。
 
 ## 7. 数据库和 Redis 安全访问
 
@@ -517,7 +517,7 @@ DEPLOY_ENV=production ./scripts/rollback.sh
 
 ## 10. v1.0.0 后再评估的事项
 
-预发布、正式生产环境、域名/HTTPS、远程镜像仓库、自动发布审批均不属于当前部署路径。backend 已在单机上用一次性 green 容器实现平滑切换（消除部署 502 窗口），多副本蓝绿/滚动发布与发布治理仍在 v1.0.0 后再评估。v1.0.0 功能与验收稳定后，再单独设计环境隔离、Secret 管理、容量、安全和发布治理；在此之前不要让未来方案干扰服务器测试环境的可重复部署。
+正式域名/HTTPS 已纳入当前部署路径；预发布、多节点和远程镜像仓库另行评估。backend 已在单机上用一次性 green 容器实现平滑切换（消除部署 502 窗口），多副本蓝绿/滚动发布与发布治理仍在 v1.0.0 后再评估。v1.0.0 功能与验收稳定后，再单独设计环境隔离、Secret 管理、容量、安全和发布治理；在此之前不要让未来方案干扰服务器测试环境的可重复部署。
 
 ## all in one 渠道
 
@@ -528,3 +528,17 @@ DEPLOY_ENV=production ./scripts/rollback.sh
 管理后台文本模型对比入口可以选择三个新增文本模型。媒体生成与子项目批量修改都使用动态模型目录。图片与视频走异步平台工单，保存平台任务 ID 和稳定幂等键；恢复只查询同一工单。提交 5xx/断网且未拿到任务 ID 时进入人工核对，不盲目重提；已拿到 ID 时查询原任务。平台计费状态与原始用量保留在 usage 中，缺少报价规则或待核账不能当作免费。
 
 2026-10-13 验证中，当前 Key 有效，但文本/媒体创建与大部分报价返回上游 500，GPT-6.1-Sol 未开放生成。须由平台修复后完成真实创建、恢复、交付和费用验收，再发布；目录启用并不代表验收通过。
+
+## 正式域名证书与共用 TOS（2026-10-19）
+
+域名 `mv.epaipix.com` 指向当前服务器。首次安装 certbot 后执行 HTTP-01：
+
+```bash
+certbot certonly --manual --preferred-challenges http --non-interactive --agree-tos \
+  --register-unsafely-without-email -d mv.epaipix.com \
+  --manual-auth-hook /opt/mv-agent-frontend/scripts/acme-http-hook.sh
+```
+
+认证钩子只向当前 frontend 容器写入 ACME challenge，不停止网站。证书目录为 `/etc/letsencrypt/live/mv.epaipix.com`，按 §5.0 部署。成功后将版本化 `scripts/reload-tls-certificate.sh` 链接到 `/etc/letsencrypt/renewal-hooks/deploy/`，启用 certbot.timer，并执行 `certbot renew --dry-run`。续期钩子仅复制证书并检查、平滑重载 nginx，不触发模型调用。
+
+正式媒体新路径为 `mv/production/references/` 和 `mv/production/videos/`；测试默认 `mv/test/references/`、`mv/test/videos/`。备份使用同 Bucket 的 `mv/production/backups/database/`；必须提供服务端 Secret 中的 `BACKUP_TOS_ENCRYPTION_KEY`（配置脚本首次生成，后续保留），上传和下载均使用 SSE-C AES256。即使媒体 Bucket 允许公开读，无该密钥也不能下载备份。密钥必须另存受控密码管理器，丢失后无法恢复这些备份；不得放在 TOS 同目录或 Git 中。

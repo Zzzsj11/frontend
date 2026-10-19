@@ -20,7 +20,7 @@ from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .auth import CurrentUser, hash_password, user_public
+from .auth import CurrentUser, hash_password, revoke_all_refresh_tokens, user_public
 from .config import settings
 from .database import database_session, session_factory
 from .error_logging import redact_error_text
@@ -77,7 +77,7 @@ from .schemas import (
     UserCreate,
     UserUpdate,
 )
-from .storage import download_public_url_to_path, get_storage, is_tos_url, is_user_owned_tos_url, safe_key
+from .storage import download_public_url_to_path, get_storage, is_user_owned_tos_url, safe_key
 from .story_bible import STORY_BIBLE_VERSION, build_ass_story_bible, build_general_story_bible, exact_durations
 from .storyboard_options import load_general_storyboard_options, resolve_genre_cast_policy
 from .storyboard_prompt import (
@@ -197,13 +197,37 @@ async def create_user(payload: UserCreate, user: CurrentUser, db: AsyncSession =
 
 
 @router.patch("/admin/users/{user_id}")
-async def update_user(user_id: str, payload: UserUpdate, user: CurrentUser, db: AsyncSession = Db) -> dict:
+async def update_user(user_id: str, payload: UserUpdate, request: Request, user: CurrentUser, db: AsyncSession = Db) -> dict:
     require_admin(user)
     item = await db.get(UserModel, user_id)
     if not item or item.deleted_at is not None:
         raise HTTPException(404, "用户不存在")
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    changes = payload.model_dump(exclude_unset=True)
+    if any(value is None for value in changes.values()):
+        raise HTTPException(422, "用户字段不能为空")
+    if user_id == user.id and (changes.get("role", item.role) != item.role or changes.get("status", item.status) != "active"):
+        raise HTTPException(422, "不能停用或降低当前管理员自己的权限")
+    before = {key: getattr(item, key) for key in changes}
+    security_changed = any(key in changes and changes[key] != getattr(item, key) for key in ("role", "status"))
+    for key, value in changes.items():
         setattr(item, key, value)
+    if security_changed:
+        item.auth_version += 1
+        await revoke_all_refresh_tokens(user_id, db)
+        if item.role == "user":
+            await db.execute(update(UserAdminRoleModel).where(UserAdminRoleModel.user_id == user_id, UserAdminRoleModel.deleted_at.is_(None)).values(deleted_at=utcnow()))
+    db.add(
+        AdminOperationLogModel(
+            id=uid("audit"),
+            admin_user_id=user.id,
+            action="user.update",
+            target_type="user",
+            target_id=user_id,
+            before_data=before,
+            after_data=changes,
+            client_ip=request.client.host if request.client else None,
+        )
+    )
     await db.commit()
     return user_public(item)
 
@@ -222,6 +246,7 @@ async def update_user_admin_role(
         raise HTTPException(404, "用户不存在")
     if user_id == user.id and payload.admin_role_code != "super_admin":
         raise HTTPException(422, "不能移除当前超级管理员自己的权限")
+    previous_role = item.role
     before_roles = list(
         (
             await db.execute(
@@ -279,6 +304,10 @@ async def update_user_admin_role(
             client_ip=request.client.host if request.client else None,
         )
     )
+    expected_roles = set() if payload.admin_role_code == "none" else {payload.admin_role_code}
+    if previous_role != item.role or set(before_roles) != expected_roles:
+        item.auth_version += 1
+        await revoke_all_refresh_tokens(user_id, db)
     await db.commit()
     await attach_admin_access(db, item)
     return user_public(item)
@@ -1970,8 +1999,8 @@ async def _sync_human_asset_avatar(human: DigitalHumanModel) -> None:
 
 @router.post("/digital-humans", status_code=201)
 async def create_human(payload: DigitalHumanCreate, user: CurrentUser, db: AsyncSession = Db) -> dict:
-    if not is_tos_url(payload.avatar_url) or (payload.avatar_thumbnail_url and not is_tos_url(payload.avatar_thumbnail_url)):
-        raise HTTPException(422, "角色图片必须先上传到配置的 TOS")
+    if not is_user_owned_tos_url(payload.avatar_url, user.id) or (payload.avatar_thumbnail_url and not is_user_owned_tos_url(payload.avatar_thumbnail_url, user.id)):
+        raise HTTPException(422, "角色图片必须先上传到当前用户的 TOS 目录")
     style = None
     if payload.style_id:
         style = await db.get(DigitalHumanStyleModel, payload.style_id)
@@ -1995,9 +2024,13 @@ async def update_human(human_id: str, payload: DigitalHumanUpdate, user: Current
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "私有角色不存在")
+    if payload.style_id:
+        style = await db.get(DigitalHumanStyleModel, payload.style_id)
+        if not style or style.deleted_at is not None or (style.scope != "system" and style.user_id != user.id):
+            raise HTTPException(422, "角色分类不可用")
     for key, value in payload.model_dump(exclude_unset=True).items():
-        if key in {"avatar_url", "avatar_thumbnail_url"} and value and not is_tos_url(str(value)):
-            raise HTTPException(422, "角色图片必须存储在配置的 TOS")
+        if key in {"avatar_url", "avatar_thumbnail_url"} and value and not is_user_owned_tos_url(str(value), user.id):
+            raise HTTPException(422, "角色图片必须存储在当前用户的 TOS 目录")
         setattr(item, key, value)
     # 换图后旧资产链接失效，必须重新注册。
     if "avatar_url" in payload.model_dump(exclude_unset=True):
@@ -2056,12 +2089,12 @@ async def create_line(task_id: str, payload: StoryboardLineCreate, user: Current
             raise HTTPException(422, "创意分镜必须包含原始提示词和优化提示词")
         if payload.digital_human_ids:
             raise HTTPException(422, "创意分镜不使用项目人物引用")
-        if any(not is_user_owned_tos_url(str(item.get("url") or ""), user.id) for item in payload.reference_media):
-            raise HTTPException(422, "创意分镜参考素材必须属于当前用户")
-        if payload.optimization_task_id:
-            optimization = await db.get(PromptOptimizationTaskModel, payload.optimization_task_id)
-            if not optimization or optimization.user_id != user.id or optimization.deleted_at is not None:
-                raise HTTPException(422, "提示词优化任务不存在或不属于当前用户")
+    if any(not is_user_owned_tos_url(str(item.get("url") or ""), user.id) for item in payload.reference_media):
+        raise HTTPException(422, "分镜参考素材必须属于当前用户")
+    if payload.optimization_task_id:
+        optimization = await db.get(PromptOptimizationTaskModel, payload.optimization_task_id)
+        if not optimization or optimization.user_id != user.id or optimization.deleted_at is not None:
+            raise HTTPException(422, "提示词优化任务不存在或不属于当前用户")
     visible = await visible_humans(db, user.id, payload.digital_human_ids)
     if len({item.id for item in visible}) != len(set(payload.digital_human_ids)):
         raise HTTPException(422, "包含不可用角色")
@@ -2081,10 +2114,10 @@ async def create_line(task_id: str, payload: StoryboardLineCreate, user: Current
 @router.patch("/storyboard-lines/{line_id}")
 async def update_line(line_id: str, payload: StoryboardLineUpdate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     line = await owned_line(db, user.id, line_id)
-    if line.source == "creative" and payload.reference_media is not None:
+    if payload.reference_media is not None:
         if any(not is_user_owned_tos_url(str(item.get("url") or ""), user.id) for item in payload.reference_media):
             raise HTTPException(422, "创意分镜参考素材必须属于当前用户")
-    if line.source == "creative" and payload.optimization_task_id is not None:
+    if payload.optimization_task_id is not None:
         optimization = await db.get(PromptOptimizationTaskModel, payload.optimization_task_id)
         if not optimization or optimization.user_id != user.id or optimization.deleted_at is not None:
             raise HTTPException(422, "提示词优化任务不存在或不属于当前用户")
@@ -2903,6 +2936,8 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
 
 @router.post("/tasks/{task_id}/material-exports", status_code=202)
 async def create_material_export(task_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
+    # 用户级锁同时保护跨任务导出配额和同任务去重。
+    await db.scalar(select(UserModel).where(UserModel.id == user.id).with_for_update())
     task = await owned_task(db, user.id, task_id)
     active_for_task = (
         (
@@ -2951,19 +2986,19 @@ async def create_material_export(task_id: str, user: CurrentUser, db: AsyncSessi
     )
     export = MaterialExportModel(id=uid("export"), user_id=user.id, project_task_id=task.id)
     db.add(export)
-    await db.commit()
-    await db.refresh(export)
+    await db.flush()
     export_id = export.id
-    job = await jobs.create(
+    job = await jobs.enqueue(
+        db,
         "export",
         {"export_id": export_id},
-        lambda item: _run_material_export(export_id, item),
         user_id=user.id,
         project_id=task.project_id,
         project_task_id=task.id,
     )
     export.generation_job_id = job.id
     await db.commit()
+    await jobs.dispatch(job, lambda item: _run_material_export(export_id, item))
     await db.refresh(export)
     return material_export_public(export)
 

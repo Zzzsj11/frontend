@@ -1,4 +1,4 @@
-ARG BACKEND_BASE_IMAGE=python:3.12-slim
+ARG BACKEND_BASE_IMAGE=python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
 FROM ${BACKEND_BASE_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -10,13 +10,8 @@ RUN sed -i 's|http://deb.debian.org|https://mirrors.aliyun.com|g' /etc/apt/sourc
     && apt-get -o Acquire::Retries=3 update \
     && apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-# Some reusable base images expose an application virtualenv while `pip` still
-# installs globally. Mirror installed packages so either Python path is valid.
-RUN if [ -d /app/.venv/lib/python3.14/site-packages ]; then \
-      cp -a /usr/local/lib/python3.14/site-packages/. /app/.venv/lib/python3.14/site-packages/; \
-    fi
+COPY requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.lock
 COPY alembic.ini ./
 COPY migrations ./migrations
 COPY app ./app
@@ -24,5 +19,9 @@ COPY scripts ./scripts
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 COPY worker-entrypoint.sh ./worker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh ./worker-entrypoint.sh
+RUN groupadd --gid 10001 mvagent && useradd --uid 10001 --gid mvagent --no-create-home mvagent \
+    && mkdir -p /srv/mvagent/data \
+    && chown 10001:10001 /srv/mvagent/data
+USER 10001:10001
 EXPOSE 8000
 ENTRYPOINT ["./docker-entrypoint.sh"]

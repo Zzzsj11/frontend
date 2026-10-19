@@ -8,10 +8,18 @@
  */
 const LOCAL_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]'])
 
-export function targetBaseURL(): string {
-  return (
-    process.env.REMOTE_API_BASE_URL || process.env.PLAYWRIGHT_BASE_URL || 'http://120.24.38.200'
+export function isRemoteRunRequested(): boolean {
+  return ['REMOTE_FRONTEND_E2E', 'REMOTE_API_E2E', 'ADMIN_API_E2E', 'ADMIN_CONSOLE_E2E'].some(
+    (name) => process.env[name] === '1',
   )
+}
+
+export function targetBaseURL(): string {
+  const configured = process.env.REMOTE_API_BASE_URL || process.env.PLAYWRIGHT_BASE_URL
+  if (configured) return configured
+  if (isRemoteRunRequested())
+    throw new Error('[e2e] 远程验收必须显式设置 REMOTE_API_BASE_URL 或 PLAYWRIGHT_BASE_URL')
+  return 'http://127.0.0.1:4173'
 }
 
 function isLocalTarget(url: string): boolean {

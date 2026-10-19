@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any
 
 import httpx
@@ -12,12 +11,13 @@ from sqlalchemy.orm import selectinload
 
 from .config import settings
 from .database import session_factory
+from .error_logging import redact_error_text
 from .jobs import Job, jobs
 from .llm_failover import choose_model, record_failure, record_success
 from .llm_policy import LlmContentPolicyError, check_provider_text, completion_options
 from .model_gateway import AsyncOpenAI
 from .model_gateway import enabled as gateway_enabled
-from .models import ChatMessageModel, ChatSessionModel
+from .models import ChatMessageModel, ChatSessionModel, utcnow
 from .redis_store import append_chat_event, chat_events_after, redis
 from .token_usage import add_token_usage
 from .usage_quota import consume_daily_quota
@@ -117,7 +117,7 @@ class ChatManager:
             model = await session.get(ChatSessionModel, session_id)
             if not model or model.user_id != user_id or model.deleted_at is not None:
                 return False
-            model.deleted_at = datetime.now().astimezone()
+            model.deleted_at = utcnow()
             await session.execute(
                 update(ChatMessageModel).where(ChatMessageModel.session_id == session_id, ChatMessageModel.deleted_at.is_(None)).values(deleted_at=model.deleted_at)
             )
@@ -284,7 +284,7 @@ class ChatManager:
                         request_id=request_id,
                     )
                     await db.commit()
-            await append_chat_event(session.id, "error", {"text": str(exc)})
+            await append_chat_event(session.id, "error", {"text": redact_error_text(str(exc))})
         finally:
             if openai_client is not None:
                 await openai_client.close()

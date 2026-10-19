@@ -1,0 +1,31 @@
+# 回滚旧镜像也必须跳过其无条件 Alembic 入口，数据库保留兼容的扩展迁移。
+services:
+  backend:
+    entrypoint:
+      [
+        'uvicorn',
+        'app.main:app',
+        '--host',
+        '0.0.0.0',
+        '--port',
+        '8000',
+        '--proxy-headers',
+        '--forwarded-allow-ips=*',
+      ]
+  worker-media:
+    healthcheck: &rollback-worker-health
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import asyncio,socket; from sqlalchemy import text; from app.database import session_factory; exec('async def check():\\n async with session_factory() as db:\\n  return bool(await db.scalar(text(\"SELECT 1 FROM worker_instances WHERE hostname=:host AND status=\\'running\\' AND deleted_at IS NULL AND last_heartbeat_at > CURRENT_TIMESTAMP - INTERVAL \\'60 seconds\\' LIMIT 1\"), {\"host\":socket.gethostname()}))'); raise SystemExit(0 if asyncio.run(check()) else 1)",
+        ]
+  worker-image:
+    healthcheck: *rollback-worker-health
+  worker-export:
+    healthcheck: *rollback-worker-health
+  worker-chat:
+    healthcheck: *rollback-worker-health
+  worker-storyboard:
+    healthcheck: *rollback-worker-health

@@ -31,6 +31,7 @@ export interface GenerationJobSnapshot<R = unknown> {
 }
 
 interface WatchEntry<T> {
+  watchKey: symbol
   id: string
   deadline: number
   signal?: AbortSignal
@@ -48,7 +49,7 @@ const POLL_INTERVAL_MS = 3000
 /** 周期 tick 进行中注册的新任务，尽快补一次首查 */
 const FIRST_POLL_DELAY_MS = 50
 
-const entries = new Map<string, WatchEntry<unknown>>()
+const entries = new Map<symbol, WatchEntry<unknown>>()
 let timer: number | null = null
 let ticking = false
 
@@ -71,7 +72,7 @@ async function fetchBatchSnapshots(
       {
         method: 'POST',
         headers: { 'X-Polling': '1' },
-        body: JSON.stringify({ ids: batch.map((entry) => entry.id) }),
+        body: JSON.stringify({ ids: [...new Set(batch.map((entry) => entry.id))] }),
         signal,
       },
     )
@@ -126,7 +127,7 @@ async function tick() {
     const current = [...entries.values()]
     const active: WatchEntry<unknown>[] = []
     for (const entry of current) {
-      if (!entries.delete(entry.id)) continue
+      if (!entries.delete(entry.watchKey)) continue
       if (entry.signal?.aborted) {
         entry.reject(new PollingCancelledError())
       } else active.push(entry)
@@ -152,11 +153,21 @@ async function tick() {
             entry.reject(new Error('生成任务不存在或无权访问'))
             continue
           }
-          if (!settleEntry(entry, snapshot)) entries.set(entry.id, entry)
+          if (!settleEntry(entry, snapshot)) entries.set(entry.watchKey, entry)
         }
       } catch (error) {
         for (const entry of batch) {
-          entry.reject(entry.signal?.aborted ? new PollingCancelledError() : error)
+          if (entry.signal?.aborted) entry.reject(new PollingCancelledError())
+          else if (
+            !(error instanceof ApiError) ||
+            !error.status ||
+            error.status === 408 ||
+            error.status === 429 ||
+            error.status >= 500
+          ) {
+            // 查询失败不代表生成失败；保留原截止时间，在后续 tick 重试。
+            entries.set(entry.watchKey, entry)
+          } else entry.reject(error)
         }
       } finally {
         for (const entry of batch) entry.signal?.removeEventListener('abort', abortBatchWhenUnused)
@@ -172,8 +183,18 @@ async function tick() {
 function scheduleNext() {
   if (timer !== null || ticking || entries.size === 0) return
   const hasFresh = [...entries.values()].some((entry) => !entry.polled)
-  timer = window.setTimeout(tick, hasFresh ? FIRST_POLL_DELAY_MS : POLL_INTERVAL_MS)
+  timer = window.setTimeout(
+    tick,
+    document.hidden ? 15_000 : hasFresh ? FIRST_POLL_DELAY_MS : POLL_INTERVAL_MS,
+  )
 }
+
+// 后台标签页降低查询频率，回到前台立即同步；后端任务不受影响。
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || ticking || entries.size === 0) return
+  if (timer !== null) window.clearTimeout(timer)
+  timer = window.setTimeout(tick, 0)
+})
 
 /**
  * 轮询一个媒体生成任务直至终态，返回 select 提取的结果。
@@ -190,6 +211,7 @@ export function watchGenerationJob<T>(
   },
 ): Promise<T> {
   const entry: WatchEntry<T> = {
+    watchKey: Symbol(jobId),
     id: jobId,
     deadline: Date.now() + (options.timeoutMs ?? 660_000),
     signal: options.signal,
@@ -208,7 +230,7 @@ export function watchGenerationJob<T>(
     entry.reject(new PollingCancelledError())
     return promise
   }
-  entries.set(jobId, entry as WatchEntry<unknown>)
+  entries.set(entry.watchKey, entry as WatchEntry<unknown>)
   scheduleNext()
   return promise
 }
