@@ -10,14 +10,14 @@ RUN sed -i 's|http://deb.debian.org|https://mirrors.aliyun.com|g' /etc/apt/sourc
     && apt-get -o Acquire::Retries=3 update \
     && apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
-COPY requirements.lock ./
+COPY --chown=10001:10001 requirements.lock ./
 RUN pip install --no-cache-dir -r requirements.lock
-COPY alembic.ini ./
-COPY migrations ./migrations
-COPY app ./app
-COPY scripts ./scripts
-COPY docker-entrypoint.sh ./docker-entrypoint.sh
-COPY worker-entrypoint.sh ./worker-entrypoint.sh
+COPY --chown=10001:10001 alembic.ini ./
+COPY --chown=10001:10001 migrations ./migrations
+COPY --chown=10001:10001 app ./app
+COPY --chown=10001:10001 scripts ./scripts
+COPY --chown=10001:10001 docker-entrypoint.sh ./docker-entrypoint.sh
+COPY --chown=10001:10001 worker-entrypoint.sh ./worker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh ./worker-entrypoint.sh
 RUN groupadd --gid 10001 mvagent && useradd --uid 10001 --gid mvagent --no-create-home mvagent \
     && mkdir -p /srv/mvagent/data \
