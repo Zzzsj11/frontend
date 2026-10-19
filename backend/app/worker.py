@@ -22,7 +22,7 @@ from .redis_store import close_redis, wait_for_worker_wakeup
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
 
 logger = logging.getLogger("mvagent.worker")
-REPLAYABLE_INTERNAL_KINDS = {"ass_outline", "general_outline", "ass_segment_retry", "storyboard_line", "billing_reconcile", "prompt_optimization", "mv_export"}
+REPLAYABLE_INTERNAL_KINDS = {"ass_outline", "general_outline", "ass_segment_retry", "storyboard_line", "billing_reconcile", "prompt_optimization", "export", "mv_export"}
 MAX_INTERNAL_ATTEMPTS = 3
 STALE_RECOVERY_INTERVAL_SECONDS = 15
 
@@ -122,6 +122,9 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
     resumed = failed = 0
     threshold = utcnow() - timedelta(seconds=settings.worker_stale_seconds)
     async with session_factory() as session:
+        from .export_state import reconcile_export_failures
+
+        await reconcile_export_failures(session, kinds)
         rows = list(
             (
                 await session.execute(
@@ -151,7 +154,7 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
                 model.phase = "queued"
                 model.started_at = None
                 model.attempt += 1
-                if model.kind == "mv_export":
+                if model.kind in {"export", "mv_export"}:
                     from .models import MaterialExportModel
 
                     export = await session.get(MaterialExportModel, (model.request or {}).get("export_id", ""))
@@ -194,7 +197,7 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
                     if line and line.deleted_at is None:
                         line.generation_status = "failed"
                         line.generation_error = model.error
-                elif model.kind == "mv_export":
+                elif model.kind in {"export", "mv_export"}:
                     from .models import MaterialExportModel
 
                     export = await session.get(MaterialExportModel, (model.request or {}).get("export_id", ""))
@@ -328,7 +331,7 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
                     await asyncio.sleep(heartbeat_interval)
                     try:
                         await jobs.heartbeat(job)
-                        if job.kind in REPLAYABLE_INTERNAL_KINDS - {"mv_export"} and job.project_task_id:
+                        if job.kind in REPLAYABLE_INTERNAL_KINDS - {"export", "mv_export"} and job.project_task_id:
                             async with session_factory() as session:
                                 task = await session.get(ProjectTaskModel, job.project_task_id)
                                 if task and task.deleted_at is None:
