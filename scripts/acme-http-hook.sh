@@ -6,6 +6,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 path="$root/.deployment/acme/.well-known/acme-challenge"
 mkdir -p "$path"
 printf '%s' "$CERTBOT_VALIDATION" > "$path/$CERTBOT_TOKEN"
+chmod 644 "$path/$CERTBOT_TOKEN"
 container="$(docker ps -q --filter label=com.docker.compose.project=mv-agent-frontend --filter label=com.docker.compose.service=frontend)"
 test -n "$container"
 docker exec "$container" mkdir -p /usr/share/nginx/html/.well-known/acme-challenge
