@@ -22,8 +22,6 @@ from .models import (
     SongEmotionProfileModel,
     StoryboardLineModel,
     StoryboardOptionItemModel,
-    UserAdminRoleModel,
-    UserModel,
     utcnow,
 )
 from .prompts import DEFAULT_PROMPTS
@@ -164,13 +162,6 @@ async def seed_system_data() -> None:
                 ).scalar_one_or_none()
                 if not ass_link:
                     session.add(AdminRolePermissionModel(id=f"arp-ass-{code.replace('.', '-')}", role_id=ass_role.id, permission_id=pid))
-        admin = (await session.execute(select(UserModel).where(UserModel.username == "admin", UserModel.deleted_at.is_(None)))).scalar_one_or_none()
-        if admin and not await session.get(UserAdminRoleModel, f"uar-super-{admin.id}"):
-            legacy_link = await session.get(UserAdminRoleModel, f"uar-{admin.id}")
-            if legacy_link:
-                legacy_link.role_id = role.id
-            else:
-                session.add(UserAdminRoleModel(id=f"uar-super-{admin.id}", user_id=admin.id, role_id=role.id))
         provider = await session.get(AiProviderModel, "provider-yinghe")
         if not provider:
             provider = AiProviderModel(id="provider-yinghe", code="yinghe", name="银河 API", base_url="", status="inactive" if settings.llm_channel == "all-in-one" else "active")
