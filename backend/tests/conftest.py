@@ -29,12 +29,21 @@ def client():
 
     from fastapi.testclient import TestClient
 
-    from app.database import engine
-    from app.models import Base
+    from app.auth import hash_password
+    from app.database import engine, session_factory
+    from app.models import AdminRoleModel, Base, UserAdminRoleModel, UserModel
 
     async def create_test_schema() -> None:
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
+        # Explicit fixture-only identity; the application never creates default users.
+        async with session_factory() as db:
+            admin = UserModel(id=f"user-{uuid4().hex}", username="admin", password_hash=hash_password("123456"), role="admin", must_change_password=True)
+            db.add(admin)
+            db.add(AdminRoleModel(id="admin-role-super", code="super_admin", name="超级管理员", description="测试角色"))
+            await db.flush()
+            db.add(UserAdminRoleModel(id=f"uar-super-{admin.id}", user_id=admin.id, role_id="admin-role-super"))
+            await db.commit()
 
     # SQLite is an isolated test database; deployed databases remain Alembic-only.
     asyncio.run(create_test_schema())

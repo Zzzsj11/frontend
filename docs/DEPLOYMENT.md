@@ -38,7 +38,7 @@ docker compose -f docker-compose.yml -f docker-compose.local-build.yml ps
 curl -fsS http://127.0.0.1:5173/api/health  # 对外仅返回 {"ok":true}
 ```
 
-浏览器访问 `http://127.0.0.1:5173`。首次管理员默认为 `admin / 123456`，仅限本地首次启动，登录后立即修改。
+浏览器访问 `http://127.0.0.1:5173`。应用不自动创建账号或按用户名授予超级管理员权限；首次管理员由受控运维流程显式配置，无默认密码。
 
 ### 2.2 发布前验证
 
@@ -549,6 +549,6 @@ certbot certonly --manual --preferred-challenges http --non-interactive --agree-
 
 测试服务器 `.env.production`（仅是 Docker 加固覆盖的历史文件名）必须设置 `DEPLOYMENT_TIER=test`、`TLS_DOMAIN=mv-test.epaipix.com`、`APP_CORS_ORIGINS=https://mv-test.epaipix.com`。发布准备脚本从该文件持久读取 tier/domain，后续不显式传环境变量也不会重置为正式目录。4核机器采用图片4、视频4、导出1、分镜2并发。
 
-新服务器先启动 PostgreSQL/Redis，用版本化镜像执行 Alembic，再在尚未开放 API 时运行 `backend/scripts/bootstrap_test_admin.py`。管理员初始密码从服务器 runtime Secret 的 `INITIAL_ADMIN_PASSWORD` 读取，至少20字符；只允许 test tier 且数据库没有任何用户，不覆盖已有账号。之后启动完整应用，系统只读人物和配置由标准种子初始化。
+新服务器先启动 PostgreSQL/Redis，用版本化镜像执行 Alembic，再由受控运维流程显式建立管理员、密码哈希及超级管理员角色关联。应用初始化仅补齐系统配置、只读人物和权限定义，不创建账号，不按 `admin` 用户名授予权限。测试环境旧 `admin` 已按用户授权永久删除，仅保留 `dev01` 超级管理员；已删除自动建号函数、启动调用、开关和一次性默认建号脚本。
 
 首次证书可在80端口临时提供 `.deployment/acme` webroot，执行 certbot `certonly --webroot`。正式 nginx 以只读卷持续提供同一 challenge 目录。续期定时器和部署钩子与正式环境相同，证书独立签发、续期，不共享私钥。

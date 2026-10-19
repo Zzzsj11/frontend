@@ -35,7 +35,6 @@ from .auth import (
     revoke_all_refresh_tokens,
     revoke_refresh,
     rotate_refresh,
-    seed_admin,
     user_public,
     verify_password,
 )
@@ -171,7 +170,6 @@ async def stale_generation_reaper() -> None:
 async def lifespan(_app: FastAPI):
     validate_runtime_security()
     await init_database()
-    await seed_admin()
     await seed_system_data()
     await recover_stale_storyboard_generation()
     await jobs.expire_overdue_video_jobs()

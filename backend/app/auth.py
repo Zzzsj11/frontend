@@ -225,31 +225,6 @@ async def revoke_all_refresh_tokens(user_id: str, session: AsyncSession) -> None
     )
 
 
-async def seed_admin() -> None:
-    if not settings.seed_admin_enabled:
-        return
-    async with session_factory() as session:
-        current = (await session.execute(select(UserModel).where(UserModel.username == "admin"))).scalar_one_or_none()
-        if current:
-            return
-        legacy = (await session.execute(select(UserModel).where(UserModel.username == "admin01"))).scalar_one_or_none()
-        if legacy:
-            legacy.username = "admin"
-            await session.commit()
-            return
-        session.add(
-            UserModel(
-                id=f"user-{uuid.uuid4().hex}",
-                username="admin",
-                display_name="管理员",
-                password_hash=hash_password("123456"),
-                role="admin",
-                must_change_password=True,
-            )
-        )
-        await session.commit()
-
-
 async def refresh_cookie_value(value: Annotated[str | None, Cookie(alias=REFRESH_COOKIE)] = None) -> str | None:
     return value
 
