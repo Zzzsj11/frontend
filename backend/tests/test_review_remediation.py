@@ -491,3 +491,30 @@ async def test_shared_provider_scheduler_isolates_expired_job_and_restarts_after
     assert scheduler.active_count == 0
     if scheduler._runner:
         await scheduler._runner
+
+
+def test_shared_bucket_backup_requires_customer_key_and_environment_directory(tmp_path):
+    import base64
+    import hashlib
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from app.backup_archive import archive_backup
+
+    path = tmp_path / "snapshot.dump"
+    path.write_bytes(b"private-shared-bucket-backup")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    key = base64.b64encode(b"a" * 32).decode()
+    client = Mock()
+    client.head_object.return_value = SimpleNamespace(
+        content_length=path.stat().st_size, meta={"sha256": digest}, header={"x-tos-server-side-encryption-customer-algorithm": "AES256"}
+    )
+    archive_backup(client, "shared-media", "mv/production/backups/database", path, digest, encryption_key=key)
+    assert client.upload_file.call_args.kwargs["ssec_key"] == key
+    assert client.put_object.call_args.kwargs["ssec_key"] == key
+    client.get_bucket_acl.assert_not_called()
+    client.reset_mock()
+    for prefix, bad_key in (("public", key), ("mv/test/backups/database", "bad-key")):
+        with pytest.raises(ValueError):
+            archive_backup(client, "shared-media", prefix, path, digest, encryption_key=bad_key)
+    client.upload_file.assert_not_called()

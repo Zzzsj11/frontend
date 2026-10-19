@@ -192,8 +192,8 @@ class Settings:
     tos_secret_key: str = os.getenv("TOS_SECRET_ACCESS_KEY", "")
     tos_reference_bucket: str = os.getenv("TOS_REFERENCE_BUCKET", "")
     tos_video_bucket: str = os.getenv("TOS_VIDEO_ARCHIVE_BUCKET", "")
-    tos_reference_prefix: str = os.getenv("TOS_REFERENCE_PREFIX", "mv-agent/references").strip("/")
-    tos_video_prefix: str = os.getenv("TOS_VIDEO_ARCHIVE_PREFIX", "mv-agent/generated-videos").strip("/")
+    tos_reference_prefix: str = os.getenv("TOS_REFERENCE_PREFIX", "mv/production/references" if os.getenv("APP_ENV") == "production" else "mv/test/references").strip("/")
+    tos_video_prefix: str = os.getenv("TOS_VIDEO_ARCHIVE_PREFIX", "mv/production/videos" if os.getenv("APP_ENV") == "production" else "mv/test/videos").strip("/")
     tos_public_domain: str = os.getenv("TOS_PUBLIC_BUCKET_DOMAIN", "").replace("https://", "").replace("http://", "").strip("/")
     # RunningHub 云端 ComfyUI 工作流（管理后台测试页用）；key 只放后端，不回显前端
     runninghub_api_key: str = os.getenv("RUNNINGHUB_API_KEY", "")

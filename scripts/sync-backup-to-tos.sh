@@ -2,7 +2,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"; cd "$root"
 file="${1:?usage: scripts/sync-backup-to-tos.sh FILE.dump}"
-: "${BACKUP_TOS_BUCKET:?configure a separate private encrypted backup bucket}"
+: "${BACKUP_TOS_BUCKET:?configure the backup bucket}"
 test -s "$file" && test -s "$file.sha256"
 checksum="$(awk '{print $1; exit}' "$file.sha256")"
 compose=(docker compose -f docker-compose.yml)

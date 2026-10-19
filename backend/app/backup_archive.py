@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import re
@@ -33,7 +34,14 @@ def require_private_bucket(client, bucket: str) -> None:
                 raise RuntimeError("备份 Bucket 禁止通配符公开访问策略")
 
 
-def archive_backup(client, bucket: str, prefix: str, path: Path, expected_sha256: str) -> dict:
+def backup_encryption(key: str) -> dict:
+    raw = base64.b64decode(key, validate=True)
+    if len(raw) != 32:
+        raise ValueError("备份加密密钥必须为32字节的Base64编码")
+    return {"ssec_algorithm": "AES256", "ssec_key": key, "ssec_key_md5": base64.b64encode(hashlib.md5(raw, usedforsecurity=False).digest()).decode()}
+
+
+def archive_backup(client, bucket: str, prefix: str, path: Path, expected_sha256: str, *, encryption_key: str = "") -> dict:
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", bucket):
         raise ValueError("备份 Bucket 名称无效")
     if any(part in {".", ".."} for part in prefix.split("/")):
@@ -42,12 +50,20 @@ def archive_backup(client, bucket: str, prefix: str, path: Path, expected_sha256
         digest = hashlib.file_digest(source, "sha256").hexdigest()
     if not re.fullmatch(r"[a-f0-9]{64}", expected_sha256) or digest != expected_sha256:
         raise ValueError("备份 SHA-256 不匹配，停止上传")
-    require_private_bucket(client, bucket)
+    encryption = backup_encryption(encryption_key) if encryption_key else {"server_side_encryption": "AES256"}
+    if not encryption_key:
+        require_private_bucket(client, bucket)
+    elif not prefix.strip("/").startswith(("mv/production/backups/", "mv/test/backups/")):
+        raise ValueError("共享 Bucket 备份必须使用独立环境目录")
     key = "/".join(filter(None, (prefix.strip("/"), path.name)))
-    client.upload_file(bucket, key, str(path), server_side_encryption="AES256", acl=ACLType.ACL_Private, meta={"sha256": digest}, enable_checkpoint=False, task_num=2)
-    head = client.head_object(bucket, key)
+    client.upload_file(bucket, key, str(path), **encryption, acl=ACLType.ACL_Private, meta={"sha256": digest}, enable_checkpoint=False, task_num=2)
+    head = client.head_object(bucket, key, **(backup_encryption(encryption_key) if encryption_key else {}))
     headers = {key.lower(): value for key, value in head.header.items()}
-    if head.content_length != path.stat().st_size or head.meta.get("sha256") != digest or headers.get("x-tos-server-side-encryption") != "AES256":
+    if (
+        head.content_length != path.stat().st_size
+        or head.meta.get("sha256") != digest
+        or headers.get("x-tos-server-side-encryption-customer-algorithm" if encryption_key else "x-tos-server-side-encryption") != "AES256"
+    ):
         raise RuntimeError("备份对象长度、校验信息或加密状态未通过验证")
-    client.put_object(bucket, key + ".sha256", content=f"{digest}  {path.name}\n".encode(), server_side_encryption="AES256", acl=ACLType.ACL_Private)
+    client.put_object(bucket, key + ".sha256", content=f"{digest}  {path.name}\n".encode(), **encryption, acl=ACLType.ACL_Private)
     return {"bucket": bucket, "key": key, "bytes": path.stat().st_size, "sha256": digest, "encryption": "AES256"}

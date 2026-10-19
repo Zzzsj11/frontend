@@ -73,7 +73,7 @@ def is_user_owned_tos_url(url: str, user_id: str) -> bool:
         return False
     if "\\" in path or any(part in {".", ".."} for part in path.split("/")):
         return False
-    prefixes = {"", settings.tos_reference_prefix.strip("/"), settings.tos_video_prefix.strip("/")}
+    prefixes = {"", "mv-agent/references", "mv-agent/generated-videos", settings.tos_reference_prefix.strip("/"), settings.tos_video_prefix.strip("/")}
     return any(path.startswith(f"/{prefix + '/' if prefix else ''}users/{user_id}/") for prefix in prefixes)
 
 

@@ -25,7 +25,7 @@ parser.add_argument("--sha256", required=True)
 args = parser.parse_args()
 if Path(args.name).name != args.name or not args.name.endswith(".dump"):
     raise SystemExit("invalid backup filename")
-if args.bucket in {settings.tos_reference_bucket, settings.tos_video_bucket}:
+if args.bucket in {settings.tos_reference_bucket, settings.tos_video_bucket} and not os.getenv("BACKUP_TOS_ENCRYPTION_KEY"):
     raise SystemExit("backup requires a separate private bucket")
 if bool(os.getenv("BACKUP_TOS_ACCESS_KEY_ID")) != bool(os.getenv("BACKUP_TOS_SECRET_ACCESS_KEY")):
     raise SystemExit("backup credentials must be configured as a complete pair")
@@ -40,7 +40,7 @@ try:
         path = Path(directory) / args.name
         with path.open("wb") as output:
             shutil.copyfileobj(sys.stdin.buffer, output, 1024 * 1024)
-        print(json.dumps(archive_backup(client, args.bucket, args.prefix, path, args.sha256)))
+        print(json.dumps(archive_backup(client, args.bucket, args.prefix, path, args.sha256, encryption_key=os.getenv("BACKUP_TOS_ENCRYPTION_KEY", ""))))
 except Exception as exc:
     # SDK 错误对象可能包含请求信息；备份日志不输出原始异常和凭据。
     print(f"backup upload failed: {type(exc).__name__}; status={getattr(exc, 'status_code', 'n/a')}", file=sys.stderr)
