@@ -67,8 +67,19 @@ def test_reasoning_compatibility(model):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["image", "video"])
-async def test_create_maps_payload_and_durable_identity(configured, monkeypatch, kind):
+@pytest.mark.parametrize(
+    ("kind", "upstream_model"),
+    [
+        ("image", "gpt-image-2"),
+        ("video", "MiniMax-H3"),
+        ("video", "seedance-2.0"),
+        ("video", "seedance-2.0-fast"),
+        ("video", "seedance-2.0-mini"),
+        ("video", "seedance-2.5"),
+        ("video", "wan3.0-video"),
+    ],
+)
+async def test_create_maps_payload_and_durable_identity(configured, monkeypatch, kind, upstream_model):
     captured = []
 
     def handle(request):
@@ -92,7 +103,7 @@ async def test_create_maps_payload_and_durable_identity(configured, monkeypatch,
         id="local-job",
         kind=kind,
         user_id="private-owner",
-        request={"_providerModelId": "gpt-image-2" if kind == "image" else "MiniMax-H3", "_capabilities": {"providerResolutionMap": {"720p": "768P"}}},
+        request={"_providerModelId": upstream_model, "_capabilities": {"providerResolutionMap": {"720p": "768P"}}},
     )
     request = (
         ImageGenerationCreate(model="gpt-image-2-all-in-one", prompt="cup", images=["https://media.example/input.png"])
@@ -105,6 +116,10 @@ async def test_create_maps_payload_and_durable_identity(configured, monkeypatch,
     assert req.headers["X-Agent-Run-Id"] == req.headers["X-Test-Run-Id"] == "test-run"
     assert "X-User-Id" not in req.headers
     assert body["images"] == ["https://media.example/input.png"]
+    if kind == "video" and upstream_model == "seedance-2.0":
+        assert body["realPersonMode"] is True
+    else:
+        assert "realPersonMode" not in body
     if kind == "video":
         assert body["resolution"] == "768P"
     provider_request.assert_awaited_once_with(job, body)

@@ -217,6 +217,9 @@ class JobManager:
                     model.started_at = utcnow()
                 if job.status in {"succeeded", "failed", "cancelled"}:
                     model.finished_at = utcnow()
+                from .export_state import sync_export_failure
+
+                await sync_export_failure(session, model)
                 await session.commit()
                 job.updated_at = model.updated_at.timestamp()
         await cache_job(job.id, job.public())

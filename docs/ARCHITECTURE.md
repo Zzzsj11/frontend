@@ -62,3 +62,5 @@ ASS 子项目关联歌曲音频后，可通过 `/api/tasks/{id}/video-exports` �
 ## 项目前端状态的职责边界
 
 `src/stores/project.ts` 保留唯一的公开 Pinia 工作区接口及 state/getters；actions 按职责放在 `src/stores/project/`：workspace、storyboard、outline、lines、characters、creation、media、export、player。各模块通过 `contracts.ts` 的显式上下文协作，避免循环推断和隐式全局状态；`shared.ts` 仅保留共享常量、待恢复工单集合及纯工具。播放器时钟变量归 player 模块。所有文件均小于 500 行，调用方无需更换 store，任务切换和登出仍统一取消 watcher。
+
+素材 ZIP 导出与成片导出均按 PostgreSQL 租约恢复，中断后最多重放三次；已交付记录不回退。工单失败/取消与导出失败在同一事务同步，导出 Worker 每 15 秒巡检并修复历史终态工单对应的排队/运行中导出，避免页面永久停留在上传进度并阻塞重新导出。
