@@ -99,6 +99,7 @@ if LLM_CHANNEL in {"yseeai", "toapis", "all-in-one"} and not LLM_API_KEY:
 @dataclass(frozen=True)
 class Settings:
     app_env: str = os.getenv("APP_ENV", "development").lower()
+    seed_admin_enabled: bool = os.getenv("SEED_ADMIN_ENABLED", "true").lower() in {"1", "true"}
     host: str = os.getenv("APP_HOST", "127.0.0.1")
     port: int = int(os.getenv("APP_PORT", "8000"))
     cors_origins: tuple[str, ...] = tuple(value.strip() for value in os.getenv("APP_CORS_ORIGINS", "http://localhost:5173").split(",") if value.strip())
