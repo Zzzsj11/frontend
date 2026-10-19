@@ -226,6 +226,8 @@ async def revoke_all_refresh_tokens(user_id: str, session: AsyncSession) -> None
 
 
 async def seed_admin() -> None:
+    if not settings.seed_admin_enabled:
+        return
     async with session_factory() as session:
         current = (await session.execute(select(UserModel).where(UserModel.username == "admin"))).scalar_one_or_none()
         if current:
