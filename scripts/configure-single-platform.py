@@ -41,7 +41,17 @@ DEFAULTS = {
 def main():
     if os.getenv("DEPLOY_ENV") != "production":
         raise SystemExit("This configuration migration is only for production deployment")
+    deploy_file = ROOT / ".env.production"
+    deployment = dict(line.split("=", 1) for line in deploy_file.read_text().splitlines() if "=" in line and not line.startswith("#")) if deploy_file.is_file() else {}
+    tier = os.getenv("DEPLOYMENT_TIER") or deployment.get("DEPLOYMENT_TIER", "production")
+    if tier not in {"production", "test"}:
+        raise SystemExit("DEPLOYMENT_TIER must be production or test")
+    domain = os.getenv("TLS_DOMAIN") or deployment.get("TLS_DOMAIN", "mv.epaipix.com")
+    if not re.fullmatch(r"[a-z0-9]+(?:[.-][a-z0-9]+)*", domain):
+        raise SystemExit("invalid TLS_DOMAIN")
     defaults = dict(DEFAULTS)
+    defaults["TOS_REFERENCE_PREFIX"] = f"mv/{tier}/references"
+    defaults["TOS_VIDEO_ARCHIVE_PREFIX"] = f"mv/{tier}/videos"
     if os.getenv("DEPLOY_TLS") == "1":
         defaults["REFRESH_COOKIE_SECURE"] = "true"
     runtime = ROOT / "backend/.runtime_secrets.env"
@@ -67,7 +77,7 @@ def main():
             retained.append(line)
         if path == ROOT / ".env.production" and os.getenv("DEPLOY_TLS") == "1":
             retained = [line for line in retained if not line.startswith("APP_CORS_ORIGINS=")]
-            retained.append("APP_CORS_ORIGINS=https://mv.epaipix.com")
+            retained.append("APP_CORS_ORIGINS=https://" + domain)
         if path == runtime:
             if not any(line.startswith("BACKUP_TOS_ENCRYPTION_KEY=") for line in retained):
                 retained.append("BACKUP_TOS_ENCRYPTION_KEY=" + base64.b64encode(secrets.token_bytes(32)).decode())

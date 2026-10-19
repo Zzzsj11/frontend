@@ -542,3 +542,13 @@ certbot certonly --manual --preferred-challenges http --non-interactive --agree-
 认证钩子只向当前 frontend 容器写入 ACME challenge，不停止网站。证书目录为 `/etc/letsencrypt/live/mv.epaipix.com`，按 §5.0 部署。成功后将版本化 `scripts/reload-tls-certificate.sh` 链接到 `/etc/letsencrypt/renewal-hooks/deploy/`，启用 certbot.timer，并执行 `certbot renew --dry-run`。续期钩子仅复制证书并检查、平滑重载 nginx，不触发模型调用。
 
 正式媒体新路径为 `mv/production/references/` 和 `mv/production/videos/`；测试默认 `mv/test/references/`、`mv/test/videos/`。备份使用同 Bucket 的 `mv/production/backups/database/`；必须提供服务端 Secret 中的 `BACKUP_TOS_ENCRYPTION_KEY`（配置脚本首次生成，后续保留），上传和下载均使用 SSE-C AES256。即使媒体 Bucket 允许公开读，无该密钥也不能下载备份。密钥必须另存受控密码管理器，丢失后无法恢复这些备份；不得放在 TOS 同目录或 Git 中。
+
+## 独立测试服务器
+
+测试环境为 `root@120.77.71.145`，入口 `https://mv-test.epaipix.com`；正式环境保持 `https://mv.epaipix.com`。两台机器各自拥有 PostgreSQL、Redis、JWT、管理员和加密备份密钥，不复制生产用户/项目数据。模型及 TOS 账号共用，新媒体使用 `mv/test/references/`、`mv/test/videos/`，备份使用 `mv/test/backups/database/`。
+
+测试服务器 `.env.production`（仅是 Docker 加固覆盖的历史文件名）必须设置 `DEPLOYMENT_TIER=test`、`TLS_DOMAIN=mv-test.epaipix.com`、`APP_CORS_ORIGINS=https://mv-test.epaipix.com`。发布准备脚本从该文件持久读取 tier/domain，后续不显式传环境变量也不会重置为正式目录。4核机器采用图片4、视频4、导出1、分镜2并发。
+
+新服务器先启动 PostgreSQL/Redis，用版本化镜像执行 Alembic，再在尚未开放 API 时运行 `backend/scripts/bootstrap_test_admin.py`。管理员初始密码从服务器 runtime Secret 的 `INITIAL_ADMIN_PASSWORD` 读取，至少20字符；只允许 test tier 且数据库没有任何用户，不覆盖已有账号。之后启动完整应用，系统只读人物和配置由标准种子初始化。
+
+首次证书可在80端口临时提供 `.deployment/acme` webroot，执行 certbot `certonly --webroot`。正式 nginx 以只读卷持续提供同一 challenge 目录。续期定时器和部署钩子与正式环境相同，证书独立签发、续期，不共享私钥。
