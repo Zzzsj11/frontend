@@ -14,7 +14,7 @@
 
 文本模型可通过 `LLM_CHANNEL=yseeai` 或 `LLM_CHANNEL=toapis` 单独选择英和海外或 ToAPIs；前者使用 `YSEEAI_LLM_API_KEY` 和固定的 `https://ai-aigc.yseeai.com/v1`，后者优先使用 `TOAPIS_LLM_API_KEY`，未配置时复用 `TOAPIS_API_KEY`，默认地址为 `https://toapis.cn/v1`。两渠道默认模型均为 `gpt-6.1-sol`，大纲默认使用同一模型，也可由 `GENERAL_OUTLINE_LLM_MODEL` 单独指定。显式文本渠道优先于国内共享 Token，仅改变 Chat、大纲及逐镜提示词调用；图片和视频仍用各自渠道配置。模型网关开启时，显式文本渠道仍直连所选供应商，媒体继续按网关设置路由。Token 账本及 LLM 调用记录保存实际渠道。
 
-`LLM_CHANNEL=all-in-one` 使用平台 Key 的 `gemini-3.8-flash-all-in-one` 作为 Chat、大纲和逐镜提示词默认模型，连续五次供应商失败后在同一平台切换到 `doubao-seed-2-1-pro-260915-all-in-one`，两小时后重试主模型。所有新视频任务只开放 all in one 的 12 个模型，默认 `doubao-seedance-2.0-all-in-one`；目录、规格、并发和迁移规则见 [视频模型目录](VIDEO-MODEL-CATALOG.md)。界面按系列分组，不展示渠道后缀。历史渠道、素材和费用归因保留，旧模型不能创建新任务。all in one 工单保存上游请求、受理响应、终态响应和平台积分结算。
+`LLM_CHANNEL=all-in-one` 使用平台 Key 的 `gemini-3.8-flash-all-in-one` 作为 Chat、大纲和逐镜提示词默认模型，默认关闭模型切换（`LLM_FAILOVER_ENABLED=false`），暂时性失败仅按安全规则重试原 Gemini 模型；只有显式开启该配置才使用历史备用模型策略。所有新视频任务只开放 all in one 的 12 个模型，默认 `doubao-seedance-2.0-all-in-one`；目录、规格、并发和迁移规则见 [视频模型目录](VIDEO-MODEL-CATALOG.md)。界面按系列分组，不展示渠道后缀。历史渠道、素材和费用归因保留，旧模型不能创建新任务。all in one 工单保存上游请求、受理响应、终态响应和平台积分结算。
 
 all in one 文本请求允许最多等待 10 分钟，ASS 两阶段大纲发生异常时仍把已完成阶段的请求、响应和用量写入日志。RunningHub 路由的视频人物参考图使用可公开读取的 TOS 原图 URL；不提交该路由不支持的 `private_asset_review` 参数，也不提交英和账户专属的 `asset://` URL。
 all in one 视频工单从项目创建起允许最多 2 小时的排队、生成和回收窗口，后台超时巡检采用同一渠道专属期限；其他渠道仍使用 20 分钟。

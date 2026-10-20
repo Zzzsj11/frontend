@@ -106,6 +106,32 @@ async def test_unknown_submission_is_not_retried_and_preserves_billing(monkeypat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 403])
+async def test_settled_provider_auth_failure_stops_without_uncertain_billing(monkeypatch, status):
+    monkeypatch.setattr(storyboard_prompt, "settings", replace(storyboard_prompt.settings, llm_model="gemini-3.8-flash-all-in-one"))
+    error = RuntimeError("provider rejected")
+    error.status_code = 502
+    error.body = {"error": {"job_id": "synthetic-rejected"}}
+    call = AsyncMock(side_effect=error)
+    monkeypatch.setattr(llm_comparison, "call_chat_model", call)
+    monkeypatch.setattr(
+        text_recovery,
+        "query_task",
+        AsyncMock(
+            return_value={"status": "FAILED", "billing": {"status": "settled", "points": "0.000000"}, "error": f"Provider HTTP {status}: Provider rejected the chat request"}
+        ),
+    )
+    monkeypatch.setattr(storyboard_prompt, "log_background_error", AsyncMock())
+    records = []
+    with pytest.raises(RuntimeError, match="鉴权或额度异常，本次未计费") as rejected:
+        await storyboard_prompt._call(None, [], 1400, operation="storyboard_line", usage_records=records)
+    assert not isinstance(rejected.value, UncertainLlmError)
+    call.assert_awaited_once()
+    assert records[0]["requestId"] == "synthetic-rejected"
+    assert records[0]["usage"]["platformBilling"] == {"status": "settled", "points": "0.000000"}
+
+
+@pytest.mark.asyncio
 async def test_stream_setup_retries_only_confirmed_unsubmitted(monkeypatch):
     error = RuntimeError("capacity")
     error.status_code = 429

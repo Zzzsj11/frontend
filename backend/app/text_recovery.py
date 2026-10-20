@@ -41,6 +41,11 @@ async def reconcile(exc: Exception) -> dict[str, Any] | None:
     unsubmitted = "no supplier request submitted" in message or "concurrency limit" in message or "admission limit" in message
     if unsubmitted and billing.get("status") == "settled" and str(billing.get("points")) in {"0", "0.000000", "0.0"}:
         return None
+    if billing.get("status") == "settled" and str(billing.get("points")) in {"0", "0.000000", "0.0"} and message.startswith(("provider http 401:", "provider http 403:")):
+        error = RuntimeError(f"文本供应商鉴权或额度异常，本次未计费，请联系管理员检查（平台工单 {jid}）")
+        error.platform_job_id = jid
+        error.platform_usage = exc.platform_usage
+        raise error from exc
     error = UncertainLlmError(f"文本请求未交付，计费状态待核对（平台工单 {jid}）；请勿重复提交")
     error.platform_job_id = jid
     error.platform_usage = {"platformBilling": billing, **(body.get("usage") or {})}
