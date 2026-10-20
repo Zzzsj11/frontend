@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import math
 import re
@@ -11,7 +12,7 @@ from typing import Any
 from .config import settings
 from .error_logging import log_background_error
 from .llm_failover import choose_model, record_failure, record_success
-from .llm_policy import LlmContentPolicyError, TemporaryLlmError, check_provider_text, completion_options, is_transient_error, outline_contract, retry_delay
+from .llm_policy import LlmContentPolicyError, TemporaryLlmError, UncertainLlmError, check_provider_text, completion_options, is_transient_error, outline_contract, retry_delay
 from .media_constraints import normalize_video_duration
 from .model_gateway import AsyncOpenAI
 from .model_gateway import enabled as gateway_enabled
@@ -806,6 +807,19 @@ def _validate(body: dict[str, Any], *, source: str, current: dict[str, Any], all
     return {"scenePrompt": scene_prompt.strip(), "shotPrompt": shot_prompt.strip(), "digitalHumanIds": role_ids}
 
 
+def _compile_wardrobe(body: dict[str, Any], current: dict[str, Any], humans: list[dict[str, Any]]) -> dict[str, Any]:
+    """服装是已审批的大纲事实，由程序注入完整片段，避免让模型反复抄写。"""
+    if not isinstance(body.get("shotPrompt"), str) or not body["shotPrompt"].strip():
+        return body
+    planned = current.get("plannedDigitalHumanIds") or []
+    wardrobe = (current.get("outline") or {}).get("wardrobeByCharacter") or {}
+    names = {human["id"]: human.get("name") or human["id"] for human in humans}
+    fragments = [f"{names.get(human_id, human_id)}：{wardrobe[human_id]}" for human_id in planned if isinstance(wardrobe.get(human_id), str) and wardrobe[human_id].strip()]
+    if fragments:
+        return {**body, "shotPrompt": "【本镜服装，以此为准：" + "；".join(fragments) + "】" + body["shotPrompt"]}
+    return body
+
+
 async def _call(
     client: AsyncOpenAI,
     messages: list[dict[str, str]],
@@ -819,7 +833,7 @@ async def _call(
     """Bounded transient retries; every response (including overload text) is accounted for."""
     snapshot = [dict(message) for message in messages]
     configured_model = (settings.general_outline_llm_model or settings.llm_model) if operation.startswith("general_story_outline") else settings.llm_model
-    max_attempts = 1 if configured_model.endswith("-all-in-one") else 3
+    max_attempts = 3
     if operation.startswith("general_story_outline"):
         # Share the budget with structural repair rounds; never multiply 3 transport x 3 schema retries.
         remaining = 5 - sum(str(record.get("operation", "")).startswith("general_story_outline") for record in usage_records)
@@ -830,19 +844,42 @@ async def _call(
         model = await choose_model(configured_model)
         started = time.perf_counter()
         text, usage, request_id = "", {}, None
+        safe_retry = not model.endswith("-all-in-one")
         try:
             if model.endswith("-all-in-one"):
                 from .llm_comparison import call_chat_model
+                from .model_gateway import current_job_id
+                from .text_recovery import platform_job_id, reconcile
 
-                text, raw_usage, request_id = await call_chat_model(model=model, protocol="openai", messages=messages, temperature=0.2, max_tokens=max_tokens)
+                digest = hashlib.sha256(json.dumps([model, operation, messages], ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:32]
+                idem = f"mv-text-{current_job_id()}-{digest}-{attempt}" if current_job_id() else None
+                try:
+                    text, raw_usage, request_id = await call_chat_model(
+                        model=model, protocol="openai", messages=messages, temperature=0.2, max_tokens=max_tokens, idempotency_key=idem
+                    )
+                except Exception as provider_error:
+                    request_id = platform_job_id(provider_error)
+                    if not is_transient_error(provider_error) and getattr(provider_error, "status_code", None) != 409:
+                        raise
+                    recovered = await reconcile(provider_error)
+                    if recovered is None:
+                        safe_retry = True
+                        raise
+                    text = recovered["choices"][0]["message"].get("content") or ""
+                    raw_usage = recovered.get("usage") or {}
+
                 usage = raw_usage.model_dump() if hasattr(raw_usage, "model_dump") else (raw_usage or {})
             else:
                 response = await client.chat.completions.create(model=model, messages=messages, **completion_options(model, max_tokens))
                 usage = _usage_dict(response)
                 request_id = getattr(response, "id", None)
                 text = response.choices[0].message.content or ""
+            # 收到完整响应后，繁忙文案/空响应可在保留本次用量的前提下有限重试。
+            safe_retry = True
             check_provider_text(text)
         except Exception as exc:
+            usage = getattr(exc, "platform_usage", usage)
+            request_id = getattr(exc, "platform_job_id", request_id)
             if not isinstance(exc, LlmContentPolicyError):
                 await record_failure(model)
             usage_records.append(
@@ -860,11 +897,17 @@ async def _call(
                     "promptVersion": prompt_version,
                 }
             )
-            if is_transient_error(exc) and attempt < max_attempts - 1:
+            if safe_retry and is_transient_error(exc) and not isinstance(exc, UncertainLlmError) and attempt < max_attempts - 1:
+                if model.endswith("-all-in-one"):
+                    from .text_admission import cooldown
+
+                    await cooldown()
                 await retry_delay(exc, attempt)
                 continue
+            if isinstance(exc, UncertainLlmError):
+                raise
             if is_transient_error(exc):
-                raise TemporaryLlmError("文本模型服务繁忙、超时或连接异常，自动重试后仍未恢复，请稍后重试") from exc
+                raise TemporaryLlmError(f"文本模型暂不可用（已尝试 {attempt + 1} 次），请稍后重试") from exc
             await log_background_error(path=f"/llm/{operation}", status_code=502, error_type="LLMCallError", message=f"LLM 调用失败（{operation}）：{exc}")
             raise
         await record_success(model)
@@ -901,6 +944,8 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
     role_constraint = role_constraint_prompt.render(planned_ids=json.dumps(planned, ensure_ascii=False))
     system = system_prompt.render(prompt_version=version_label, schema_version=SCHEMA_VERSION)
     requirements = requirements_prompt.render_json()
+    if planned and (current.get("outline") or {}).get("wardrobeByCharacter"):
+        requirements.append("本镜服装由服务端从 wardrobeByCharacter 完整注入；shotPrompt 专注动作、表情与镜头，不另行设计或改写服装，禁止与大纲服装冲突。")
     if CHARACTER_DIRECTION_RULE not in requirements:
         requirements.append(CHARACTER_DIRECTION_RULE)
     outline = current.get("outline") or {}
@@ -930,7 +975,7 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
     except Exception as exc:
         raise StoryboardPromptError(str(exc), usage_records=usage_records) from exc
     try:
-        result = _validate(_extract_json(text), source=source, current=current, allowed_humans=allowed_humans)
+        result = _validate(_compile_wardrobe(_extract_json(text), current, allowed_humans), source=source, current=current, allowed_humans=allowed_humans)
     except ValueError as first_error:
         await log_background_error(
             path="/api/tasks/storyboard-lines/generate",
@@ -969,7 +1014,7 @@ async def generate_storyboard_line(*, source: str, current: dict[str, Any], full
         except Exception as exc:
             raise StoryboardPromptError(str(exc), usage_records=usage_records) from exc
         try:
-            result = _validate(_extract_json(repaired), source=source, current=current, allowed_humans=allowed_humans)
+            result = _validate(_compile_wardrobe(_extract_json(repaired), current, allowed_humans), source=source, current=current, allowed_humans=allowed_humans)
         except Exception as exc:
             raise StoryboardPromptError(str(exc), usage_records=usage_records) from exc
     if source == "general" and current.get("shotType") == "character":

@@ -32,7 +32,7 @@ async def test_transport_retries_are_bounded(monkeypatch):
     create = AsyncMock(side_effect=TimeoutError("upstream request timeout"))
     monkeypatch.setattr(storyboard_prompt, "retry_delay", AsyncMock())
     records = []
-    with pytest.raises(TemporaryLlmError, match="自动重试"):
+    with pytest.raises(TemporaryLlmError, match="已尝试"):
         await storyboard_prompt._call(SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))), [], 3400, usage_records=records, operation="test")
     assert create.await_count == len(records) == 3
 

@@ -123,6 +123,8 @@ class Settings:
     llm_api_key: str = LLM_API_KEY
     llm_model: str = LLM_MODEL
     llm_channel: str = LLM_CHANNEL
+    llm_failover_enabled: bool = os.getenv("LLM_FAILOVER_ENABLED", "false").lower() == "true"
+    text_generation_concurrency: int = max(1, min(64, int(os.getenv("TEXT_GENERATION_CONCURRENCY", "8"))))
     all_in_one_base_url: str = os.getenv("ALL_IN_ONE_BASE_URL", "https://mg.epaipix.com").rstrip("/")
     all_in_one_api_key: str = os.getenv("ALL_IN_ONE_API_KEY", "")
     all_in_one_system_key: bool = os.getenv("ALL_IN_ONE_SYSTEM_KEY", "false").lower() == "true"

@@ -1977,3 +1977,21 @@ describe('manual prompt recovery', () => {
     expect(store.lines[0].generationStatus).toBe('running')
   })
 })
+
+describe('outline connection recovery', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+  afterEach(() => vi.restoreAllMocks())
+
+  it('keeps the persisted running status when observation fails', async () => {
+    const store = useProjectStore()
+    store.activeTaskId = 'running-outline'
+    store.activeStoryboardType = 'general'
+    store.activeTaskStatus = 'outlining'
+    const submit = vi.spyOn(domainApi, 'regenerateStoryboardOutline')
+    vi.spyOn(store, '_watchOutline').mockRejectedValue(new Error('connection lost'))
+    vi.spyOn(domainApi, 'fetchSongScript').mockResolvedValue({ status: 'outlining' } as never)
+    await store.runOutlineGeneration()
+    expect(submit).not.toHaveBeenCalled()
+    expect(store.activeTaskStatus).toBe('outlining')
+  })
+})

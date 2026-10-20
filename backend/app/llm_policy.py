@@ -12,6 +12,12 @@ class TemporaryLlmError(RuntimeError):
     pass
 
 
+class UncertainLlmError(TemporaryLlmError):
+    """保留原工单，禁止在提交或计费不确定时盲目重提。"""
+
+    pass
+
+
 class LlmContentPolicyError(RuntimeError):
     """供应商明确拒绝输入，不应当作 JSON 损坏或服务故障再次调用。"""
 
@@ -31,6 +37,8 @@ def completion_options(model: str, max_tokens: int, temperature: float = 0.2) ->
 def check_provider_text(text: str) -> None:
     """Some compatible providers send capacity errors inside successful chat responses."""
     stripped = text.strip()
+    if not stripped:
+        raise TemporaryLlmError("文本模型返回空响应，请稍后重试")
     if len(stripped) > 1000 or stripped.startswith(("{", "[", "```")):
         return
     lower = stripped.lower()

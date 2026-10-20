@@ -178,6 +178,7 @@ def test_optimizer_busy_response_preserves_failure_usage_and_audit(client, monke
 
 def test_chat_busy_text_counts_failures_and_switches_backup(client, monkeypatch):
     platform_settings(monkeypatch)
+    monkeypatch.setattr(llm_failover, "settings", replace(llm_failover.settings, llm_failover_enabled=True))
     user_id = client.get("/api/auth/me").json()["id"]
     monkeypatch.setattr(chat, "redis", SimpleNamespace(get=AsyncMock(return_value=None)))
     events = AsyncMock()

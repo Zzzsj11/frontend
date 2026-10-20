@@ -50,7 +50,7 @@ export const outlineActions = {
   },
 
   /**
-   * 订阅大纲生成进度 SSE；返回 true=已到达终态，false=看门狗超时（进度长时间无更新，需重新触发）。
+   * 订阅大纲进度；连接超时仅重新查询/订阅，不代表后台工单失败。
    * 服务端只在 status 离开 outlining 后关闭流；僵尸任务（后台丢失）时流不会关闭，由看门狗兜底。
    */
   async _watchOutline(taskId: string): Promise<'completed' | 'timeout' | 'navigation-cancelled'> {
@@ -109,9 +109,10 @@ export const outlineActions = {
     this.outlineStartedAt = Date.now()
     this._setTaskStatus(id, 'outlining')
     try {
-      // 僵尸恢复循环：409 表示后台仍在生成，转为订阅；看门狗超时说明后台丢失，重新 POST 触发
-      for (let attempt = 0; attempt < 5 && this.activeTaskId === id; attempt++) {
-        if (!(attempt === 0 && resumeWatching)) {
+      // POST 仅提交一次。断线恢复通过持久化状态判断，禁止因观察超时重复生成。
+      const watchDeadline = Date.now() + OUTLINE_WATCH_TIMEOUT_MS
+      for (let attempt = 0; Date.now() < watchDeadline && this.activeTaskId === id; attempt++) {
+        if (attempt === 0 && !resumeWatching) {
           try {
             await api.regenerateStoryboardOutline(id)
           } catch (error) {
@@ -121,6 +122,10 @@ export const outlineActions = {
         const watchResult = await this._watchOutline(id)
         if (watchResult === 'navigation-cancelled') return
         if (watchResult === 'completed') break
+        const current = await api.fetchSongScript(id)
+        this._setTaskStatus(id, current.status)
+        if (current.status !== 'outlining') break
+        await abortableSleep(5000)
       }
       if (this.activeTaskId !== id) return
       // 终态后全量刷新（storyBible 含 failedSegments，行含最新大纲规划）
@@ -131,12 +136,13 @@ export const outlineActions = {
       this.lines = fresh.lines
       this._setTaskStatus(id, fresh.status)
       if (fresh.status === 'outline_failed' || fresh.status === 'outlining') {
-        if (fresh.status === 'outlining') this._setTaskStatus(id, 'outline_failed')
         this.outlineError =
           // SSE 回调中的赋值对 TS 控制流分析不可见，需显式还原类型
           String(fresh.outlineProgress?.error || '') ||
           (this.outlineProgress as OutlineProgress | null)?.error ||
-          (fresh.status === 'outlining' ? '大纲生成超时，请重试' : '大纲生成失败，请重试')
+          (fresh.status === 'outlining'
+            ? '大纲仍在后台生成，可稍后返回查看进度'
+            : '大纲生成失败，请重试')
         return
       }
       // 段级失败的行保持占位标注，不进入逐句生成队列（由段级重试恢复）
@@ -145,7 +151,8 @@ export const outlineActions = {
         .map((line) => line.id)
       if (readyIds.length) void this._generateStoryboardBatch(id, readyIds)
     } catch (error) {
-      this._setTaskStatus(id, 'outline_failed')
+      const fresh = await api.fetchSongScript(id).catch(() => null)
+      if (fresh) this._setTaskStatus(id, fresh.status)
       this.outlineError = error instanceof Error ? error.message : '大纲生成失败'
     } finally {
       if (this.outlineTaskId === id) {
@@ -159,12 +166,21 @@ export const outlineActions = {
   async _runSiblingGeneralStoryboard(taskId: string) {
     try {
       await api.regenerateStoryboardOutline(taskId)
-      const controller = new AbortController()
-      const timeout = window.setTimeout(() => controller.abort(), OUTLINE_WATCH_TIMEOUT_MS)
-      try {
-        await api.streamStoryboardOutline(taskId, () => undefined, controller.signal)
-      } finally {
-        window.clearTimeout(timeout)
+      const deadline = Date.now() + OUTLINE_WATCH_TIMEOUT_MS
+      while (Date.now() < deadline) {
+        const controller = new AbortController()
+        const timeout = window.setTimeout(() => controller.abort(), 150_000)
+        try {
+          await api.streamStoryboardOutline(taskId, () => undefined, controller.signal)
+        } catch {
+          // SSE 断开后以数据库状态继续等待，不再次 POST。
+        } finally {
+          window.clearTimeout(timeout)
+        }
+        const current = await api.fetchSongScript(taskId)
+        this._setTaskStatus(taskId, current.status)
+        if (current.status !== 'outlining') break
+        await abortableSleep(5000)
       }
       const fresh = await api.fetchSongScript(taskId)
       if (fresh.status) this._setTaskStatus(taskId, fresh.status)

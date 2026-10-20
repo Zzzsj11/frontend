@@ -49,11 +49,11 @@ def _anthropic_messages_url() -> str:
     return f"{base}/messages" if base.endswith("/v1") else f"{base}/v1/messages"
 
 
-async def _call_openai(model: str, messages: list[dict[str, str]], temperature: float, max_tokens: int) -> tuple[str, Any, str | None]:
+async def _call_openai(model: str, messages: list[dict[str, str]], temperature: float, max_tokens: int, idempotency_key: str | None = None) -> tuple[str, Any, str | None]:
     from . import all_in_one
 
     if model.endswith(all_in_one.SUFFIX):
-        client = all_in_one.chat_client(user_id=model_gateway.current_owner())
+        client = all_in_one.chat_client(user_id=model_gateway.current_owner(), timeout=300, idempotency_key=idempotency_key)
         upstream = all_in_one.upstream_model(model)
     else:
         client = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url, timeout=120)
@@ -61,7 +61,9 @@ async def _call_openai(model: str, messages: list[dict[str, str]], temperature: 
     async with client:
         response = await client.chat.completions.create(model=upstream, messages=messages, **completion_options(model, max_tokens, temperature))
         text = response.choices[0].message.content or ""
-        return text, response.usage, response.id
+        usage = response.usage.model_dump() if response.usage else {}
+        usage["finishReason"] = getattr(response.choices[0], "finish_reason", None)
+        return text, usage, response.id
 
 
 async def _call_anthropic(model: str, messages: list[dict[str, str]], temperature: float, max_tokens: int) -> tuple[str, Any, str | None]:
@@ -84,11 +86,20 @@ async def _call_anthropic(model: str, messages: list[dict[str, str]], temperatur
     return text, body.get("usage") or {}, body.get("id")
 
 
-async def call_chat_model(*, model: str, protocol: str, messages: list[dict[str, str]], temperature: float, max_tokens: int) -> tuple[str, Any, str | None]:
+async def call_chat_model(
+    *, model: str, protocol: str, messages: list[dict[str, str]], temperature: float, max_tokens: int, idempotency_key: str | None = None
+) -> tuple[str, Any, str | None]:
     """单次模型调用；业务流程通过显式 model/protocol 注入测试模型，不改全局默认配置。"""
     if settings.llm_channel == "all-in-one" and not model.endswith("-all-in-one"):
         raise ValueError("旧渠道文本模型已停用，请选择平台模型")
     caller = _call_anthropic if protocol == "anthropic" else _call_openai
+    if model.endswith("-all-in-one"):
+        from .text_admission import text_slot
+
+        async with text_slot():
+            if idempotency_key:
+                return await caller(model, messages, temperature, max_tokens, idempotency_key=idempotency_key)
+            return await caller(model, messages, temperature, max_tokens)
     return await caller(model, messages, temperature, max_tokens)
 
 

@@ -1682,15 +1682,19 @@ async def _run_storyboard_line_generation(job: Job) -> dict[str, Any]:
     try:
         async with storyboard_generation_slots:
             try:
-                result = await asyncio.wait_for(
-                    generate_storyboard_line(
-                        source=str(request.get("source") or storyboard_type),
-                        current=dict(request.get("current") or {}),
-                        full_context=dict(request.get("full_context") or {}),
-                        allowed_humans=list(request.get("allowed_humans") or []),
-                    ),
-                    timeout=settings.storyboard_line_timeout_seconds,
-                )
+                from .text_admission import text_slot
+
+                # 排队不占供应商执行超时预算；内部调用复用此槽位，修复轮不再排队。
+                async with text_slot():
+                    result = await asyncio.wait_for(
+                        generate_storyboard_line(
+                            source=str(request.get("source") or storyboard_type),
+                            current=dict(request.get("current") or {}),
+                            full_context=dict(request.get("full_context") or {}),
+                            allowed_humans=list(request.get("allowed_humans") or []),
+                        ),
+                        timeout=settings.storyboard_line_timeout_seconds,
+                    )
             except TimeoutError as exc:
                 raise TimeoutError(f"逐镜提示词生成超过{max(1, settings.storyboard_line_timeout_seconds // 60)}分钟，已判定失败，请重新生成") from exc
         async with session_factory() as session:

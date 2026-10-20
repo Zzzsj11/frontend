@@ -64,3 +64,11 @@ ASS 子项目关联歌曲音频后，可通过 `/api/tasks/{id}/video-exports` �
 `src/stores/project.ts` 保留唯一的公开 Pinia 工作区接口及 state/getters；actions 按职责放在 `src/stores/project/`：workspace、storyboard、outline、lines、characters、creation、media、export、player。各模块通过 `contracts.ts` 的显式上下文协作，避免循环推断和隐式全局状态；`shared.ts` 仅保留共享常量、待恢复工单集合及纯工具。播放器时钟变量归 player 模块。所有文件均小于 500 行，调用方无需更换 store，任务切换和登出仍统一取消 watcher。
 
 素材 ZIP 导出与成片导出均按 PostgreSQL 租约恢复，中断后最多重放三次；已交付记录不回退。工单失败/取消与导出失败在同一事务同步，导出 Worker 每 15 秒巡检并修复历史终态工单对应的排队/运行中导出，避免页面永久停留在上传进度并阻塞重新导出。
+
+## 文本生成可靠性（2026-10-20）
+
+文本默认保持 Gemini，`LLM_FAILOVER_ENABLED=false`；只有显式开启才允许旧备用模型策略。`TEXT_GENERATION_CONCURRENCY` 默认8，API/Worker 共用 Redis 文本槽位与60次/分钟的提交窗口，平台异常触发共享短冷却；Redis 故障退回进程内限流。逐镜等待槽位不计入720秒执行预算，单次非流式平台调用最多300秒，给结构修复留出时间。
+
+平台 TLS 握手失败由平台以同一工单有限重试；明确未提交且零结算的错误，MV 最多尝试3次并逐次记录用量。提交/计费不确定时只查询原平台工单，不盲目重提，保留平台工单号与账务状态。文本请求幂等键由本地工单、模型、操作、消息摘要及尝试序号派生，Worker 重放复用原请求。Chat 只允许在建流前安全重试，输出开始后的断流不重放。
+
+人物镜服装由服务端将大纲的完整服装片段注入最终提示词，模型专注动作与镜头；仍校验原人物集合与完整输出字段。大纲 SSE 断开只重新查询/订阅，观察窗口结束仍保留服务端 outlining 状态，不伪造失败、不重复提交。

@@ -172,6 +172,7 @@ class ChatManager:
         request_id: str | None = None
         usage_recorded = False
         openai_client = None
+        text_scope = None
         model_used = settings.llm_model
         provider_started = provider_completed = False
         try:
@@ -217,13 +218,35 @@ class ChatManager:
                     model_used = model
                 openai_client = client
                 provider_started = True
-                stream = await client.chat.completions.create(
-                    model=model,
-                    **options,
-                    messages=[{"role": "system", "content": session.system_prompt}, *session.messages],
-                    stream=True,
-                    stream_options={"include_usage": True},
+                payload = dict(
+                    model=model, **options, messages=[{"role": "system", "content": session.system_prompt}, *session.messages], stream=True, stream_options={"include_usage": True}
                 )
+                if settings.llm_model.endswith("-all-in-one"):
+                    from .model_gateway import current_job_id
+                    from .text_admission import text_slot
+                    from .text_recovery import create_stream, platform_job_id
+
+                    scope = text_slot()
+                    await scope.__aenter__()
+                    text_scope = scope
+
+                    async def on_retry(exc):
+                        async with session_factory() as db:
+                            add_token_usage(
+                                db,
+                                operation="chat_retry",
+                                provider="all-in-one",
+                                model=model_used,
+                                usage={**getattr(exc, "platform_usage", {}), "submissionRejected": True},
+                                user_id=session.user_id,
+                                chat_session_id=session.id,
+                                request_id=platform_job_id(exc),
+                            )
+                            await db.commit()
+
+                    stream = await create_stream(client, payload, key=f"mv-chat-{current_job_id() or uuid.uuid4().hex}", on_retry=on_retry)
+                else:
+                    stream = await client.chat.completions.create(**payload)
                 async for chunk in stream:
                     if await redis.get(f"chat:{session.id}:cancel"):
                         raise asyncio.CancelledError
@@ -269,6 +292,8 @@ class ChatManager:
                     await db.commit()
             await append_chat_event(session.id, "interrupted", {})
         except Exception as exc:
+            usage = getattr(exc, "platform_usage", usage)
+            request_id = getattr(exc, "platform_job_id", request_id)
             if provider_started and not provider_completed and not isinstance(exc, LlmContentPolicyError):
                 await record_failure(model_used)
             if not usage_recorded:
@@ -286,6 +311,8 @@ class ChatManager:
                     await db.commit()
             await append_chat_event(session.id, "error", {"text": redact_error_text(str(exc))})
         finally:
+            if text_scope is not None:
+                await text_scope.__aexit__(None, None, None)
             if openai_client is not None:
                 await openai_client.close()
             async with session_factory() as db:

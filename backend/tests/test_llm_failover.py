@@ -60,7 +60,7 @@ async def test_legacy_channels_do_not_switch_models(monkeypatch, channel):
 async def test_all_in_one_primary_falls_back_with_same_channel_suffix(monkeypatch):
     redis = RedisState()
     monkeypatch.setattr(llm_failover, "redis", redis)
-    monkeypatch.setattr(llm_failover, "settings", replace(llm_failover.settings, llm_channel="all-in-one"))
+    monkeypatch.setattr(llm_failover, "settings", replace(llm_failover.settings, llm_channel="all-in-one", llm_failover_enabled=True))
     for _ in range(5):
         await llm_failover.record_failure("gemini-3.8-flash-all-in-one")
     assert redis.ttl == 2 * 60 * 60
