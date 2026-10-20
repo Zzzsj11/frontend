@@ -36,7 +36,7 @@
       "providerCode": "all-in-one",
       "providerProtocol": "all-in-one",
       "executionPool": "all-in-one:doubao-seedance-2.0",
-      "executionConcurrency": 500,
+      "executionConcurrency": 50,
       "billing": {
         "provider": "all-in-one",
         "balanceCheck": false,
