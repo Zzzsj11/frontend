@@ -127,9 +127,6 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
             generate_audio=request.generate_audio,
             watermark=request.watermark,
         )
-        # Only RunningHub's standard Seedance 2.0 route accepts this option.
-        if model == "seedance-2.0":
-            payload["realPersonMode"] = True
     job.idempotency_key = f"{job.id}:{job.kind}"
     request_headers = headers(user_id=job.user_id, idempotency_key=job.idempotency_key)
     await jobs.record_provider_request(job, payload)

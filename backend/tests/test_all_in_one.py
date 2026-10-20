@@ -116,10 +116,7 @@ async def test_create_maps_payload_and_durable_identity(configured, monkeypatch,
     assert req.headers["X-Agent-Run-Id"] == req.headers["X-Test-Run-Id"] == "test-run"
     assert "X-User-Id" not in req.headers
     assert body["images"] == ["https://media.example/input.png"]
-    if kind == "video" and upstream_model == "seedance-2.0":
-        assert body["realPersonMode"] is True
-    else:
-        assert "realPersonMode" not in body
+    assert "realPersonMode" not in body
     if kind == "video":
         assert body["resolution"] == "768P"
     provider_request.assert_awaited_once_with(job, body)
