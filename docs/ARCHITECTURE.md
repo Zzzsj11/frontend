@@ -59,6 +59,12 @@ ASS 子项目关联歌曲音频后，可通过 `/api/tasks/{id}/video-exports` �
 
 旧渠道模型/供应商软删除；旧余额和旧模型实验接口返回 410；登录和恢复会话只刷新平台积分。人物创建和更新使用 TOS 原图，不再注册英和素材，线上补扫 cron 在版本发布后移除。旧请求/响应解析仅用于历史记录与隔离单元测试，不恢复旧服务。媒体存储仍用 TOS，合并导出仍由本系统执行。
 
+## SD2.0 人物资产模式
+
+MV 对绑定人物身份图的 all in one SD2.0 请求默认启用 `person_asset_mode`，并以从1开始的 `person_reference_indices` 标明人物图位置；显式关闭时保持普通参考行为。最终输入快照包含开关和位置，参与同镜头幂等比较。MV 始终提交 TOS 原图，不读取或复用历史供应商 asset ID。
+
+all in one 仅在英和国内与 RunningHub SD2.0 Token 之间路由：英和先按官方流程创建并审核人物资产，Active 后替换资产引用；RunningHub 映射其官方人物模式。旧公开参数移除，无法准确映射的组合明确拒绝。素材审核阶段显示“人物素材审核中”。平台明确证明未创建工单且未提交生成的503属于确定拒绝；普通5xx或断网仍保留核查，不盲目重提。历史费用、身份图和已交付媒体不改写，不恢复旧人物补注册调度。
+
 ## 项目前端状态的职责边界
 
 `src/stores/project.ts` 保留唯一的公开 Pinia 工作区接口及 state/getters；actions 按职责放在 `src/stores/project/`：workspace、storyboard、outline、lines、characters、creation、media、export、player。各模块通过 `contracts.ts` 的显式上下文协作，避免循环推断和隐式全局状态；`shared.ts` 仅保留共享常量、待恢复工单集合及纯工具。播放器时钟变量归 player 模块。所有文件均小于 500 行，调用方无需更换 store，任务切换和登出仍统一取消 watcher。

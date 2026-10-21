@@ -869,6 +869,13 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
         await db.refresh(line)
     if task and (task.storyboard_config or {}).get("videoModelRevision") and line and (line.shot_options or {}).get("videoModel") != payload.model:
         raise HTTPException(409, "该分镜的视频模型已更新，请刷新页面后再生成")
+    identity_indices = await _identity_reference_indices(db, payload.image_urls, user_id=user.id)
+    if provider.code == "all-in-one" and model.provider_model_id == "seedance-2.0":
+        if "person_asset_mode" not in payload.model_fields_set and identity_indices:
+            payload.person_asset_mode = True
+            payload.person_reference_indices = sorted(identity_indices)
+    elif payload.person_asset_mode:
+        raise HTTPException(422, "人物资产模式仅支持 all in one SD2.0")
     submission_input = payload.model_dump(mode="json", exclude={"request_id"})
     submission_input["model"] = model.code
     if line_id:
@@ -904,7 +911,6 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
     is_h3 = bool((model.capabilities or {}).get("h3Modes"))
     if is_h3:
         validate_h3_mode_inputs(payload)
-    identity_indices = await _identity_reference_indices(db, payload.image_urls, user_id=user.id)
     if (model.capabilities or {}).get("providerProtocol") == "kling-native":
         try:
             kling_image_inputs(payload, identity_reference=bool(identity_indices))

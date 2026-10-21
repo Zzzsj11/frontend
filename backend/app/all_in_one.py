@@ -100,7 +100,7 @@ async def store_result(job: Any, body: dict[str, Any]) -> dict[str, Any]:
 
 async def generate(request: Any, job: Any) -> dict[str, Any]:
     from .jobs import jobs
-    from .providers import ProviderError, ProviderSubmissionUncertainError, _raise_for_status, _toapis_image_ratio
+    from .providers import ProviderError, ProviderRejectedError, ProviderSubmissionUncertainError, _raise_for_status, _toapis_image_ratio
 
     snapshot = job.request or {}
     model = snapshot.get("_providerModelId") or upstream_model(request.model)
@@ -127,6 +127,11 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
             generate_audio=request.generate_audio,
             watermark=request.watermark,
         )
+    if job.kind == "video" and request.person_asset_mode:
+        if model != "seedance-2.0":
+            raise ProviderError("人物资产模式仅支持 SD2.0")
+        payload["person_asset_mode"] = True
+        payload["person_reference_indices"] = request.person_reference_indices
     job.idempotency_key = f"{job.id}:{job.kind}"
     request_headers = headers(user_id=job.user_id, idempotency_key=job.idempotency_key)
     await jobs.record_provider_request(job, payload)
@@ -142,6 +147,9 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
                 if task_id:
                     await jobs.set_provider_task(job, PROVIDER, task_id, idempotency_key=job.idempotency_key)
                     return await resume(job)
+                if response.headers.get("x-platform-job-created") == "false" and response.headers.get("x-generation-submitted") == "false":
+                    await jobs.record_provider_response(job, "rejected_before_acceptance", {"httpStatus": response.status_code, "body": error_body, "generationSubmitted": False})
+                    raise ProviderRejectedError("平台当前无可用渠道，本次未创建平台任务、未提交视频生成；请稍后重试")
                 error = ProviderSubmissionUncertainError("all in one 服务异常，提交结果不确定；请核查原任务")
                 error.provider = PROVIDER
                 error.request_id = response.headers.get("x-request-id")
@@ -197,6 +205,9 @@ async def resume(job: Any) -> dict[str, Any]:
             "ARCHIVING": "archiving",
             "SUCCEEDED": "archiving",
         }.get(data["status"], "reconciling")
+        review = data.get("asset_review") or {}
+        if review.get("status") == "reviewing":
+            job.phase = "reviewing_assets"
         await jobs.update_progress(job, job.progress)
         if data["status"] == "SUCCEEDED":
             await jobs.record_provider_response(job, "terminal", data)

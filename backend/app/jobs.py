@@ -333,7 +333,7 @@ class JobManager:
             if getattr(exc, "requires_reconciliation", False):
                 prefix = "平台已受理，结果或计费状态待核对，请勿重复生成；"
             elif uncertain_submission and job.idempotency_key:
-                prefix = "供应商创建接口经同一幂等键恢复后仍无法确认结果，请先人工核对供应商任务；"
+                prefix = "供应商创建接口未返回可确认结果，请先人工核对供应商任务；"
             elif uncertain_submission:
                 prefix = "供应商创建结果不确定且不支持幂等重提，请先人工核对供应商任务；"
             else:

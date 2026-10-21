@@ -286,3 +286,44 @@ async def test_seedance_uses_public_original_images_without_private_review(confi
     with pytest.raises(ProviderError, match="原始 TOS"):
         await aio.generate(request, job)
     submitting.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sd20_person_asset_mode_is_transmitted_with_identity_positions(configured, monkeypatch):
+    import json
+
+    captured = []
+
+    def handle(request):
+        captured.append(json.loads(request.content))
+        return httpx.Response(202, json={"id": "asset-mode-test"})
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(aio.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handle), **kw))
+    for name in ("mark_provider_submitting", "record_provider_request", "record_provider_response", "set_provider_task"):
+        monkeypatch.setattr(jobs, name, AsyncMock())
+    monkeypatch.setattr(aio, "resume", AsyncMock(return_value={"ok": True}))
+    request = VideoGenerationCreate(
+        model="doubao-seedance-2.0-all-in-one", prompt="synthetic", image_urls=["https://example.com/identity.png"], person_asset_mode=True, person_reference_indices=[1]
+    )
+    job = Job(id="person-assets-contract", kind="video", user_id="owner", request={"_providerModelId": "seedance-2.0"})
+    await aio.generate(request, job)
+    assert captured[0]["images"] == request.image_urls
+    assert captured[0]["person_asset_mode"] is True
+    assert captured[0]["person_reference_indices"] == [1]
+    assert "private_asset_review" not in captured[0] and "real_person_mode" not in captured[0]
+
+
+@pytest.mark.asyncio
+async def test_platform_proven_preacceptance_503_is_safe_rejection(configured, monkeypatch):
+    from app.providers import ProviderRejectedError
+
+    original = httpx.AsyncClient
+    response = httpx.Response(503, json={"detail": "all routes unavailable"}, headers={"X-Platform-Job-Created": "false", "X-Generation-Submitted": "false"})
+    monkeypatch.setattr(aio.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(lambda _: response), **kw))
+    for name in ("mark_provider_submitting", "record_provider_request", "record_provider_response"):
+        monkeypatch.setattr(jobs, name, AsyncMock())
+    request = VideoGenerationCreate(model="doubao-seedance-2.0-all-in-one", prompt="synthetic")
+    job = Job(id="proven-unsubmitted", kind="video", user_id="owner", request={"_providerModelId": "seedance-2.0"})
+    with pytest.raises(ProviderRejectedError, match="未提交视频"):
+        await aio.generate(request, job)
