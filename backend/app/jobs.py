@@ -42,6 +42,10 @@ def _timestamp(value: datetime | float) -> float:
     return value.timestamp()
 
 
+def needs_provider_reconciliation(job) -> bool:
+    return job.phase == "manual_review" or (job.status == "failed" and bool(job.provider_task_id) and "核查原任务" in (job.error or ""))
+
+
 @dataclass
 class Job:
     id: str
@@ -78,7 +82,7 @@ class Job:
             "provider": self.provider,
             "provider_task_id": self.provider_task_id,
             "idempotency_key": self.idempotency_key,
-            "phase": self.phase,
+            "phase": "manual_review" if needs_provider_reconciliation(self) else self.phase,
             "attempt": self.attempt,
         }
 
@@ -240,6 +244,7 @@ class JobManager:
                 raise JobExpiredError(job.error or "生成任务已结束")
             if model and model.status == "running" and (not job.worker_id or model.worker_id == job.worker_id):
                 model.progress = job.progress
+                model.phase = job.phase
                 now = utcnow()
                 model.heartbeat_at = now
                 model.lease_expires_at = now + timedelta(seconds=settings.worker_stale_seconds)
@@ -320,10 +325,14 @@ class JobManager:
         except JobExpiredError:
             pass
         except Exception as exc:
-            uncertain_submission = job.phase == "submitting_provider" and not bool(getattr(exc, "submission_certain", False))
+            uncertain_submission = bool(getattr(exc, "requires_reconciliation", False)) or (
+                job.phase == "submitting_provider" and not bool(getattr(exc, "submission_certain", False))
+            )
             job.status = "failed"
             job.phase = "manual_review" if uncertain_submission else "failed"
-            if uncertain_submission and job.idempotency_key:
+            if getattr(exc, "requires_reconciliation", False):
+                prefix = "平台已受理，结果或计费状态待核对，请勿重复生成；"
+            elif uncertain_submission and job.idempotency_key:
                 prefix = "供应商创建接口经同一幂等键恢复后仍无法确认结果，请先人工核对供应商任务；"
             elif uncertain_submission:
                 prefix = "供应商创建结果不确定且不支持幂等重提，请先人工核对供应商任务；"

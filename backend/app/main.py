@@ -49,7 +49,7 @@ from .error_logging import record_api_error, request_payload
 from .h3_prompt_compiler import compile_h3_prompt
 from .image_download import router as image_download_router
 from .image_model_policy import validate_image_selection
-from .jobs import Job, jobs
+from .jobs import Job, jobs, needs_provider_reconciliation
 from .media_constraints import normalize_video_duration
 from .models import (
     AiModelModel,
@@ -850,7 +850,8 @@ async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str], *,
 async def create_video_generation(payload: VideoGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
     job = await _enqueue_video_generation(payload, user, db)
     await db.commit()
-    await jobs.dispatch(job, lambda item: generate_video(payload, item))
+    if not getattr(job, "reused", False):
+        await jobs.dispatch(job, lambda item: generate_video(payload, item))
     return job.public()
 
 
@@ -868,6 +869,37 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
         await db.refresh(line)
     if task and (task.storyboard_config or {}).get("videoModelRevision") and line and (line.shot_options or {}).get("videoModel") != payload.model:
         raise HTTPException(409, "该分镜的视频模型已更新，请刷新页面后再生成")
+    submission_input = payload.model_dump(mode="json", exclude={"request_id"})
+    submission_input["model"] = model.code
+    if line_id:
+        candidates = (
+            await db.scalars(
+                select(GenerationJobModel)
+                .where(
+                    GenerationJobModel.user_id == user.id,
+                    GenerationJobModel.storyboard_line_id == line_id,
+                    GenerationJobModel.kind == "video",
+                    GenerationJobModel.deleted_at.is_(None),
+                    or_(
+                        GenerationJobModel.status.in_(("queued", "running")),
+                        GenerationJobModel.phase == "manual_review",
+                        (GenerationJobModel.status == "failed") & GenerationJobModel.provider_task_id.isnot(None) & GenerationJobModel.error.contains("核查原任务"),
+                        GenerationJobModel.request["request_id"].as_string() == payload.request_id if payload.request_id else False,
+                    ),
+                )
+                .order_by(GenerationJobModel.created_at.desc())
+            )
+        ).all()
+        # The user/task locks above serialize concurrent submissions across API processes.
+        existing = next((row for row in candidates if payload.request_id and (row.request or {}).get("request_id") == payload.request_id), None)
+        if existing is None:
+            existing = next((row for row in candidates if row.status in {"queued", "running"} or needs_provider_reconciliation(row)), None)
+        if existing is not None:
+            if (existing.request or {}).get("_submissionInput") != submission_input:
+                raise HTTPException(409, "该镜头已有生成请求，请先核对原任务；不同参数不能覆盖或重复提交")
+            reused = jobs._from_model(existing)
+            reused.reused = True
+            return reused
     validate_video_references(payload, dict(model.capabilities or {}))
     is_h3 = bool((model.capabilities or {}).get("h3Modes"))
     if is_h3:
@@ -906,6 +938,7 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
             shot_index=line.sort_order,
         )
     snapshot = generation_request_snapshot(payload, model, provider)
+    snapshot["_submissionInput"] = submission_input
     snapshot["_identityReferenceIndices"] = sorted(identity_indices)
     if task and task.storyboard_type == "general_random" and line and not is_h3:
         snapshot.update(
@@ -959,15 +992,19 @@ async def create_video_generations_batch(
     db: AsyncSession = Depends(database_session),
 ) -> dict:
     """一次受理最多200个视频工单；每个工单仍独立持久化、计费、重试和回填素材。"""
+    # Replays do not consume quota, reserve funds or dispatch the original job again.
+    pending = [(item, await _enqueue_video_generation(item, user, db)) for item in payload.items]
+    new_items = [item for item, job in pending if not getattr(job, "reused", False)]
     try:
-        estimate = await ensure_video_batch_balance(payload.items)
+        estimate = await ensure_video_batch_balance(new_items) if new_items else {}
     except ValueError as exc:
         raise HTTPException(402, str(exc)) from exc
-    # 整批工单与日配额同事务：任何一项校验/额度失败，都不会留下已开始收费的前半批。
-    pending = [(item, await _enqueue_video_generation(item, user, db)) for item in payload.items]
     await db.commit()
+    dispatched = set()
     for request, job in pending:
-        await jobs.dispatch(job, lambda item, payload=request: generate_video(payload, item))
+        if not getattr(job, "reused", False) and job.id not in dispatched:
+            dispatched.add(job.id)
+            await jobs.dispatch(job, lambda item, payload=request: generate_video(payload, item))
     jobs_output = [job.public() for _, job in pending]
     return {"count": len(jobs_output), "jobs": jobs_output, **estimate}
 
@@ -1036,28 +1073,34 @@ async def list_active_task_generations(task_id: str, user: CurrentUser, db: Asyn
     rows = (
         (
             await db.execute(
-                select(GenerationJobModel).where(
+                select(GenerationJobModel)
+                .where(
                     GenerationJobModel.project_task_id == task_id,
                     GenerationJobModel.user_id == user.id,
                     GenerationJobModel.deleted_at.is_(None),
-                    GenerationJobModel.status.in_(("queued", "running")),
                 )
+                .order_by(GenerationJobModel.created_at.desc())
             )
         )
         .scalars()
         .all()
     )
+    latest = {}
+    for row in rows:
+        latest.setdefault((row.storyboard_line_id, row.kind), row)
     return [
         {
             "id": row.id,
             "kind": row.kind,
             "storyboardLineId": row.storyboard_line_id,
             "progress": row.progress,
+            "phase": "manual_review" if needs_provider_reconciliation(row) else row.phase,
             # 前端刷新后用服务端落库时间恢复等待秒数，避免从 0 重新计时。
             "createdAt": row.created_at.isoformat(),
             "providerSubmittedAt": row.provider_submitted_at.isoformat() if row.provider_submitted_at else None,
         }
-        for row in rows
+        for row in latest.values()
+        if row.status in {"queued", "running"} or needs_provider_reconciliation(row)
     ]
 
 

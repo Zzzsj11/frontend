@@ -218,7 +218,7 @@ export const creationActions = {
 
   /** 随机通用没有图片/人物参考，创建任务后一次性把全部纯文本视频持久化入队。 */
   async _generateRandomShotsBatch(taskId: string, lines: ScriptLine[]) {
-    const targets = lines.filter((line) => line.shot.status !== 'done')
+    const targets = lines.filter((line) => !['done', 'generating'].includes(line.shot.status))
     if (!targets.length) return
     for (const line of targets) {
       line.shot.status = 'generating'
@@ -241,29 +241,27 @@ export const creationActions = {
             watermark: options.watermark ?? false,
             project_task_id: taskId,
             storyboard_line_id: line.id,
+            request_id: `random-initial-${taskId}-${line.id}`,
           }
         }),
       )
       await Promise.allSettled(
-        result.jobs
-          .map((item) => String(item.id || ''))
-          .filter(Boolean)
-          .map((jobId) => api.waitGenerationJob(jobId)),
+        result.jobs.map((item, index) => {
+          const lineId = targets[index]?.id
+          return item.id && lineId
+            ? this._watchGenerationJob(taskId, String(item.id), lineId, 'video')
+            : Promise.resolve()
+        }),
       )
-      const script = await api.fetchSongScript(taskId)
-      if (this.activeTaskId === taskId) {
-        this.taskScripts[taskId] = script
-        this.lines = script.lines
-        this.activeTaskStatus = script.status || this.activeTaskStatus
-        this._cacheCurrentTask()
-      }
     } catch (error) {
       for (const line of targets) {
         if (line.shot.status === 'generating') {
-          line.shot.status = 'failed'
-          line.shot.error = error instanceof Error ? error.message : '批量视频提交失败'
+          // Submission may have committed before the response was lost. Only query; never POST again here.
+          line.shot.generationPhase = 'reconciling'
+          line.shot.error = error instanceof Error ? error.message : '提交状态核对中'
         }
       }
+      await this.resumeActiveGenerations(taskId)
     }
   },
 

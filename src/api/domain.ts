@@ -159,12 +159,17 @@ export const fetchActiveGenerations = (taskId: string) =>
       storyboardLineId: string | null
       createdAt: string
       providerSubmittedAt?: string | null
+      phase?: string
     }>
   >(`/tasks/${taskId}/generations/active`)
 
 /** 按任务 ID 恢复媒体生成任务的轮询等待（页面刷新后续跑；成功时资产已由后端落库） */
-export const waitGenerationJob = (id: string, signal?: AbortSignal, timeoutMs = 660_000) =>
-  mediaGen.waitForJob(id, timeoutMs, { signal })
+export const waitGenerationJob = (
+  id: string,
+  signal?: AbortSignal,
+  timeoutMs = 660_000,
+  onUpdate?: (snapshot: import('../utils/generationPoller').GenerationJobSnapshot) => void,
+) => mediaGen.waitForJob(id, timeoutMs, { signal, onUpdate })
 export const getGenerationJob = (id: string) => mediaGen.getJob(id)
 
 export const acknowledgeGenerationResults = (ids: string[]) =>
@@ -573,6 +578,7 @@ export async function generateShotVideo(
   storyboardLineId?: string,
   signal?: AbortSignal,
   onSubmitted?: (submittedAt: string) => void,
+  onUpdate?: (snapshot: import('../utils/generationPoller').GenerationJobSnapshot) => void,
 ): Promise<{ coverUrl: string; coverThumbnailUrl?: string; videoUrl: string; duration: number }> {
   return mediaGen.generateShotVideo(
     [scenePrompt, shotPrompt].filter(Boolean).join('。'),
@@ -591,10 +597,12 @@ export async function generateShotVideo(
     storyboardLineId,
     signal,
     onSubmitted,
+    onUpdate,
   )
 }
 
 export interface VideoBatchItem {
+  request_id?: string
   prompt: string
   duration: number
   ratio: ShotGenOptions['ratio']

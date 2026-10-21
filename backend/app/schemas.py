@@ -240,6 +240,7 @@ class ImageGenerationCreate(BaseModel):
 
 
 class VideoGenerationCreate(BaseModel):
+    request_id: str | None = Field(default=None, min_length=1, max_length=160)
     prompt: str = Field(min_length=1, max_length=30_000)
     duration: int = Field(default=DEFAULT_VIDEO_DURATION, ge=1, le=30)
     ratio: Literal["16:9", "9:16", "1:1", "4:3"] = "16:9"

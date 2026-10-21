@@ -4,11 +4,15 @@ import { ApiError } from '../../errorBus'
 import { STORYBOARD_LINE_WAIT_TIMEOUT_MS } from '../../generationConstraints'
 import {
   PollingCancelledError,
+  GenerationObservationTimeout,
+  GenerationJobFailed,
   abortableSleep,
   registerTaskWatcher,
 } from '../../utils/generationPoller'
 import { resumedGenerationJobs, storyboardRunningWatchers, localGeneratingLines } from './shared'
 import type { ProjectContext } from './contracts'
+
+const mediaGenerationWatchers = new Map<string, AbortController>()
 
 export const storyboardActions = {
   /** 行的大纲是否已就绪（未就绪的行不能进入逐句生成，后端会 422） */
@@ -215,8 +219,13 @@ export const storyboardActions = {
   /** 刷新/切任务后恢复仍在排队或执行中的媒体生成（场景图/视频）等待态；结果由后端落库，落定后重新拉取合并 */
   async resumeActiveGenerations(taskId: string) {
     const jobs = await api.fetchActiveGenerations(taskId).catch(() => [])
+    if (this.activeTaskId !== taskId || !Array.isArray(jobs)) return
     for (const job of jobs) {
-      if (!job.storyboardLineId || resumedGenerationJobs.has(job.id)) continue
+      if (
+        !job.storyboardLineId ||
+        (job.kind === 'storyboard_line' && resumedGenerationJobs.has(job.id))
+      )
+        continue
       const line = this.lines.find((item) => item.id === job.storyboardLineId)
       if (!line) continue
       if (job.kind === 'storyboard_line') {
@@ -248,13 +257,11 @@ export const storyboardActions = {
         continue
       }
       const slot = job.kind === 'video' ? line.shot : line.scene
-      if (slot.status === 'generating') continue
       slot.status = 'generating'
       slot.error = undefined
       if (job.kind === 'video') {
         line.shot.generationSubmittedAt = job.createdAt
       }
-      resumedGenerationJobs.add(job.id)
       void this._watchGenerationJob(taskId, job.id, job.storyboardLineId, job.kind)
     }
   },
@@ -265,35 +272,75 @@ export const storyboardActions = {
     lineId: string,
     kind: 'image' | 'video',
   ) {
+    const previous = mediaGenerationWatchers.get(jobId)
+    if (previous && !previous.signal.aborted) return
     const watcher = registerTaskWatcher(taskId)
+    mediaGenerationWatchers.set(jobId, watcher)
+    const currentLine = () =>
+      (this.activeTaskId === taskId ? this.lines : (this.taskScripts[taskId]?.lines ?? [])).find(
+        (item) => item.id === lineId,
+      )
+    const initial = currentLine()
+    if (kind === 'video' && initial) initial.shot.generationJobId = jobId
     let failed: string | undefined
     try {
-      await api.waitGenerationJob(jobId, watcher.signal, kind === 'video' ? 1_260_000 : 660_000)
-    } catch (error) {
-      // 切换子项目被取消：后端任务照跑且资产落库，切回时会重新恢复，静默退出
-      if (error instanceof PollingCancelledError) return
-      failed =
-        error instanceof Error
-          ? error.message
-          : kind === 'video'
-            ? '视频生成失败'
-            : '场景图生成失败'
+      try {
+        await api.waitGenerationJob(
+          jobId,
+          watcher.signal,
+          kind === 'video' ? 7_500_000 : 660_000,
+          (snapshot) => {
+            const current = currentLine()
+            if (kind === 'video' && current?.shot.generationJobId === jobId) {
+              current.shot.status = 'generating'
+              if (snapshot.created_at)
+                current.shot.generationSubmittedAt = new Date(
+                  snapshot.created_at * 1000,
+                ).toISOString()
+              current.shot.generationPhase =
+                snapshot.phase || (snapshot.status === 'queued' ? 'queued' : 'provider_running')
+            }
+          },
+        )
+      } catch (error) {
+        if (watcher.signal.aborted || error instanceof PollingCancelledError) return
+        if (
+          error instanceof GenerationObservationTimeout ||
+          !(error instanceof GenerationJobFailed)
+        ) {
+          const current = currentLine()
+          if (kind === 'video' && current?.shot.generationJobId === jobId)
+            current.shot.generationPhase = 'reconciling'
+          return
+        }
+        failed = error instanceof Error ? error.message : '生成状态核对失败'
+      }
+      let freshLine: ScriptLine | null = null
+      for (let attempt = 0; attempt < 12 && !watcher.signal.aborted; attempt++) {
+        freshLine = await api.fetchStoryboardLine(taskId, lineId).catch(() => null)
+        if (freshLine) break
+        const current = currentLine()
+        if (kind === 'video' && current?.shot.generationJobId === jobId)
+          current.shot.generationPhase = 'reconciling'
+        if (attempt < 11) await abortableSleep(3000, watcher.signal)
+      }
+      if (watcher.signal.aborted) return
+      const current = currentLine()
+      if (!current || (kind === 'video' && current.shot.generationJobId !== jobId)) return
+      if (!freshLine) {
+        if (kind === 'video') current.shot.generationPhase = 'reconciling'
+        return
+      }
+      if (kind === 'video') current.shot = freshLine.shot
+      else current.scene = freshLine.scene
+      if (failed) {
+        const slot = kind === 'video' ? current.shot : current.scene
+        slot.status = 'failed'
+        slot.error = failed
+      }
     } finally {
-      resumedGenerationJobs.delete(jobId)
-    }
-    if (this.activeTaskId !== taskId) return
-    // P2 切换路径瘦身：只拉取该行（单行全量端点）做增量合并，不再全量拉脚本；
-    // 后端在任务成功时已把资产落库，只合并媒体子状态，不覆盖用户正在编辑的提示词
-    const freshLine = await api.fetchStoryboardLine(taskId, lineId).catch(() => null)
-    if (!freshLine || this.activeTaskId !== taskId) return
-    const current = this.lines.find((item) => item.id === lineId)
-    if (!current) return
-    if (kind === 'video') current.shot = freshLine.shot
-    else current.scene = freshLine.scene
-    if (failed) {
-      const slot = kind === 'video' ? current.shot : current.scene
-      slot.status = 'failed'
-      slot.error = failed
+      watcher.abort()
+      if (mediaGenerationWatchers.get(jobId) === watcher) mediaGenerationWatchers.delete(jobId)
     }
   },
 

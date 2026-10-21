@@ -3,11 +3,12 @@ import type { ScriptLine, ShotAsset, ShotGenOptions } from '../../types'
 import * as api from '../../api/domain'
 import { generateVoice } from '../../api/voice'
 import { nextId } from '../../utils/id'
-import { reportApiError } from '../../errorBus'
+import { ApiError, reportApiError } from '../../errorBus'
 import { normalizeShotOptions } from '../../mediaConstraints'
 import { videoModelConcurrency } from '../../generationModels'
 import {
   PollingCancelledError,
+  GenerationJobFailed,
   abortableSleep,
   registerTaskWatcher,
 } from '../../utils/generationPoller'
@@ -110,6 +111,10 @@ export const mediaActions = {
           const current = this.lines.find((item) => item.id === lineId)
           if (current) current.shot.generationSubmittedAt = submittedAt
         },
+        (snapshot) => {
+          const current = this.lines.find((item) => item.id === lineId)
+          if (current) current.shot.generationPhase = snapshot.phase || 'provider_running'
+        },
       )
       const still = this.lines.find((l) => l.id === lineId)
       if (still) {
@@ -133,6 +138,18 @@ export const mediaActions = {
     } catch (error) {
       // 切换子项目导致轮询被取消：保持 generating 等待切回恢复，不标失败不弹窗
       if (error instanceof PollingCancelledError) return
+      if (
+        !(error instanceof GenerationJobFailed) &&
+        (!(error instanceof ApiError) ||
+          !error.status ||
+          error.status >= 500 ||
+          [408, 409].includes(error.status))
+      ) {
+        const current = this.lines.find((item) => item.id === lineId)
+        if (current) current.shot.generationPhase = 'reconciling'
+        if (this.activeTaskId) void this.resumeActiveGenerations(this.activeTaskId)
+        return
+      }
       // 同场景图：失败原因入行内状态，不 throw（保留已有资产封面，重试由行内/详情弹窗发起）
       const reported = reportApiError(error, '视频生成失败')
       const still = this.lines.find((l) => l.id === lineId)

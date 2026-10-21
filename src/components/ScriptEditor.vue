@@ -266,7 +266,10 @@ const confirmBatchGenerate = async () => {
           <span class="generation-progress-track">
             <span class="generation-progress-fill" :style="{ width: `${storyboardPercent}%` }" />
           </span>
-          已生成 {{ store.storyboardProgress.completed }}/{{ store.storyboardProgress.total }}
+          分镜已就绪 {{ store.storyboardProgress.completed }}/{{ store.storyboardProgress.total }} ·
+          视频已完成 {{ store.lines.filter((line) => line.shot.assets.length > 0).length }}/{{
+            store.storyboardProgress.total
+          }}
           <template v-if="store.storyboardProgress.failed">
             <button class="retry-all" title="跳转到下一条失败分镜" @click="focusNextFailedLine">
               {{ store.storyboardProgress.failed }} 条失败

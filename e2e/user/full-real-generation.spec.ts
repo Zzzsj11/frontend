@@ -63,7 +63,7 @@ async function createProject(page: Page, name: string) {
 async function waitForPrompts(page: Page, expected: number, prefix: string) {
   await expect(page.locator('.line-wrapper')).toHaveCount(expected, { timeout: 30_000 })
   if (!resumeAssProject) {
-    await expect(page.getByText(`已生成 ${expected}/${expected}`)).toBeVisible({
+    await expect(page.getByText(`分镜已就绪 ${expected}/${expected}`)).toBeVisible({
       timeout: 10 * 60_000,
     })
   }

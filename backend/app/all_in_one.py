@@ -182,11 +182,22 @@ async def resume(job: Any) -> dict[str, Any]:
             data = await query_task(job.kind, job.provider_task_id, user_id=job.user_id)
             consecutive_errors = 0
         except Exception:
+            job.phase = "reconciling"
+            await jobs.update_progress(job, job.progress)
             consecutive_errors += 1
-            if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS:
+            if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS and job.kind != "video":
                 raise
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
             continue
+        job.phase = {
+            "QUEUED": "platform_queued",
+            "PENDING": "platform_queued",
+            "RUNNING": "provider_running",
+            "PROCESSING": "provider_running",
+            "ARCHIVING": "archiving",
+            "SUCCEEDED": "archiving",
+        }.get(data["status"], "reconciling")
+        await jobs.update_progress(job, job.progress)
         if data["status"] == "SUCCEEDED":
             await jobs.record_provider_response(job, "terminal", data)
             from .image_failover import record_outcome
@@ -196,6 +207,7 @@ async def resume(job: Any) -> dict[str, Any]:
                 return await store_result(job, data)
             except Exception as exc:
                 # 上游已交付并可能扣费，归档失败不能抹掉供应商用量。
+                exc.requires_reconciliation = True
                 exc.usage = data.get("usage") or {}
                 exc.provider = PROVIDER
                 exc.request_id = job.provider_task_id
@@ -211,9 +223,10 @@ async def resume(job: Any) -> dict[str, Any]:
             error.provider = PROVIDER
             error.request_id = job.provider_task_id
             raise error
-        await jobs.update_progress(job, min(90, job.progress + 2))
         await asyncio.sleep(POLL_INTERVAL_SECONDS)
-    raise ProviderError("all in one 生成等待超过2小时，请核查原任务；未重新提交")
+    error = ProviderError("all in one 生成等待超过2小时，请核查原任务；未重新提交")
+    error.requires_reconciliation = True
+    raise error
 
 
 def _content_rejection(value: Any) -> bool:

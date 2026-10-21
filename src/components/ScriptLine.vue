@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import BaseSelect from './base/BaseSelect.vue'
+import VideoGenerationStatus from './VideoGenerationStatus.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { ScriptLine } from '../types'
 import { DEFAULT_SHOT_OPTIONS, formatTime, useProjectStore } from '../stores/project'
@@ -291,6 +292,12 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="line-actions" @click.stop>
+      <VideoGenerationStatus
+        v-if="line.shot.status === 'generating'"
+        :phase="line.shot.generationPhase"
+        :submitted-at="line.shot.generationSubmittedAt"
+        :has-assets="line.shot.assets.length > 0"
+      />
       <!-- 生成分镜视频片段 -->
       <BaseIconButton
         name="movie"

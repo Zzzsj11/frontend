@@ -24,6 +24,7 @@ export const getJob = (id: string) =>
 export interface WaitForJobOptions {
   /** 切换子项目时经统一注册表 abort，轮询立即停止（后端任务照跑，切回后恢复） */
   signal?: AbortSignal
+  onUpdate?: (snapshot: GenerationJobSnapshot) => void
 }
 
 /** 经统一轮询调度器等待生成任务完成（全前端共享一个 3s tick，替代独立循环） */
@@ -34,6 +35,7 @@ export async function waitForJob<T>(
 ): Promise<T> {
   return watchGenerationJob<T>(id, {
     signal: options.signal,
+    onUpdate: options.onUpdate,
     timeoutMs,
     select: (snapshot: GenerationJobSnapshot) => snapshot.result as T,
   })
@@ -77,6 +79,7 @@ export async function generateShotVideo(
   storyboardLineId?: string,
   signal?: AbortSignal,
   onSubmitted?: (submittedAt: string) => void,
+  onUpdate?: (snapshot: GenerationJobSnapshot) => void,
 ): Promise<{ coverUrl: string; coverThumbnailUrl?: string; videoUrl: string; duration: number }> {
   const requestedMode = options.h3Mode ?? DEFAULT_H3_MODE
   const automaticImages = [referenceImageUrl, ...characterImageUrls].filter(Boolean) as string[]
@@ -100,9 +103,14 @@ export async function generateShotVideo(
           ? ([explicitFirst, options.h3LastFrameUrl].filter(Boolean) as string[])
           : Array.from(new Set([...automaticImages, ...(options.referenceImageUrls ?? [])]))
   const includeReferences = mode === 'auto' || mode === 'reference'
+  const pendingKey =
+    projectTaskId && storyboardLineId ? `video-intent:${projectTaskId}:${storyboardLineId}` : null
+  const requestId = (pendingKey && localStorage.getItem(pendingKey)) || crypto.randomUUID()
+  if (pendingKey) localStorage.setItem(pendingKey, requestId)
   const job = await request<GenerationJob>('/generations/videos', {
     method: 'POST',
     body: JSON.stringify({
+      request_id: requestId,
       prompt,
       duration: options.duration,
       ratio: options.ratio,
@@ -119,6 +127,7 @@ export async function generateShotVideo(
       storyboard_line_id: storyboardLineId,
     }),
   })
+  if (pendingKey) localStorage.removeItem(pendingKey)
   // 以服务端工单创建时间为准；客户端只负责逐秒展示，不自行猜测起点。
   if (job.created_at) onSubmitted?.(new Date(job.created_at * 1000).toISOString())
   const result = await waitForJob<{
@@ -126,7 +135,7 @@ export async function generateShotVideo(
     coverThumbnailUrl?: string
     videoUrl: string
     duration: number
-  }>(job.id, 7_260_000, { signal })
+  }>(job.id, 7_500_000, { signal, onUpdate })
   return {
     coverUrl: result.coverUrl || referenceImageUrl || '',
     coverThumbnailUrl: result.coverThumbnailUrl,

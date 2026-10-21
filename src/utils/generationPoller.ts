@@ -22,10 +22,16 @@ export class PollingCancelledError extends Error {
   }
 }
 
+export class GenerationObservationTimeout extends Error {}
+export class GenerationJobFailed extends Error {}
+export class GenerationReconciliationRequired extends Error {}
+
 export interface GenerationJobSnapshot<R = unknown> {
   id: string
   status: string
   progress?: number
+  phase?: string
+  created_at?: number
   result?: R
   error?: string | null
 }
@@ -43,6 +49,7 @@ interface WatchEntry<T> {
   timeoutMessage: string
   /** 是否已至少查询过一次（新注册的任务需要尽快首查，不等待完整周期间隔） */
   polled: boolean
+  onUpdate?: (snapshot: GenerationJobSnapshot) => void
 }
 
 const POLL_INTERVAL_MS = 3000
@@ -104,17 +111,24 @@ async function fetchBatchSnapshots(
 
 function settleEntry(entry: WatchEntry<unknown>, job: GenerationJobSnapshot): boolean {
   entry.polled = true
+  entry.onUpdate?.(job)
   const status = (job.status ?? '').toLowerCase()
   if (status === 'succeeded') {
     entry.resolve(entry.select(job))
     return true
   }
+  if (status === 'failed' && job.phase === 'manual_review') {
+    entry.reject(
+      new GenerationReconciliationRequired(job.error || '原工单状态待核对，请勿重复生成'),
+    )
+    return true
+  }
   if (status === 'failed' || status === 'cancelled') {
-    entry.reject(new Error(job.error || entry.failureMessage))
+    entry.reject(new GenerationJobFailed(job.error || entry.failureMessage))
     return true
   }
   if (Date.now() >= entry.deadline) {
-    entry.reject(new Error(entry.timeoutMessage))
+    entry.reject(new GenerationObservationTimeout(entry.timeoutMessage))
     return true
   }
   return false
@@ -166,7 +180,10 @@ async function tick() {
             error.status >= 500
           ) {
             // 查询失败不代表生成失败；保留原截止时间，在后续 tick 重试。
-            entries.set(entry.watchKey, entry)
+            entry.onUpdate?.({ id: entry.id, status: 'running', phase: 'reconciling' })
+            if (Date.now() >= entry.deadline)
+              entry.reject(new GenerationObservationTimeout(entry.timeoutMessage))
+            else entries.set(entry.watchKey, entry)
           } else entry.reject(error)
         }
       } finally {
@@ -205,6 +222,7 @@ export function watchGenerationJob<T>(
   options: {
     signal?: AbortSignal
     timeoutMs?: number
+    onUpdate?: (snapshot: GenerationJobSnapshot) => void
     select: (snapshot: GenerationJobSnapshot) => T
     failureMessage?: string
     timeoutMessage?: string
@@ -221,6 +239,7 @@ export function watchGenerationJob<T>(
     failureMessage: options.failureMessage ?? '生成失败',
     timeoutMessage: options.timeoutMessage ?? '生成超时，请稍后重试',
     polled: false,
+    onUpdate: options.onUpdate,
   }
   const promise = new Promise<T>((resolve, reject) => {
     entry.resolve = resolve
