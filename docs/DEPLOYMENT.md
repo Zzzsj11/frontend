@@ -1,11 +1,25 @@
 # 部署指南（v1.0.0 前）
 
-本文给维护人员和 Code Agent 提供可直接照做的部署手册。当前只维护两个环境：
+本文给维护人员和 Code Agent 提供可直接照做的部署手册。当前维护本地、独立测试和正式环境。
 
-| 环境           | 用途                                     | 入口                     | 数据             |
-| -------------- | ---------------------------------------- | ------------------------ | ---------------- |
-| 本地开发环境   | 开发、单元测试、完整预检                 | `http://127.0.0.1:5173`  | 本地 Docker 卷   |
-| 服务器测试环境 | 业务方手工验收、远程 API/Playwright 回归 | `https://mv.epaipix.com` | 服务器 Docker 卷 |
+## 环境对应与发布顺序（强制）
+
+| 环境 | 本项目入口                    | 本项目服务器         | all in one 入口               | all in one 服务器        |
+| ---- | ----------------------------- | -------------------- | ----------------------------- | ------------------------ |
+| 测试 | `https://mv-test.epaipix.com` | `root@120.77.71.145` | `https://mg-test.epaipix.com` | `ecs-user@47.106.21.152` |
+| 正式 | `https://mv.epaipix.com`      | `root@120.24.38.200` | `https://mg.epaipix.com`      | `ecs-user@120.77.172.57` |
+
+两台 MV 服务器项目目录均为 `/opt/mv-agent-frontend`。本地开发不作为服务器验收环境，接平台时默认使用测试域名及测试 Key，禁止默认使用正式凭据。
+
+- 非紧急变更（新功能、优化、普通 Bug 修复、配置、权限和部署变更）必须依次经过：本地检查 → 测试服务器部署 → 测试验收通过 → 用户明确授权正式发布 → 同一已验证提交发布正式 → 正式冒烟和健康检查。测试失败、仅本地通过或尚未验收，均不得发布正式；正式失败回滚到上一版本。
+- 未指定环境的发布请求只授权测试。不得将“开发完成”“测试通过”解释为正式发布授权；已有明确正式发布授权时，无须再次确认，但必须先完成测试。
+- 测试记录应保留提交 SHA、版本化镜像标签、测试目标、用例/结果、健康检查、Agent 批次与回滚版本。测试后再改业务代码，必须重新走测试验收；正式不得夹带未经测试的新提交。
+- 唯一可跳过测试服务器前置步骤的情况是正在影响正式业务的紧急 Bug 修复。必须记录事故影响、紧急原因、跳过原因、修复提交、必要本地检查、正式验证和回滚版本，修复后补部署测试服务器并完成回归。常规功能开发不能以紧急修复名义绕过。
+- `ALL_IN_ONE_BASE_URL` 必须按上表配置。测试与正式平台分别使用独立客户端 Key；测试认证失败应修复测试凭据，禁止切换到正式平台兜底。上游供应商账号可能共用，测试仍有真实成本，必须保留 Agent 三头及费用归因。
+- PostgreSQL、Redis、JWT、用户/项目和平台账本分别隔离；不得迁移或伪造历史工单来源。已有工单按其原始平台记录查询，切换前检查在途任务；未完成的旧平台任务先处理完再切换。
+- 两台服务器均沿用 `.env.production` 和 `DEPLOY_ENV=production` 的历史加固覆盖文件名，不能据此判断环境。测试设置 `DEPLOYMENT_TIER=test`、`TLS_DOMAIN=mv-test.epaipix.com`；正式设置 `DEPLOYMENT_TIER=production`、`TLS_DOMAIN=mv.epaipix.com`。`configure-single-platform.py` 按 tier 固定平台地址，拒绝 tier/domain 冲突，平台 Key 仍由受控 Secret 单独配置。
+
+本手册环境表与发布规则优先于早期部署报告中的历史“测试服务器”称呼。
 
 2026-10-19 起使用正式域名 `mv.epaipix.com`，HTTP `80` 自动跳转 HTTPS `443`。测试与正式共用现有 TOS 账号/Bucket，通过 `mv/test/`、`mv/production/` 对象目录隔离；历史对象保留原址。当前发布方式是在服务器从 Git 获取指定提交，并在服务器本地构建带 Git SHA 的版本化镜像。
 
@@ -56,12 +70,14 @@ git push origin <当前分支>
 
 记录准备部署的完整 SHA；服务器必须检出同一个 SHA，不能仅凭本地文件内容判断版本。
 
+以下 SSH、推送与部署示例默认指向测试服务器；正式发布必须先满足上面的测试验收与授权规则，再显式替换为环境表中的正式目标。
+
 ## 3. 登录服务器
 
 当前服务器：
 
 ```text
-主机：120.24.38.200
+主机：120.77.71.145
 用户：ubuntu
 项目目录：/opt/mv-agent-frontend
 Web 端口：5173
@@ -84,7 +100,7 @@ ssh-keygen -t ed25519 -C "mv-agent-deploy" -f ~/.ssh/mv_agent_deploy
 将公钥安装到服务器（该步骤可能需要输入服务器登录密码）：
 
 ```bash
-ssh-copy-id -i ~/.ssh/mv_agent_deploy.pub root@120.24.38.200
+ssh-copy-id -i ~/.ssh/mv_agent_deploy.pub root@120.77.71.145
 ```
 
 如果开发机没有 `ssh-copy-id`，显示公钥并由服务器管理员把这一整行追加到 `/home/ubuntu/.ssh/authorized_keys`：
@@ -107,7 +123,7 @@ chown -R ubuntu:ubuntu /home/ubuntu/.ssh
 
 ```sshconfig
 Host mv-agent-test
-  HostName 120.24.38.200
+  HostName 120.77.71.145
   User root
   IdentityFile ~/.ssh/mv_agent_deploy
   IdentitiesOnly yes
@@ -124,7 +140,7 @@ ssh mv-agent-test
 未配置别名时使用：
 
 ```bash
-ssh -i ~/.ssh/mv_agent_deploy root@120.24.38.200
+ssh -i ~/.ssh/mv_agent_deploy root@120.77.71.145
 ```
 
 首次连接要核对服务器指纹；不要在不确认主机身份时盲目接受变更后的指纹。登录后先确认身份和主机：
@@ -193,14 +209,14 @@ git remote -v
 ```bash
 git status --short
 git rev-parse HEAD
-git push ssh://root@120.24.38.200/opt/mv-agent-frontend.git main:main
+git push ssh://root@120.77.71.145/opt/mv-agent-frontend.git main:main
 ```
 
 如使用 `mv-agent-test` SSH 别名，URL 可写成 `ssh://mv-agent-test/opt/mv-agent-frontend.git`。出现“Git LFS locking API 不受支持”的提示不影响当前仓库，因为发布内容不依赖 Git LFS 锁；真正的推送失败必须处理，不能继续部署。
 
 ### 4.3 创建服务器配置
 
-当前脚本内部沿用 `.env.production` 这个历史文件名，但它在 v1.0.0 前仅代表“服务器测试环境”，不代表正式生产环境：
+当前脚本内部沿用 `.env.production` 这个历史文件名；测试、正式均使用它，务必按本文环境表核对 `DEPLOYMENT_TIER`、域名和目标服务器：
 
 ```bash
 cd /opt/mv-agent-frontend
@@ -275,7 +291,7 @@ WORKER_STALE_SECONDS=180
 域名解析和证书就绪后，在服务器准备只读证书目录，文件名固定为 `fullchain.pem`、`privkey.pem`。发布环境设置 `TLS_DOMAIN`、`TLS_CERT_DIR`，使用：
 
 ```bash
-TLS_DOMAIN=example.com \
+TLS_DOMAIN=mv-test.epaipix.com \
 TLS_CERT_DIR=/etc/letsencrypt/live/example.com \
 DEPLOY_TLS=1 DEPLOY_ENV=production ./scripts/deploy-local-images.sh
 ```
@@ -317,7 +333,7 @@ timeout 20 git ls-remote origin HEAD
 curl -I --max-time 10 https://github.com
 ```
 
-两者均超时时，不要持续重试占用发布窗口，也不要改线上源码。改用上一节的服务器裸仓库通道：先在开发机执行 `git push ssh://root@120.24.38.200/opt/mv-agent-frontend.git main:main`，再在服务器执行：
+两者均超时时，不要持续重试占用发布窗口，也不要改线上源码。改用上一节的服务器裸仓库通道：先在开发机执行 `git push ssh://root@120.77.71.145/opt/mv-agent-frontend.git main:main`，再在服务器执行：
 
 ```bash
 cd /opt/mv-agent-frontend
@@ -405,7 +421,7 @@ docker compose --env-file .env.production \
 ### 6.2 开发机远程验收
 
 ```bash
-curl -fsS http://120.24.38.200/api/health
+curl -fsS https://mv-test.epaipix.com/api/health
 # 凭据写入 e2e/.env（模板见 e2e/.env.example）后免环境变量直跑
 npm run test:remote:api && npm run test:remote:frontend
 ```
@@ -517,13 +533,13 @@ DEPLOY_ENV=production ./scripts/rollback.sh
 
 ## 10. v1.0.0 后再评估的事项
 
-正式域名/HTTPS 已纳入当前部署路径；预发布、多节点和远程镜像仓库另行评估。backend 已在单机上用一次性 green 容器实现平滑切换（消除部署 502 窗口），多副本蓝绿/滚动发布与发布治理仍在 v1.0.0 后再评估。v1.0.0 功能与验收稳定后，再单独设计环境隔离、Secret 管理、容量、安全和发布治理；在此之前不要让未来方案干扰服务器测试环境的可重复部署。
+正式域名/HTTPS 已纳入当前部署路径；预发布、多节点和远程镜像仓库另行评估。backend 已在单机上用一次性 green 容器实现平滑切换（消除部署 502 窗口），多副本蓝绿/滚动发布、远程镜像仓库和容量扩展另行评估。独立测试/正式隔离及本文测试先行的发布规则当前已生效，不属于未来事项。
 
 ## all in one 渠道
 
 `c9d52e8b310a` 前向迁移仅注册当前 MV 使用的三个图片模型、SD2.0 / Wan3.0 / H3，以及 GPT-6.1-Sol、GPT-6-Astra、GPT-6-Sol。文本模型处于启用状态，但不替换现有全局默认。模型编码使用 `-all-in-one` 后缀；SD2.0 提交给该渠道的编码是 `seedance-2.0`，H3 是 `MiniMax-H3`。不继承英和账户的 `asset://` 或报价规则。
 
-在受限的 `backend/.runtime_secrets.env` 中配置 `ALL_IN_ONE_API_KEY`；`ALL_IN_ONE_BASE_URL` 默认为 `https://mg.epaipix.com`。个人 Key 使用 `ALL_IN_ONE_SYSTEM_KEY=false`，省略 `X-User-Id`；只有平台提供的系统 Key 才设为 `true`，由持久化任务用户提供稳定身份。所有调用携带原 Agent 批次归因，不能把个人 Key 的用户绑定错误改为忽略隔离。
+在受限的 `backend/.runtime_secrets.env` 中配置 `ALL_IN_ONE_API_KEY`；测试必须设 `ALL_IN_ONE_BASE_URL=https://mg-test.epaipix.com`，正式必须设 `ALL_IN_ONE_BASE_URL=https://mg.epaipix.com`，并分别使用对应平台的 Key。个人 Key 使用 `ALL_IN_ONE_SYSTEM_KEY=false`，省略 `X-User-Id`；只有平台提供的系统 Key 才设为 `true`，由持久化任务用户提供稳定身份。所有调用携带原 Agent 批次归因，不能把个人 Key 的用户绑定错误改为忽略隔离。
 
 管理后台文本模型对比入口可以选择三个新增文本模型。媒体生成与子项目批量修改都使用动态模型目录。图片与视频走异步平台工单，保存平台任务 ID 和稳定幂等键；恢复只查询同一工单。提交 5xx/断网且未拿到任务 ID 时进入人工核对，不盲目重提；已拿到 ID 时查询原任务。平台计费状态与原始用量保留在 usage 中，缺少报价规则或待核账不能当作免费。
 
@@ -545,7 +561,7 @@ certbot certonly --manual --preferred-challenges http --non-interactive --agree-
 
 ## 独立测试服务器
 
-测试环境为 `root@120.77.71.145`，入口 `https://mv-test.epaipix.com`；正式环境保持 `https://mv.epaipix.com`。两台机器各自拥有 PostgreSQL、Redis、JWT、管理员和加密备份密钥，不复制生产用户/项目数据。模型及 TOS 账号共用，新媒体使用 `mv/test/references/`、`mv/test/videos/`，备份使用 `mv/test/backups/database/`。
+测试环境为 `root@120.77.71.145`，入口 `https://mv-test.epaipix.com`；正式环境保持 `https://mv.epaipix.com`。两台机器各自拥有 PostgreSQL、Redis、JWT、管理员和加密备份密钥，不复制生产用户/项目数据。all in one 平台入口和 Key 按环境隔离；上游供应商账号及 TOS Bucket 可共用，新媒体使用 `mv/test/references/`、`mv/test/videos/`，备份使用 `mv/test/backups/database/`。
 
 测试服务器 `.env.production`（仅是 Docker 加固覆盖的历史文件名）必须设置 `DEPLOYMENT_TIER=test`、`TLS_DOMAIN=mv-test.epaipix.com`、`APP_CORS_ORIGINS=https://mv-test.epaipix.com`。发布准备脚本从该文件持久读取 tier/domain，后续不显式传环境变量也不会重置为正式目录。4核机器采用图片4、视频4、导出1、分镜2并发。
 

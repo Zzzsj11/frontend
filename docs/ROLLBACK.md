@@ -1,6 +1,6 @@
 # 回滚
 
-当前服务器测试环境的应用回滚：`DEPLOY_ENV=production ./scripts/rollback.sh`，或传入明确旧标签。`production` 是脚本沿用的历史环境文件名，并不代表当前已有正式生产环境。部署脚本保存 `.previous-version`。
+测试或正式环境的应用回滚（先核对 [环境表](DEPLOYMENT.md#环境对应与发布顺序强制) 和 SSH 目标）：`DEPLOY_ENV=production ./scripts/rollback.sh`，或传入明确旧标签。`production` 是两套服务器沿用的环境文件名，实际环境以 `DEPLOYMENT_TIER` 和域名为准；回滚也必须保留对应平台域名和独立 Key。部署脚本保存 `.previous-version`。
 
 数据库迁移遵循 expand/contract：先加兼容字段，再回填，再切换读写，最后隔多个版本删除旧字段。应用回滚通常不执行 Alembic downgrade。破坏性迁移发布前必须备份并给出专用恢复方案。
 

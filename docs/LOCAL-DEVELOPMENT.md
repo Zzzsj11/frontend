@@ -31,3 +31,7 @@ make docker-build
 ## 数字人资产补注册已退役
 
 所有环境均禁止配置或恢复 `ensure_asset_avatars.py`、`sync-digital-human-assets.sh` 的 cron、launchd 或其他周期任务。人物参考直接使用 TOS 原图。发布脚本会移除遗留调度。详见 [数字人资产链路](ASSET-AVATAR.md#5)。
+
+## 测试先行与环境隔离
+
+非紧急变更必须先部署 `https://mv-test.epaipix.com`，连接 `https://mg-test.epaipix.com`，完成远程验收后，才能按用户明确授权将同一提交发布 `https://mv.epaipix.com`（连接 `https://mg.epaipix.com`）。默认发布目标为测试；仅正在影响正式业务的紧急 Bug 修复可例外，必须记录原因并补测试回归。服务器、Key 隔离、发布证据及紧急处理详见 [部署手册](DEPLOYMENT.md#环境对应与发布顺序强制)。本地接入平台也使用测试 Key，禁止从代码默认值推断发布目标。

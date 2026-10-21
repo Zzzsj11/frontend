@@ -46,10 +46,14 @@ def main():
     tier = os.getenv("DEPLOYMENT_TIER") or deployment.get("DEPLOYMENT_TIER", "production")
     if tier not in {"production", "test"}:
         raise SystemExit("DEPLOYMENT_TIER must be production or test")
-    domain = os.getenv("TLS_DOMAIN") or deployment.get("TLS_DOMAIN", "mv.epaipix.com")
+    expected_domain = "mv-test.epaipix.com" if tier == "test" else "mv.epaipix.com"
+    domain = os.getenv("TLS_DOMAIN") or deployment.get("TLS_DOMAIN", expected_domain)
     if not re.fullmatch(r"[a-z0-9]+(?:[.-][a-z0-9]+)*", domain):
         raise SystemExit("invalid TLS_DOMAIN")
+    if domain != expected_domain:
+        raise SystemExit("TLS_DOMAIN does not match DEPLOYMENT_TIER")
     defaults = dict(DEFAULTS)
+    defaults["ALL_IN_ONE_BASE_URL"] = "https://mg-test.epaipix.com" if tier == "test" else "https://mg.epaipix.com"
     defaults["TOS_REFERENCE_PREFIX"] = f"mv/{tier}/references"
     defaults["TOS_VIDEO_ARCHIVE_PREFIX"] = f"mv/{tier}/videos"
     if os.getenv("DEPLOY_TLS") == "1":

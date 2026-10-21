@@ -13,3 +13,5 @@
 前端代码须遵循 `docs/FRONTEND-GUIDELINES.md`（组件、样式令牌、弹层与 z-index 层级规范）；格式由 Prettier 统一，`make lint-frontend` 包含 `format:check` 卡口。
 
 英和数字人资产补注册已退役；所有环境禁止配置或恢复调用 `ensure_asset_avatars.py` / `sync-digital-human-assets.sh` 的 cron、launchd 或其他周期任务。生产发布会移除旧补注册调度，人物参考直接使用 TOS 原图。详见 `docs/ASSET-AVATAR.md` §5。
+
+环境与发布强制规则：测试 `mv-test.epaipix.com` / `root@120.77.71.145` 只接 all in one 测试 `mg-test.epaipix.com` / `ecs-user@47.106.21.152`；正式 `mv.epaipix.com` / `root@120.24.38.200` 只接正式 `mg.epaipix.com` / `ecs-user@120.77.172.57`。平台 Key 按环境独立配置，禁止测试连正式或认证失败后跨环境兜底。除正在影响正式业务的紧急 Bug 修复外，所有新功能、优化、普通修复、配置和部署变更必须先发布测试服务器并完成对应验收，再将同一已验证提交发布正式服务器；测试未通过不得发布正式。未指定环境的发布请求仅授权测试，正式发布须用户明确授权。紧急修复须记录事故、跳过测试原因、提交、验证和回滚版本，并补齐测试环境回归。以 [部署手册](docs/DEPLOYMENT.md#环境对应与发布顺序强制) 为准；两台服务器的 `.env.production` 均是历史文件名，环境以 `DEPLOYMENT_TIER` 及对应域名判定。

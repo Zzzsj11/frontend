@@ -123,7 +123,7 @@ e2e 不在 preflight 内，按需触发：`test:e2e:user`（本地 mock 链路�
 
 ## 远程验收（对已部署环境）
 
-远程自动化固定使用 `http://120.24.38.200`（生产 Web 端口 80），不使用业务域名；域名可用性由 `scripts/online-health-check.sh` 单独验证，避免将网络问题误判为应用回归。带远程开关（`REMOTE_*`/`ADMIN_*`）运行时 playwright.config.ts 自动以 `e2e/env.ts` 的 `targetBaseURL()` 为目标且不在本地起服务，无需再设 `PLAYWRIGHT_BASE_URL`（设置了则可覆盖目标）。
+远程验收显式指定 `REMOTE_API_BASE_URL=https://mv-test.epaipix.com`，确认该环境连接 `https://mg-test.epaipix.com`。非紧急变更先完成测试环境验收；正式发布获明确授权后，才指定 `REMOTE_API_BASE_URL=https://mv.epaipix.com` 做正式冒烟，正式只连接 `https://mg.epaipix.com`。禁止隐式使用正式目标；完整规则见 [部署手册](DEPLOYMENT.md#环境对应与发布顺序强制)。域名、容器及依赖健康由 `scripts/online-health-check.sh` 验证。带远程开关（`REMOTE_*`/`ADMIN_*`）运行时 playwright.config.ts 自动以 `e2e/env.ts` 的 `targetBaseURL()` 为目标且不在本地起服务，无需再设 `PLAYWRIGHT_BASE_URL`（设置了则可覆盖目标）。
 
 ```bash
 npm run test:remote:api        # API 契约/鉴权/隔离/软删除（不消耗生成 Token）

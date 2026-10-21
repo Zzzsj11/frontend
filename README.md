@@ -247,4 +247,4 @@ docker compose exec redis redis-cli
 
 PPIO 与 BFL（Black Forest Labs，历史 FLUX 3）已从 MV 与 model-service 移除支持，不再提供配置、调用或余额入口。历史 Alembic 保留防断链；存量配置行须通过两侧各自的前向迁移退役，历史财务工单、费用与媒体保留。详见 [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) 与 [model-service 部署说明](model-service/docs/DEPLOYMENT.md)。
 
-`v0.9.1` 是 Web 内测版初版，已完成登录、多用户隔离、ASS/通用分镜、逐条提示词生成、角色库、TOS 媒体、图片/视频生成、素材导出、Token 记账、错误审计及完整自动化测试资产。当前只维护本地开发环境和服务器测试环境；预发布、正式生产及其容量/安全方案在 v1.0.0 完成后再考虑。服务器测试部署前仍须轮换密钥、修改默认密码并验证外部服务限流。
+`v0.9.1` 是 Web 内测版初版，已完成登录、多用户隔离、ASS/通用分镜、逐条提示词生成、角色库、TOS 媒体、图片/视频生成、素材导出、Token 记账、错误审计及完整自动化测试资产。当前维护本地、独立测试和正式环境。非紧急变更必须先测试服务器验收，再经明确授权发布正式；域名、服务器和 all in one 对应关系见 [部署手册](docs/DEPLOYMENT.md#环境对应与发布顺序强制)。
