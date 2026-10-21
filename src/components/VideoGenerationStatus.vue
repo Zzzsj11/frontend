@@ -5,6 +5,7 @@ const labels: Record<string, string> = {
   queued: '等待提交',
   platform_queued: '平台排队中',
   provider_running: '视频生成中',
+  reviewing_assets: '人物素材审核中',
   archiving: '素材保存中',
   reconciling: '状态核对中',
   manual_review: '状态核对中',

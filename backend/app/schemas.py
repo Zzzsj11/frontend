@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, StrictBool, StrictInt, model_validator
 
 from .generation_constraints import GENERAL_STORYBOARD_MAX_GROUPS, GENERAL_STORYBOARD_MAX_SHOTS
 from .media_constraints import DEFAULT_VIDEO_DURATION
@@ -240,6 +240,8 @@ class ImageGenerationCreate(BaseModel):
 
 
 class VideoGenerationCreate(BaseModel):
+    person_asset_mode: StrictBool = False
+    person_reference_indices: list[StrictInt] = Field(default_factory=list, max_length=9)
     request_id: str | None = Field(default=None, min_length=1, max_length=160)
     prompt: str = Field(min_length=1, max_length=30_000)
     duration: int = Field(default=DEFAULT_VIDEO_DURATION, ge=1, le=30)

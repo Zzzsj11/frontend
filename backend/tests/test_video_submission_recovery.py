@@ -99,3 +99,23 @@ def test_uncertain_legacy_timeout_is_not_treated_as_safe_to_resubmit(client, vid
     active = client.get(f"/api/tasks/{body['project_task_id']}/generations/active").json()
     assert active[0]["phase"] == "manual_review"
     assert dispatch.await_count == quota.await_count == 1
+
+
+def test_sd20_identity_defaults_to_person_asset_mode_and_is_idempotent(client, video_submission, monkeypatch):
+    import json
+
+    from app import main
+
+    body, dispatch, quota, _ = video_submission
+    monkeypatch.setattr(main, "_identity_reference_indices", AsyncMock(return_value={1}))
+    body = {**body, "image_urls": ["https://example.com/identity.png"]}
+    first = client.post("/api/generations/videos", json=body)
+    assert first.status_code == 202, first.text
+    again = client.post("/api/generations/videos", json=body)
+    assert again.json()["id"] == first.json()["id"]
+    with sqlite3.connect(TEST_DB) as db:
+        request = json.loads(db.execute("SELECT request FROM generation_jobs WHERE id=?", (first.json()["id"],)).fetchone()[0])
+    assert request["person_asset_mode"] is True
+    assert request["person_reference_indices"] == [1]
+    assert request["_submissionInput"]["person_asset_mode"] is True
+    assert dispatch.await_count == quota.await_count == 1
