@@ -219,6 +219,8 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
 }
 .balance-provider {
+  white-space: nowrap;
+  flex-shrink: 0;
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 650;
