@@ -21,6 +21,9 @@ def platform_settings(monkeypatch):
     for module in (config, chat, creative, llm_failover, prompt_optimizer):
         monkeypatch.setattr(module, "settings", settings)
     monkeypatch.setattr(optimizer_media, "content_parts", AsyncMock(return_value=[]))
+    from app import generation_preferences
+
+    monkeypatch.setattr(generation_preferences, "settings", settings)
     return settings
 
 
@@ -176,7 +179,7 @@ def test_optimizer_busy_response_preserves_failure_usage_and_audit(client, monke
     asyncio.run(verify())
 
 
-def test_chat_busy_text_counts_failures_and_switches_backup(client, monkeypatch):
+def test_chat_busy_text_counts_failures_without_changing_model(client, monkeypatch):
     platform_settings(monkeypatch)
     monkeypatch.setattr(llm_failover, "settings", replace(llm_failover.settings, llm_failover_enabled=True))
     user_id = client.get("/api/auth/me").json()["id"]
@@ -206,8 +209,8 @@ def test_chat_busy_text_counts_failures_and_switches_backup(client, monkeypatch)
         session = await chat.chat_manager.create(user_id, "synthetic test")
         for _ in range(6):
             await chat.chat_manager._run(session)
-        assert models == ["gemini-3.8-flash"] * 5 + ["doubao-seed-2-1-pro-260915"]
-        assert state.value == 5
+        assert models == ["gemini-3.8-flash"] * 6
+        assert state.value == 0
         assert sum(call.args[1] == "error" for call in events.await_args_list) == 5
         assert sum(call.args[1] == "assistant_done" for call in events.await_args_list) == 1
         async with session_factory() as db:

@@ -5,9 +5,10 @@ import {
   PROJECT_VIDEO_MODEL_GROUPS,
   VIDEO_MODEL_OPTIONS,
 } from '../generationModels'
-import BaseModelSelect from './base/BaseModelSelect.vue'
+import GenerationModelSelect from './GenerationModelSelect.vue'
 withDefaults(
   defineProps<{
+    beforeSelect?: (model: string) => boolean
     modelValue: string
     label?: string
     ariaLabel?: string
@@ -29,10 +30,10 @@ const groups = computed(() =>
 )
 </script>
 <template>
-  <BaseModelSelect
+  <GenerationModelSelect
     v-bind="$props"
     :groups="groups"
-    icon="movie"
+    modality="video"
     @update:model-value="emit('update:modelValue', $event)"
   />
 </template>

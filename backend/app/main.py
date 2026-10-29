@@ -46,6 +46,7 @@ from .database import close_database, database_ok, database_session, init_databa
 from .domain import owned_line, owned_project, owned_task, project_audio_json, uid, visible_humans
 from .domain import router as domain_router
 from .error_logging import record_api_error, request_payload
+from .generation_preferences import router as generation_preferences_router
 from .h3_prompt_compiler import compile_h3_prompt
 from .image_download import router as image_download_router
 from .image_model_policy import validate_image_selection
@@ -212,6 +213,7 @@ app.include_router(task_video_model_router)
 app.include_router(creative_router)
 app.include_router(admin_router)
 app.include_router(model_options_router)
+app.include_router(generation_preferences_router)
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -764,6 +766,11 @@ async def preview_portrait_prompt(payload: PortraitPromptParams, user: CurrentUs
 
 @app.post("/api/generations/images", status_code=202)
 async def create_image_generation(payload: ImageGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
+    from .generation_preferences import apply_media_preference
+
+    if payload.model:
+        await require_active_model(db, payload.model, "image")
+    await apply_media_preference(db, user.id, "image", payload)
     if payload.portrait is not None:
         payload.prompt = await _portrait_prompt(payload.portrait.description, payload.portrait.style)
     if not payload.prompt.strip():
@@ -856,6 +863,11 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
 
 
 async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserModel, db: AsyncSession) -> Job:
+    from .generation_preferences import apply_media_preference
+
+    if payload.model:
+        await require_active_model(db, payload.model, "video")
+    await apply_media_preference(db, user.id, "video", payload)
     await db.scalar(select(UserModel.id).where(UserModel.id == user.id).with_for_update())
     model, provider = await require_active_model(db, payload.model or settings.video_model, "video")
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
@@ -867,7 +879,13 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
         await db.refresh(task)
     if line:
         await db.refresh(line)
-    if task and (task.storyboard_config or {}).get("videoModelRevision") and line and (line.shot_options or {}).get("videoModel") != payload.model:
+    if (
+        not (user.generation_preferences or {}).get("video")
+        and task
+        and (task.storyboard_config or {}).get("videoModelRevision")
+        and line
+        and (line.shot_options or {}).get("videoModel") != payload.model
+    ):
         raise HTTPException(409, "该分镜的视频模型已更新，请刷新页面后再生成")
     identity_indices = await _identity_reference_indices(db, payload.image_urls, user_id=user.id)
     if provider.code == "all-in-one" and model.provider_model_id == "seedance-2.0":

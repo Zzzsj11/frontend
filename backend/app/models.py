@@ -35,6 +35,7 @@ class UserModel(LifecycleMixin, Base):
     daily_chat_limit: Mapped[int] = mapped_column(Integer, default=1000)
     daily_image_limit: Mapped[int] = mapped_column(Integer, default=1000)
     daily_video_limit: Mapped[int] = mapped_column(Integer, default=1000)
+    generation_preferences: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
 class RefreshTokenModel(LifecycleMixin, Base):

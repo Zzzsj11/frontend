@@ -34,6 +34,7 @@ test('发现新版本后由用户点击版本条刷新页面', async ({ page }) 
       path === '/api/digital-human-styles'
     )
       return route.fulfill({ json: [] })
+    if (path === '/api/generation-preferences') return route.fulfill({ json: {} })
     if (path === '/api/model-options') return route.fulfill({ json: [] })
     if (path === '/api/account/balance')
       return route.fulfill({

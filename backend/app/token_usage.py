@@ -43,6 +43,11 @@ def add_token_usage(
     request_id: str | None = None,
 ) -> tuple[TokenUsageModel, dict[str, Any]]:
     normalized = normalize_usage(usage)
+    from .generation_preferences import text_selection
+
+    selection = text_selection.get()
+    if selection is not None:
+        normalized["raw"] = {**normalized["raw"], "requestedChannel": selection.get("channel"), "routingMode": "specified" if selection.get("channel") else "automatic"}
     origin, agent_name, agent_run_id = current_agent_attribution()
     item = TokenUsageModel(
         id=f"usage-{uuid.uuid4().hex}",

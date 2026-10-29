@@ -103,6 +103,7 @@ async function mockApp(page: Page) {
       remaining: '100000.000000',
       remainingDisplay: '100,000.00',
     },
+    '/api/generation-preferences': {},
     '/api/model-options': [
       {
         id: 'nano-banana-2.1-all-in-one',

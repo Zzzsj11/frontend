@@ -90,7 +90,7 @@ async def test_backup_freezes_actual_model_spec_and_pool(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("succeeded", [True, False])
-async def test_terminal_provider_outcome_precedes_media_storage(monkeypatch, succeeded):
+async def test_terminal_provider_outcome_precedes_media_storage(client, monkeypatch, succeeded):
     from app import all_in_one
     from app.jobs import jobs
     from app.providers import ProviderError
@@ -108,7 +108,7 @@ async def test_terminal_provider_outcome_precedes_media_storage(monkeypatch, suc
     recorded.assert_awaited_once_with(task, succeeded=succeeded)
 
 
-def test_api_enqueues_actual_backup_with_own_pool(client, monkeypatch):
+def test_api_preserves_selected_model_despite_legacy_failover(client, monkeypatch):
     import asyncio
 
     from app.jobs import jobs
@@ -118,7 +118,7 @@ def test_api_enqueues_actual_backup_with_own_pool(client, monkeypatch):
     response = client.post("/api/generations/images", json={"prompt": "Synthetic backup test", "model": policy.PRIMARY_MODEL, "resolution": "4K", "size": "16:9"})
     assert response.status_code == 202, response.text
     saved = asyncio.run(jobs.get(response.json()["id"]))
-    assert saved.request["model"] == policy.FALLBACK_MODEL
-    assert saved.request["_providerModelId"] == "seedream-5.0-pro"
-    assert saved.request["_executionConcurrency"] == 5
-    assert saved.request["resolution"] == "2K"
+    assert saved.request["model"] == policy.PRIMARY_MODEL
+    assert saved.request["_providerModelId"] == "nano-banana-2.1"
+    assert saved.request["_executionPool"] == "all-in-one:nano-banana-2.1"
+    assert saved.request["resolution"] == "4K"

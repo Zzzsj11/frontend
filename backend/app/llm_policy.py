@@ -25,6 +25,16 @@ class LlmContentPolicyError(RuntimeError):
 
 
 def completion_options(model: str, max_tokens: int, temperature: float = 0.2) -> dict:
+    from .generation_preferences import text_selection
+
+    options = _completion_options(model, max_tokens, temperature)
+    selection = text_selection.get() or {}
+    if selection.get("channel"):
+        options["extra_body"] = {"channel": selection["channel"]}
+    return options
+
+
+def _completion_options(model: str, max_tokens: int, temperature: float = 0.2) -> dict:
     model = model.removesuffix("-all-in-one")
     if model == "gemini-3.8-flash":
         return {"max_completion_tokens": max(8192, max_tokens * 2), "reasoning_effort": "low"}

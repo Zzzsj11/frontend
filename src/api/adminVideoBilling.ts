@@ -75,6 +75,8 @@ export interface VideoBillingDetail {
   prompts: { label: string; content: string }[]
   references: { label: string; type: string; url: string; providerUrl?: string }[]
   rawUsage: Record<string, unknown>
+  requestedChannel?: string | null
+  routingMode?: 'specified' | 'automatic' | 'unknown'
   result: { videoUrl?: string; coverUrl?: string; duration?: number; ratio?: string }
 }
 

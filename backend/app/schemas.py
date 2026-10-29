@@ -225,6 +225,7 @@ class PortraitPromptParams(BaseModel):
 
 
 class ImageGenerationCreate(BaseModel):
+    channel: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
     # prompt 允许为空：portrait 模式下由后端用注册中心模板拼装（二者至少其一，端点内校验）
     prompt: str = Field(default="", max_length=20_000)
     size: str = "1024x1024"
@@ -242,6 +243,7 @@ class ImageGenerationCreate(BaseModel):
 class VideoGenerationCreate(BaseModel):
     person_asset_mode: StrictBool = False
     person_reference_indices: list[StrictInt] = Field(default_factory=list, max_length=9)
+    channel: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
     request_id: str | None = Field(default=None, min_length=1, max_length=160)
     prompt: str = Field(min_length=1, max_length=30_000)
     duration: int = Field(default=DEFAULT_VIDEO_DURATION, ge=1, le=30)

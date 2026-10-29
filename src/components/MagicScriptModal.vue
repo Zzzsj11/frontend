@@ -12,7 +12,6 @@ import type { ShotGenOptions } from '../types'
 import {
   DEFAULT_IMAGE_MODEL,
   DEFAULT_VIDEO_MODEL,
-  imageModelSupportsRatio,
   imageResolutionChoices,
   loadGenerationModels,
   videoResolutionChoices,
@@ -76,10 +75,7 @@ watch(videoModel, () => {
     resolution.value = resolutionChoices.value[0] ?? '720p'
   }
 })
-watch(ratio, () => {
-  if (!imageModelSupportsRatio(imageModel.value, ratio.value))
-    imageModel.value = DEFAULT_IMAGE_MODEL
-})
+
 watch(imageModel, () => {
   if (!imageResolutions.value.includes(imageResolution.value))
     imageResolution.value = (imageResolutions.value[0] ?? '1K') as typeof imageResolution.value

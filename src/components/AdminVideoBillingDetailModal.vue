@@ -45,6 +45,16 @@ const money = (value: number) => `¥${value.toFixed(6)}`
             <span>模型 / 渠道</span><b>{{ detail.model }} / {{ detail.provider }}</b>
           </div>
           <div>
+            <span>用户渠道选择</span
+            ><b>{{
+              detail.routingMode === 'specified'
+                ? detail.requestedChannel
+                : detail.routingMode === 'automatic'
+                  ? '自动（平台推荐）'
+                  : '历史记录未知'
+            }}</b>
+          </div>
+          <div>
             <span>请求 / 供应商规格</span
             ><b>{{ detail.resolution }} / {{ detail.providerResolution || '-' }}</b>
           </div>

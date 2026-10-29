@@ -406,3 +406,12 @@ label .app-select {
 .image-preview-host {
   position: relative;
 }
+
+/* 模型渠道弹层使用 Popover 的边界变量，不能继承 Select 专用变量。 */
+.generation-model-menu.model-channel-menu {
+  width: max(var(--reka-popover-trigger-width, 320px), 320px);
+  max-width: min(540px, calc(100vw - 24px));
+  max-height: min(440px, var(--reka-popover-content-available-height, 60vh));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}

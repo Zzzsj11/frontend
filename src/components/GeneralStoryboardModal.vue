@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import BaseSelect from './base/BaseSelect.vue'
 import { computed, ref, watch } from 'vue'
+import { useGenerationPreferences } from '../stores/generationPreferences'
 import { useAuthStore } from '../stores/auth'
 import type {
   GeneralGender,
@@ -32,7 +33,6 @@ import {
 import {
   DEFAULT_IMAGE_MODEL,
   DEFAULT_VIDEO_MODEL,
-  imageModelSupportsRatio,
   imageResolutionChoices,
   VIDEO_MODEL_OPTIONS,
   loadGenerationModels,
@@ -119,6 +119,7 @@ const canSubmit = computed(
     (props.random || !castRequired.value || selectedHumanIds.value.length > 0),
 )
 
+const preferences = useGenerationPreferences()
 const reset = () => {
   const options = store.generalStoryboardOptions
   genre.value = options?.genres[0]?.value ?? ''
@@ -131,21 +132,21 @@ const reset = () => {
     : (options?.visualStyles[0] ?? '')
   ratio.value = options?.ratios[0] ?? '16:9'
   resolution.value = '720p'
-  imageModel.value = DEFAULT_IMAGE_MODEL
+  imageModel.value = preferences.selections.image?.model || DEFAULT_IMAGE_MODEL
   imageResolution.value = '1K'
-  videoModel.value = DEFAULT_VIDEO_MODEL
+  videoModel.value = preferences.selections.video?.model || DEFAULT_VIDEO_MODEL
   gender.value = '女'
   emptyShotCount.value = props.random ? 3 : 4
   characterShotCount.value = props.random ? 14 : 13
   groupCount.value = 1
-  totalDuration.value = 210
+  totalDuration.value = Math.min(
+    maximumTotalDuration.value,
+    Math.max(minimumTotalDuration.value, 210),
+  )
   extraRequirement.value = ''
   selectedHumanIds.value = []
 }
-watch(ratio, () => {
-  if (!imageModelSupportsRatio(imageModel.value, ratio.value))
-    imageModel.value = DEFAULT_IMAGE_MODEL
-})
+
 watch(imageModel, () => {
   if (!imageResolutions.value.includes(imageResolution.value))
     imageResolution.value = (imageResolutions.value[0] ?? '1K') as typeof imageResolution.value
@@ -177,7 +178,7 @@ watch(genre, () => {
 watch(secondary, () => {
   tertiary.value = tertiaryOptions.value[0]?.value ?? ''
 })
-watch(videoModel, () => {
+watch([videoModel, minimumTotalDuration, maximumTotalDuration, resolutionChoices], () => {
   if (!videoRatios.value.includes(ratio.value)) ratio.value = videoRatios.value[0] ?? '16:9'
   totalDuration.value = Math.min(
     maximumTotalDuration.value,

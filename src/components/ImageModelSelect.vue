@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { IMAGE_MODEL_OPTIONS, imageModelSupportsRatio } from '../generationModels'
-import BaseModelSelect from './base/BaseModelSelect.vue'
+import GenerationModelSelect from './GenerationModelSelect.vue'
 const props = withDefaults(
   defineProps<{
     modelValue: string
@@ -32,10 +32,10 @@ const groups = computed(() =>
 )
 </script>
 <template>
-  <BaseModelSelect
+  <GenerationModelSelect
     v-bind="$props"
     :groups="groups"
-    icon="image"
+    modality="image"
     @update:model-value="emit('update:modelValue', $event)"
   />
 </template>
