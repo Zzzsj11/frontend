@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { apiRequest } from '../api/client'
+const channelRequests = new Map<string, Promise<void>>()
 
 export type GenerationModality = 'text' | 'image' | 'video'
 export interface GenerationSelection {
@@ -39,13 +40,24 @@ export const useGenerationPreferences = defineStore('generationPreferences', {
     },
     async loadChannels(model: string) {
       const owner = this.ownerId
-      const result = await apiRequest<{ channels: GenerationChannel[] }>(
-        `/model-options/${encodeURIComponent(model)}/channels`,
-      )
-      if (this.ownerId !== owner) return
-      this.channels[model] = result.channels
-        .filter((channel) => channel.available)
-        .sort((a, b) => a.priority - b.priority)
+      const key = `${owner}:${model}`
+      const pending = channelRequests.get(key)
+      if (pending) return pending
+      const request = (async () => {
+        const result = await apiRequest<{ channels: GenerationChannel[] }>(
+          `/model-options/${encodeURIComponent(model)}/channels`,
+        )
+        if (this.ownerId !== owner) return
+        this.channels[model] = result.channels
+          .filter((channel) => channel.available)
+          .sort((a, b) => a.priority - b.priority)
+      })()
+      channelRequests.set(key, request)
+      try {
+        await request
+      } finally {
+        if (channelRequests.get(key) === request) channelRequests.delete(key)
+      }
     },
     async save(modality: GenerationModality, selection: GenerationSelection) {
       const owner = this.ownerId

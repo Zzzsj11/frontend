@@ -53,6 +53,17 @@ watch(
     if (model.value !== props.modelValue) emit('update:modelValue', model.value)
   },
 )
+watch(
+  [model, () => selected.value?.channel],
+  ([value, channel]) => {
+    if (channel && value && !preferences.channels[value]) {
+      void preferences.loadChannels(value).catch(() => {
+        // Keep the selected key visible when discovery is temporarily unavailable.
+      })
+    }
+  },
+  { immediate: true },
+)
 async function expand(value: string) {
   expanded.value = value
   channelLoading.value = true
