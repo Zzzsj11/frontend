@@ -338,6 +338,7 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await page.getByRole('button', { name: /管理员/ }).click()
   await expect(page.getByRole('menuitem', { name: '管理后台' })).toBeVisible()
   await page.getByRole('button', { name: /管理员/ }).click()
+  await expect(page.locator('.app-header').getByLabel('文本模型', { exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: 'ASS 视频' }).first().click()
   const assText = page.getByRole('dialog').getByLabel('文本模型', { exact: true })
   await assText.click()

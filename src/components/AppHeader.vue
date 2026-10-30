@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import DeploymentBadge from './DeploymentBadge.vue'
-import TextModelSelect from './TextModelSelect.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -73,7 +72,6 @@ onBeforeUnmount(() => {
       <span class="beta">内测版</span>
     </RouterLink>
     <div class="header-actions">
-      <TextModelSelect v-if="auth.user && !auth.user.mustChangePassword" />
       <DeploymentBadge />
       <button
         class="balance-pill all-in-one"
