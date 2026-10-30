@@ -17,6 +17,7 @@ const copyResult = async (result: ChatComparisonResult) => {
           <div>
             <b>{{ result.name }}</b
             ><small>{{ result.model }}</small>
+            <small>请求渠道：{{ result.requestedChannel || '自动（平台推荐）' }}</small>
           </div>
           <span class="result-status" :class="result.status">{{
             result.status === 'ok' ? '成功' : '失败'

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AdminComparisonChannels from './AdminComparisonChannels.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
   fetchChatComparisonModels,
@@ -9,6 +10,7 @@ import {
 import { GENERAL_STORYBOARD_MAX_SHOTS } from '../generationConstraints'
 import AdminGeneralOutlineResults from './AdminGeneralOutlineResults.vue'
 
+const channels = ref<Record<string, string | null>>({})
 const models = ref<ChatComparisonModel[]>([])
 const selectedModels = ref(['gemini-3.8-flash-all-in-one', 'doubao-seed-2-1-pro-260915-all-in-one'])
 const loading = ref(false)
@@ -54,7 +56,13 @@ const run = async () => {
   results.value = []
   try {
     results.value = (
-      await runGeneralOutlineComparison({ ...form, models: selectedModels.value })
+      await runGeneralOutlineComparison({
+        ...form,
+        models: selectedModels.value,
+        channels: Object.fromEntries(
+          selectedModels.value.map((model) => [model, channels.value[model] || null]),
+        ),
+      })
     ).results
   } catch (e) {
     error.value = e instanceof Error ? e.message : '通用大纲对比失败'
@@ -132,6 +140,11 @@ onMounted(async () => {
           </button>
         </div>
       </fieldset>
+      <AdminComparisonChannels
+        v-model="channels"
+        :models="models.filter((model) => selectedModels.includes(model.code))"
+        :disabled="loading"
+      />
       <div class="actions">
         <button class="run-button" type="button" :disabled="!canRun" @click="run">
           {{ loading ? `正在生成 ${selectedModels.length} 份大纲…` : '开始业务对比' }}

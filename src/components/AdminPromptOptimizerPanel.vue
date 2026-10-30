@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import VideoModelSelect from './VideoModelSelect.vue'
+import { useGenerationPreferences } from '../stores/generationPreferences'
+import TextModelSelect from './TextModelSelect.vue'
 import ImageZoom from './ImageZoom.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
@@ -19,6 +22,9 @@ import type { ShotGenOptions } from '../types'
 
 type GenerationMode = 'text' | 'first_frame' | 'first_last' | 'reference'
 
+const preferences = useGenerationPreferences()
+const videoModel = ref('minimax-h3-all-in-one')
+const selectedVideoModel = computed(() => preferences.selections.video?.model || videoModel.value)
 const status = ref<PromptOptimizerStatus | null>(null)
 const provider = ref<PromptOptimizerProvider>('gemini')
 const prompt = ref('')
@@ -60,6 +66,7 @@ const generationAudios = computed(() => media.value.filter((item) => item.kind =
 const generationPrompt = computed(() => current.value?.outputPrompt?.trim() || prompt.value.trim())
 const canGenerate = computed(() => {
   if (
+    selectedVideoModel.value !== 'minimax-h3-all-in-one' ||
     !status.value?.providers.gemini.configured ||
     generationLoading.value ||
     !generationPrompt.value
@@ -187,7 +194,7 @@ const generateVideo = async () => {
       undefined,
       [],
       {
-        videoModel: 'minimax-h3-all-in-one',
+        videoModel: selectedVideoModel.value,
         imageModel: DEFAULT_IMAGE_MODEL,
         ratio: (ratio.value === 'adaptive' ? '16:9' : ratio.value) as ShotGenOptions['ratio'],
         resolution: '720p',
@@ -328,6 +335,11 @@ onBeforeUnmount(() => {
         平台服务暂不可用，请联系管理员检查平台配置。
       </p>
 
+      <TextModelSelect v-if="provider === 'gemini'" label="文本模型 / 渠道" />
+      <VideoModelSelect v-model="videoModel" label="视频模型 / 渠道" />
+      <p v-if="selectedVideoModel !== 'minimax-h3-all-in-one'" role="status">
+        本实验页仅支持 H3 的生成参数，请主动选择 H3 后生成。
+      </p>
       <div class="generation-mode" role="group" aria-label="H3 生成模式">
         <button
           v-for="item in [

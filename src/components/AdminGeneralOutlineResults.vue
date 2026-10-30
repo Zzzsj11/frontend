@@ -11,6 +11,7 @@ defineProps<{ results: GeneralOutlineComparisonResult[] }>()
         <div>
           <b>{{ result.name }}</b
           ><small>{{ result.model }}</small>
+          <small>请求渠道：{{ result.requestedChannel || '自动（平台推荐）' }}</small>
         </div>
         <span :class="result.status">{{ result.status === 'ok' ? '校验通过' : '失败' }}</span>
       </header>

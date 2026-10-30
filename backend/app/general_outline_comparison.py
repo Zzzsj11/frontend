@@ -4,12 +4,15 @@ import asyncio
 import time
 from typing import Any
 
+from .generation_preferences import text_selection
 from .llm_comparison import CHAT_TEST_MODEL_MAP, call_chat_model
 from .storyboard_prompt import generate_general_story_outline
 from .token_usage import normalize_usage
 
 
-async def compare_general_outlines(*, models: list[str], config: dict[str, Any], selected_humans: list[dict[str, Any]]) -> list[dict[str, Any]]:
+async def compare_general_outlines(
+    *, models: list[str], config: dict[str, Any], selected_humans: list[dict[str, Any]], channels: dict[str, str | None] | None = None
+) -> list[dict[str, Any]]:
     semaphore = asyncio.Semaphore(3)
 
     async def run(model: str) -> dict[str, Any]:
@@ -62,6 +65,7 @@ async def compare_general_outlines(*, models: list[str], config: dict[str, Any],
                 raise
 
         started = time.perf_counter()
+        token = text_selection.set({"model": model, "channel": (channels or {}).get(model)})
         try:
             outline = await generate_general_story_outline(
                 config=config,
@@ -71,6 +75,7 @@ async def compare_general_outlines(*, models: list[str], config: dict[str, Any],
             usage = normalize_usage(outline.get("usage") or {})
             return {
                 "model": model,
+                "requestedChannel": (channels or {}).get(model),
                 "name": profile.name,
                 "protocol": profile.protocol,
                 "provider": "all-in-one" if model.endswith("-all-in-one") else profile.protocol,
@@ -89,6 +94,7 @@ async def compare_general_outlines(*, models: list[str], config: dict[str, Any],
             }
             return {
                 "model": model,
+                "requestedChannel": (channels or {}).get(model),
                 "name": profile.name,
                 "protocol": profile.protocol,
                 "provider": "all-in-one" if model.endswith("-all-in-one") else profile.protocol,
@@ -100,5 +106,8 @@ async def compare_general_outlines(*, models: list[str], config: dict[str, Any],
                 "usage": normalize_usage(raw_usage),
                 "shots": [],
             }
+
+        finally:
+            text_selection.reset(token)
 
     return list(await asyncio.gather(*(run(model) for model in models)))

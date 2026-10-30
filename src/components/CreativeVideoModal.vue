@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TextModelSelect from './TextModelSelect.vue'
 import ImageZoom from './ImageZoom.vue'
 import BaseSelect from './base/BaseSelect.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -228,6 +229,7 @@ onBeforeUnmount(() => pollTimer && clearTimeout(pollTimer))
         </button>
       </div>
       <p class="hint">视频参考按首、中、尾画面及音轨分析，视频和音频参考最长 15 秒。</p>
+      <TextModelSelect v-if="provider === 'gemini'" label="文本模型 / 渠道" />
       <div class="switch modes" role="group" aria-label="视频生成模式">
         <button
           v-for="item in [
