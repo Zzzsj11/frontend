@@ -14,7 +14,7 @@ it('shows the actual phase and elapsed time without hiding an existing version',
   await vi.advanceTimersByTimeAsync(1000)
   expect(wrapper.text()).toContain('1分06秒')
   await wrapper.setProps({ phase: 'manual_review' })
-  expect(wrapper.text()).toContain('状态核对中')
+  expect(wrapper.text()).toContain('待人工核对')
   wrapper.unmount()
   expect(vi.getTimerCount()).toBe(0)
 })

@@ -9,6 +9,7 @@ import { videoModelConcurrency } from '../../generationModels'
 import {
   PollingCancelledError,
   GenerationJobFailed,
+  GenerationReconciliationRequired,
   abortableSleep,
   registerTaskWatcher,
 } from '../../utils/generationPoller'
@@ -79,6 +80,7 @@ export const mediaActions = {
     const idx = this.lines.findIndex((l) => l.id === lineId)
     if (idx < 0 || this.lines[idx].shot.status === 'generating') return
     const line = this.lines[idx]
+    if (line.shot.generationPhase === 'manual_review') return
     if (shotPrompt !== undefined) line.shotPrompt = shotPrompt
     if (options) line.shotOptions = normalizeShotOptions(options)
     const genOptions = normalizeShotOptions(line.shotOptions ?? DEFAULT_SHOT_OPTIONS)
@@ -113,7 +115,10 @@ export const mediaActions = {
         },
         (snapshot) => {
           const current = this.lines.find((item) => item.id === lineId)
-          if (current) current.shot.generationPhase = snapshot.phase || 'provider_running'
+          if (current) {
+            current.shot.generationPhase = snapshot.phase || 'provider_running'
+            current.shot.generationJobId = snapshot.id
+          }
         },
       )
       const still = this.lines.find((l) => l.id === lineId)
@@ -138,6 +143,15 @@ export const mediaActions = {
     } catch (error) {
       // 切换子项目导致轮询被取消：保持 generating 等待切回恢复，不标失败不弹窗
       if (error instanceof PollingCancelledError) return
+      if (error instanceof GenerationReconciliationRequired) {
+        const current = this.lines.find((item) => item.id === lineId)
+        if (current) {
+          current.shot.status = 'failed'
+          current.shot.generationPhase = 'manual_review'
+          current.shot.error = error.message
+        }
+        return
+      }
       if (
         !(error instanceof GenerationJobFailed) &&
         (!(error instanceof ApiError) ||
@@ -199,7 +213,9 @@ export const mediaActions = {
     const watcher = taskId ? registerTaskWatcher(taskId) : null
     const interrupted = () => this.activeTaskId !== taskId || Boolean(watcher?.signal.aborted)
     const needsShot = (line: ScriptLine) =>
-      line.generationStatus === 'succeeded' && line.shot.status !== 'done'
+      line.generationStatus === 'succeeded' &&
+      line.shot.status !== 'done' &&
+      line.shot.generationPhase !== 'manual_review'
     const pending = [...this.lines].filter(needsShot)
     let cursor = 0
     const worker = async () => {

@@ -94,8 +94,8 @@ def test_uncertain_legacy_timeout_is_not_treated_as_safe_to_resubmit(client, vid
             "UPDATE generation_jobs SET status='failed',phase='failed',provider_task_id='original-platform-job',error='等待超过2小时，请核查原任务；未重新提交' WHERE id=?", (jid,)
         )
     replay = client.post("/api/generations/videos", json={**body, "request_id": "another-intent"})
-    assert replay.status_code == 202 and replay.json()["id"] == jid
-    assert replay.json()["phase"] == "manual_review"
+    assert replay.status_code == 409
+    assert "待人工核对" in replay.text
     active = client.get(f"/api/tasks/{body['project_task_id']}/generations/active").json()
     assert active[0]["phase"] == "manual_review"
     assert dispatch.await_count == quota.await_count == 1
@@ -119,3 +119,42 @@ def test_sd20_identity_defaults_to_person_asset_mode_and_is_idempotent(client, v
     assert request["person_reference_indices"] == [1]
     assert request["_submissionInput"]["person_asset_mode"] is True
     assert dispatch.await_count == quota.await_count == 1
+
+
+def test_manual_review_release_is_audited_and_allows_new_intent(client, video_submission):
+    body, dispatch, quota, _ = video_submission
+    jid = client.post("/api/generations/videos", json=body).json()["id"]
+    with sqlite3.connect(TEST_DB) as db:
+        db.execute("UPDATE generation_jobs SET status='failed',phase='manual_review' WHERE id=?", (jid,))
+    snapshot = client.post("/api/generations/status", json={"ids": [jid]}).json()[0]
+    assert snapshot["phase"] == "manual_review" and not snapshot["retryAllowed"]
+    assert client.post("/api/generations/videos", json={**body, "request_id": "blocked"}).status_code == 409
+    url = f"/api/admin/jobs/{jid}/release-review"
+    assert client.post(url, json={"reason": "平台确认未受理", "confirmed_not_accepted": False}).status_code == 422
+    assert client.post(url, json={"reason": "平台确认未受理", "confirmed_not_accepted": True}).status_code == 200
+    assert client.get(f"/api/generations/{jid}").json()["retryAllowed"]
+    assert client.post(url, json={"reason": "平台确认未受理", "confirmed_not_accepted": True}).status_code == 409
+    assert any(x["action"] == "job.release_review" and x["targetId"] == jid for x in client.get("/api/admin/audit-logs").json()["items"])
+    new = client.post("/api/generations/videos", json={**body, "request_id": "after-release"})
+    assert new.status_code == 202 and new.json()["id"] != jid
+    assert dispatch.await_count == quota.await_count == 2
+
+
+def test_release_rejects_accepted_and_running_jobs(client, video_submission):
+    body, _, _, _ = video_submission
+    jid = client.post("/api/generations/videos", json=body).json()["id"]
+    url = f"/api/admin/jobs/{jid}/release-review"
+    payload = {"reason": "平台核查测试证据", "confirmed_not_accepted": True}
+    assert client.post(url, json=payload).status_code == 409
+    with sqlite3.connect(TEST_DB) as db:
+        db.execute("UPDATE generation_jobs SET status='failed',phase='manual_review',provider_task_id='accepted' WHERE id=?", (jid,))
+    assert client.post(url, json=payload).status_code == 409
+    created = client.post("/api/admin/users", json={"username": "review-unprivileged", "password": "test-review-secure-123"}).json()
+    login = client.post("/api/auth/login", json={"username": "review-unprivileged", "password": "test-review-secure-123"}).json()
+    changed = client.post(
+        "/api/auth/change-password",
+        headers={"Authorization": f"Bearer {login['accessToken']}"},
+        json={"current_password": "test-review-secure-123", "new_password": "test-review-secure-456"},
+    ).json()
+    assert client.post(url, json=payload, headers={"Authorization": f"Bearer {changed['accessToken']}"}).status_code == 403
+    client.delete(f"/api/admin/users/{created['id']}")

@@ -83,6 +83,7 @@ class Job:
             "provider_task_id": self.provider_task_id,
             "idempotency_key": self.idempotency_key,
             "phase": "manual_review" if needs_provider_reconciliation(self) else self.phase,
+            "retryAllowed": self.status not in {"queued", "running"} and not needs_provider_reconciliation(self),
             "attempt": self.attempt,
         }
 
@@ -713,7 +714,7 @@ class JobManager:
                 if not model or model.deleted_at is not None or (user_id is not None and model.user_id != user_id):
                     return None
             return Job(
-                **cached,
+                **{key: value for key, value in cached.items() if key != "retryAllowed"},
                 user_id=model.user_id,
                 project_id=model.project_id,
                 project_task_id=model.project_task_id,

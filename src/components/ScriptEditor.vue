@@ -169,8 +169,12 @@ const batchGeneratableLines = computed(() =>
     (line) =>
       line.generationStatus === 'succeeded' &&
       line.shot.status !== 'done' &&
-      line.shot.status !== 'generating',
+      line.shot.status !== 'generating' &&
+      line.shot.generationPhase !== 'manual_review',
   ),
+)
+const reviewCount = computed(
+  () => store.lines.filter((line) => line.shot.generationPhase === 'manual_review').length,
 )
 const batchGeneratableCount = computed(() => batchGeneratableLines.value.length)
 
@@ -298,6 +302,9 @@ const confirmBatchGenerate = async () => {
             {{ checkingBatchCost ? '正在核算费用…' : '批量生成'
             }}{{ batchGeneratableCount ? `（${batchGeneratableCount}）` : '' }}
           </button>
+          <span v-if="reviewCount" role="status"
+            >{{ reviewCount }} 个镜头待人工核对，已排除，请联系开发人员</span
+          >
           <button class="btn-outline" @click="store.openLibrary()">
             <AppIcon name="users" :size="15" />
             角色阵容

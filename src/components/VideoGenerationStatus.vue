@@ -8,7 +8,7 @@ const labels: Record<string, string> = {
   reviewing_assets: '人物素材审核中',
   archiving: '素材保存中',
   reconciling: '状态核对中',
-  manual_review: '状态核对中',
+  manual_review: '待人工核对，请联系开发人员，不能重新生成',
 }
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | undefined

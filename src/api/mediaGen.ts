@@ -2,6 +2,7 @@ import type { ShotGenOptions } from '../types'
 import type { ImageModelId } from '../generationModels'
 import { isH3VideoModel } from '../generationModels'
 import { DEFAULT_H3_MODE } from '../mediaConstraints'
+import { ApiError } from '../errorBus'
 import { apiRequest } from './client'
 import { watchGenerationJob, type GenerationJobSnapshot } from '../utils/generationPoller'
 
@@ -126,6 +127,10 @@ export async function generateShotVideo(
       project_task_id: projectTaskId,
       storyboard_line_id: storyboardLineId,
     }),
+  }).catch((error) => {
+    if (pendingKey && error instanceof ApiError && error.status === 409)
+      localStorage.removeItem(pendingKey)
+    throw error
   })
   if (pendingKey) localStorage.removeItem(pendingKey)
   // 以服务端工单创建时间为准；客户端只负责逐秒展示，不自行猜测起点。

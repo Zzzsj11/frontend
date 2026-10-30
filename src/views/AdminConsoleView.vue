@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AdminJobRelease from '../components/AdminJobRelease.vue'
 import BaseSelect from '../components/base/BaseSelect.vue'
 import { computed, onMounted, ref } from 'vue'
 import { apiRequest } from '../api/client'
@@ -813,6 +814,7 @@ onMounted(() => {
               <option value="running">running</option>
               <option value="succeeded">succeeded</option>
               <option value="failed">failed</option>
+              <option value="manual_review">待人工核对</option>
               <option value="cancelled">cancelled</option>
             </BaseSelect>
             <input
@@ -940,6 +942,11 @@ onMounted(() => {
                     <button class="action" @click="openReqDetail(row)">详情</button>
                   </td>
                   <td v-if="tab === 'jobs'">
+                    <AdminJobRelease
+                      v-if="row.phase === 'manual_review' && row.id"
+                      :job-id="row.id"
+                      @released="load"
+                    />
                     <button
                       v-if="row.providerTaskId"
                       class="action"

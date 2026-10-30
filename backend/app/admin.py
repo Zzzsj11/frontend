@@ -24,6 +24,7 @@ from .general_outline_comparison import compare_general_outlines
 from .generation_constraints import GENERAL_STORYBOARD_MAX_SHOTS
 from .generation_timing import generation_elapsed_seconds
 from .jobs import jobs as job_manager
+from .jobs import needs_provider_reconciliation
 from .kling import ASPECT_RATIOS as KLING_ASPECT_RATIOS
 from .kling import IMAGE_TYPES as KLING_IMAGE_TYPES
 from .kling import MAX_DURATION as KLING_MAX_DURATION
@@ -455,7 +456,14 @@ async def jobs(
     conditions = [GenerationJobModel.deleted_at.is_(None)]
     if kind in {"image", "video"}:
         conditions.append(GenerationJobModel.kind == kind)
-    if status:
+    if status == "manual_review":
+        conditions.append(
+            or_(
+                GenerationJobModel.phase == "manual_review",
+                (GenerationJobModel.status == "failed") & GenerationJobModel.provider_task_id.isnot(None) & GenerationJobModel.error.contains("核查原任务"),
+            )
+        )
+    elif status:
         conditions.append(GenerationJobModel.status == status)
     if q and q.strip():
         term = f"%{q.strip()}%"
@@ -485,7 +493,7 @@ async def jobs(
             "kind": j.kind,
             "status": j.status,
             "progress": j.progress,
-            "phase": j.phase,
+            "phase": "manual_review" if needs_provider_reconciliation(j) else j.phase,
             "workerId": j.worker_id,
             "provider": j.provider,
             "providerTaskId": j.provider_task_id,
@@ -503,6 +511,34 @@ async def jobs(
         for j, username, stale in rows
     ]
     return {"total": total, "page": page, "pageSize": page_size, "items": items}
+
+
+class ReleaseReviewIn(BaseModel):
+    reason: str = Field(min_length=5, max_length=2000)
+    confirmed_not_accepted: bool
+
+
+@router.post("/jobs/{job_id}/release-review")
+async def release_job_review(job_id: str, payload: ReleaseReviewIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    from .redis_store import cache_job
+
+    require_admin(user)
+    if not payload.confirmed_not_accepted or len(payload.reason.strip()) < 5:
+        raise HTTPException(422, "请确认平台未受理并填写核查依据")
+    job = (await db.execute(select(GenerationJobModel).where(GenerationJobModel.id == job_id, GenerationJobModel.deleted_at.is_(None)).with_for_update())).scalar_one_or_none()
+    if not job:
+        raise HTTPException(404, "任务不存在")
+    if job.status != "failed" or not needs_provider_reconciliation(job) or job.provider_task_id:
+        raise HTTPException(409, "仅允许解除无平台工单号的待核对失败任务；已受理任务请同步")
+    before = {"phase": job.phase, "error": job.error}
+    job.phase = "failed"
+    job.error = "平台未受理，人工核查已解除限制，可重新生成"
+    job.request = {**(job.request or {}), "_manualResolution": {"reason": payload.reason.strip(), "actor": user.id, "resolvedAt": utcnow().isoformat(), "before": before}}
+    job.updated_at = utcnow()
+    await audit(db, request, user, "job.release_review", "generation_job", job.id, before, job.request["_manualResolution"])
+    await db.commit()
+    await cache_job(job.id, job_manager._from_model(job).public())
+    return {"id": job.id, "retryAllowed": True}
 
 
 @router.post("/jobs/{job_id}/sync")

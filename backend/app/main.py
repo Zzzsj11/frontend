@@ -920,6 +920,8 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
         if existing is None:
             existing = next((row for row in candidates if row.status in {"queued", "running"} or needs_provider_reconciliation(row)), None)
         if existing is not None:
+            if needs_provider_reconciliation(existing):
+                raise HTTPException(409, f"待人工核对，不能重新生成。请联系开发人员处理。工单：{existing.id}")
             if (existing.request or {}).get("_submissionInput") != submission_input:
                 raise HTTPException(409, "该镜头已有生成请求，请先核对原任务；不同参数不能覆盖或重复提交")
             reused = jobs._from_model(existing)
@@ -1066,6 +1068,8 @@ async def get_generation_status_batch(payload: GenerationStatusBatchRequest, use
             "progress": row.progress,
             "result": row.result,
             "error": row.error,
+            "phase": "manual_review" if needs_provider_reconciliation(row) else row.phase,
+            "retryAllowed": row.status not in {"queued", "running"} and not needs_provider_reconciliation(row),
         }
         for row in rows
     ]
