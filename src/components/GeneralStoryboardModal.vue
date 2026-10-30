@@ -25,6 +25,7 @@ import CharacterPortrait from './CharacterPortrait.vue'
 import CharacterZoom from './CharacterZoom.vue'
 import VideoModelSelect from './VideoModelSelect.vue'
 import ImageModelSelect from './ImageModelSelect.vue'
+import TextModelSelect from './TextModelSelect.vue'
 import { MAX_VIDEO_DURATION, MIN_VIDEO_DURATION } from '../mediaConstraints'
 import {
   GENERAL_STORYBOARD_MAX_GROUPS,
@@ -501,6 +502,7 @@ const submit = async () => {
                 </option>
               </BaseSelect></label
             >
+            <TextModelSelect label="文本模型 *" />
             <VideoModelSelect v-model="videoModel" label="视频模型 *" />
             <ImageModelSelect
               v-if="!random"

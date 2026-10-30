@@ -8,6 +8,7 @@ import CharacterPortrait from './CharacterPortrait.vue'
 import CharacterZoom from './CharacterZoom.vue'
 import VideoModelSelect from './VideoModelSelect.vue'
 import ImageModelSelect from './ImageModelSelect.vue'
+import TextModelSelect from './TextModelSelect.vue'
 import type { ShotGenOptions } from '../types'
 import {
   DEFAULT_IMAGE_MODEL,
@@ -178,6 +179,7 @@ const cancel = () => {
               </option>
             </BaseSelect></label
           >
+          <TextModelSelect label="文本模型 *" />
           <VideoModelSelect v-model="videoModel" label="视频模型 *" />
           <ImageModelSelect v-model="imageModel" :ratio="ratio" label="图片模型 *" />
           <label
