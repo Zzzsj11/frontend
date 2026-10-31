@@ -554,6 +554,15 @@ async def sync_generation_job(job_id: str, request: Request, user: CurrentUser, 
         validate_media_job_source(model)
     except ProviderError as exc:
         raise HTTPException(422, str(exc)) from exc
+    from .jobs import automatic_reconciliation
+
+    if automatic_reconciliation(model):
+        from .video_reconciliation import reconcile_one
+
+        result = await reconcile_one(job_id)
+        await audit(db, request, user, "job.sync", "generation_job", job_id, after=result)
+        await db.commit()
+        return result
     if job_manager.is_active(job_id):
         return {"providerStatus": None, "action": "skipped", "detail": "任务正在本机执行中，无需同步"}
     try:

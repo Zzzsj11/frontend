@@ -110,6 +110,7 @@ async function fetchBatchSnapshots(
 }
 
 function settleEntry(entry: WatchEntry<unknown>, job: GenerationJobSnapshot): boolean {
+  if (job.phase === 'auto_reconciling') entry.deadline = Date.now() + 660_000
   entry.polled = true
   entry.onUpdate?.(job)
   const status = (job.status ?? '').toLowerCase()

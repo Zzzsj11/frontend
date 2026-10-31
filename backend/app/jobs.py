@@ -16,8 +16,8 @@ from .config import settings
 from .database import session_factory
 from .error_logging import _redact, redact_error_text
 from .generation_constraints import video_job_timeout_seconds
-from .models import GenerationJobModel, SceneAssetModel, ShotAssetModel, TokenUsageModel, utcnow
-from .redis_store import acquire_execution_lease, cache_job, get_cached_job, notify_worker, release_execution_lease, renew_execution_lease
+from .models import GenerationJobModel, ProjectModel, ProjectTaskModel, SceneAssetModel, ShotAssetModel, StoryboardLineModel, TokenUsageModel, utcnow
+from .redis_store import acquire_execution_lease, cache_job, notify_worker, release_execution_lease, renew_execution_lease
 from .token_usage import add_token_usage, normalize_usage
 
 JobRunner = Callable[["Job"], Awaitable[dict[str, Any]]]
@@ -43,7 +43,15 @@ def _timestamp(value: datetime | float) -> float:
 
 
 def needs_provider_reconciliation(job) -> bool:
-    return job.phase == "manual_review" or (job.status == "failed" and bool(job.provider_task_id) and "核查原任务" in (job.error or ""))
+    return job.phase in {"manual_review", "auto_reconciling"} or (job.status == "failed" and bool(job.provider_task_id) and "核查原任务" in (job.error or ""))
+
+
+def automatic_reconciliation(job) -> bool:
+    return job.kind == "video" and job.provider == "all-in-one" and bool(job.provider_task_id) and needs_provider_reconciliation(job)
+
+
+def public_phase(job) -> str:
+    return "auto_reconciling" if automatic_reconciliation(job) else "manual_review" if needs_provider_reconciliation(job) else job.phase
 
 
 @dataclass
@@ -73,7 +81,7 @@ class Job:
         return {
             "id": self.id,
             "kind": self.kind,
-            "status": self.status,
+            "status": "running" if automatic_reconciliation(self) else self.status,
             "progress": self.progress,
             "result": self.result,
             "error": self.error,
@@ -82,7 +90,7 @@ class Job:
             "provider": self.provider,
             "provider_task_id": self.provider_task_id,
             "idempotency_key": self.idempotency_key,
-            "phase": "manual_review" if needs_provider_reconciliation(self) else self.phase,
+            "phase": public_phase(self),
             "retryAllowed": self.status not in {"queued", "running"} and not needs_provider_reconciliation(self),
             "attempt": self.attempt,
         }
@@ -201,8 +209,12 @@ class JobManager:
     async def _persist(self, job: Job, *, provider_confirmed_recovery: bool = False) -> None:
         job.updated_at = time.time()
         async with session_factory() as session:
-            model = await session.get(GenerationJobModel, job.id)
+            model = await session.get(GenerationJobModel, job.id, with_for_update=True)
             if model:
+                if model.worker_id and model.worker_id.startswith("reconcile-") and model.worker_id != job.worker_id:
+                    return
+                if model.status == "succeeded" and job.status != "succeeded":
+                    return
                 # The deadline reaper may fail a task while this worker is
                 # awaiting the provider. Never let stale in-memory state revive it.
                 if not provider_confirmed_recovery and model.status in {"failed", "cancelled"} and job.status not in {"failed", "cancelled"}:
@@ -384,6 +396,24 @@ class JobManager:
             model = await session.get(GenerationJobModel, job.id, with_for_update=True)
             if job.worker_id and (not model or model.worker_id != job.worker_id):
                 raise JobExpiredError("工单已被其他 Worker 接管，停止写入资产和用量")
+            if not model or model.deleted_at is not None:
+                raise JobExpiredError("工单已删除，停止恢复")
+            if model.worker_id and model.worker_id.startswith("reconcile-") and model.worker_id != job.worker_id:
+                raise JobExpiredError("原工单已由自动恢复接管")
+            if model.status == "succeeded":
+                job.status, job.phase, job.result, job.error = "succeeded", "succeeded", model.result, None
+                return
+            if provider_confirmed_recovery:
+                if job.worker_id and model.lease_expires_at and _timestamp(model.lease_expires_at) <= time.time():
+                    raise JobExpiredError("恢复租约已失效")
+                if job.worker_id and job.worker_id.startswith("reconcile-"):
+                    project = await session.get(ProjectModel, job.project_id)
+                    task = await session.get(ProjectTaskModel, job.project_task_id)
+                    if not project or not task or project.deleted_at or task.deleted_at or project.user_id != job.user_id or task.project_id != project.id:
+                        raise JobExpiredError("项目已删除或归属已变化，停止恢复")
+                line = await session.get(StoryboardLineModel, job.storyboard_line_id, with_for_update=True) if job.storyboard_line_id else None
+                if job.storyboard_line_id and (not line or line.deleted_at is not None):
+                    raise JobExpiredError("镜头已删除，停止恢复")
             terminal = bool(not provider_confirmed_recovery and model and model.status in {"failed", "cancelled"})
             if job.kind in {"image", "video"}:
                 existing_usage = None
@@ -449,6 +479,18 @@ class JobManager:
                     )
                 )
             elif job.storyboard_line_id and job.kind == "video" and job.result.get("videoUrl"):
+                existing_asset = await session.scalar(select(ShotAssetModel).where(ShotAssetModel.generation_job_id == job.id, ShotAssetModel.deleted_at.is_(None)).limit(1))
+                newer_job = await session.scalar(
+                    select(GenerationJobModel.id)
+                    .where(
+                        GenerationJobModel.storyboard_line_id == job.storyboard_line_id,
+                        GenerationJobModel.kind == "video",
+                        GenerationJobModel.deleted_at.is_(None),
+                        GenerationJobModel.created_at > model.created_at,
+                    )
+                    .limit(1)
+                )
+                make_current = not newer_job
                 current = (
                     (
                         await session.execute(
@@ -461,32 +503,46 @@ class JobManager:
                     .all()
                 )
                 for item in current:
-                    item.is_current = False
+                    if make_current:
+                        item.is_current = False
+                if existing_asset and make_current:
+                    existing_asset.is_current = True
                 request = job.request or {}
-                session.add(
-                    ShotAssetModel(
-                        id=f"shot-{uuid.uuid4().hex}",
-                        storyboard_line_id=job.storyboard_line_id,
-                        generation_job_id=job.id,
-                        model_code=str(request.get("model") or "") or None,
-                        cover_url=job.result["coverUrl"],
-                        cover_thumbnail_url=job.result.get("coverThumbnailUrl"),
-                        video_url=job.result["videoUrl"],
-                        duration=float(job.result.get("duration") or 0),
-                        resolution=str(request.get("resolution") or "720p"),
-                        requested_resolution=str(job.result.get("requestedResolution") or request.get("resolution") or "720p"),
-                        provider_resolution=str(job.result.get("providerResolution") or ""),
-                        actual_width=int(job.result.get("actualWidth") or 0) or None,
-                        actual_height=int(job.result.get("actualHeight") or 0) or None,
-                        fps=float(job.result.get("fps") or 0) or None,
-                        codec=str(job.result.get("codec") or ""),
-                        actual_duration=float(job.result.get("actualDuration") or 0) or None,
-                        file_size=int(job.result.get("fileSize") or 0) or None,
-                        ratio=str(job.result.get("ratio") or request.get("ratio") or "16:9"),
-                        prompt=str(request.get("prompt") or ""),
-                        is_current=True,
+                if not existing_asset:
+                    session.add(
+                        ShotAssetModel(
+                            id=f"shot-{uuid.uuid4().hex}",
+                            storyboard_line_id=job.storyboard_line_id,
+                            generation_job_id=job.id,
+                            model_code=str(request.get("model") or "") or None,
+                            cover_url=job.result["coverUrl"],
+                            cover_thumbnail_url=job.result.get("coverThumbnailUrl"),
+                            video_url=job.result["videoUrl"],
+                            duration=float(job.result.get("duration") or 0),
+                            resolution=str(request.get("resolution") or "720p"),
+                            requested_resolution=str(job.result.get("requestedResolution") or request.get("resolution") or "720p"),
+                            provider_resolution=str(job.result.get("providerResolution") or ""),
+                            actual_width=int(job.result.get("actualWidth") or 0) or None,
+                            actual_height=int(job.result.get("actualHeight") or 0) or None,
+                            fps=float(job.result.get("fps") or 0) or None,
+                            codec=str(job.result.get("codec") or ""),
+                            actual_duration=float(job.result.get("actualDuration") or 0) or None,
+                            file_size=int(job.result.get("fileSize") or 0) or None,
+                            ratio=str(job.result.get("ratio") or request.get("ratio") or "16:9"),
+                            prompt=str(request.get("prompt") or ""),
+                            is_current=make_current,
+                        )
                     )
-                )
+            if provider_confirmed_recovery:
+                # Asset, usage and terminal state commit together; retries cannot duplicate them.
+                model.status, model.phase, model.progress = "succeeded", "succeeded", 100
+                model.result, model.error, model.finished_at = job.result, None, utcnow()
+                model.worker_id, model.lease_expires_at, model.reconciliation_next_at = None, None, None
+                from .video_billing import reconcile_video_job
+
+                await session.flush()
+                if job.kind == "video":
+                    await reconcile_video_job(session, model)
             await session.commit()
 
     async def expire_overdue_video_jobs(self) -> int:
@@ -691,13 +747,7 @@ class JobManager:
             job.result = result
             job.progress, job.status, job.phase, job.error = 100, "succeeded", "succeeded", None
             await self._persist_asset(job, provider_confirmed_recovery=True)
-            await self._persist(job, provider_confirmed_recovery=True)
-            if job.kind == "video":
-                from .video_billing import reconcile_video_billing
-
-                async with session_factory() as session:
-                    await reconcile_video_billing(session, [job.id])
-                    await session.commit()
+            await cache_job(job.id, job.public())
         return job
 
     async def finalize_failure(self, job: Job, error: str) -> Job:
@@ -707,20 +757,6 @@ class JobManager:
         return job
 
     async def get(self, job_id: str, user_id: str | None = None) -> Job | None:
-        cached = await get_cached_job(job_id)
-        if cached:
-            async with session_factory() as session:
-                model = await session.get(GenerationJobModel, job_id)
-                if not model or model.deleted_at is not None or (user_id is not None and model.user_id != user_id):
-                    return None
-            return Job(
-                **{key: value for key, value in cached.items() if key != "retryAllowed"},
-                user_id=model.user_id,
-                project_id=model.project_id,
-                project_task_id=model.project_task_id,
-                storyboard_line_id=model.storyboard_line_id,
-                request=model.request,
-            )
         async with session_factory() as session:
             model = await session.get(GenerationJobModel, job_id)
             if not model or model.deleted_at is not None or (user_id is not None and model.user_id != user_id):

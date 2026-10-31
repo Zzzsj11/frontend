@@ -50,7 +50,7 @@ from .generation_preferences import router as generation_preferences_router
 from .h3_prompt_compiler import compile_h3_prompt
 from .image_download import router as image_download_router
 from .image_model_policy import validate_image_selection
-from .jobs import Job, jobs, needs_provider_reconciliation
+from .jobs import Job, automatic_reconciliation, jobs, needs_provider_reconciliation, public_phase
 from .media_constraints import normalize_video_duration
 from .models import (
     AiModelModel,
@@ -178,10 +178,15 @@ async def lifespan(_app: FastAPI):
         recovered = await jobs.recover_stale_jobs(resume_generation)
         if recovered["resumed"] or recovered["failed"]:
             logger.info("媒体生成任务恢复：续跑 %s 个，判败 %s 个", recovered["resumed"], recovered["failed"])
+    from .video_reconciliation import serve as reconcile_videos
+
+    reconciler = asyncio.create_task(reconcile_videos())
     reaper = asyncio.create_task(stale_generation_reaper())
     try:
         yield
     finally:
+        reconciler.cancel()
+        await asyncio.gather(reconciler, return_exceptions=True)
         reaper.cancel()
         with suppress(asyncio.CancelledError):
             await reaper
@@ -907,7 +912,7 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
                     GenerationJobModel.deleted_at.is_(None),
                     or_(
                         GenerationJobModel.status.in_(("queued", "running")),
-                        GenerationJobModel.phase == "manual_review",
+                        GenerationJobModel.phase.in_(("manual_review", "auto_reconciling")),
                         (GenerationJobModel.status == "failed") & GenerationJobModel.provider_task_id.isnot(None) & GenerationJobModel.error.contains("核查原任务"),
                         GenerationJobModel.request["request_id"].as_string() == payload.request_id if payload.request_id else False,
                     ),
@@ -920,6 +925,8 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
         if existing is None:
             existing = next((row for row in candidates if row.status in {"queued", "running"} or needs_provider_reconciliation(row)), None)
         if existing is not None:
+            if automatic_reconciliation(existing):
+                raise HTTPException(409, f"正在自动核对并恢复原视频，无需重新生成，不会重复扣费。工单：{existing.id}")
             if needs_provider_reconciliation(existing):
                 raise HTTPException(409, f"待人工核对，不能重新生成。请联系开发人员处理。工单：{existing.id}")
             if (existing.request or {}).get("_submissionInput") != submission_input:
@@ -1064,11 +1071,11 @@ async def get_generation_status_batch(payload: GenerationStatusBatchRequest, use
         {
             "id": row.id,
             "kind": row.kind,
-            "status": row.status,
+            "status": "running" if automatic_reconciliation(row) else row.status,
             "progress": row.progress,
             "result": row.result,
             "error": row.error,
-            "phase": "manual_review" if needs_provider_reconciliation(row) else row.phase,
+            "phase": public_phase(row),
             "retryAllowed": row.status not in {"queued", "running"} and not needs_provider_reconciliation(row),
         }
         for row in rows
@@ -1122,7 +1129,7 @@ async def list_active_task_generations(task_id: str, user: CurrentUser, db: Asyn
             "kind": row.kind,
             "storyboardLineId": row.storyboard_line_id,
             "progress": row.progress,
-            "phase": "manual_review" if needs_provider_reconciliation(row) else row.phase,
+            "phase": public_phase(row),
             # 前端刷新后用服务端落库时间恢复等待秒数，避免从 0 重新计时。
             "createdAt": row.created_at.isoformat(),
             "providerSubmittedAt": row.provider_submitted_at.isoformat() if row.provider_submitted_at else None,

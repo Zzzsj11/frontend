@@ -80,7 +80,7 @@ export const mediaActions = {
     const idx = this.lines.findIndex((l) => l.id === lineId)
     if (idx < 0 || this.lines[idx].shot.status === 'generating') return
     const line = this.lines[idx]
-    if (line.shot.generationPhase === 'manual_review') return
+    if (['manual_review', 'auto_reconciling'].includes(line.shot.generationPhase || '')) return
     if (shotPrompt !== undefined) line.shotPrompt = shotPrompt
     if (options) line.shotOptions = normalizeShotOptions(options)
     const genOptions = normalizeShotOptions(line.shotOptions ?? DEFAULT_SHOT_OPTIONS)
@@ -215,7 +215,7 @@ export const mediaActions = {
     const needsShot = (line: ScriptLine) =>
       line.generationStatus === 'succeeded' &&
       line.shot.status !== 'done' &&
-      line.shot.generationPhase !== 'manual_review'
+      !['manual_review', 'auto_reconciling'].includes(line.shot.generationPhase || '')
     const pending = [...this.lines].filter(needsShot)
     let cursor = 0
     const worker = async () => {

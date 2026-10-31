@@ -815,6 +815,7 @@ onMounted(() => {
               <option value="succeeded">succeeded</option>
               <option value="failed">failed</option>
               <option value="manual_review">待人工核对</option>
+              <option value="auto_reconciling">自动恢复原视频</option>
               <option value="cancelled">cancelled</option>
             </BaseSelect>
             <input

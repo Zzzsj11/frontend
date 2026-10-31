@@ -235,6 +235,8 @@ class GenerationJobModel(LifecycleMixin, Base):
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     provider_submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reconciliation_next_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    reconciliation_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class WorkerInstanceModel(LifecycleMixin, Base):
