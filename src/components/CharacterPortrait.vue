@@ -44,8 +44,8 @@ const onLoad = (event: Event) => {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  object-position: center top;
+  object-fit: contain;
+  object-position: center;
 }
 
 .character-portrait.legacy-sheet img {

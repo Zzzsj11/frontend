@@ -82,3 +82,92 @@ test('asset labels stay above portraits in a multi-column grid', async ({ page }
   await page.getByRole('button', { name: '修改名称', exact: true }).click()
   await expect(page.getByRole('dialog', { name: '编辑数字人 · 男14' })).toBeVisible()
 })
+
+test('single portraits remain complete in wide, square and vertical containers', async ({
+  page,
+}) => {
+  await page.route('**/portrait-fixture', (route) =>
+    route.fulfill({ contentType: 'text/html', body: '<div id="app"></div>' }),
+  )
+  await page.goto('/portrait-fixture')
+  await page.evaluate(async () => {
+    const load = (path: string) => import(/* @vite-ignore */ path)
+    const { createApp, h } = await load('/node_modules/.vite/deps/vue.js')
+    const { default: Portrait } = await load('/src/components/CharacterPortrait.vue')
+    const src =
+      'data:image/svg+xml,' +
+      encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="150"><rect width="100" height="150" fill="green"/><circle cx="50" cy="75" r="40" fill="white"/></svg>',
+      )
+    createApp({
+      render: () =>
+        [
+          [124, 68],
+          [64, 64],
+          [124, 186],
+        ].map(([width, height]) =>
+          h('div', { style: { width: width + 'px', height: height + 'px' } }, [
+            h(Portrait, { src, alt: '完整人物' }),
+          ]),
+        ),
+    }).mount('#app')
+  })
+  const images = page.locator('.character-portrait img')
+  await expect(images).toHaveCount(3)
+  for (const image of await images.all()) {
+    await expect(image).toHaveJSProperty('naturalHeight', 150)
+    await expect(image).toHaveCSS('object-fit', 'contain')
+  }
+})
+
+for (const entry of ['GeneralStoryboardModal', 'MagicScriptModal']) {
+  test(`${entry} displays complete vertical portraits in the character picker`, async ({
+    page,
+  }) => {
+    await page.route(/^https?:\/\/[^/]+\/api\//, (route) => route.fulfill({ json: [] }))
+    await page.route('**/portrait-fixture', (route) =>
+      route.fulfill({ contentType: 'text/html', body: '<div id="app"></div>' }),
+    )
+    await page.goto('/portrait-fixture')
+    await page.evaluate(async (entry) => {
+      const load = (path: string) => import(/* @vite-ignore */ path)
+      const { createApp, h } = await load('/node_modules/.vite/deps/vue.js')
+      const { createPinia } = await load('/node_modules/.vite/deps/pinia.js')
+      const { default: Modal } = await load(`/src/components/${entry}.vue`)
+      const { useProjectStore } = await load('/src/stores/project.ts')
+      const pinia = createPinia()
+      const store = useProjectStore(pinia)
+      store.digitalHumans = Array.from({ length: 28 }, (_, i) => ({
+        id: `portrait-${i}`,
+        name: `人物${i}`,
+        style: '男',
+        description: '',
+        avatar:
+          'data:image/svg+xml,' +
+          encodeURIComponent(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="150"><rect width="100" height="150" fill="green"/></svg>',
+          ),
+      }))
+      store.generalStoryboardOptions = {
+        genres: [{ value: 'pop', label: '流行歌曲' }],
+        seasons: ['秋'],
+        ageGroups: ['青年'],
+        visualStyles: ['电影写实'],
+        ratios: ['16:9'],
+      }
+      store.generalStoryboardOpen = true
+      store.magicOpen = true
+      createApp({ render: () => h(Modal) })
+        .use(pinia)
+        .mount('#app')
+    }, entry)
+    const portraits = page.locator('.character-portrait')
+    await expect(portraits).toHaveCount(28)
+    const portrait = portraits.first()
+    await expect(portrait.locator('img')).toHaveCSS('object-fit', 'contain')
+    const box = await portrait.boundingBox()
+    expect(box!.height / box!.width).toBeCloseTo(1.5, 1)
+    await portrait.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: `output/playwright/${entry}-complete-portraits.png` })
+  })
+}

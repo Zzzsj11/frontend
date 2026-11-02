@@ -563,7 +563,8 @@ const cancel = () => {
 }
 .role-card .character-portrait {
   width: 100%;
-  height: 70px;
+  height: auto;
+  aspect-ratio: 2 / 3;
   border-radius: var(--radius-sm);
 }
 .role-card-wrap {
