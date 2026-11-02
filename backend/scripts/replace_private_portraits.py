@@ -38,9 +38,11 @@ def apply(connection, manifest):
             raise ValueError("Replacement is restricted to live assets belonging to the authorized user")
         before, after = item["before"], item["after"]
         keys = {"avatar_url", "avatar_thumbnail_url"}
+        if "avatar_prompt" in before or "avatar_prompt" in after:
+            keys.add("avatar_prompt")
         if set(before) != keys or set(after) != keys:
-            raise ValueError("Only original and thumbnail URLs can be replaced")
-        if not all(is_user_owned_tos_url(after[key], user_id) for key in keys):
+            raise ValueError("Only portrait URLs and the corresponding generation prompt can be replaced")
+        if not all(is_user_owned_tos_url(after[key], user_id) for key in {"avatar_url", "avatar_thumbnail_url"}):
             raise ValueError("Both replacement files must be in the user TOS prefix")
         if all(row[key] == after[key] for key in keys):
             continue

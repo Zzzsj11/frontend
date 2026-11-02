@@ -929,6 +929,7 @@ const removeDh = async () => {
 .dh-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-auto-rows: max-content;
   gap: 14px;
   padding: 16px 22px 22px;
   flex: 1 1 auto;
@@ -958,6 +959,8 @@ const removeDh = async () => {
 }
 .dh-portrait {
   position: relative;
+  flex-shrink: 0;
+  width: 100%;
   aspect-ratio: 2 / 3;
   background: var(--surface-muted);
   overflow: hidden;

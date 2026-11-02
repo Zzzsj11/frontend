@@ -66,3 +66,16 @@ def test_replace_rejects_wrong_scope_or_newer_asset(portrait_db, problem):
         with pytest.raises(ValueError):
             apply(connection, request)
         assert connection.scalar(sa.select(sa.func.count()).select_from(AdminOperationLogModel.__table__)) == 0
+
+
+def test_replacement_updates_obsolete_collage_prompt_with_audit(portrait_db):
+    request = manifest()
+    request["items"][0]["before"]["avatar_prompt"] = ""
+    request["items"][0]["after"]["avatar_prompt"] = "Single frontal head-and-shoulders portrait, preserve identity and style; no collage"
+    with portrait_db.begin() as connection:
+        assert apply(connection, request) == 1
+        assert apply(connection, request) == 0
+        row = connection.execute(sa.select(DigitalHumanModel.__table__)).mappings().one()
+        assert row["avatar_prompt"] == request["items"][0]["after"]["avatar_prompt"]
+        log = connection.execute(sa.select(AdminOperationLogModel.__table__)).mappings().one()
+        assert log["before_data"]["avatar_prompt"] == ""

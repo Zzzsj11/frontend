@@ -40,7 +40,12 @@ test('asset labels stay above portraits in a multi-column grid', async ({ page }
     const { useProjectStore } = await load('/src/stores/project.ts')
     const pinia = createPinia()
     const store = useProjectStore(pinia)
-    store.digitalHumans = ['男14', '男13', '老男1'].map((name, index) => ({
+    store.digitalHumans = [
+      '男14',
+      '男13',
+      '老男1',
+      ...Array.from({ length: 32 }, (_, i) => `系统人物${i}`),
+    ].map((name, index) => ({
       id: `fixture-${index}`,
       name,
       style: '男',
@@ -53,7 +58,7 @@ test('asset labels stay above portraits in a multi-column grid', async ({ page }
       .use(pinia)
       .mount('#app')
   })
-  await expect(page.locator('.dh-card')).toHaveCount(3)
+  await expect(page.locator('.dh-card')).toHaveCount(35)
   for (const name of ['男14', '男13', '老男1']) {
     await expect(page.locator('.dh-name-row strong', { hasText: name })).toBeVisible()
   }
@@ -63,8 +68,13 @@ test('asset labels stay above portraits in a multi-column grid', async ({ page }
       y: card.getBoundingClientRect().y,
       labelY: card.querySelector('.dh-info')!.getBoundingClientRect().y,
       portraitY: card.querySelector('.dh-portrait')!.getBoundingClientRect().y,
+      portraitWidth: card.querySelector('.dh-portrait')!.getBoundingClientRect().width,
+      portraitHeight: card.querySelector('.dh-portrait')!.getBoundingClientRect().height,
     })),
   )
+  expect(
+    positions.every((position) => position.portraitHeight / position.portraitWidth > 1.45),
+  ).toBeTruthy()
   expect(positions[1].x).toBeGreaterThan(positions[0].x)
   expect(positions[1].y).toBe(positions[0].y)
   expect(positions.every((position) => position.labelY < position.portraitY)).toBeTruthy()
