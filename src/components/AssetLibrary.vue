@@ -203,6 +203,7 @@ const showPreview = (dh: { originalAvatar?: string; avatar: string; name: string
     src: human.originalAvatar || human.avatar,
     thumbnail: human.avatar,
     alt: human.name,
+    editLabel: human.readOnly ? undefined : () => openEdit(human.id),
   }))
   const index = items.findIndex((item) => item.src === (dh.originalAvatar || dh.avatar))
   openImageGallery(
@@ -227,18 +228,22 @@ const closeEdit = () => {
 }
 
 /** 把表单草稿写回 store，并同步保存到后端 */
-const applyEdit = () => {
+const applyEdit = async () => {
   if (!editing.value) return
-  store.updateDigitalHuman(editing.value.id, {
+  await store.updateDigitalHuman(editing.value.id, {
     name: editName.value.trim() || editing.value.name,
     style: editStyle.value.trim() || '自定义',
     description: editDesc.value.trim() || editing.value.description,
   })
 }
 
-const saveEdit = () => {
-  applyEdit()
-  editId.value = null
+const saveEdit = async () => {
+  try {
+    await applyEdit()
+    editId.value = null
+  } catch {
+    editError.value = '名称保存失败，请重试'
+  }
 }
 
 /** 用当前提示词重新生成形象，成功后图片本地化存储并替换头像（会覆盖当前形象，需二次确认） */
@@ -253,8 +258,8 @@ const regenAvatar = async () => {
   )
     return
   editError.value = ''
-  applyEdit()
   try {
+    await applyEdit()
     await store.regenerateDigitalHumanAvatar(editing.value.id)
   } catch (e) {
     editError.value = e instanceof Error ? e.message : '生成失败，请稍后重试'
@@ -944,6 +949,8 @@ const removeDh = async () => {
     box-shadow 0.15s;
   background: var(--palette-ffffff);
   min-height: 200px;
+  display: flex;
+  flex-direction: column;
 }
 .dh-card:hover {
   border-color: var(--palette-rgba-255-90-44-0-5);
@@ -1065,6 +1072,8 @@ const removeDh = async () => {
   cursor: not-allowed;
 }
 .dh-info {
+  order: -1;
+  flex-shrink: 0;
   padding: 8px 10px 10px;
 }
 .dh-name-row {

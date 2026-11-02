@@ -314,7 +314,7 @@ export type ProjectActions = {
   updateDigitalHuman(
     id: string,
     patch: Partial<Pick<DigitalHuman, 'name' | 'style' | 'description' | 'avatarPrompt'>>,
-  ): void
+  ): Promise<void>
   /** 删除数字人：同步从全局阵容与所有分镜出演角色中移除 */
   deleteDigitalHuman(id: string): void
   /** 用（可能已修改的）提示词重新生成数字人形象，成功后本地化存储并替换头像 */
