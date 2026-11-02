@@ -455,8 +455,8 @@ const cancel = () => {
   border-radius: var(--radius-md);
   background: var(--surface-muted);
   padding: 10px;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
   gap: 10px;
   align-items: flex-start;
 }
@@ -569,10 +569,7 @@ const cancel = () => {
 }
 .role-card-wrap {
   position: relative;
-}
-.role-card-wrap {
-  flex: 1 1 124px;
-  max-width: 160px;
+  min-width: 0;
 }
 .role-card-wrap .role-card {
   width: 100%;

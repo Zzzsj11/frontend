@@ -137,7 +137,7 @@ for (const entry of ['GeneralStoryboardModal', 'MagicScriptModal']) {
       const { useProjectStore } = await load('/src/stores/project.ts')
       const pinia = createPinia()
       const store = useProjectStore(pinia)
-      store.digitalHumans = Array.from({ length: 28 }, (_, i) => ({
+      store.digitalHumans = Array.from({ length: 59 }, (_, i) => ({
         id: `portrait-${i}`,
         name: `人物${i}`,
         style: '男',
@@ -162,7 +162,11 @@ for (const entry of ['GeneralStoryboardModal', 'MagicScriptModal']) {
         .mount('#app')
     }, entry)
     const portraits = page.locator('.character-portrait')
-    await expect(portraits).toHaveCount(28)
+    await expect(portraits).toHaveCount(59)
+    const widths = await portraits.evaluateAll((nodes) =>
+      nodes.map((node) => node.getBoundingClientRect().width),
+    )
+    expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(1)
     const portrait = portraits.first()
     await expect(portrait.locator('img')).toHaveCSS('object-fit', 'contain')
     const box = await portrait.boundingBox()
