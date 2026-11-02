@@ -33,9 +33,10 @@ test('asset labels stay above portraits in a multi-column grid', async ({ page }
   await page.goto('/portrait-fixture')
   await page.evaluate(async () => {
     const load = (path: string) => import(/* @vite-ignore */ path)
-    const { createApp } = await load('/node_modules/.vite/deps/vue.js')
+    const { createApp, h } = await load('/node_modules/.vite/deps/vue.js')
     const { createPinia } = await load('/node_modules/.vite/deps/pinia.js')
     const { default: Library } = await load('/src/components/AssetLibrary.vue')
+    const { default: Preview } = await load('/src/components/ImagePreviewOverlay.vue')
     const { useProjectStore } = await load('/src/stores/project.ts')
     const pinia = createPinia()
     const store = useProjectStore(pinia)
@@ -48,7 +49,9 @@ test('asset labels stay above portraits in a multi-column grid', async ({ page }
       avatar: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
     }))
     store.libraryOpen = true
-    createApp(Library).use(pinia).mount('#app')
+    createApp({ render: () => [h(Library), h(Preview)] })
+      .use(pinia)
+      .mount('#app')
   })
   await expect(page.locator('.dh-card')).toHaveCount(3)
   for (const name of ['男14', '男13', '老男1']) {
@@ -65,4 +68,7 @@ test('asset labels stay above portraits in a multi-column grid', async ({ page }
   expect(positions[1].x).toBeGreaterThan(positions[0].x)
   expect(positions[1].y).toBe(positions[0].y)
   expect(positions.every((position) => position.labelY < position.portraitY)).toBeTruthy()
+  await page.getByRole('button', { name: '查看男14大图', exact: true }).click()
+  await page.getByRole('button', { name: '修改名称', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: '编辑数字人 · 男14' })).toBeVisible()
 })

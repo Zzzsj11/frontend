@@ -468,7 +468,7 @@ const removeDh = async () => {
       >
         <div class="dh-portrait" title="点击查看大图" @click="showPreview(dh)">
           <CharacterPortrait :src="dh.avatar" :alt="dh.name" />
-          <CharacterZoom :human="dh" :humans="filtered" />
+          <CharacterZoom :human="dh" :humans="filtered" :edit-label="openEdit" />
           <span v-show="store.castIds.includes(dh.id)" class="dh-check"
             ><AppIcon name="check" :size="11" /> 已入阵容</span
           >
@@ -519,10 +519,7 @@ const removeDh = async () => {
       <div class="edit-body">
         <div class="edit-portrait" title="点击查看大图" @click="showPreview(editing)">
           <img :src="editing.originalAvatar || editing.avatar" :alt="editing.name" />
-          <ImageZoom
-            :src="editing.originalAvatar || editing.avatar"
-            :alt="`${editing.name} · 原图预览`"
-          />
+          <CharacterZoom :human="editing" :humans="filtered" :edit-label="openEdit" />
           <div v-if="regenBusy" class="edit-regen-mask">
             <span class="spinner light" />
             正在重新生成形象…
