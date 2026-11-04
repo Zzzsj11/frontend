@@ -407,7 +407,7 @@ def test_uncertain_idempotent_provider_submission_reports_recovery_exhausted(mon
         await manager._run(job, uncertain)
         assert job.status == "failed"
         assert job.phase == "manual_review"
-        assert "经同一幂等键恢复后仍无法确认" in (job.error or "")
+        assert "未返回可确认结果" in (job.error or "")
         assert "不支持幂等重提" not in (job.error or "")
 
     asyncio.run(scenario())

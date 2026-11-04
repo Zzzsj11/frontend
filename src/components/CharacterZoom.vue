@@ -2,12 +2,17 @@
 import { computed } from 'vue'
 import type { DigitalHuman } from '../types'
 import ImageZoom from './ImageZoom.vue'
-const props = defineProps<{ human: DigitalHuman; humans?: DigitalHuman[] }>()
+const props = defineProps<{
+  human: DigitalHuman
+  humans?: DigitalHuman[]
+  editLabel?: (id: string) => void
+}>()
 const items = computed(() =>
   (props.humans?.length ? props.humans : [props.human]).map((human) => ({
     src: human.originalAvatar || human.avatar,
     thumbnail: human.avatar,
     alt: `${human.name} · 人物参考图`,
+    editLabel: !human.readOnly && props.editLabel ? () => props.editLabel?.(human.id) : undefined,
   })),
 )
 const index = computed(() =>

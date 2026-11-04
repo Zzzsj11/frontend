@@ -6,6 +6,7 @@ import {
   PollingCancelledError,
   GenerationObservationTimeout,
   GenerationJobFailed,
+  GenerationReconciliationRequired,
   abortableSleep,
   registerTaskWatcher,
 } from '../../utils/generationPoller'
@@ -256,6 +257,12 @@ export const storyboardActions = {
         })()
         continue
       }
+      if (job.kind === 'video' && job.phase === 'manual_review') {
+        line.shot.status = 'failed'
+        line.shot.generationPhase = 'manual_review'
+        line.shot.generationJobId = job.id
+        continue
+      }
       const slot = job.kind === 'video' ? line.shot : line.scene
       slot.status = 'generating'
       slot.error = undefined
@@ -304,6 +311,15 @@ export const storyboardActions = {
         )
       } catch (error) {
         if (watcher.signal.aborted || error instanceof PollingCancelledError) return
+        if (error instanceof GenerationReconciliationRequired) {
+          const current = currentLine()
+          if (kind === 'video' && current) {
+            current.shot.status = 'failed'
+            current.shot.generationPhase = 'manual_review'
+            current.shot.error = error.message
+          }
+          return
+        }
         if (
           error instanceof GenerationObservationTimeout ||
           !(error instanceof GenerationJobFailed)

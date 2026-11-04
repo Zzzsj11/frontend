@@ -5,10 +5,14 @@ from app import general_outline_comparison as comparison
 
 @pytest.mark.asyncio
 async def test_general_outline_comparison_injects_model_without_changing_default(monkeypatch):
+    from app.generation_preferences import text_selection
+
     captured = []
+    channels = []
 
     async def fake_call_chat_model(**kwargs):
         captured.append((kwargs["model"], kwargs["protocol"]))
+        channels.append(text_selection.get().get("channel"))
         return "{}", {"input_tokens": 3, "output_tokens": 4}, "req-1"
 
     async def fake_generate(*, config, selected_humans, call_override):
@@ -31,6 +35,9 @@ async def test_general_outline_comparison_injects_model_without_changing_default
         models=["gpt-5.5", "claude-opus-4-8"],
         config={"empty_shot_count": 1},
         selected_humans=[],
+        channels={"gpt-5.5": "synthetic-channel"},
     )
+    assert channels == ["synthetic-channel", None]
+    assert text_selection.get() is None
     assert captured == [("gpt-5.5", "openai"), ("claude-opus-4-8", "anthropic")]
     assert all(item["status"] == "ok" and item["usage"]["totalTokens"] == 7 for item in results)

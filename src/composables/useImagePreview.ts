@@ -4,6 +4,7 @@ export interface PreviewImage {
   src: string
   alt: string
   thumbnail?: string
+  editLabel?: () => void
 }
 const state = reactive({
   open: false,

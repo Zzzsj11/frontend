@@ -46,8 +46,29 @@ async def apply_media_preference(db: AsyncSession, user_id: str, modality: str, 
     if payload.channel:
         model = await visible_model(db, payload.model)
         catalog = await fetch_channels(model.provider_model_id, user_id)
-        if not any(item.get("channel") == payload.channel and item.get("available") is True for item in catalog["channels"]):
+        channel = next((item for item in catalog["channels"] if item.get("channel") == payload.channel and item.get("available") is True), None)
+        if channel is None:
             raise HTTPException(422, "所选渠道不可用，请重新选择")
+        validate_channel_parameters(modality, payload, channel.get("capabilities") or {})
+
+
+def validate_channel_parameters(modality: str, payload, capabilities: dict) -> None:
+    """Reject channel-specific incompatibilities before creating a paid job."""
+    from .image_model_policy import image_ratio
+
+    resolution = str(payload.resolution).lower()
+    supported = capabilities.get("resolutions") or capabilities.get("resolution")
+    if isinstance(supported, list) and supported and resolution not in {str(item).lower() for item in supported}:
+        raise HTTPException(422, "所选渠道不支持当前清晰度，请调整参数或主动切换渠道")
+    ratio = image_ratio(payload.size) if modality == "image" else payload.ratio
+    ratios = capabilities.get("aspect_ratios")
+    if isinstance(ratios, list) and ratios and ratio not in ratios:
+        raise HTTPException(422, "所选渠道不支持当前画幅，请调整参数或主动切换渠道")
+    media = {"images": payload.images} if modality == "image" else {"images": payload.image_urls, "videos": payload.video_urls, "audios": payload.audio_urls}
+    for kind, values in media.items():
+        maximum = capabilities.get("max_" + kind)
+        if isinstance(maximum, int) and len(values) > maximum:
+            raise HTTPException(422, f"所选渠道最多支持 {maximum} 个 {kind} 参考素材，请调整参数或主动切换渠道")
 
 
 class GenerationPreference(BaseModel):

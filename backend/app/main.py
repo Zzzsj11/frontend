@@ -50,7 +50,7 @@ from .generation_preferences import router as generation_preferences_router
 from .h3_prompt_compiler import compile_h3_prompt
 from .image_download import router as image_download_router
 from .image_model_policy import validate_image_selection
-from .jobs import Job, jobs, needs_provider_reconciliation
+from .jobs import Job, automatic_reconciliation, jobs, needs_provider_reconciliation, public_phase
 from .media_constraints import normalize_video_duration
 from .models import (
     AiModelModel,
@@ -178,10 +178,15 @@ async def lifespan(_app: FastAPI):
         recovered = await jobs.recover_stale_jobs(resume_generation)
         if recovered["resumed"] or recovered["failed"]:
             logger.info("媒体生成任务恢复：续跑 %s 个，判败 %s 个", recovered["resumed"], recovered["failed"])
+    from .video_reconciliation import serve as reconcile_videos
+
+    reconciler = asyncio.create_task(reconcile_videos())
     reaper = asyncio.create_task(stale_generation_reaper())
     try:
         yield
     finally:
+        reconciler.cancel()
+        await asyncio.gather(reconciler, return_exceptions=True)
         reaper.cancel()
         with suppress(asyncio.CancelledError):
             await reaper
@@ -875,6 +880,7 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
             .where(
                 GenerationJobModel.user_id == user.id,
                 GenerationJobModel.kind == "video",
+                GenerationJobModel.storyboard_line_id == line_id,
                 GenerationJobModel.deleted_at.is_(None),
                 GenerationJobModel.request["request_id"].as_string() == payload.request_id,
             )
@@ -911,6 +917,13 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
         and original_input.get("model") != line_model
     ):
         raise HTTPException(409, "该分镜的视频模型已更新，请刷新页面后再生成")
+    identity_indices = await _identity_reference_indices(db, payload.image_urls, user_id=user.id)
+    if provider.code == "all-in-one" and model.provider_model_id == "seedance-2.0":
+        if "person_asset_mode" not in payload.model_fields_set and identity_indices:
+            payload.person_asset_mode = True
+            payload.person_reference_indices = sorted(identity_indices)
+    elif payload.person_asset_mode:
+        raise HTTPException(422, "人物资产模式仅支持 all in one SD2.0")
     submission_input = payload.model_dump(mode="json", exclude={"request_id"})
     submission_input["model"] = model.code
     if line_id:
@@ -924,7 +937,7 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
                     GenerationJobModel.deleted_at.is_(None),
                     or_(
                         GenerationJobModel.status.in_(("queued", "running")),
-                        GenerationJobModel.phase == "manual_review",
+                        GenerationJobModel.phase.in_(("manual_review", "auto_reconciling")),
                         (GenerationJobModel.status == "failed") & GenerationJobModel.provider_task_id.isnot(None) & GenerationJobModel.error.contains("核查原任务"),
                         GenerationJobModel.request["request_id"].as_string() == payload.request_id if payload.request_id else False,
                     ),
@@ -937,6 +950,10 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
         if existing is None:
             existing = next((row for row in candidates if row.status in {"queued", "running"} or needs_provider_reconciliation(row)), None)
         if existing is not None:
+            if automatic_reconciliation(existing):
+                raise HTTPException(409, f"正在自动核对并恢复原视频，无需重新生成，不会重复扣费。工单：{existing.id}")
+            if needs_provider_reconciliation(existing):
+                raise HTTPException(409, f"待人工核对，不能重新生成。请联系开发人员处理。工单：{existing.id}")
             if (existing.request or {}).get("_submissionInput") != submission_input:
                 raise HTTPException(409, "该镜头已有生成请求，请先核对原任务；不同参数不能覆盖或重复提交")
             reused = jobs._from_model(existing)
@@ -946,7 +963,6 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
     is_h3 = bool((model.capabilities or {}).get("h3Modes"))
     if is_h3:
         validate_h3_mode_inputs(payload)
-    identity_indices = await _identity_reference_indices(db, payload.image_urls, user_id=user.id)
     if (model.capabilities or {}).get("providerProtocol") == "kling-native":
         try:
             kling_image_inputs(payload, identity_reference=bool(identity_indices))
@@ -1081,11 +1097,12 @@ async def get_generation_status_batch(payload: GenerationStatusBatchRequest, use
         {
             "id": row.id,
             "kind": row.kind,
-            "status": row.status,
+            "status": "running" if automatic_reconciliation(row) else row.status,
             "progress": row.progress,
-            "phase": "manual_review" if needs_provider_reconciliation(row) else row.phase,
             "result": row.result,
             "error": row.error,
+            "phase": public_phase(row),
+            "retryAllowed": row.status not in {"queued", "running"} and not needs_provider_reconciliation(row),
         }
         for row in rows
     ]
@@ -1138,7 +1155,7 @@ async def list_active_task_generations(task_id: str, user: CurrentUser, db: Asyn
             "kind": row.kind,
             "storyboardLineId": row.storyboard_line_id,
             "progress": row.progress,
-            "phase": "manual_review" if needs_provider_reconciliation(row) else row.phase,
+            "phase": public_phase(row),
             # 前端刷新后用服务端落库时间恢复等待秒数，避免从 0 重新计时。
             "createdAt": row.created_at.isoformat(),
             "providerSubmittedAt": row.provider_submitted_at.isoformat() if row.provider_submitted_at else None,

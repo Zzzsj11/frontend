@@ -9,6 +9,7 @@ import httpx
 
 from . import model_gateway
 from .config import settings
+from .generation_preferences import text_selection
 from .llm_policy import completion_options
 from .model_gateway import AsyncOpenAI
 from .model_gateway import enabled as gateway_enabled
@@ -103,7 +104,9 @@ async def call_chat_model(
     return await caller(model, messages, temperature, max_tokens)
 
 
-async def compare_chat_models(*, models: list[str], system_prompt: str, prompt: str, temperature: float, max_tokens: int) -> list[dict[str, Any]]:
+async def compare_chat_models(
+    *, models: list[str], system_prompt: str, prompt: str, temperature: float, max_tokens: int, channels: dict[str, str | None] | None = None
+) -> list[dict[str, Any]]:
     if not settings.llm_api_key and not gateway_enabled() and not settings.all_in_one_api_key:
         raise RuntimeError("LLM_API_KEY 未配置")
     semaphore = asyncio.Semaphore(3)
@@ -113,6 +116,7 @@ async def compare_chat_models(*, models: list[str], system_prompt: str, prompt: 
         profile = CHAT_TEST_MODEL_MAP[model]
         provider = "all-in-one" if model.endswith("-all-in-one") else (settings.llm_channel if model in {"gpt-6.1-sol", "gpt-6-sol"} and settings.llm_channel else profile.protocol)
         started = time.perf_counter()
+        token = text_selection.set({"model": model, "channel": (channels or {}).get(model)})
         try:
             async with semaphore:
                 text, usage, request_id = await call_chat_model(
@@ -125,6 +129,7 @@ async def compare_chat_models(*, models: list[str], system_prompt: str, prompt: 
             normalized = normalize_usage(usage)
             return {
                 "model": model,
+                "requestedChannel": (channels or {}).get(model),
                 "name": profile.name,
                 "protocol": profile.protocol,
                 "provider": provider,
@@ -138,6 +143,7 @@ async def compare_chat_models(*, models: list[str], system_prompt: str, prompt: 
         except Exception as exc:
             return {
                 "model": model,
+                "requestedChannel": (channels or {}).get(model),
                 "name": profile.name,
                 "protocol": profile.protocol,
                 "provider": provider,
@@ -148,5 +154,8 @@ async def compare_chat_models(*, models: list[str], system_prompt: str, prompt: 
                 "requestId": getattr(exc, "request_id", None),
                 "usage": normalize_usage({}),
             }
+
+        finally:
+            text_selection.reset(token)
 
     return list(await asyncio.gather(*(run(model) for model in models)))

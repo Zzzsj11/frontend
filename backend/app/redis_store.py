@@ -121,7 +121,7 @@ async def provider_cooldown_remaining(provider: str) -> int | None:
 
 async def cache_job(job_id: str, snapshot: dict[str, Any]) -> None:
     try:
-        await redis.set(f"job:{job_id}", json.dumps(snapshot, ensure_ascii=False), ex=7 * 24 * 3600)
+        await redis.set(f"job:{job_id}", json.dumps({key: value for key, value in snapshot.items() if key != "retryAllowed"}, ensure_ascii=False), ex=7 * 24 * 3600)
         await redis.publish(f"job-events:{job_id}", json.dumps(snapshot, ensure_ascii=False))
     except Exception:
         # PostgreSQL is the job source of truth. Cache/event loss may increase

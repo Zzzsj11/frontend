@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ManualReviewNotice from './ManualReviewNotice.vue'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { DEFAULT_SHOT_OPTIONS, useProjectStore } from '../stores/project'
 import type { ShotAsset, ShotGenOptions } from '../types'
@@ -412,7 +413,9 @@ const cancel = () => store.closeEditor()
               <button
                 class="btn-outline prompt-action"
                 :disabled="
-                  store.editingLine.shot.status === 'generating' || !shotPromptDraft.trim()
+                  store.editingLine.shot.status === 'generating' ||
+                  store.editingLine.shot.generationPhase === 'manual_review' ||
+                  !shotPromptDraft.trim()
                 "
                 @click="regenShot"
               >
@@ -468,6 +471,11 @@ const cancel = () => store.closeEditor()
       </div>
     </template>
     <template v-if="store.editingLine" #footer>
+      <ManualReviewNotice
+        v-if="store.editingLine.shot.generationPhase === 'manual_review'"
+        :job-id="store.editingLine.shot.generationJobId"
+        :line-number="store.lines.findIndex((l) => l.id === store.editingLine?.id) + 1"
+      />
       <button class="btn-cancel" @click="cancel">取消</button>
       <button class="btn-primary" @click="save">
         <AppIcon name="check" :size="14" />

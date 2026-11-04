@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AdminComparisonChannels from './AdminComparisonChannels.vue'
 import { computed, onMounted, ref } from 'vue'
 import {
   fetchChatComparisonModels,
@@ -8,6 +9,7 @@ import {
 } from '../api/adminChatComparison'
 import AdminChatComparisonResults from './AdminChatComparisonResults.vue'
 
+const channels = ref<Record<string, string | null>>({})
 const models = ref<ChatComparisonModel[]>([])
 const selectedModels = ref<string[]>([
   'gemini-3.8-flash-all-in-one',
@@ -69,6 +71,9 @@ const run = async () => {
       systemPrompt: systemPrompt.value.trim(),
       prompt: prompt.value.trim(),
       models: selectedModels.value,
+      channels: Object.fromEntries(
+        selectedModels.value.map((model) => [model, channels.value[model] || null]),
+      ),
       temperature: temperature.value,
       maxTokens: maxTokens.value,
     })
@@ -89,7 +94,7 @@ onMounted(loadModels)
       <div class="intro">
         <div>
           <h3>同提示词多模型对比</h3>
-          <p>仅执行独立测试，不会修改项目主流程的默认模型 GPT 5.5。</p>
+          <p>逐模型选择测试渠道；此实验配置不修改项目的用户级生成偏好。</p>
         </div>
         <span class="selection-count">已选 {{ selectedModels.length }}/6</span>
       </div>
@@ -145,6 +150,11 @@ onMounted(loadModels)
           </div>
         </div>
       </fieldset>
+      <AdminComparisonChannels
+        v-model="channels"
+        :models="models.filter((model) => selectedModels.includes(model.code))"
+        :disabled="loading"
+      />
 
       <div class="actions">
         <label

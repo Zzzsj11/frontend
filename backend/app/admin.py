@@ -6,7 +6,7 @@ import uuid
 from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO
-from typing import Any
+from typing import Annotated, Any
 from zipfile import BadZipFile
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -24,6 +24,7 @@ from .general_outline_comparison import compare_general_outlines
 from .generation_constraints import GENERAL_STORYBOARD_MAX_SHOTS
 from .generation_timing import generation_elapsed_seconds
 from .jobs import jobs as job_manager
+from .jobs import needs_provider_reconciliation
 from .kling import ASPECT_RATIOS as KLING_ASPECT_RATIOS
 from .kling import IMAGE_TYPES as KLING_IMAGE_TYPES
 from .kling import MAX_DURATION as KLING_MAX_DURATION
@@ -128,12 +129,14 @@ class ChatComparisonIn(BaseModel):
     system_prompt: str = Field(default="", max_length=12000)
     prompt: str = Field(min_length=1, max_length=30000)
     models: list[str] = Field(min_length=1, max_length=6)
+    channels: dict[str, Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")] | None] = Field(default_factory=dict, max_length=6)
     temperature: float = Field(default=0.2, ge=0, le=2)
     max_tokens: int = Field(default=2048, ge=1, le=8192)
 
 
 class GeneralOutlineComparisonIn(BaseModel):
     models: list[str] = Field(min_length=1, max_length=6)
+    channels: dict[str, Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")] | None] = Field(default_factory=dict, max_length=6)
     genre: str = Field(min_length=1, max_length=120)
     secondary_category: str = Field(default="", max_length=120)
     tertiary_category: str = Field(default="", max_length=120)
@@ -160,6 +163,28 @@ async def chat_comparison_models(user: CurrentUser):
     ]
 
 
+@router.get("/chat-comparison/models/{model}/channels")
+async def comparison_model_channels(model: str, user: CurrentUser):
+    require_admin(user)
+    allowed = {item.code for item in CHAT_TEST_MODELS if item.code.endswith("-all-in-one")}
+    if model not in allowed:
+        raise HTTPException(422, "此模型不支持平台渠道选择")
+    from .generation_preferences import fetch_channels
+
+    return await fetch_channels(model, user.id)
+
+
+async def validate_comparison_channels(models: list[str], channels: dict[str, str | None], user) -> None:
+    if set(channels) - set(models):
+        raise HTTPException(422, "渠道配置包含未选择的模型")
+    for model, channel in channels.items():
+        if channel is None:
+            continue
+        catalog = await comparison_model_channels(model, user)
+        if not any(item.get("channel") == channel and item.get("available") is True for item in catalog["channels"]):
+            raise HTTPException(422, "所选测试渠道不可用，请重新选择")
+
+
 @router.post("/chat-comparison/run")
 async def run_chat_comparison(payload: ChatComparisonIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
     require_admin(user)
@@ -168,6 +193,7 @@ async def run_chat_comparison(payload: ChatComparisonIn, request: Request, user:
     unknown = [model for model in models if model not in allowed]
     if unknown:
         raise HTTPException(422, f"不支持的 Chat 模型：{', '.join(unknown)}")
+    await validate_comparison_channels(models, payload.channels, user)
     messages = ([{"role": "system", "content": payload.system_prompt}] if payload.system_prompt else []) + [{"role": "user", "content": payload.prompt}]
     results = await compare_chat_models(
         models=models,
@@ -175,9 +201,14 @@ async def run_chat_comparison(payload: ChatComparisonIn, request: Request, user:
         prompt=payload.prompt,
         temperature=payload.temperature,
         max_tokens=payload.max_tokens,
+        channels=payload.channels,
     )
     for result in results:
-        usage = result["usage"].get("raw") or {}
+        usage = {
+            **(result["usage"].get("raw") or {}),
+            "requestedChannel": payload.channels.get(result["model"]),
+            "routingMode": "specified" if payload.channels.get(result["model"]) else "automatic",
+        }
         add_token_usage(
             db,
             operation="admin_chat_comparison",
@@ -201,7 +232,14 @@ async def run_chat_comparison(payload: ChatComparisonIn, request: Request, user:
             request_messages=messages,
             response_text=result["text"],
         )
-    await audit(db, request, user, "chat_comparison.run", "llm_comparison", after={"models": models, "temperature": payload.temperature, "maxTokens": payload.max_tokens})
+    await audit(
+        db,
+        request,
+        user,
+        "chat_comparison.run",
+        "llm_comparison",
+        after={"models": models, "channels": payload.channels, "temperature": payload.temperature, "maxTokens": payload.max_tokens},
+    )
     await db.commit()
     return {"results": results}
 
@@ -218,7 +256,8 @@ async def run_general_outline_comparison(payload: GeneralOutlineComparisonIn, re
     unknown = [model for model in models if model not in allowed]
     if unknown:
         raise HTTPException(422, f"不支持的 Chat 模型：{', '.join(unknown)}")
-    config = payload.model_dump(exclude={"models", "character_name", "character_age", "character_appearance", "character_clothing"})
+    await validate_comparison_channels(models, payload.channels, user)
+    config = payload.model_dump(exclude={"channels", "models", "character_name", "character_age", "character_appearance", "character_clothing"})
     selected_humans = []
     if payload.character_shot_count:
         selected_humans = [
@@ -230,9 +269,14 @@ async def run_general_outline_comparison(payload: GeneralOutlineComparisonIn, re
                 "clothingDescription": payload.character_clothing,
             }
         ]
-    results = await compare_general_outlines(models=models, config=config, selected_humans=selected_humans)
+    results = await compare_general_outlines(models=models, config=config, selected_humans=selected_humans, channels=payload.channels)
     for result in results:
         for call in result["calls"]:
+            call["usage"] = {
+                **(call.get("usage") or {}),
+                "requestedChannel": payload.channels.get(result["model"]),
+                "routingMode": "specified" if payload.channels.get(result["model"]) else "automatic",
+            }
             add_token_usage(
                 db,
                 operation="admin_general_outline_comparison",
@@ -264,7 +308,7 @@ async def run_general_outline_comparison(payload: GeneralOutlineComparisonIn, re
         user,
         "general_outline_comparison.run",
         "llm_comparison",
-        after={"models": models, "emptyShotCount": payload.empty_shot_count, "characterShotCount": payload.character_shot_count},
+        after={"models": models, "channels": payload.channels, "emptyShotCount": payload.empty_shot_count, "characterShotCount": payload.character_shot_count},
     )
     await db.commit()
     public_results = [
@@ -412,7 +456,14 @@ async def jobs(
     conditions = [GenerationJobModel.deleted_at.is_(None)]
     if kind in {"image", "video"}:
         conditions.append(GenerationJobModel.kind == kind)
-    if status:
+    if status == "manual_review":
+        conditions.append(
+            or_(
+                GenerationJobModel.phase == "manual_review",
+                (GenerationJobModel.status == "failed") & GenerationJobModel.provider_task_id.isnot(None) & GenerationJobModel.error.contains("核查原任务"),
+            )
+        )
+    elif status:
         conditions.append(GenerationJobModel.status == status)
     if q and q.strip():
         term = f"%{q.strip()}%"
@@ -442,7 +493,7 @@ async def jobs(
             "kind": j.kind,
             "status": j.status,
             "progress": j.progress,
-            "phase": j.phase,
+            "phase": "manual_review" if needs_provider_reconciliation(j) else j.phase,
             "workerId": j.worker_id,
             "provider": j.provider,
             "providerTaskId": j.provider_task_id,
@@ -462,6 +513,34 @@ async def jobs(
     return {"total": total, "page": page, "pageSize": page_size, "items": items}
 
 
+class ReleaseReviewIn(BaseModel):
+    reason: str = Field(min_length=5, max_length=2000)
+    confirmed_not_accepted: bool
+
+
+@router.post("/jobs/{job_id}/release-review")
+async def release_job_review(job_id: str, payload: ReleaseReviewIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
+    from .redis_store import cache_job
+
+    require_admin(user)
+    if not payload.confirmed_not_accepted or len(payload.reason.strip()) < 5:
+        raise HTTPException(422, "请确认平台未受理并填写核查依据")
+    job = (await db.execute(select(GenerationJobModel).where(GenerationJobModel.id == job_id, GenerationJobModel.deleted_at.is_(None)).with_for_update())).scalar_one_or_none()
+    if not job:
+        raise HTTPException(404, "任务不存在")
+    if job.status != "failed" or not needs_provider_reconciliation(job) or job.provider_task_id:
+        raise HTTPException(409, "仅允许解除无平台工单号的待核对失败任务；已受理任务请同步")
+    before = {"phase": job.phase, "error": job.error}
+    job.phase = "failed"
+    job.error = "平台未受理，人工核查已解除限制，可重新生成"
+    job.request = {**(job.request or {}), "_manualResolution": {"reason": payload.reason.strip(), "actor": user.id, "resolvedAt": utcnow().isoformat(), "before": before}}
+    job.updated_at = utcnow()
+    await audit(db, request, user, "job.release_review", "generation_job", job.id, before, job.request["_manualResolution"])
+    await db.commit()
+    await cache_job(job.id, job_manager._from_model(job).public())
+    return {"id": job.id, "retryAllowed": True}
+
+
 @router.post("/jobs/{job_id}/sync")
 async def sync_generation_job(job_id: str, request: Request, user: CurrentUser, db: AsyncSession = Db):
     """按供应商 taskId 主动对账：已成功则补落库资产挽回结果，已失败同步原因，供应商仍在跑而本机无协程则重新挂轮询"""
@@ -475,6 +554,15 @@ async def sync_generation_job(job_id: str, request: Request, user: CurrentUser, 
         validate_media_job_source(model)
     except ProviderError as exc:
         raise HTTPException(422, str(exc)) from exc
+    from .jobs import automatic_reconciliation
+
+    if automatic_reconciliation(model):
+        from .video_reconciliation import reconcile_one
+
+        result = await reconcile_one(job_id)
+        await audit(db, request, user, "job.sync", "generation_job", job_id, after=result)
+        await db.commit()
+        return result
     if job_manager.is_active(job_id):
         return {"providerStatus": None, "action": "skipped", "detail": "任务正在本机执行中，无需同步"}
     try:

@@ -83,6 +83,8 @@ The request failed because the input image 'content[1]' 'content[2]' may contain
 
 所有新生图、视频和提示词优化只调用 All in one。人物原图与缩略图继续保存在 TOS，生成请求使用用户自己的 TOS 原图 URL，不再注册英和 `asset://`。
 
+SD2.0 人物参考的新流程由 all in one 按需承担：MV 传 TOS 原图及统一 `person_asset_mode`/`person_reference_indices`，平台在英和渠道执行官方素材审核与资产替换，RunningHub 渠道映射官方人物模式。MV 不直连注册、不写回旧 `asset_avatar_url`，不恢复任何周期补注册任务。
+
 旧补注册脚本和 Compose 包装入口已删除，维护任务安装脚本不再创建该 cron；生产发布通过 `scripts/retire-legacy-service-cron.sh` 只移除旧补注册调度，保留健康检查、数据库备份及监控任务。所有环境禁止恢复旧调度。
 
 历史 `asset_avatar_url` 保留供审计，新建/更新人物不调用英和接口；更新图片时清空失效链接。旧渠道模型和供应商通过 Alembic 软删除，历史工单、素材与费用归因保留。

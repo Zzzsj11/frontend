@@ -8,6 +8,7 @@ export interface ChatComparisonModel {
 
 export interface ChatComparisonResult {
   model: string
+  requestedChannel?: string | null
   name: string
   protocol: string
   status: 'ok' | 'error'
@@ -37,6 +38,7 @@ export interface GeneralOutlineShot {
 
 export interface GeneralOutlineComparisonResult {
   model: string
+  requestedChannel?: string | null
   name: string
   protocol: string
   status: 'ok' | 'error'
@@ -55,6 +57,7 @@ export const runChatComparison = (payload: {
   systemPrompt: string
   prompt: string
   models: string[]
+  channels?: Record<string, string | null>
   temperature: number
   maxTokens: number
 }) =>
@@ -64,6 +67,7 @@ export const runChatComparison = (payload: {
       system_prompt: payload.systemPrompt,
       prompt: payload.prompt,
       models: payload.models,
+      channels: payload.channels,
       temperature: payload.temperature,
       max_tokens: payload.maxTokens,
     }),

@@ -39,4 +39,13 @@ describe('user generation preferences', () => {
     expect(store.ownerId).toBe('new')
     expect(store.selections).toEqual({})
   })
+  it('coalesces concurrent channel discovery while restoring saved names', async () => {
+    const store = useGenerationPreferences()
+    vi.mocked(apiRequest).mockResolvedValueOnce({
+      channels: [{ channel: 'toapis', name: 'Toapis', available: true, priority: 20 }],
+    })
+    await Promise.all([store.loadChannels('gemini'), store.loadChannels('gemini')])
+    expect(apiRequest).toHaveBeenCalledTimes(1)
+    expect(store.channels.gemini?.[0]?.name).toBe('Toapis')
+  })
 })

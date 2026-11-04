@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { apiRequest } from '../api/client'
 import { useGenerationPreferences } from '../stores/generationPreferences'
 import GenerationModelSelect from './GenerationModelSelect.vue'
+withDefaults(defineProps<{ label?: string }>(), { label: '' })
 const preferences = useGenerationPreferences()
 const models = ref<Array<{ id: string; name: string }>>([])
 const groups = computed(() => [
@@ -25,6 +26,7 @@ onMounted(async () => {
 <template>
   <GenerationModelSelect
     :model-value="preferences.selections.text?.model || 'gemini-3.8-flash-all-in-one'"
+    :label="label"
     modality="text"
     :groups="groups"
     aria-label="文本模型"

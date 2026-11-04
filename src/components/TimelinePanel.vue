@@ -196,6 +196,11 @@ const onAudioTrackDown = (event: MouseEvent) => {
                 alt=""
               />
               <span v-else class="clip-icon"><AppIcon name="image" :size="16" /></span>
+              <span
+                v-if="lineOf(clip.lineId)?.shot.generationPhase === 'manual_review'"
+                title="待人工核对，不能重新生成，请联系开发人员"
+                >待核对</span
+              >
               <span class="clip-index">{{ String(clip.index + 1).padStart(2, '0') }}</span>
             </div>
           </div>

@@ -46,6 +46,27 @@ describe('shared image preview interactions', () => {
     expect(document.querySelector('[aria-label="图片大图预览"]')).toBeNull()
     expect(document.body.style.overflow).toBe('hidden')
   })
+  it('opens the selected editable label and leaves system images read-only', async () => {
+    let edited = ''
+    mount(ImagePreviewOverlay, { attachTo: document.body })
+    openImageGallery([
+      {
+        src: '/private.png',
+        alt: '测试1',
+        editLabel: () => {
+          edited = 'private'
+        },
+      },
+      { src: '/system.png', alt: '系统人物' },
+    ])
+    await nextTick()
+    await click('修改名称')
+    expect(edited).toBe('private')
+    expect(useImagePreview().state.open).toBe(false)
+    openImageGallery([{ src: '/system.png', alt: '系统人物' }])
+    await nextTick()
+    expect(document.body.textContent).not.toContain('修改名称')
+  })
   it('shows a retry action on load failure and resets the image for another attempt', async () => {
     mount(ImagePreviewOverlay, { attachTo: document.body })
     openImageGallery([{ src: '/original.png', alt: '原图' }])

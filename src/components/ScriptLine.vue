@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import BaseSelect from './base/BaseSelect.vue'
+import ManualReviewNotice from './ManualReviewNotice.vue'
 import VideoGenerationStatus from './VideoGenerationStatus.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { ScriptLine } from '../types'
@@ -291,6 +292,11 @@ onBeforeUnmount(() => {
       </p>
     </div>
 
+    <ManualReviewNotice
+      v-if="line.shot.generationPhase === 'manual_review'"
+      :job-id="line.shot.generationJobId"
+      :line-number="index + 1"
+    />
     <div class="line-actions" @click.stop>
       <VideoGenerationStatus
         v-if="line.shot.status === 'generating'"
@@ -300,6 +306,7 @@ onBeforeUnmount(() => {
       />
       <!-- 生成分镜视频片段 -->
       <BaseIconButton
+        v-if="line.shot.generationPhase !== 'manual_review'"
         name="movie"
         :size="15"
         :class="{ 'gen-failed': line.shot.status === 'failed' }"

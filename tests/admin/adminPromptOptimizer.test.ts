@@ -1,3 +1,4 @@
+import { createPinia, setActivePinia } from 'pinia'
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -20,7 +21,8 @@ vi.mock('../../src/api/adminPromptOptimizer', () => ({
 }))
 
 vi.mock('../../src/api/mediaGen', () => ({ generateShotVideo: vi.fn() }))
-vi.mock('../../src/generationModels', () => ({
+vi.mock('../../src/generationModels', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/generationModels')>()),
   DEFAULT_IMAGE_MODEL: 'nano-banana-2.1-all-in-one',
   loadGenerationModels: vi.fn(),
   videoRatioChoices: () => ['16:9', '9:16'],
@@ -38,6 +40,7 @@ const configuredStatus = {
 
 describe('admin prompt optimizer panel', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     vi.mocked(fetchPromptOptimizerStatus).mockReset().mockResolvedValue(configuredStatus)
     vi.mocked(fetchPromptOptimizerTasks).mockReset().mockResolvedValue({ items: [] })
     vi.mocked(uploadPromptOptimizerMedia).mockReset()

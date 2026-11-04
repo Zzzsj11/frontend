@@ -8,6 +8,7 @@ import CharacterPortrait from './CharacterPortrait.vue'
 import CharacterZoom from './CharacterZoom.vue'
 import VideoModelSelect from './VideoModelSelect.vue'
 import ImageModelSelect from './ImageModelSelect.vue'
+import TextModelSelect from './TextModelSelect.vue'
 import type { ShotGenOptions } from '../types'
 import {
   DEFAULT_IMAGE_MODEL,
@@ -178,6 +179,7 @@ const cancel = () => {
               </option>
             </BaseSelect></label
           >
+          <TextModelSelect label="文本模型 *" />
           <VideoModelSelect v-model="videoModel" label="视频模型 *" />
           <ImageModelSelect v-model="imageModel" :ratio="ratio" label="图片模型 *" />
           <label
@@ -453,8 +455,8 @@ const cancel = () => {
   border-radius: var(--radius-md);
   background: var(--surface-muted);
   padding: 10px;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
   gap: 10px;
   align-items: flex-start;
 }
@@ -561,15 +563,13 @@ const cancel = () => {
 }
 .role-card .character-portrait {
   width: 100%;
-  height: 70px;
+  height: auto;
+  aspect-ratio: 2 / 3;
   border-radius: var(--radius-sm);
 }
 .role-card-wrap {
   position: relative;
-}
-.role-card-wrap {
-  flex: 1 1 124px;
-  max-width: 160px;
+  min-width: 0;
 }
 .role-card-wrap .role-card {
   width: 100%;

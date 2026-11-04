@@ -29,6 +29,11 @@ watch(
     downloadError.value = ''
   },
 )
+const editLabel = () => {
+  const edit = current.value?.editLabel
+  closeImagePreview()
+  edit?.()
+}
 const move = (delta: number) =>
   selectPreviewImage((state.index + delta + state.items.length) % state.items.length)
 const onKey = (e: KeyboardEvent) => {
@@ -67,6 +72,7 @@ const download = async () => {
     @keydown="onKey"
   >
     <template #actions>
+      <button v-if="current?.editLabel" class="preview-action" @click="editLabel">修改名称</button>
       <button class="preview-action" :disabled="downloading" @click="download">
         {{ downloading ? '下载中…' : '下载原图' }}
       </button>

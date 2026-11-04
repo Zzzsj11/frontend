@@ -255,20 +255,19 @@ export const charactersActions = {
   },
 
   /** 编辑数字人基础信息 / 提示词 */
-  updateDigitalHuman(
+  async updateDigitalHuman(
     id: string,
     patch: Partial<Pick<DigitalHuman, 'name' | 'style' | 'description' | 'avatarPrompt'>>,
   ) {
     const dh = this.digitalHumans.find((d) => d.id === id)
     if (!dh || dh.readOnly) return
+    await api.updateDigitalHuman(id, {
+      name: patch.name,
+      style_id: patch.style ? this.dhStyleIds[patch.style] : undefined,
+      description: patch.description,
+      avatar_prompt: patch.avatarPrompt,
+    })
     Object.assign(dh, patch)
-    if (!dh.readOnly)
-      void api.updateDigitalHuman(id, {
-        name: patch.name,
-        style_id: patch.style ? this.dhStyleIds[patch.style] : undefined,
-        description: patch.description,
-        avatar_prompt: patch.avatarPrompt,
-      })
     if (patch.style) this.ensureDhStyle(patch.style)
   },
 

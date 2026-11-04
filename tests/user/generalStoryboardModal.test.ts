@@ -241,21 +241,27 @@ describe('general storyboard defaults', () => {
     }
     store.randomGeneralStoryboardOpen = true
     const run = vi.spyOn(store, 'runRandomGeneralStoryboard').mockResolvedValue()
-    vi.spyOn(apiClient, 'apiRequest').mockResolvedValue({
-      available: true,
-      balance: '100',
-      balanceDisplay: '100.00',
-      currency: 'CNY',
-      updatedAt: '',
-      key: {
-        keyMasked: 'yh-low***',
-        keyName: '低额度 Key',
-        quotaAmt: 100,
-        usedAmt: 90,
-        remaining: 10,
-        remainingDisplay: '10.00',
-      },
-    })
+    vi.spyOn(apiClient, 'apiRequest').mockImplementation((path: string) =>
+      Promise.resolve(
+        path.startsWith('/account/balance')
+          ? {
+              available: true,
+              balance: '100',
+              balanceDisplay: '100.00',
+              currency: 'CNY',
+              updatedAt: '',
+              key: {
+                keyMasked: 'yh-low***',
+                keyName: '低额度 Key',
+                quotaAmt: 100,
+                usedAmt: 90,
+                remaining: 10,
+                remainingDisplay: '10.00',
+              },
+            }
+          : [],
+      ),
+    )
     const confirm = vi.spyOn(confirmDialogModule, 'confirmDialog').mockResolvedValue(false)
     const wrapper = mount(GeneralStoryboardModal, {
       props: { random: true },
@@ -279,15 +285,21 @@ describe('general storyboard defaults', () => {
     }
     store.randomGeneralStoryboardOpen = true
     const run = vi.spyOn(store, 'runRandomGeneralStoryboard').mockResolvedValue()
-    vi.spyOn(apiClient, 'apiRequest').mockResolvedValue({
-      available: true,
-      balance: '100',
-      balanceDisplay: '100.00',
-      currency: 'CNY',
-      updatedAt: '',
-      key: null,
-      keyError: 'Key 额度接口超时',
-    })
+    vi.spyOn(apiClient, 'apiRequest').mockImplementation((path: string) =>
+      Promise.resolve(
+        path.startsWith('/account/balance')
+          ? {
+              available: true,
+              balance: '100',
+              balanceDisplay: '100.00',
+              currency: 'CNY',
+              updatedAt: '',
+              key: null,
+              keyError: 'Key 额度接口超时',
+            }
+          : [],
+      ),
+    )
     const confirm = vi.spyOn(confirmDialogModule, 'confirmDialog').mockResolvedValue(false)
     const wrapper = mount(GeneralStoryboardModal, {
       props: { random: true },
