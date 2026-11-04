@@ -46,6 +46,7 @@ from .database import close_database, database_ok, database_session, init_databa
 from .domain import owned_line, owned_project, owned_task, project_audio_json, uid, visible_humans
 from .domain import router as domain_router
 from .error_logging import record_api_error, request_payload
+from .generation_preferences import router as generation_preferences_router
 from .h3_prompt_compiler import compile_h3_prompt
 from .image_download import router as image_download_router
 from .image_model_policy import validate_image_selection
@@ -212,6 +213,7 @@ app.include_router(task_video_model_router)
 app.include_router(creative_router)
 app.include_router(admin_router)
 app.include_router(model_options_router)
+app.include_router(generation_preferences_router)
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -764,6 +766,11 @@ async def preview_portrait_prompt(payload: PortraitPromptParams, user: CurrentUs
 
 @app.post("/api/generations/images", status_code=202)
 async def create_image_generation(payload: ImageGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
+    from .generation_preferences import apply_media_preference
+
+    if payload.model:
+        await require_active_model(db, payload.model, "image")
+    await apply_media_preference(db, user.id, "image", payload)
     if payload.portrait is not None:
         payload.prompt = await _portrait_prompt(payload.portrait.description, payload.portrait.style)
     if not payload.prompt.strip():
@@ -856,9 +863,36 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
 
 
 async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserModel, db: AsyncSession) -> Job:
-    await db.scalar(select(UserModel.id).where(UserModel.id == user.id).with_for_update())
-    model, provider = await require_active_model(db, payload.model or settings.video_model, "video")
+    from .generation_preferences import apply_media_preference
+
+    original_input = payload.model_dump(mode="json", exclude={"request_id"})
+    await db.scalar(select(UserModel).where(UserModel.id == user.id).with_for_update().execution_options(populate_existing=True))
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
+    # 重放原请求不读取新偏好，也不要求原模型/渠道仍可用于新生成。
+    if payload.request_id:
+        existing = await db.scalar(
+            select(GenerationJobModel)
+            .where(
+                GenerationJobModel.user_id == user.id,
+                GenerationJobModel.kind == "video",
+                GenerationJobModel.deleted_at.is_(None),
+                GenerationJobModel.request["request_id"].as_string() == payload.request_id,
+            )
+            .order_by(GenerationJobModel.created_at.desc())
+            .limit(1)
+        )
+        if existing:
+            snapshot = existing.request or {}
+            previous_input = snapshot.get("_originalSubmissionInput") or snapshot.get("_submissionInput")
+            if previous_input != original_input:
+                raise HTTPException(409, "同一请求标识的参数不能更改，请核对原任务")
+            reused = jobs._from_model(existing)
+            reused.reused = True
+            return reused
+    if payload.model:
+        await require_active_model(db, payload.model, "video")
+    await apply_media_preference(db, user.id, "video", payload)
+    model, provider = await require_active_model(db, payload.model or settings.video_model, "video")
     if task_id:
         await lock_video_task(db, task_id)
     task = await db.get(ProjectTaskModel, task_id) if task_id else None
@@ -867,7 +901,15 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
         await db.refresh(task)
     if line:
         await db.refresh(line)
-    if task and (task.storyboard_config or {}).get("videoModelRevision") and line and (line.shot_options or {}).get("videoModel") != payload.model:
+    preferred_video = (user.generation_preferences or {}).get("video") or {}
+    line_model = (line.shot_options or {}).get("videoModel") if line else None
+    if (
+        task
+        and (task.storyboard_config or {}).get("videoModelRevision")
+        and line
+        and (not preferred_video or preferred_video.get("model") == line_model)
+        and original_input.get("model") != line_model
+    ):
         raise HTTPException(409, "该分镜的视频模型已更新，请刷新页面后再生成")
     submission_input = payload.model_dump(mode="json", exclude={"request_id"})
     submission_input["model"] = model.code
@@ -938,6 +980,7 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
             shot_index=line.sort_order,
         )
     snapshot = generation_request_snapshot(payload, model, provider)
+    snapshot["_originalSubmissionInput"] = original_input
     snapshot["_submissionInput"] = submission_input
     snapshot["_identityReferenceIndices"] = sorted(identity_indices)
     if task and task.storyboard_type == "general_random" and line and not is_h3:
@@ -1040,6 +1083,7 @@ async def get_generation_status_batch(payload: GenerationStatusBatchRequest, use
             "kind": row.kind,
             "status": row.status,
             "progress": row.progress,
+            "phase": "manual_review" if needs_provider_reconciliation(row) else row.phase,
             "result": row.result,
             "error": row.error,
         }

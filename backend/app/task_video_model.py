@@ -14,7 +14,8 @@ from .all_in_one_catalog import VIDEO_MODEL_CODES
 from .auth import CurrentUser
 from .database import database_session
 from .domain import owned_task, task_json
-from .models import AiModelModel, AiProviderModel, GenerationJobModel, ProjectTaskModel, StoryboardLineModel
+from .generation_preferences import fetch_channels
+from .models import AiModelModel, AiProviderModel, GenerationJobModel, ProjectTaskModel, StoryboardLineModel, UserModel
 
 router = APIRouter(prefix="/api")
 
@@ -23,6 +24,7 @@ SUPPORTED_VIDEO_MODELS = VIDEO_MODEL_CODES
 
 class TaskVideoModelChange(BaseModel):
     model: str = Field(min_length=1, max_length=200)
+    channel: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
     apply: bool = False
     preview_token: str | None = None
 
@@ -32,8 +34,8 @@ async def lock_video_task(db: AsyncSession, task_id: str) -> None:
     await db.execute(select(ProjectTaskModel.id).where(ProjectTaskModel.id == task_id).with_for_update(key_share=True))
 
 
-def _token(task: ProjectTaskModel, lines: list[StoryboardLineModel], model: AiModelModel) -> str:
-    snapshot = [task.storyboard_config, model.code, model.capabilities, [(line.id, line.shot_options) for line in lines]]
+def _token(task: ProjectTaskModel, lines: list[StoryboardLineModel], model: AiModelModel, channel: str | None = None) -> str:
+    snapshot = [channel, task.storyboard_config, model.code, model.capabilities, [(line.id, line.shot_options) for line in lines]]
     return hashlib.sha256(json.dumps(snapshot, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
@@ -86,6 +88,7 @@ def plan_line(options: dict, model: AiModelModel, number: int) -> tuple[dict, li
 
 @router.post("/tasks/{task_id}/video-model")
 async def change_task_video_model(task_id: str, payload: TaskVideoModelChange, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
+    owner = await db.scalar(select(UserModel).where(UserModel.id == user.id).with_for_update().execution_options(populate_existing=True))
     task = await owned_task(db, user.id, task_id)
     await lock_video_task(db, task_id)
     await db.refresh(task)
@@ -140,7 +143,11 @@ async def change_task_video_model(task_id: str, payload: TaskVideoModelChange, u
     )
     if not lines:
         raise HTTPException(422, "请先生成分镜，再修改视频模型")
-    token = _token(task, lines, model)
+    if payload.channel:
+        catalog = await fetch_channels(model.provider_model_id, user.id)
+        if not any(item.get("channel") == payload.channel and item.get("available") is True for item in catalog["channels"]):
+            raise HTTPException(422, "所选渠道不可用，请重新选择")
+    token = _token(task, lines, model, payload.channel)
     plans, adjustments, blockers = [], [], []
     for number, line in enumerate(lines, 1):
         if line.source == "creative":
@@ -152,6 +159,7 @@ async def change_task_video_model(task_id: str, payload: TaskVideoModelChange, u
     result = {
         "taskId": task_id,
         "model": model.code,
+        "channel": payload.channel,
         "modelName": model.name,
         "count": len(lines),
         "adjustments": adjustments,
@@ -181,6 +189,7 @@ async def change_task_video_model(task_id: str, payload: TaskVideoModelChange, u
         "resolution": default_resolution,
         "videoModelRevision": token,
     }
+    owner.generation_preferences = {**(owner.generation_preferences or {}), "video": {"model": model.code, "channel": payload.channel}}
     await db.commit()
-    result.update(applied=True, task=task_json(task))
+    result.update(applied=True, task=task_json(task), generationPreferences=owner.generation_preferences)
     return result

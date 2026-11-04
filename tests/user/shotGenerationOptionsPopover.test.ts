@@ -1,5 +1,6 @@
 import { enableAutoUnmount, mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import ShotGenerationOptionsPopover from '../../src/components/ShotGenerationOptionsPopover.vue'
 import VideoModelSelect from '../../src/components/VideoModelSelect.vue'
 import {
@@ -11,6 +12,7 @@ import {
 import type { ShotGenOptions } from '../../src/types'
 
 enableAutoUnmount(afterEach)
+beforeEach(() => setActivePinia(createPinia()))
 
 const options: ShotGenOptions = {
   resolution: '480p',

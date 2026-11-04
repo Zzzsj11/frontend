@@ -30,7 +30,7 @@
 - 镜像标签固定为 `git-<完整 commit SHA>`，便于定位和回滚。
 - `.env`、供应商 Token、TOS 密钥、数据库密码和 JWT 密钥只保存在服务器，不提交 Git。
 - 数据库结构只通过 Alembic 更新；发布时后端入口会自动执行迁移。
-- backend 采用一次性 green 容器平滑切换：新版本先通过健康检查再接管流量，部署窗口不再产生 502；nginx 通过 Docker 内嵌 DNS 运行时解析上游，无需重启即可感知 backend 容器 IP 变化。
+- backend 采用一次性 green 容器切换：新版本通过健康检查后，由 `scripts/switch-backend.sh` 修改并 reload Nginx 上游，再重建 backend；正式 backend 健康后切回并排空 green。Nginx 通过 Docker 内嵌 DNS 运行时解析上游。
 - PostgreSQL 和 Redis 不开放公网，维护时使用 SSH 隧道。
 - 发布前在本地执行 `make preflight`；发布后执行服务器健康检查和远程自动化测试。
 
@@ -370,8 +370,8 @@ DEPLOY_ENV=production ./scripts/deploy-local-images.sh
 3. 构建 `mvagent-local/mv-agent-frontend:git-<sha>` 和后端镜像；
 4. 不从远程镜像仓库拉取；首次部署会先启动并等待 PostgreSQL、Redis 健康，后续发布为空操作；
 5. 先更新 frontend 容器（新 nginx 配置先就绪）；
-6. 平滑切换 backend：用新镜像启动一次性 green 容器 `mv-backend-green`（`compose run` 继承服务的环境/密钥/网络别名），健康检查通过后重建正式容器——整个窗口内始终有健康上游，nginx 不会返回 502；green 未通过健康检查则打印其日志并中止部署，当前版本继续服务；
-7. 等待正式 backend 健康检查后删除 green 容器，并兜底更新其余服务；
+6. 启动带时间戳和进程号的一次性 green 容器（`compose run` 继承服务的环境、密钥与网络）。通过容器内和 Nginx 容器内两次健康检查后，显式将 Nginx 上游切至 green，再重建正式 backend。切流配置校验或 reload 失败会恢复旧配置并退出；green 健康检查失败则清理本次 green，当前 backend 继续服务；
+7. 正式 backend 健康后将 Nginx 切回 backend，给 green 最多 60 秒终止排空窗口后删除。若切流之后发生失败，脚本保留可能承载流量的 green 并输出名称；修复 backend、确认切回后才能清理该容器。随后更新其余服务；
 8. 将当前和上一版本写入 `.deployed-version`、`.previous-version`；全部容器健康后再原子更新 `.deployment/info.json`。工作台与管理后台顶部栏通过 `/api/release` 展示这次实际部署完成时间及 Git 版本短号，测试人员可据此确认页面是否为最新部署。
 
 部署脚本会无条件重建 backend 与全部 Worker。原因是运行时 Secret 虽以只读文件挂载，但应用只在进程启动时加载；即使镜像版本未变化，Key 轮换也必须启动新进程才能生效。

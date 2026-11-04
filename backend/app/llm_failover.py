@@ -30,14 +30,10 @@ def failures_key() -> str:
 
 
 async def choose_model(model: str) -> str:
-    if not settings.llm_failover_enabled or not applies(model):
-        return model
-    try:
-        failures = int(await redis.get(failures_key()) or 0)
-    except Exception:
-        logger.warning("Unable to read text-model failover state", exc_info=True)
-        return model
-    return FALLBACK_MODEL + "-all-in-one" if failures >= FAILURE_LIMIT else model
+    from .generation_preferences import text_selection
+
+    selection = text_selection.get() or {}
+    return selection.get("model") or model
 
 
 async def record_success(model: str) -> None:
@@ -55,6 +51,11 @@ async def record_failure(model: str) -> None:
     try:
         failures = int(await redis.eval(_RECORD_FAILURE, 1, failures_key(), COOLDOWN_SECONDS))
         if failures == FAILURE_LIMIT and settings.llm_failover_enabled:
-            logger.error("%s primary text model failed five consecutive calls; switching to %s for %s seconds", settings.llm_channel, FALLBACK_MODEL, COOLDOWN_SECONDS)
+            logger.error(
+                "%s primary text model failed five consecutive calls; retaining selected model (legacy fallback %s disabled, cooldown %s seconds)",
+                settings.llm_channel,
+                FALLBACK_MODEL,
+                COOLDOWN_SECONDS,
+            )
     except Exception:
         logger.warning("Unable to update text-model failover state", exc_info=True)

@@ -19,6 +19,7 @@ import type {
 import * as api from '../../api/domain'
 
 export type ProjectState = {
+  shotSelectionPending: Record<string, boolean>
   lines: ScriptLine[]
   digitalHumans: DigitalHuman[]
   /** 风格分类列表（支持增删改查，空分类也会保留） */
@@ -345,7 +346,7 @@ export type ProjectActions = {
   /** 生成/重新生成分镜视频片段（场景 × 分镜提示词 × 出演角色 × 生成参数）；新片段作为资产追加并选中 */
   generateShotFor(lineId: string, shotPrompt?: string, options?: ShotGenOptions): Promise<void>
   /** 从资产历史中选用某个视频片段 */
-  selectShotAsset(lineId: string, assetId: string): void
+  selectShotAsset(lineId: string, assetId: string): Promise<boolean>
   generateAllVoices(): Promise<void>
   /** 批量生成视频片段：提示词就绪且视频「未生成/失败」的行最多 200 路并发（与后端单用户上限一致）；
    *  单行失败不中断后续（失败原因入行内状态，429 单账号上限由后端兜底并统一弹窗）；

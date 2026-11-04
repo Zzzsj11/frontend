@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: lock-backend setup dev stop lint lint-frontend lint-backend test test-backend test-frontend test-e2e smoke smoke-backend smoke-frontend smoke-real migration-check build docker-build preflight preflight-lite remote-test
+.PHONY: lock-backend setup dev dev-web stop lint lint-frontend lint-backend test test-backend test-frontend test-e2e smoke smoke-backend smoke-frontend smoke-real migration-check migration-head-check test-middleware build docker-build preflight preflight-lite remote-test
 lock-backend:
 	backend/.venv/bin/pip-compile --no-emit-index-url --no-emit-trusted-host --output-file backend/requirements.lock backend/requirements.txt
 setup:
@@ -7,7 +7,9 @@ setup:
 	npm ci
 	cd backend && .venv/bin/pip install -r requirements-dev.txt
 dev:
-	docker compose -f docker-compose.yml -f docker-compose.local-build.yml up -d
+	python3 scripts/local_runtime.py dev
+dev-web:
+	npm run dev -- --host 127.0.0.1
 stop:
 	docker compose -f docker-compose.yml -f docker-compose.local-build.yml --profile workers down
 lint: lint-frontend lint-backend
@@ -17,6 +19,8 @@ lint-frontend:
 lint-backend:
 	cd backend && .venv/bin/ruff check app tests migrations
 	cd backend && .venv/bin/ruff format --check app tests migrations
+	backend/.venv/bin/ruff check scripts/local_runtime.py scripts/local_middleware_proof.py
+	backend/.venv/bin/ruff format --check scripts/local_runtime.py scripts/local_middleware_proof.py
 test: test-backend test-frontend
 test-backend:
 	cd backend && .venv/bin/pytest -q --cov=app --cov-report=term-missing --cov-fail-under=55
@@ -38,9 +42,13 @@ migration-check:
 build:
 	npm run build
 docker-build:
-	docker compose -f docker-compose.yml -f docker-compose.local-build.yml build
-preflight: lint migration-check test build docker-build
-# 日常提交前快速卡口：跳过 Docker 构建（约省一半时间），发布前仍跑完整 preflight
-preflight-lite: lint migration-check test build
+	python3 scripts/local_runtime.py build
+migration-head-check:
+	python3 scripts/local_runtime.py heads
+test-middleware:
+	python3 scripts/local_runtime.py middleware
+# Native checks first; real PostgreSQL/Redis are disposable and never reused.
+preflight: preflight-lite test-middleware
+preflight-lite: lint migration-head-check test build
 remote-test:
 	npm run test:admin && npm run test:remote:all

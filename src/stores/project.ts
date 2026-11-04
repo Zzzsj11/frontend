@@ -87,6 +87,7 @@ export const useProjectStore = defineStore('project', {
     activeTaskStatus: null as string | null,
     activeStoryboardConfig: {} as Record<string, unknown>,
     taskVideoModelEditing: false,
+    shotSelectionPending: {} as Record<string, boolean>,
     /** 当前歌曲项目的整首审核音轨。 */
     projectAudio: null as ProjectAudio | null,
     audioTrackVisible: false,

@@ -10,6 +10,8 @@
 
 重要入口：后端 `backend/app/main.py`，领域 API `backend/app/domain.py`，管理 API `backend/app/admin.py`，前端路由 `src/router.ts`，主状态 `src/stores/project.ts`，管理控制台 `src/views/AdminConsoleView.vue` + 侧边导航 `src/components/AdminSideNav.vue`，测试说明 `docs/TESTING.md`。
 
+本地开发与验证优先使用本机 Python、Node 和浏览器，不保留常驻应用容器。`make preflight-lite` 全程不依赖 Docker；`make preflight` 追加临时 PostgreSQL/Redis 的迁移、任务领取及执行租约验收。必须使用 Docker 时通过 `scripts/local_runtime.py` 的唯一项目名隔离，正常结束、失败或中断均清理本次容器、网络和测试数据；构建验收只删除本次独占镜像标签。禁止全局 prune、删除其他项目或未知历史数据卷。`make dev` 在本机运行应用，仅数据依赖使用临时容器，Ctrl-C 后清理；只做页面开发用 `make dev-web`。数据库结构验收用 `make migration-check`，不得连接已有业务数据库。详见 `docs/LOCAL-DEVELOPMENT.md`。
+
 前端代码须遵循 `docs/FRONTEND-GUIDELINES.md`（组件、样式令牌、弹层与 z-index 层级规范）；格式由 Prettier 统一，`make lint-frontend` 包含 `format:check` 卡口。
 
 英和数字人资产补注册已退役；所有环境禁止配置或恢复调用 `ensure_asset_avatars.py` / `sync-digital-human-assets.sh` 的 cron、launchd 或其他周期任务。生产发布会移除旧补注册调度，人物参考直接使用 TOS 原图。详见 `docs/ASSET-AVATAR.md` §5。

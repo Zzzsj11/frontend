@@ -2,6 +2,8 @@
 import { computed, ref } from 'vue'
 import { useProjectStore } from '../stores/project'
 import AppIcon from './AppIcon.vue'
+import ImageModelSelect from './ImageModelSelect.vue'
+import { DEFAULT_IMAGE_MODEL } from '../generationModels'
 import BaseModal from './base/BaseModal.vue'
 import CharacterPortrait from './CharacterPortrait.vue'
 import ImageZoom from './ImageZoom.vue'
@@ -320,6 +322,11 @@ const removeDh = async () => {
         </div>
         <input ref="upFileRef" type="file" accept="image/*" hidden @change="onUpAvatarChange" />
         <div class="upload-fields">
+          <ImageModelSelect
+            :model-value="DEFAULT_IMAGE_MODEL"
+            label="人物图片模型"
+            :disabled="store.dhGenerating"
+          />
           <div class="gen-row">
             <input
               v-model="upName"
@@ -532,6 +539,12 @@ const removeDh = async () => {
               />
             </div>
           </div>
+          <ImageModelSelect
+            v-if="!editing.readOnly"
+            :model-value="DEFAULT_IMAGE_MODEL"
+            label="人物图片模型"
+            :disabled="regenBusy"
+          />
           <label class="edit-label">身份特征（不含服装、年代或职业）</label>
           <textarea v-model="editDesc" class="gen-desc" rows="2" :disabled="editing.readOnly" />
           <span class="readonly-tip"

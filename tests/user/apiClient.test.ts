@@ -46,25 +46,18 @@ describe('apiRequest', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('retries POST requests that hit a 502 gateway window', async () => {
-    vi.useFakeTimers()
-    const fetchMock = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response('Bad Gateway', { status: 502 }))
-      .mockResolvedValueOnce(new Response('Bad Gateway', { status: 502 }))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ id: 'job-1' }), {
-          status: 202,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      )
-
-    const resultPromise = apiRequest<{ id: string }>('/generations/videos', { method: 'POST' })
-    await vi.runAllTimersAsync()
-
-    await expect(resultPromise).resolves.toEqual({ id: 'job-1' })
-    expect(fetchMock).toHaveBeenCalledTimes(3)
-  })
+  it.each([502, 503])(
+    'does not replay paid POST requests after an ambiguous %s',
+    async (status) => {
+      const fetchMock = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(new Response('Bad Gateway', { status }))
+      await expect(
+        apiRequest('/generations/images', { method: 'POST', body: '{"prompt":"test"}' }),
+      ).rejects.toMatchObject({ status })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    },
+  )
 
   it('surfaces an actionable message after the 502 retry budget is exhausted', async () => {
     vi.useFakeTimers()
@@ -72,7 +65,7 @@ describe('apiRequest', () => {
       .spyOn(globalThis, 'fetch')
       .mockImplementation(async () => new Response('Bad Gateway', { status: 502 }))
 
-    const resultPromise = apiRequest('/generations/videos', { method: 'POST' })
+    const resultPromise = apiRequest('/generations/job-1')
     const assertion = expect(resultPromise).rejects.toThrow('服务正在重启，请稍后重试')
     await vi.runAllTimersAsync()
     await assertion
@@ -147,8 +140,7 @@ describe('apiRequest 主动取消（abort）', () => {
       .mockImplementation(async () => new Response('Bad Gateway', { status: 502 }))
 
     const started = Date.now()
-    const promise = apiRequest('/generations/videos', {
-      method: 'POST',
+    const promise = apiRequest('/generations/job-1', {
       signal: controller.signal,
     })
     // 首个网关等待为 1000ms，等待期间 abort

@@ -261,3 +261,37 @@ def test_copied_ass_resolves_only_same_project_source(client, export_case):
             assert item.input_snapshot["assUrl"] == "https://test.tos/source.ass"
 
     asyncio.run(check())
+
+
+def test_selected_history_is_persisted_and_used_by_export(client, export_case):
+    headers, task_id = export_case
+    line_id, historical_id = f"{task_id}-l0", f"{task_id}-historical"
+
+    async def seed_history():
+        async with session_factory() as db:
+            db.add(ShotAssetModel(id=historical_id, storyboard_line_id=line_id, cover_url="", video_url="https://test.tos/historical.mp4", duration=4, is_current=False))
+            await db.commit()
+
+    asyncio.run(seed_history())
+    path = f"/api/storyboard-lines/{line_id}/current-shot/{historical_id}"
+    _, foreign = create_and_login_user(client, "history-foreign-" + uuid.uuid4().hex[:8])
+    assert client.put(path, headers=foreign).status_code == 404
+    assert client.put(f"/api/storyboard-lines/{task_id}-l1/current-shot/{historical_id}", headers=headers).status_code == 404
+    assert client.put(path, headers=headers).status_code == 200
+    assert client.put(path, headers=headers).status_code == 200
+    refreshed = client.get(f"/api/tasks/{task_id}/storyboard-lines/{line_id}", headers=headers).json()
+    assert [v["id"] for v in refreshed["shotAssets"] if v["isCurrent"]] == [historical_id]
+    response = client.post(f"/api/tasks/{task_id}/video-exports", headers=headers)
+    assert response.status_code == 202, response.text
+
+    async def verify_selection():
+        async with session_factory() as db:
+            export = await db.get(MaterialExportModel, response.json()["id"])
+            assert export.input_snapshot["clips"][0]["assetId"] == historical_id
+            assert export.input_snapshot["clips"][0]["url"].endswith("historical.mp4")
+            historical = await db.get(ShotAssetModel, historical_id)
+            historical.deleted_at = utcnow()
+            await db.commit()
+
+    asyncio.run(verify_selection())
+    assert client.put(path, headers=headers).status_code == 404

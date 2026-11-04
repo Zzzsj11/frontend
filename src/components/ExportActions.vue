@@ -31,6 +31,7 @@ const latest = (kind: string) =>
   )
 const busy = (item?: MaterialExport) => !!item && ['queued', 'running'].includes(item.status)
 const submitting = (kind: string) => store.exportSubmitting[`${store.activeTaskId}:${kind}`]
+const selecting = computed(() => store.lines.some((line) => store.shotSelectionPending[line.id]))
 const label = (kind: string) => (kind === 'video' ? '合并并导出' : '导出素材')
 const unavailable = (kind: string) =>
   kind === 'video' ? !store.lines.length || missing.value > 0 : !store.hasVideoAssets
@@ -102,7 +103,7 @@ const stageIndex = (item: MaterialExport) =>
       <div class="buttons">
         <button
           class="btn-outline"
-          :disabled="submitting(kind) || busy(latest(kind)) || unavailable(kind)"
+          :disabled="selecting || submitting(kind) || busy(latest(kind)) || unavailable(kind)"
           @click="store.runExport(kind)"
         >
           {{

@@ -7,6 +7,7 @@ import {
   type AuthUser,
 } from '../api/client'
 import { useProjectStore } from './project'
+import { useGenerationPreferences } from './generationPreferences'
 export interface KeyQuotaInfo {
   keyMasked: string
   keyName: string | null
@@ -73,6 +74,7 @@ export const useAuthStore = defineStore('auth', {
         this.ready = true
         if (this.user && !this.user.mustChangePassword) {
           void this.loadAllInOneCredits()
+          await useGenerationPreferences().load(this.user.id)
         }
       }
     },
@@ -82,6 +84,7 @@ export const useAuthStore = defineStore('auth', {
         this.user = (await loginRequest(username, password)).user
         if (!this.user.mustChangePassword) {
           void this.loadAllInOneCredits()
+          await useGenerationPreferences().load(this.user.id)
         }
       } finally {
         this.loading = false
@@ -124,6 +127,7 @@ export const useAuthStore = defineStore('auth', {
       const uid = this.user?.id
       await logoutRequest()
       this.user = null
+      useGenerationPreferences().$reset()
       this.balance = null
       this.allInOneCredits = null
       // 清空用户相关的 localStorage

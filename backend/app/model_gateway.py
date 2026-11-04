@@ -98,6 +98,9 @@ async def run_with_context(job: Any, runner: Any) -> Any:
     owner_token = _owner.set(job.user_id or "")
     agent_token = _agent.set(attrs)
     job_token = _job.set(str(job.id or ""))
+    from .generation_preferences import text_selection
+
+    selection_token = text_selection.set(snapshot.get("_textSelection"))
     try:
         return await runner(job)
     finally:
@@ -105,6 +108,7 @@ async def run_with_context(job: Any, runner: Any) -> Any:
         _owner.reset(owner_token)
         _agent.reset(agent_token)
         _job.reset(job_token)
+        text_selection.reset(selection_token)
 
 
 class AsyncOpenAI(OpenAIClient):

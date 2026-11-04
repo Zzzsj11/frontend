@@ -7,8 +7,7 @@ let refreshPromise: Promise<boolean> | null = null
 /** 用户主动退出登录后置位：在途请求/轮询撞上 401 时静默失败，不再弹“登录已过期”或强制跳转 */
 let intentionalLogout = false
 const NETWORK_RETRY_DELAYS_MS = [500, 1500]
-// 502/503 是 nginx 在上游不可达时直接返回的（部署重启窗口），请求从未到达后端，
-// 因此任何方法（含 POST）都可安全重放；预算覆盖一次平滑切换的收敛时间
+// 502/503 不能证明后端未受理；仅重试读取，避免重复创建付费生成工单。
 const GATEWAY_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000]
 /** 可中断等待：signal abort 时提前返回（由调用方检查 aborted 后退出重试） */
 const wait = (delayMs: number, signal?: AbortSignal) =>
@@ -110,9 +109,8 @@ export async function apiRequest<T>(
     }
   }
   // 撞上部署重启窗口：按预算重试等待新 backend 就绪，用户无感
-  const agentMutation =
-    headers.has('X-Agent-Run-Id') && (init.method ?? 'GET').toUpperCase() !== 'GET'
-  if ((response.status === 502 || response.status === 503) && !agentMutation) {
+  const safeToReplay = ['GET', 'HEAD', 'OPTIONS'].includes((init.method ?? 'GET').toUpperCase())
+  if ((response.status === 502 || response.status === 503) && safeToReplay) {
     for (const delayMs of GATEWAY_RETRY_DELAYS_MS) {
       await wait(delayMs, init.signal ?? undefined)
       if (init.signal?.aborted) throw abortError()

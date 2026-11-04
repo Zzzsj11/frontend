@@ -80,7 +80,13 @@ export async function generateShotVideo(
   signal?: AbortSignal,
   onSubmitted?: (submittedAt: string) => void,
   onUpdate?: (snapshot: GenerationJobSnapshot) => void,
-): Promise<{ coverUrl: string; coverThumbnailUrl?: string; videoUrl: string; duration: number }> {
+): Promise<{
+  assetId?: string
+  coverUrl: string
+  coverThumbnailUrl?: string
+  videoUrl: string
+  duration: number
+}> {
   const requestedMode = options.h3Mode ?? DEFAULT_H3_MODE
   const automaticImages = [referenceImageUrl, ...characterImageUrls].filter(Boolean) as string[]
   // 兼容曾以 Ref2VA 作为默认值保存的旧分镜：没有视觉参考时交给后端自动选择 T2VA。
@@ -131,12 +137,14 @@ export async function generateShotVideo(
   // 以服务端工单创建时间为准；客户端只负责逐秒展示，不自行猜测起点。
   if (job.created_at) onSubmitted?.(new Date(job.created_at * 1000).toISOString())
   const result = await waitForJob<{
+    assetId?: string
     coverUrl?: string
     coverThumbnailUrl?: string
     videoUrl: string
     duration: number
   }>(job.id, 7_500_000, { signal, onUpdate })
   return {
+    assetId: result.assetId,
     coverUrl: result.coverUrl || referenceImageUrl || '',
     coverThumbnailUrl: result.coverThumbnailUrl,
     videoUrl: result.videoUrl,

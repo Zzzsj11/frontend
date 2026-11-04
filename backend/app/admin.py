@@ -865,6 +865,8 @@ async def video_billing_detail(record_id: str, user: CurrentUser, db: AsyncSessi
         "attempt": job.attempt,
         "providerAttempts": request_data.get("_providerAttempts") or [],
         "providerRequest": request_data.get("_providerRequest"),
+        "requestedChannel": request_data.get("channel"),
+        "routingMode": ("specified" if request_data.get("channel") else "automatic") if "channel" in request_data else "unknown",
         "prompts": prompts,
         "references": references,
         "rawUsage": record.raw_usage,

@@ -150,6 +150,12 @@ export async function fetchStoryboardLine(taskId: string, lineId: string): Promi
   return mapScriptLine(item)
 }
 
+export const selectCurrentShot = (lineId: string, assetId: string) =>
+  apiRequest<{ lineId: string; assetId: string }>(
+    `/storyboard-lines/${encodeURIComponent(lineId)}/current-shot/${encodeURIComponent(assetId)}`,
+    { method: 'PUT' },
+  )
+
 /** GET /api/tasks/{id}/generations/active — 任务下仍在排队/执行中的媒体生成任务（刷新后恢复等待态） */
 export const fetchActiveGenerations = (taskId: string) =>
   apiRequest<
@@ -579,7 +585,13 @@ export async function generateShotVideo(
   signal?: AbortSignal,
   onSubmitted?: (submittedAt: string) => void,
   onUpdate?: (snapshot: import('../utils/generationPoller').GenerationJobSnapshot) => void,
-): Promise<{ coverUrl: string; coverThumbnailUrl?: string; videoUrl: string; duration: number }> {
+): Promise<{
+  assetId?: string
+  coverUrl: string
+  coverThumbnailUrl?: string
+  videoUrl: string
+  duration: number
+}> {
   return mediaGen.generateShotVideo(
     [scenePrompt, shotPrompt].filter(Boolean).join('。'),
     referenceImageUrl,
@@ -624,6 +636,8 @@ export const submitVideoGenerationsBatch = (items: VideoBatchItem[]) =>
   })
 
 export interface TaskVideoModelPlan {
+  channel?: string | null
+  generationPreferences?: import('../stores/generationPreferences').GenerationPreferences
   taskId: string
   model: string
   modelName: string
@@ -635,10 +649,20 @@ export interface TaskVideoModelPlan {
   applied: boolean
   task?: { storyboardConfig: Record<string, unknown> }
 }
-export const changeTaskVideoModel = (taskId: string, model: string, previewToken?: string) =>
+export const changeTaskVideoModel = (
+  taskId: string,
+  model: string,
+  previewToken?: string,
+  channel: string | null = null,
+) =>
   apiRequest<TaskVideoModelPlan>(`/tasks/${taskId}/video-model`, {
     method: 'POST',
-    body: JSON.stringify({ model, apply: Boolean(previewToken), preview_token: previewToken }),
+    body: JSON.stringify({
+      model,
+      channel,
+      apply: Boolean(previewToken),
+      preview_token: previewToken,
+    }),
   })
 
 // 单条畸形 SSE 不应丢掉后续已完成事件。

@@ -6,20 +6,28 @@ for (const kind of ['ass', 'general', 'general_random']) {
     test(`${kind}: ${target} picker applies all lines and survives reload`, async ({ page }) => {
       let model = 'doubao-seedance-2.0-all-in-one'
       let saves = 0
+      const preferences: Record<string, unknown> = {}
       const entries = videoCatalog.map((row) => ({ ...row, id: row.code }))
       const targetName = entries.find((item) => item.id === target)!.name
       await page.route('**/api/**', async (route) => {
         const path = new URL(route.request().url()).pathname
         if (!path.startsWith('/api/')) return route.continue()
+        if (path.includes('/generation-preferences')) {
+          if (route.request().method() === 'PUT')
+            preferences[path.split('/').pop()!] = route.request().postDataJSON()
+          return route.fulfill({ json: preferences })
+        }
         if (path.endsWith('/model-options')) return route.fulfill({ json: entries })
         if (path.endsWith('/video-model')) {
           const body = route.request().postDataJSON()
           if (body.apply) {
             model = body.model
+            preferences.video = { model: body.model, channel: body.channel ?? null }
             saves++
           }
           return route.fulfill({
             json: {
+              generationPreferences: body.apply ? preferences : undefined,
               taskId: 'model-task',
               model: body.model,
               modelName: entries.find((item) => item.id === body.model)?.name,
@@ -99,14 +107,22 @@ for (const kind of ['ass', 'general', 'general_random']) {
       await picker.click()
       await expect(page.getByRole('dialog', { name: '修改子项目视频模型' })).toBeVisible()
       await page.getByLabel('目标视频模型').click()
-      await expect(page.getByRole('option')).toHaveCount(12)
-      await expect(page.getByRole('option', { name: 'Veo 3.1', exact: true })).toHaveCount(1)
+      await expect(page.locator('[data-model-option]')).toHaveCount(12)
+      await expect(page.getByRole('button', { name: 'Veo 3.1', exact: true })).toHaveCount(1)
       await page
-        .getByRole('option', {
+        .getByRole('button', {
           name: targetName,
           exact: true,
         })
         .click()
+      await expect(page.getByText('第 1 镜：清晰度 480P → 720P')).toBeVisible()
+      expect(preferences).toEqual({})
+      expect(saves).toBe(0)
+      await page.getByRole('button', { name: '取消', exact: true }).click()
+      expect(preferences).toEqual({})
+      await picker.click()
+      await page.getByLabel('目标视频模型').click()
+      await page.getByRole('button', { name: targetName, exact: true }).click()
       await expect(page.getByText('第 1 镜：清晰度 480P → 720P')).toBeVisible()
       await page.getByRole('button', { name: '应用到全部分镜' }).click()
       await expect(picker).toContainText(targetName)

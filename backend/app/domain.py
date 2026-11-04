@@ -2149,6 +2149,34 @@ async def update_line(line_id: str, payload: StoryboardLineUpdate, user: Current
     return await line_json(db, line, payload.digital_human_ids or [])
 
 
+@router.put("/storyboard-lines/{line_id}/current-shot/{asset_id}")
+async def select_current_shot(line_id: str, asset_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
+    # 与导出受理串行化，确保确认保存后的导出使用同一选用版本。
+    await db.execute(select(UserModel.id).where(UserModel.id == user.id).with_for_update())
+    line = await owned_line(db, user.id, line_id)
+    await db.execute(select(StoryboardLineModel.id).where(StoryboardLineModel.id == line.id).with_for_update())
+    asset = await db.scalar(
+        select(ShotAssetModel).where(
+            ShotAssetModel.id == asset_id,
+            ShotAssetModel.storyboard_line_id == line.id,
+            ShotAssetModel.deleted_at.is_(None),
+            ShotAssetModel.status == "ready",
+        )
+    )
+    if not asset or not asset.video_url:
+        raise HTTPException(404, "可选用的视频不存在")
+    await db.execute(
+        update(ShotAssetModel)
+        .where(
+            ShotAssetModel.storyboard_line_id == line.id,
+            ShotAssetModel.deleted_at.is_(None),
+        )
+        .values(is_current=ShotAssetModel.id == asset.id)
+    )
+    await db.commit()
+    return {"lineId": line.id, "assetId": asset.id}
+
+
 @router.delete("/storyboard-lines/{line_id}")
 async def delete_line(line_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
     line = await owned_line(db, user.id, line_id)

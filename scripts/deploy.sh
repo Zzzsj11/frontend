@@ -83,10 +83,21 @@ if [[ "${DEPLOY_TLS:-0}" == "1" ]]; then
   "${compose[@]}" exec -T frontend nginx -s reload
 fi
 
-# 平滑切换 backend：用新版本起 green 一次性容器（compose run 继承服务的环境/密钥/网络别名），
-# 健康后再重建正式容器 —— 整个窗口内始终有健康上游，消除 502 窗口
-green="mv-backend-green"
-docker rm -f "$green" >/dev/null 2>&1 || true
+# green 以唯一容器名接入同一网络；健康后显式切换 Nginx，再重建 backend。
+source "$root/scripts/switch-backend.sh"
+green="mv-backend-green-$(date +%s)-$$"
+green_serving=0
+cleanup_green() {
+  local status=$?
+  if [[ "$green_serving" == "1" ]]; then
+    echo "deployment interrupted; $green remains serving traffic; repair backend then switch Nginx back before removing it" >&2
+  else
+    docker stop --time 60 "$green" >/dev/null 2>&1 || true
+    docker rm "$green" >/dev/null 2>&1 || true
+  fi
+  return "$status"
+}
+trap cleanup_green EXIT
 "${compose[@]}" run -d --no-deps --name "$green" backend >/dev/null
 green_ok=0
 for _ in {1..60}; do
@@ -99,16 +110,23 @@ done
 if [[ "$green_ok" != "1" ]]; then
   echo "green backend health check failed; last logs:" >&2
   docker logs --tail=100 "$green" >&2 || true
-  docker rm -f "$green" >/dev/null 2>&1 || true
   echo "aborting deploy, current version still serving" >&2
   exit 1
 fi
+# 切流失败时保留 green，避免响应丢失或 reload 状态不确定后误删上游。
+green_serving=1
+switch_backend "$green"
 # 强制重建正式 backend：版本号不变的 Secret 轮换也必须让进程重新读取挂载文件；
 # 旧容器停起期间流量由 green 承载。
 "${compose[@]}" up -d --no-deps --force-recreate backend
 for _ in {1..30}; do curl -fsS http://127.0.0.1:8000/api/health >/dev/null && break; sleep 2; done
 curl -fsS http://127.0.0.1:8000/api/health >/dev/null
-docker rm -f "$green" >/dev/null || echo "warn: failed to remove $green" >&2
+switch_backend backend
+green_serving=0
+# SIGTERM 给已经连到 green 的请求保留与正式 API 相同的排空窗口。
+docker stop --time 60 "$green" >/dev/null
+docker rm "$green" >/dev/null
+trap - EXIT
 
 execution_mode="$("${compose[@]}" config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["backend"]["environment"].get("JOB_EXECUTION_MODE", "inline"))')"
 if [[ "$execution_mode" == "worker" ]]; then

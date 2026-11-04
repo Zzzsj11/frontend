@@ -8,7 +8,9 @@
 make test        # 后端 pytest + 前端 vitest
 make test-e2e    # 本地 Playwright（mock 链路）
 make smoke       # 重大调整后的无费用主流程冒烟
-make preflight   # 发布前全流程校验
+make preflight-lite # 本机检查，无 Docker
+make preflight   # 本机检查 + 一次性 PostgreSQL/Redis 验收
+make docker-build # 显式镜像构建验收，结束删除本次标签
 ```
 
 前端测试按「用户侧 / 管理后台」分组存放，可独立运行以缩短反馈时间：
@@ -29,7 +31,7 @@ npm run test:e2e:user     # 仅用户侧 e2e（带开关的 spec 仍需对应环
 npm run test:admin        # 管理后台 e2e（API 契约 + 控制台 UI）
 ```
 
-新增测试按归属放入对应子目录；`npm test` / `npm run test:e2e` 仍跑全量，`make preflight` 行为不变。
+新增测试按归属放入对应子目录；`npm test` / `npm run test:e2e` 仍跑全量，`make preflight-lite` 不依赖容器；`make preflight` 追加临时数据依赖的集成验收。
 
 ## 最小冒烟（重大调整后必跑）
 
@@ -49,35 +51,30 @@ PLAYWRIGHT_BASE_URL=http://127.0.0.1:5173 make smoke-real
 
 ## 耗时与针对性验证
 
-2026-10-16 扩展后的测试规模已超过 630 条后端和 250 条前端；计数以本次运行输出为准。缓存环境的 `make preflight-lite` 约 3 分钟，完整 `make preflight` 约 3–5 分钟。首次下载基础镜像、字体和媒体处理依赖会额外增加十余分钟，不能沿用早期百余条测试时的 70–90 秒估算。
+测试数量与耗时以本次输出为准。`make preflight-lite` 直接使用本机 Python/Node：lint、Alembic 单 head 检查、临时 SQLite/fakeredis 单测及前端构建。它不创建 Docker 资源，也不对既有数据库执行迁移。
 
-| 阶段            | 典型耗时                   | 说明                                        |
-| --------------- | -------------------------- | ------------------------------------------- |
-| lint            | 约 10 秒                   | 前后端格式和静态检查                        |
-| migration-check | 约 5 秒                    | PostgreSQL 迁移单 head 与升级               |
-| test-backend    | 约 2 分钟                  | 全量 pytest 与覆盖率                        |
-| test-frontend   | 约 30 秒                   | 用户侧和管理侧 Vitest                       |
-| build           | 约 10 秒                   | 类型检查和前端构建                          |
-| docker-build    | 缓存后数十秒，首次显著更久 | 固定基础镜像 digest、锁定依赖及系统媒体工具 |
+`make preflight` 在上述结果之外运行 `make test-middleware`：创建本次独有的临时 PostgreSQL/Redis，执行从空库到 head 的全部迁移，再验证真实数据库的并发领取、失租恢复、软删除排除，以及 Redis 原子执行名额。供应商请求被网络限制阻止，模型调用为零。结束、失败或中断都删除本次容器、网络和测试数据；不接入本地已有业务库。
+
+`make migration-check` 单独验证临时 PostgreSQL 的完整迁移。Dockerfile、系统依赖或容器行为变化时追加 `make docker-build`，使用唯一临时镜像标签并在结束后删除；日常全量检查不再重复构建应用镜像。实际服务器发布仍需构建和验证不可变版本镜像。
 
 e2e 不在 preflight 内，按需触发：`test:e2e:user`（本地 mock 链路）约 6s；`test:admin` 约 10s；`test:remote:*` 分钟级；`test:e2e:real` 上限 90 分钟且产生真实费用。
 
 日常小改不必每次全量，按改动范围选最小验证集：
 
-| 改动范围                | 最小验证命令                                          | 耗时       |
-| ----------------------- | ----------------------------------------------------- | ---------- |
-| 前端单组件/composable   | `npx vitest run tests/user/xxx.test.ts`               | ~3s        |
-| 前端用户侧 src          | `npm run test:unit:user`                              | ~9s        |
-| 前端管理后台 src        | `npm run test:unit:admin`                             | ~6s        |
-| 后端单模块              | `cd backend && .venv/bin/pytest -q tests/test_xxx.py` | 2~10s      |
-| 权限/隔离/API 契约      | 上述 + `tests/test_multi_user.py` `tests/test_api.py` | ~10s       |
-| models.py 或 migrations | `make migration-check` + 相关 pytest 文件             | ~15s       |
-| 日常提交前              | `make preflight-lite`（跳过 docker-build）            | ~3 分钟    |
-| 发布前                  | `make preflight` 全量 + 相关 e2e                      | ~3min      |
-| 用户旅程关键链路        | 追加 `npm run test:e2e:user`                          | ~6s        |
-| 重大调整后的主流程      | `make smoke`（无真实模型费用）                        | 分钟内     |
-| 管理后台 UI/契约        | 追加 `npm run test:admin`                             | ~10s       |
-| 供应商/提示词/生成链路  | 按需 `npm run test:e2e:real`（有成本）                | 上限 90min |
+| 改动范围                | 最小验证命令                                                       | 耗时       |
+| ----------------------- | ------------------------------------------------------------------ | ---------- |
+| 前端单组件/composable   | `npx vitest run tests/user/xxx.test.ts`                            | ~3s        |
+| 前端用户侧 src          | `npm run test:unit:user`                                           | ~9s        |
+| 前端管理后台 src        | `npm run test:unit:admin`                                          | ~6s        |
+| 后端单模块              | `cd backend && .venv/bin/pytest -q tests/test_xxx.py`              | 2~10s      |
+| 权限/隔离/API 契约      | 上述 + `tests/test_multi_user.py` `tests/test_api.py`              | ~10s       |
+| models.py 或 migrations | `make migration-check` + 相关 pytest 文件                          | ~15s       |
+| 日常提交前              | `make preflight-lite`（全程无 Docker）                             | ~3 分钟    |
+| 发布前                  | `make preflight` 全量 + 相关 e2e；容器变更另跑 `make docker-build` | ~3min      |
+| 用户旅程关键链路        | 追加 `npm run test:e2e:user`                                       | ~6s        |
+| 重大调整后的主流程      | `make smoke`（无真实模型费用）                                     | 分钟内     |
+| 管理后台 UI/契约        | 追加 `npm run test:admin`                                          | ~10s       |
+| 供应商/提示词/生成链路  | 按需 `npm run test:e2e:real`（有成本）                             | 上限 90min |
 
 约束：新增后端功能必须补集成测试（对应 pytest 文件必跑）；涉及用户旅程、API、部署或权限的改动必须加跑对应 e2e；`make preflight` 是发布前唯一全量卡口，不得用 preflight-lite 替代发布验证。
 
@@ -141,7 +138,7 @@ REMOTE_REAL_GENERATION=1 npm run test:remote:api   # 含真实生成分支（产
 
 ```bash
 npx playwright install chromium   # 首次
-docker compose up -d --build      # 四个服务 healthy/running
+make dev                        # 临时数据依赖 + 本机应用，Ctrl-C 清理
 export REAL_E2E_PROJECT_SUFFIX="$(date +%Y%m%d-%H%M%S)"
 npm run test:e2e:real             # 完整模式，上限 90 分钟
 npm run test:e2e:smoke-real       # 最小真实模式：通用文本 + 1 图 + 1 个 5 秒视频 + 导出
@@ -181,7 +178,7 @@ ADMIN_CONSOLE_E2E=1 npx playwright test e2e/admin/admin-console.spec.ts  # 远�
 - 大纲改动：明确人物动作的歌词不得规划为空镜、连续空镜受限、6 条及以上歌词至少 3 个场景、视觉母题不超过大纲声明次数。
 - 分镜Worker改动：断开 `worker-storyboard` 后API仍能202入队且工单保持 `queued`；恢复Worker后可完成。执行中强制终止Worker后，工单须由PostgreSQL心跳判定为失租、attempt递增并重放；超过3次必须落失败终态，同时更新任务的 `outlineProgress`，不得无限重试或停留在 `outlining`。
 - 系统人物改动：默认分类男/女/儿童且只读、对所有用户可见、儿童提示词保持年龄造型一致、原图与缩略图均为 TOS URL；新增系统图片用 `scripts/sync-system-human-assets.py --asset CODE=/path/to/image` 上传，不得复制到项目目录。
-- 本机 `make preflight` 的 Docker 阶段经 `docker-compose.local-build.yml` 使用国内镜像代理；服务器部署不加载该文件。代理不可用时用 `LOCAL_NODE_BASE_IMAGE`、`LOCAL_NGINX_BASE_IMAGE` 临时覆盖，不得改服务器部署配置。
+- 本机临时数据依赖和显式镜像构建验收经 `docker-compose.local-build.yml` 使用国内镜像代理；服务器部署不加载该文件。代理不可用时用 `LOCAL_NODE_BASE_IMAGE`、`LOCAL_NGINX_BASE_IMAGE` 临时覆盖，不得改服务器部署配置。
 
 ## Agent 来源授权与完整用量归因
 

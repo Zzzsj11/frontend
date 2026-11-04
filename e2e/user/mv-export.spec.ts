@@ -132,3 +132,77 @@ test('MV export shows progress, survives reload, retries and keeps ZIP separate'
   await expect(page.getByRole('progressbar', { name: '合并并导出完成百分比' })).toHaveCount(0)
   expect(posts).toBe(2)
 })
+
+test('history selection waits for persistence and blocks export while saving', async ({ page }) => {
+  let selected = 'new'
+  let release: () => void = () => {}
+  const saving = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let received = false
+  await page.route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (!path.startsWith('/api/')) return route.continue()
+    if (path.endsWith('/current-shot/old')) {
+      received = true
+      await saving
+      selected = 'old'
+      return route.fulfill({ json: { assetId: selected, lineId: 'line' } })
+    }
+    return route.fulfill({ json: [] })
+  })
+  await page.route('**/selection-fixture', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<html><body><div id="fixture"></div></body></html>',
+    }),
+  )
+  async function mount() {
+    await page.goto('/selection-fixture')
+    await page.evaluate(
+      async ({ selected }) => {
+        const load = (path: string) => import(/* @vite-ignore */ path)
+        const { createApp, h } = await load('/node_modules/.vite/deps/vue.js')
+        const { createPinia } = await load('/node_modules/.vite/deps/pinia.js')
+        const { useProjectStore } = await load('/src/stores/project.ts')
+        const { default: ExportActions } = await load('/src/components/ExportActions.vue')
+        const pinia = createPinia()
+        const store = useProjectStore(pinia)
+        store.activeTaskId = 'history-task'
+        store.activeStoryboardType = 'ass'
+        store.projectAudio = { filename: 'song.mp3', duration: 5 }
+        store.lines = [
+          {
+            id: 'line',
+            shot: {
+              currentAssetId: selected,
+              assets: ['old', 'new'].map((id) => ({ id, videoUrl: `https://test.tos/${id}.mp4` })),
+            },
+          },
+        ]
+        createApp({
+          setup: () => () =>
+            h('div', [
+              h('button', { onClick: () => store.selectShotAsset('line', 'old') }, '选用历史片段'),
+              h('output', { 'aria-label': '当前片段' }, store.lines[0].shot.currentAssetId),
+              h(ExportActions),
+            ]),
+        })
+          .use(pinia)
+          .mount('#fixture')
+      },
+      { selected },
+    )
+  }
+  await mount()
+  await page.getByRole('button', { name: '选用历史片段' }).click()
+  await expect.poll(() => received).toBe(true)
+  await expect(page.getByLabel('当前片段')).toHaveText('new')
+  await expect(page.getByRole('button', { name: '导出素材', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '合并并导出', exact: true })).toBeDisabled()
+  release()
+  await expect(page.getByLabel('当前片段')).toHaveText('old')
+  await expect(page.getByRole('button', { name: '导出素材', exact: true })).toBeEnabled()
+  await mount()
+  await expect(page.getByLabel('当前片段')).toHaveText('old')
+})

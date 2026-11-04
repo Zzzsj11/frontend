@@ -1,3 +1,4 @@
+import { useGenerationPreferences } from '../generationPreferences'
 import type { CreativeReferenceMedia, ScriptLine, ShotGenOptions } from '../../types'
 import * as api from '../../api/domain'
 import { nextId } from '../../utils/id'
@@ -145,7 +146,16 @@ export const linesActions = {
   },
 
   async applyTaskVideoModel(plan: api.TaskVideoModelPlan) {
-    const result = await api.changeTaskVideoModel(plan.taskId, plan.model, plan.previewToken)
+    const owner = this.ownerUserId
+    const result = await api.changeTaskVideoModel(
+      plan.taskId,
+      plan.model,
+      plan.previewToken,
+      plan.channel ?? null,
+    )
+    if (this.ownerUserId !== owner) return result
+    if (result.generationPreferences)
+      useGenerationPreferences().selections = result.generationPreferences
     if (this.activeTaskId === plan.taskId) {
       for (const item of result.lines) {
         const line = this.lines.find((line) => line.id === item.id)

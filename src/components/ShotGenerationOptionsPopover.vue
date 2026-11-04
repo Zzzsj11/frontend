@@ -56,6 +56,7 @@ const {
           <VideoModelSelect
             v-if="mode === 'shot'"
             :model-value="modelValue.videoModel"
+            :before-select="(model) => updateVideoModel(model, true) !== false"
             compact
             @update:model-value="updateVideoModel"
           />

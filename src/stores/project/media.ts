@@ -96,30 +96,31 @@ export const mediaActions = {
     // P1：轮询挂到任务 watcher 上，切换子项目即被取消（后端任务照跑，切回后恢复）
     const watcher = this.activeTaskId ? registerTaskWatcher(this.activeTaskId) : null
     try {
-      const { coverUrl, coverThumbnailUrl, videoUrl, duration } = await api.generateShotVideo(
-        line.scenePrompt,
-        line.shotPrompt,
-        characterUrls,
-        idx,
-        variant,
-        genOptions,
-        line.scene.originalImageUrl || line.scene.imageUrl,
-        this.activeTaskId ?? undefined,
-        lineId,
-        watcher?.signal ?? undefined,
-        (submittedAt) => {
-          const current = this.lines.find((item) => item.id === lineId)
-          if (current) current.shot.generationSubmittedAt = submittedAt
-        },
-        (snapshot) => {
-          const current = this.lines.find((item) => item.id === lineId)
-          if (current) current.shot.generationPhase = snapshot.phase || 'provider_running'
-        },
-      )
+      const { assetId, coverUrl, coverThumbnailUrl, videoUrl, duration } =
+        await api.generateShotVideo(
+          line.scenePrompt,
+          line.shotPrompt,
+          characterUrls,
+          idx,
+          variant,
+          genOptions,
+          line.scene.originalImageUrl || line.scene.imageUrl,
+          this.activeTaskId ?? undefined,
+          lineId,
+          watcher?.signal ?? undefined,
+          (submittedAt) => {
+            const current = this.lines.find((item) => item.id === lineId)
+            if (current) current.shot.generationSubmittedAt = submittedAt
+          },
+          (snapshot) => {
+            const current = this.lines.find((item) => item.id === lineId)
+            if (current) current.shot.generationPhase = snapshot.phase || 'provider_running'
+          },
+        )
       const still = this.lines.find((l) => l.id === lineId)
       if (still) {
         const asset: ShotAsset = {
-          id: nextId('asset'),
+          id: assetId || nextId('asset'),
           coverUrl,
           originalCoverUrl: coverUrl,
           videoUrl,
@@ -161,12 +162,30 @@ export const mediaActions = {
   },
 
   /** 从资产历史中选用某个视频片段 */
-  selectShotAsset(lineId: string, assetId: string) {
+  async selectShotAsset(lineId: string, assetId: string) {
     const line = this.lines.find((l) => l.id === lineId)
     const asset = line?.shot.assets.find((a) => a.id === assetId)
-    if (line && asset) {
-      line.shot.currentAssetId = asset.id
-      line.shot.imageUrl = asset.coverUrl
+    if (!line || !asset || this.shotSelectionPending[lineId]) return false
+    const taskId = this.activeTaskId
+    const owner = this.ownerUserId
+    this.shotSelectionPending[lineId] = true
+    try {
+      await api.selectCurrentShot(lineId, assetId)
+      if (this.ownerUserId !== owner) return false
+      if (this.activeTaskId !== taskId) {
+        if (taskId) delete this.taskScripts[taskId]
+        return false
+      }
+      const current = this.lines.find((item) => item.id === lineId)
+      if (!current) return false
+      current.shot.currentAssetId = asset.id
+      current.shot.imageUrl = asset.coverUrl
+      return true
+    } catch (error) {
+      reportApiError(error, '视频版本选用失败，原选择已保留')
+      return false
+    } finally {
+      if (this.ownerUserId === owner) delete this.shotSelectionPending[lineId]
     }
   },
 

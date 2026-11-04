@@ -86,15 +86,14 @@ export function useShotGenerationOptions(
   }
   const updateRatio = (ratio: ShotGenOptions['ratio']) => {
     const imageModel = props.modelValue.imageModel
-    emit('update:modelValue', {
-      ...props.modelValue,
-      ratio,
-      ...(props.mode === 'scene' && !imageModelSupportsRatio(imageModel, ratio)
-        ? { imageModel: DEFAULT_IMAGE_MODEL, imageResolution: '1K' as const }
-        : {}),
-    })
+    if (props.mode === 'scene' && !imageModelSupportsRatio(imageModel, ratio)) {
+      modelChangeError.value = '当前图片模型不支持该比例，请选择其他比例或主动切换模型'
+      return
+    }
+    modelChangeError.value = ''
+    emit('update:modelValue', { ...props.modelValue, ratio })
   }
-  const updateVideoModel = (model: string) => {
+  const updateVideoModel = (model: string, validateOnly = false) => {
     modelChangeError.value = ''
     const caps = videoModelCapabilities(model)
     const currentMode = props.modelValue.h3Mode ?? DEFAULT_H3_MODE
@@ -116,8 +115,9 @@ export function useShotGenerationOptions(
     if ((unsupportedMode && (hasDedicatedFrames || hasReferences)) || incompatibleReferences) {
       modelChangeError.value =
         '当前模式或参考素材与目标模型不兼容，请先处理参考素材或调整生成模式后再切换。原配置已保留。'
-      return
+      return false
     }
+    if (validateOnly) return true
     const nextMode = unsupportedMode ? (modes?.includes('auto') ? 'auto' : modes?.[0]) : currentMode
     const allowed = videoResolutionChoices(
       model,

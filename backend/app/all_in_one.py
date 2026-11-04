@@ -105,6 +105,8 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
     snapshot = job.request or {}
     model = snapshot.get("_providerModelId") or upstream_model(request.model)
     payload: dict[str, Any] = {"model": model, "prompt": request.prompt}
+    if snapshot.get("channel"):
+        payload["channel"] = snapshot["channel"]
     if job.kind == "image":
         if request.quality != "auto":
             raise ProviderError("all in one 图片模型仅支持 quality=auto")

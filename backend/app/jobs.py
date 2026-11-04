@@ -147,10 +147,10 @@ class JobManager:
         storyboard_line_id: str | None = None,
     ) -> Job:
         """Add a replayable job to the caller's transaction without dispatching it."""
-        if kind == "image":
-            from .image_failover import prepare_request
+        if kind in {"chat", "ass_outline", "general_outline", "ass_segment_retry", "storyboard_line", "prompt_optimization"}:
+            from .generation_preferences import snapshot_text_selection
 
-            request = await prepare_request(session, request)
+            request = {**request, "_textSelection": await snapshot_text_selection(session, user_id, kind)}
         now = time.time()
         generation_origin, agent_name, agent_run_id = current_agent_attribution()
         job = Job(
@@ -448,6 +448,9 @@ class JobManager:
                     )
                 )
             elif job.storyboard_line_id and job.kind == "video" and job.result.get("videoUrl"):
+                from .models import StoryboardLineModel
+
+                await session.execute(select(StoryboardLineModel.id).where(StoryboardLineModel.id == job.storyboard_line_id).with_for_update())
                 current = (
                     (
                         await session.execute(
@@ -462,9 +465,11 @@ class JobManager:
                 for item in current:
                     item.is_current = False
                 request = job.request or {}
+                asset_id = f"shot-{uuid.uuid4().hex}"
+                job.result["assetId"] = asset_id
                 session.add(
                     ShotAssetModel(
-                        id=f"shot-{uuid.uuid4().hex}",
+                        id=asset_id,
                         storyboard_line_id=job.storyboard_line_id,
                         generation_job_id=job.id,
                         model_code=str(request.get("model") or "") or None,

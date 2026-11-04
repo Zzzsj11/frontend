@@ -208,9 +208,6 @@ async def _call_platform(*, prompt: str, duration: int, ratio: str, media: list[
     snapshot = await _job_snapshot("_optimizationRequest")
     if snapshot is None:
         model = await choose_model(settings.llm_model)
-        if model != settings.llm_model and media:
-            # Text-only backup must not silently discard multimodal evidence.
-            raise RuntimeError("多参考优化主模型暂不可用，请稍后重试；不会将参考素材交给纯文本备用模型")
         content = [{"type": "text", "text": enrich_prompt(prompt, duration, ratio, media)}]
         content.extend(await content_parts(media, model_gateway.current_owner()))
         snapshot = await _job_snapshot(

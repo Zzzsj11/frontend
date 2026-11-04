@@ -99,7 +99,12 @@ export const exportActions = {
     const active = this.exportsByTaskId[taskId]?.some(
       (item) => (item.kind || 'materials') === kind && ['queued', 'running'].includes(item.status),
     )
-    if (active || this.exportSubmitting[key]) return
+    if (
+      active ||
+      this.exportSubmitting[key] ||
+      this.lines.some((line) => this.shotSelectionPending[line.id])
+    )
+      return
     this.exportSubmitting[key] = true
     try {
       const item =

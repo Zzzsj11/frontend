@@ -79,7 +79,8 @@ def test_reasoning_compatibility(model):
         ("video", "wan3.0-video"),
     ],
 )
-async def test_create_maps_payload_and_durable_identity(configured, monkeypatch, kind, upstream_model):
+@pytest.mark.parametrize("selected_channel", [None, "toapis-official"])
+async def test_create_maps_payload_and_durable_identity(configured, monkeypatch, kind, upstream_model, selected_channel):
     captured = []
 
     def handle(request):
@@ -103,7 +104,7 @@ async def test_create_maps_payload_and_durable_identity(configured, monkeypatch,
         id="local-job",
         kind=kind,
         user_id="private-owner",
-        request={"_providerModelId": upstream_model, "_capabilities": {"providerResolutionMap": {"720p": "768P"}}},
+        request={"channel": selected_channel, "_providerModelId": upstream_model, "_capabilities": {"providerResolutionMap": {"720p": "768P"}}},
     )
     request = (
         ImageGenerationCreate(model="gpt-image-2-all-in-one", prompt="cup", images=["https://media.example/input.png"])
@@ -115,6 +116,8 @@ async def test_create_maps_payload_and_durable_identity(configured, monkeypatch,
     assert req.headers["Idempotency-Key"] == f"local-job:{kind}"
     assert req.headers["X-Agent-Run-Id"] == req.headers["X-Test-Run-Id"] == "test-run"
     assert "X-User-Id" not in req.headers
+    assert body.get("channel") == selected_channel
+    assert ("channel" in body) == (selected_channel is not None)
     assert body["images"] == ["https://media.example/input.png"]
     assert "realPersonMode" not in body
     if kind == "video":

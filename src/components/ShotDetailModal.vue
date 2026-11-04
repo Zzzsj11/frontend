@@ -150,10 +150,10 @@ const resizeVisiblePrompt = async () => {
   resizePromptInput(activeTab.value === 'shot' ? shotPromptInput.value : scenePromptInput.value)
 }
 
-const pickAsset = (asset: ShotAsset, index: number) => {
+const pickAsset = async (asset: ShotAsset, index: number) => {
   const line = store.editingLine
   if (!line) return
-  store.selectShotAsset(line.id, asset.id)
+  if (!(await store.selectShotAsset(line.id, asset.id))) return
   previewAsset.value = asset
   previewIndex.value = index
 }

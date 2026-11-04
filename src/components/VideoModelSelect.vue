@@ -5,9 +5,12 @@ import {
   PROJECT_VIDEO_MODEL_GROUPS,
   VIDEO_MODEL_OPTIONS,
 } from '../generationModels'
-import BaseModelSelect from './base/BaseModelSelect.vue'
+import GenerationModelSelect from './GenerationModelSelect.vue'
 withDefaults(
   defineProps<{
+    beforeSelect?: (model: string) => boolean
+    persistPreference?: boolean
+    channel?: string | null
     modelValue: string
     label?: string
     ariaLabel?: string
@@ -15,9 +18,21 @@ withDefaults(
     id?: string
     compact?: boolean
   }>(),
-  { label: '', ariaLabel: '视频模型', disabled: false, id: '', compact: false },
+  {
+    label: '',
+    ariaLabel: '视频模型',
+    disabled: false,
+    id: '',
+    compact: false,
+    beforeSelect: undefined,
+    persistPreference: true,
+    channel: null,
+  },
 )
-const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
+const emit = defineEmits<{
+  'update:modelValue': [value: string]
+  'update:channel': [value: string | null]
+}>()
 const groups = computed(() =>
   PROJECT_VIDEO_MODEL_GROUPS.map((group) => ({
     label: group.label,
@@ -29,10 +44,11 @@ const groups = computed(() =>
 )
 </script>
 <template>
-  <BaseModelSelect
+  <GenerationModelSelect
     v-bind="$props"
     :groups="groups"
-    icon="movie"
+    modality="video"
+    @update:channel="emit('update:channel', $event)"
     @update:model-value="emit('update:modelValue', $event)"
   />
 </template>

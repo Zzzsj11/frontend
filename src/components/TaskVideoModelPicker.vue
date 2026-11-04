@@ -10,12 +10,15 @@ import { useProjectStore, DEFAULT_SHOT_OPTIONS } from '../stores/project'
 import BaseModal from './base/BaseModal.vue'
 import AppIcon from './AppIcon.vue'
 import VideoModelSelect from './VideoModelSelect.vue'
+import { useGenerationPreferences } from '../stores/generationPreferences'
 
 const props = withDefaults(defineProps<{ disabled?: boolean }>(), { disabled: false })
 const store = useProjectStore()
 const open = ref(false)
 const loading = ref(false)
 const selected = ref('')
+const channel = ref<string | null>(null)
+const preferences = useGenerationPreferences()
 const plan = ref<TaskVideoModelPlan | null>(null)
 const error = ref('')
 const saved = ref('')
@@ -66,7 +69,12 @@ async function preview() {
   if (!selected.value || !store.activeTaskId) return
   loading.value = true
   try {
-    const result = await changeTaskVideoModel(store.activeTaskId, selected.value)
+    const result = await changeTaskVideoModel(
+      store.activeTaskId,
+      selected.value,
+      undefined,
+      channel.value,
+    )
     if (version === requestVersion && open.value) plan.value = result
   } catch (e) {
     if (version === requestVersion)
@@ -92,6 +100,10 @@ async function show() {
       VIDEO_MODEL_OPTIONS.some((m) => m.value === current.value)
         ? current.value
         : VIDEO_MODEL_OPTIONS.find((m) => PROJECT_VIDEO_MODEL_IDS.has(m.value))?.value || ''
+    channel.value =
+      preferences.selections.video?.model === selected.value
+        ? preferences.selections.video.channel
+        : null
     await preview()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '模型目录加载失败'
@@ -153,7 +165,9 @@ onBeforeUnmount(() => {
         当前模型：<strong>{{ currentLabel }}</strong> · 全部 {{ store.lines.length }} 条分镜
       </p>
       <VideoModelSelect
+        v-model:channel="channel"
         :model-value="selected"
+        :persist-preference="false"
         label="目标视频模型"
         aria-label="目标视频模型"
         :disabled="loading"

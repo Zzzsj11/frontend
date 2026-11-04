@@ -120,7 +120,7 @@ PostgreSQL 是持久化事实来源，主要保存用户、刷新令牌、项目
 
 ## 运行依赖
 
-推荐使用 Docker 启动完整环境：
+默认使用本机 Python/Node 开发与测试；需要真实数据库/Redis 时创建一次性容器：
 
 - Docker Desktop / Docker Engine，支持 Compose v2
 - 可用的 PostgreSQL、Redis、LLM、图片生成、视频生成和 TOS 配置
@@ -154,57 +154,19 @@ cp backend/.env.example backend/.env
 
 项目也支持将统一供应商配置放在 `backend/.provider_config.py`，Compose 会将其作为 secret 挂载。`backend/.env`、`.env.chat` 和 `.provider_config.py` 均已被 Git 忽略，严禁提交真实密钥。
 
-## Docker 启动
+## 本地开发与临时依赖
 
 ```bash
-make dev            # 组合加载 local-build 覆盖（镜像加速）后 docker compose up -d
-docker compose ps
+make dev-web          # 仅前端：本机 Vite，不需要 Docker
+make dev              # 本机前后端 + 临时 PostgreSQL/Redis；Ctrl-C 自动清理
+make preflight-lite   # 静态检查、迁移 head、单测和前端构建，无 Docker
+make preflight        # 追加一次性 PostgreSQL/Redis 集成验收
+make docker-build     # 仅显式镜像构建验收，结束删除本次镜像标签
 ```
 
-本机所有 compose 入口均固定加载 `docker-compose.local-build.yml` 走国内镜像代理，不直连 docker.io；手动执行 compose 命令时必须带 `-f docker-compose.yml -f docker-compose.local-build.yml`，详见 [`LOCAL-DEVELOPMENT.md`](docs/LOCAL-DEVELOPMENT.md)。
+临时数据只保存到本次独占容器的内存文件系统，不挂载已有数据卷；正常结束、失败或中断都清理。默认禁用平台 Key，不自动创建管理员。需要保留数据的环境应使用测试服务器。共享基础镜像缓存和历史数据卷不作全局清理。
 
-服务地址：
-
-- Web：<http://127.0.0.1:5173>
-- 健康检查：<http://127.0.0.1:5173/api/health>
-- PostgreSQL：`127.0.0.1:5433`
-- Redis：`127.0.0.1:6380`
-
-后端容器启动时自动执行 Alembic 迁移并补齐系统配置、只读人物及权限定义，**不会创建任何默认用户，也不会按用户名自动授予管理员权限**。首次管理员须由受控运维流程显式建立；测试环境目前仅有 `dev01` 超级管理员，密码不写入仓库。停止服务：
-
-```bash
-docker compose down
-```
-
-该命令不会删除命名卷。只有明确需要销毁数据库与 Redis 数据时才使用 `docker compose down -v`。
-
-## 本地开发启动
-
-先启动数据服务：
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.local-build.yml up -d postgres redis
-```
-
-启动后端：
-
-```bash
-cd backend
-python3.13 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
-alembic upgrade head
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-另开终端启动前端：
-
-```bash
-npm ci
-npm run dev -- --host 127.0.0.1 --port 5173
-```
-
-Vite 开发服务器会将 `/api` 代理到后端。
+本机 Docker 入口统一加载 `docker-compose.local-build.yml`，不直连 docker.io；完整说明及异常退出边界见 [本地开发](docs/LOCAL-DEVELOPMENT.md)。单测使用临时 SQLite/fakeredis；浏览器 mock 验收按需启动和关闭 Vite，不依赖应用容器。
 
 ## 测试
 
@@ -219,7 +181,7 @@ npm run test:admin        # 管理后台 e2e（远程 API 契约 + 控制台 UI�
 cd backend && .venv/bin/pytest -q   # 后端测试
 ```
 
-日常提交前跑 `make preflight-lite`（跳过 Docker 构建，缓存环境约 3 分钟）；发布前跑完整 `make preflight`（缓存环境约 3–5 分钟；首次下载基础镜像和系统依赖可能更久）。按改动范围选择最小验证集的耗时矩阵见 [`docs/TESTING.md`](docs/TESTING.md)。
+日常提交前跑 `make preflight-lite`（全程无 Docker）；发布前跑完整 `make preflight`（追加临时 PostgreSQL/Redis 集成验收）。容器定义或系统依赖有变更时另跑 `make docker-build`；首次下载基础镜像可能更久。按改动范围选择最小验证集的耗时矩阵见 [`docs/TESTING.md`](docs/TESTING.md)。
 
 真实 ASS + 通用分镜测试会调用付费模型和媒体供应商，必须显式开启：
 

@@ -152,7 +152,7 @@ def test_hidden_model_rejected_and_stale_generation_stopped_before_provider(clie
     async def forbidden(*args, **kwargs):
         raise AssertionError("stale configuration must not enqueue or call supplier")
 
-    monkeypatch.setattr(main.jobs, "create", forbidden)
+    monkeypatch.setattr(main.jobs, "enqueue", forbidden)
     response = client.post(
         "/api/generations/videos",
         headers=headers,
@@ -177,3 +177,24 @@ def test_preview_handles_duration_and_reference_compatibility():
     assert len(changes) == 2 and not errors
     _, _, errors = plan_line({"duration": 15, "ratio": "9:16", "h3LastFrameUrl": "https://test.tos/last.png"}, model, 2)
     assert len(errors) == 3
+
+
+def test_preview_and_rejected_apply_do_not_change_global_preference(client, model_case, monkeypatch):
+    from app import task_video_model
+
+    _, headers, task_id = model_case
+    initial = {"model": "doubao-seedance-2.0-all-in-one", "channel": None}
+    assert client.put("/api/generation-preferences/video", headers=headers, json=initial).status_code == 200
+
+    async def channels(*args):
+        return {"channels": [{"channel": "test-channel", "available": True}]}
+
+    monkeypatch.setattr(task_video_model, "fetch_channels", channels)
+    preview = change(client, headers, task_id, channel="test-channel").json()
+    assert client.get("/api/generation-preferences", headers=headers).json()["video"] == initial
+    wrong = change(client, headers, task_id, apply=True, preview_token=preview["previewToken"], channel=None)
+    assert wrong.status_code == 409
+    assert client.get("/api/generation-preferences", headers=headers).json()["video"] == initial
+    applied = change(client, headers, task_id, apply=True, preview_token=preview["previewToken"], channel="test-channel")
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["generationPreferences"]["video"] == {"model": "minimax-h3-all-in-one", "channel": "test-channel"}
