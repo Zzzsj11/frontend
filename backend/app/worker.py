@@ -355,6 +355,9 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
                 heartbeat_task.cancel()
                 await asyncio.gather(heartbeat_task, return_exceptions=True)
 
+    from .image_billing import poll_image_bills
+
+    billing_task = asyncio.create_task(poll_image_bills()) if "image" in kinds and (not providers or "all-in-one" in providers) else None
     next_stale_recovery = loop.time() + STALE_RECOVERY_INTERVAL_SECONDS
     try:
         while not stop.is_set():
@@ -384,6 +387,9 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
                 item.cancel()
             await asyncio.gather(*pending, return_exceptions=True)
     finally:
+        if billing_task:
+            billing_task.cancel()
+            await asyncio.gather(billing_task, return_exceptions=True)
         await update_instance("draining")
         if active:
             await asyncio.gather(*active, return_exceptions=True)

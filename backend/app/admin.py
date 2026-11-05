@@ -9,7 +9,7 @@ from io import BytesIO
 from typing import Annotated, Any
 from zipfile import BadZipFile
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 from pydantic import BaseModel, Field
@@ -556,6 +556,16 @@ async def sync_generation_job(job_id: str, request: Request, user: CurrentUser, 
         raise HTTPException(422, str(exc)) from exc
     from .jobs import automatic_reconciliation
 
+    if model.kind == "image" and model.provider == "all-in-one" and model.status == "succeeded":
+        from .image_billing import refresh_image_bill
+
+        try:
+            action = await refresh_image_bill(db, model)
+        except Exception as exc:
+            raise HTTPException(502, "查询原平台工单结算失败") from exc
+        await audit(db, request, user, "job.sync", "generation_job", job_id, after={"action": action})
+        await db.commit()
+        return {"action": action, "providerStatus": "SUCCEEDED"}
     if automatic_reconciliation(model):
         from .video_reconciliation import reconcile_one
 
@@ -630,6 +640,35 @@ async def sync_generation_job(job_id: str, request: Request, user: CurrentUser, 
     await audit(db, request, user, "job.sync", "generation_job", job_id, after={"providerStatus": provider_status, "action": action})
     await db.commit()
     return {"providerStatus": provider_status, "action": action, "progress": data.get("progress")}
+
+
+@router.get("/image-billing")
+async def image_billing(user: CurrentUser, db: AsyncSession = Db, username: str = "", origin: str = "", offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
+    require_admin(user)
+    bill = TokenUsageModel.raw_usage["platformBilling"]
+    q = (
+        select(
+            UserModel.username,
+            TokenUsageModel.generation_job_id,
+            TokenUsageModel.model,
+            TokenUsageModel.agent_name,
+            TokenUsageModel.agent_run_id,
+            TokenUsageModel.generation_origin,
+            bill["status"].as_string(),
+            bill["points"].as_string(),
+        )
+        .join(UserModel, UserModel.id == TokenUsageModel.user_id)
+        .where(TokenUsageModel.deleted_at.is_(None), UserModel.deleted_at.is_(None), TokenUsageModel.operation == "generation_image", TokenUsageModel.provider == "all-in-one")
+    )
+    if username:
+        q = q.where(UserModel.username == username)
+    if origin:
+        q = q.where(TokenUsageModel.generation_origin == origin)
+    rows = (await db.execute(q.order_by(TokenUsageModel.created_at.desc(), TokenUsageModel.id).offset(offset).limit(limit))).all()
+    return [
+        dict(username=name, jobId=job, model=model, agentName=agent, agentRunId=run, origin=source, points=points if status == "settled" else None)
+        for name, job, model, agent, run, source, status, points in rows
+    ]
 
 
 @router.get("/usage")

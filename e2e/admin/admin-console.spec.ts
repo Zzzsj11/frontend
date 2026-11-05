@@ -57,12 +57,27 @@ test('administrator can inspect dashboard, models, errors and audit logs', async
   await expect(page.getByRole('heading', { name: '费用用量' })).toBeVisible()
   await page.reload()
   await expect(page.getByRole('heading', { name: '费用用量' })).toBeVisible()
+  const imageBills = page.getByRole('region', { name: '图片积分结算' })
+  await imageBills.getByLabel('用户名').fill(username)
+  const imageRows = page.waitForResponse(
+    (response) =>
+      response.url().includes('/admin/image-billing?') &&
+      new URL(response.url()).searchParams.get('username') === username,
+  )
+  await imageBills.getByRole('button', { name: '查询图片结算' }).click()
+  expect((await imageRows).ok()).toBeTruthy()
+  if (process.env.IMAGE_BILLING_TEST_JOB) {
+    const row = imageBills.getByRole('row').filter({ hasText: process.env.IMAGE_BILLING_TEST_JOB })
+    await expect(row.getByRole('cell', { name: '10.5', exact: true })).toBeVisible()
+  }
   await expect(page.getByText('最终失败任务')).toBeVisible()
   await expect(page.getByText('失败任务费用')).toBeVisible()
   await expect(page.locator('.summary span', { hasText: 'Agent 开发测试' })).toBeVisible()
-  await expect(page.getByLabel('生成来源')).toBeVisible()
+  await expect(page.getByLabel('生成来源', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '重新核算全部历史' })).toBeVisible()
-  await expect(page.getByRole('columnheader', { name: '来源' })).toBeVisible()
+  await expect(
+    page.locator('.billing-panel').getByRole('columnheader', { name: '来源' }),
+  ).toBeVisible()
   await expect(page.getByRole('columnheader', { name: '时长' })).toBeVisible()
   await expect(
     page.getByRole('columnheader', { name: '计费用量/单价 Token / 秒 / 积分' }),
@@ -70,7 +85,7 @@ test('administrator can inspect dashboard, models, errors and audit logs', async
   await expect(page.getByRole('columnheader', { name: '费用/每秒费用（单价毛）' })).toBeVisible()
   const catalogRun = process.env.VIDEO_CATALOG_TEST_RUN_ID
   if (catalogRun) {
-    await selectDropdown(page.getByLabel('生成来源'), 'Agent 开发测试')
+    await selectDropdown(page.getByLabel('生成来源', { exact: true }), 'Agent 开发测试')
     await page.getByLabel('搜索', { exact: true }).fill(catalogRun)
     const bills = page.waitForResponse(
       (r) =>
@@ -85,7 +100,7 @@ test('administrator can inspect dashboard, models, errors and audit logs', async
       expect(record.usageUnit).toBe('积分')
       expect(['priced', 'pending']).toContain(record.billingStatus)
     }
-    await expect(page.locator('tbody tr')).toHaveCount(12)
+    await expect(page.locator('.billing-panel tbody tr')).toHaveCount(12)
     await page.screenshot({
       path: test.info().outputPath('all-in-one-video-billing.png'),
       fullPage: true,

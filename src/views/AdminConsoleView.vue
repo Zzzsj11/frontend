@@ -13,6 +13,7 @@ import AdminServerMonitoringPanel from '../components/AdminServerMonitoringPanel
 import AdminSideNav from '../components/AdminSideNav.vue'
 import AdminSongEmotionProfilesPanel from '../components/AdminSongEmotionProfilesPanel.vue'
 import AdminTopBar from '../components/AdminTopBar.vue'
+import AdminImageBillingPanel from '../components/AdminImageBillingPanel.vue'
 import AdminVideoBillingPanel from '../components/AdminVideoBillingPanel.vue'
 import AdminPagination from '../components/base/AdminPagination.vue'
 import BaseModal from '../components/base/BaseModal.vue'
@@ -631,6 +632,7 @@ onMounted(() => {
           <AdminModelComparisonPanel v-if="tab === 'chat-comparison'" />
           <AdminPromptOptimizerPanel v-if="tab === 'prompt-optimizer'" />
           <AdminServerMonitoringPanel v-if="tab === 'server'" />
+          <AdminImageBillingPanel v-if="tab === 'usage'" />
           <AdminVideoBillingPanel v-if="tab === 'usage'" />
           <!-- 性能页：后端全量耗时（慢请求 TOP + 路径聚合） + 本浏览器会话观测 -->
           <div v-if="tab === 'perf'" class="perf">
