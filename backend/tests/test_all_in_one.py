@@ -109,7 +109,7 @@ async def test_create_maps_payload_and_durable_identity(configured, monkeypatch,
         request={"channel": selected_channel, "_providerModelId": upstream_model, "_capabilities": {"providerResolutionMap": {"720p": "768P"}}},
     )
     request = (
-        ImageGenerationCreate(model="gpt-image-2-all-in-one", prompt="cup", images=["https://media.example/input.png"])
+        ImageGenerationCreate(model="gpt-image-2-all-in-one", prompt="cup", size="9:21", images=["https://media.example/input.png"] * 15)
         if kind == "image"
         else VideoGenerationCreate(model="minimax-h3-all-in-one", prompt="cup", image_urls=["https://media.example/input.png"], resolution="720p", duration=5)
     )
@@ -126,12 +126,13 @@ async def test_create_maps_payload_and_durable_identity(configured, monkeypatch,
     assert "X-User-Id" not in req.headers
     assert body.get("channel") == selected_channel
     assert ("channel" in body) == (selected_channel is not None)
-    assert body["image" if kind == "image" else "images"] == ["https://media.example/input.png"]
+    assert body["image" if kind == "image" else "images"] == ["https://media.example/input.png"] * (15 if kind == "image" else 1)
     assert "realPersonMode" not in body
     if kind == "video":
         assert body["resolution"] == "768P"
     provider_request.assert_awaited_once_with(job, body)
     if kind == "image":
+        assert body["size"] == "9:21" and body["resolution"] == "1K"
         assert req.url.path == "/v1/images/edits"
         persist.assert_not_awaited()
         return

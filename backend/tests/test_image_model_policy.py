@@ -31,3 +31,21 @@ def test_seedream_supports_portraits_wide_and_reference_limit():
         with pytest.raises(HTTPException) as error:
             validate_image_selection("seedream-5.0-pro-all-in-one", SEEDREAM, **{"size": "1:1", "resolution": "2K", **changes})
         assert error.value.status_code == 422
+
+
+GPT2 = next(row["capabilities"] for row in rows({}) if row["provider_model_id"] == "gpt-image-2")
+
+
+@pytest.mark.parametrize("ratio", "1:1 3:2 2:3 4:3 3:4 5:4 4:5 16:9 9:16 21:9 2:1 1:2 9:21".split())
+def test_gpt2_reference_edits(ratio):
+    validate_image_selection("gpt-image-2-all-in-one", GPT2, size=ratio, resolution="1K", images=["https://example.test/ref.png"] * 15)
+
+
+def test_gpt2_edit_boundaries_and_text_generation():
+    code = "gpt-image-2-all-in-one"
+    for size, resolution, count in [("16:9", "2K", 1), ("9:16", "4K", 15), ("1:1", "1K", 16), ("1:4", "1K", 1)]:
+        with pytest.raises(HTTPException) as error:
+            validate_image_selection(code, GPT2, size=size, resolution=resolution, images=["https://example.test/ref.png"] * count)
+        assert error.value.status_code == 422
+    validate_image_selection(code, GPT2, size="9:21", resolution="4K")
+    assert image_ratio("864x2016", code) == "9:21"

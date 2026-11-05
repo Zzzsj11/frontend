@@ -14,11 +14,12 @@ TEXT_MODELS = (
 )
 BASE_RATIOS = ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"]
 EXTENDED_RATIOS = [*BASE_RATIOS, "5:4", "4:5"]
+GPT2_RATIOS = [*EXTENDED_RATIOS, "2:1", "1:2", "9:21"]
 IMAGE_MODELS = (
     ("nano-banana-2.1", "Nano Banana 2.1", [*EXTENDED_RATIOS, "1:4", "4:1", "1:8", "8:1"], ["1K", "2K", "4K"], 14),
     ("seedream-5.0-pro", "Seedream Pro", BASE_RATIOS, ["1K", "2K"], 10),
     ("seedream-5.0-flash", "Seedream Flash", BASE_RATIOS, ["1K", "1.5K", "2K"], 10),
-    ("gpt-image-2", "GPT Image 2", ["1:1"], ["1K"], 1),
+    ("gpt-image-2", "GPT Image 2", GPT2_RATIOS, ["1K", "2K", "4K"], 15),
     ("gpt-image-2.5-flare", "GPT Image 2.5 Flare", EXTENDED_RATIOS, ["1K", "2K", "4K"], 15),
     ("gpt-image-2.5-sunburst", "GPT Image 2.5 Sunburst", EXTENDED_RATIOS, ["1K", "2K", "4K"], 15),
 )
@@ -46,6 +47,8 @@ def rows(source_capabilities: dict[str, dict]) -> list[dict]:
         )
     for order, (code, name, ratios, resolutions, limit) in enumerate(IMAGE_MODELS):
         caps = {"ratios": list(ratios), "resolutions": list(resolutions), "imageToImage": True, "referenceImage": {"min": 0, "max": limit}}
+        if code == "gpt-image-2":
+            caps["editResolutions"] = ["1K"]
         caps.update(
             systemManaged=True,
             providerCode="all-in-one",

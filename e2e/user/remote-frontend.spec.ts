@@ -102,7 +102,6 @@ test('deployed frontend login, project and storyboard configuration journey', as
     await expect(general.getByLabel('图片模型')).toContainText('Nano Banana 2.1')
     await general.getByLabel('图片模型').click()
     await expect(page.getByRole('button', { name: 'Seedream Flash', exact: true })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'GPT Image 2', exact: true })).toHaveCount(0)
     await page.screenshot({ path: join(output, '04-image-model-options.png'), fullPage: true })
     await page.getByRole('button', { name: 'Seedream Pro', exact: true }).click()
     await selectDropdown(general.getByLabel('图片清晰度'), '2K')

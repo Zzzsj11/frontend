@@ -101,7 +101,7 @@ async def store_result(job: Any, body: dict[str, Any]) -> dict[str, Any]:
 
 async def generate(request: Any, job: Any) -> dict[str, Any]:
     from .jobs import jobs
-    from .providers import ProviderError, ProviderRejectedError, ProviderSubmissionUncertainError, _raise_for_status, _toapis_image_ratio
+    from .providers import ProviderError, ProviderRejectedError, ProviderSubmissionUncertainError, _raise_for_status
 
     snapshot = job.request or {}
     model = snapshot.get("_providerModelId") or upstream_model(request.model)
@@ -115,7 +115,9 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
             raise ProviderError("all in one 每次生成一张图片")
         if request.images:
             payload["image"] = request.images
-        payload.update(size=_toapis_image_ratio(request.size), resolution=request.resolution, quality="auto", output_format="png", n=request.n)
+        from .image_model_policy import image_ratio
+
+        payload.update(size=image_ratio(request.size, model), resolution=request.resolution, quality="auto", output_format="png", n=request.n)
     else:
         mode = snapshot.get("_h3Mode") or request.h3_mode
         modes = {"first_last": "first_last", "first_frame": "first_frame", "reference": "reference", "text": "text"}
