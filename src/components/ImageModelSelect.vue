@@ -21,12 +21,9 @@ const groups = computed(() =>
       label: '图片生成',
       items: IMAGE_MODEL_OPTIONS.filter(
         (item) =>
-          ['nano-banana-2.1-all-in-one', 'seedream-5.0-pro-all-in-one'].includes(item.value) &&
+          item.value.endsWith('-all-in-one') &&
           (!props.ratio || imageModelSupportsRatio(item.value, props.ratio)),
-      ).map((item) => ({
-        value: item.value,
-        label: item.value === 'nano-banana-2.1-all-in-one' ? 'Nano Banana 2.1' : 'Seedream Pro',
-      })),
+      ),
     },
   ].filter((group) => group.items.length),
 )

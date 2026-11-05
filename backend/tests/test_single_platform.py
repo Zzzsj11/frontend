@@ -31,7 +31,7 @@ def test_platform_optimizer_exposes_only_configured_gemini(monkeypatch):
     assert status["gemini"]["configured"]
     assert status["gemini"]["model"] == "gemini-3.8-flash-all-in-one"
     assert not status["minimax"]["configured"]
-    assert completion_options(status["gemini"]["model"], 7000) == {"max_completion_tokens": 14000, "reasoning_effort": "low"}
+    assert completion_options(status["gemini"]["model"], 7000) == {"max_completion_tokens": 14000}
 
 
 @pytest.mark.asyncio

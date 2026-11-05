@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import re
 import uuid
 from typing import Any
@@ -110,7 +111,11 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
     if job.kind == "image":
         if request.quality != "auto":
             raise ProviderError("all in one 图片模型仅支持 quality=auto")
-        payload.update(images=request.images, size=_toapis_image_ratio(request.size), resolution=request.resolution, quality="auto", n=request.n)
+        if request.n != 1:
+            raise ProviderError("all in one 每次生成一张图片")
+        if request.images:
+            payload["image"] = request.images
+        payload.update(size=_toapis_image_ratio(request.size), resolution=request.resolution, quality="auto", output_format="png", n=request.n)
     else:
         mode = snapshot.get("_h3Mode") or request.h3_mode
         modes = {"first_last": "first_last", "first_frame": "first_frame", "reference": "reference", "text": "text"}
@@ -139,8 +144,11 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
     await jobs.record_provider_request(job, payload)
     await jobs.mark_provider_submitting(job)
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(settings.all_in_one_base_url.rstrip("/") + f"/v1/{'images' if job.kind == 'image' else 'videos'}", headers=request_headers, json=payload)
+        endpoint = "videos"
+        if job.kind == "image":
+            endpoint = "images/edits" if request.images else "images/generations"
+        async with httpx.AsyncClient(timeout=600 if job.kind == "image" else 60) as client:
+            response = await client.post(settings.all_in_one_base_url.rstrip("/") + "/v1/" + endpoint, headers=request_headers, json=payload)
             # Do not resubmit a potentially accepted request on a 5xx or transport failure.
             if response.status_code >= 500:
                 error_body = response.json()
@@ -158,6 +166,26 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
                 raise error
             _raise_for_status(response)
             body = response.json()
+            if job.kind == "image":
+                from .image_failover import record_outcome
+                from .storage import import_remote_image, put_image_with_thumbnail, safe_key
+
+                task_id = response.headers.get("x-job-id")
+                if task_id:
+                    await jobs.set_provider_task(job, PROVIDER, task_id, idempotency_key=job.idempotency_key)
+                request_id = response.headers.get("x-request-id") or body.get("id")
+                usage = {**(body.get("usage") or {}), "platformBilling": body.get("billing")}
+                await jobs.record_provider_response(job, "submission", {"requestId": request_id, "jobId": task_id, "usage": usage})
+                item = next(iter(body.get("data") or []), {})
+                owner = f"users/{job.user_id}/generated/images"
+                if item.get("url"):
+                    original, thumbnail = await import_remote_image(item["url"], owner)
+                elif item.get("b64_json"):
+                    original, thumbnail = await put_image_with_thumbnail(safe_key(owner, f"{job.id}.png"), base64.b64decode(item["b64_json"], validate=True), "image/png")
+                else:
+                    raise ProviderSubmissionUncertainError("图片响应缺少 URL 或 Base64 数据，请核查原请求")
+                await record_outcome(job, succeeded=True)
+                return {"provider": PROVIDER, "providerTaskId": task_id or request_id, "model": request.model, "urls": [original], "thumbnailUrls": [thumbnail], "usage": usage}
             await jobs.record_provider_response(job, "submission", body)
     except ProviderError as exc:
         if getattr(exc, "submission_certain", False) and not _content_rejection(exc):

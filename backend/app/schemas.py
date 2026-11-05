@@ -232,7 +232,7 @@ class ImageGenerationCreate(BaseModel):
     quality: Literal["auto", "low", "medium", "high", "xhigh", "max"] = "auto"
     resolution: Literal["1K", "1.5K", "2K", "4K"] = "1K"
     n: int = Field(default=1, ge=1, le=1)
-    images: list[str] = Field(default_factory=list, max_length=14)
+    images: list[str] = Field(default_factory=list, max_length=15)
     model: str | None = Field(default=None, max_length=160)
     purpose: Literal["scene", "digital_human", "other"] = "other"
     portrait: PortraitPromptParams | None = None

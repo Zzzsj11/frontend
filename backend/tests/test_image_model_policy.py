@@ -26,8 +26,8 @@ def test_nano_accepts_portrait_ratio_and_references():
 
 
 def test_seedream_supports_portraits_wide_and_reference_limit():
-    validate_image_selection("seedream-5.0-pro-all-in-one", SEEDREAM, size="16:9", resolution="1.5K", purpose="digital_human", images=["https://example.test/face.jpg"])
-    for changes in ({"resolution": "4K"}, {"images": ["https://example.test/ref.jpg"] * 11}):
+    validate_image_selection("seedream-5.0-pro-all-in-one", SEEDREAM, size="16:9", resolution="2K", purpose="digital_human", images=["https://example.test/face.jpg"])
+    for changes in ({"resolution": "4K"}, {"resolution": "1.5K"}, {"images": ["https://example.test/ref.jpg"] * 11}):
         with pytest.raises(HTTPException) as error:
             validate_image_selection("seedream-5.0-pro-all-in-one", SEEDREAM, **{"size": "1:1", "resolution": "2K", **changes})
         assert error.value.status_code == 422

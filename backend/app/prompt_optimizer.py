@@ -220,6 +220,10 @@ async def _call_platform(*, prompt: str, duration: int, ratio: str, media: list[
             },
         )
     model, messages = snapshot["model"], snapshot["messages"]
+    if upstream_model(model) != "gemini-3.8-flash" and any(
+        part.get("type") == "input_audio" for message in messages if isinstance(message.get("content"), list) for part in message["content"]
+    ):
+        raise ValueError("带声音的参考素材需要选择 Gemini 3.8 Flash")
     started = time.perf_counter()
     cached = await _job_snapshot("_optimizationResponse")
     result = cached or {}
@@ -232,7 +236,10 @@ async def _call_platform(*, prompt: str, duration: int, ratio: str, media: list[
                 idempotency_key=snapshot.get("idempotencyKey") or (f"aio-{job_id}:prompt-optimization:v1" if job_id else None),
             ) as client:
                 response = await client.chat.completions.create(
-                    model=upstream_model(model), messages=messages, extra_headers=_agent_headers(agent_name, agent_run_id), **snapshot["options"]
+                    model=upstream_model(model),
+                    messages=messages,
+                    extra_headers=_agent_headers(agent_name, agent_run_id),
+                    **{k: v for k, v in snapshot["options"].items() if k in {"max_tokens", "max_completion_tokens", "extra_body"}},
                 )
             result = {
                 "prompt": response.choices[0].message.content or "" if response.choices else "",

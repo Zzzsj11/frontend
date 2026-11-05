@@ -104,8 +104,8 @@ test('deployed frontend login, project and storyboard configuration journey', as
     await expect(page.locator('[data-model-option]')).toHaveCount(2)
     await page.screenshot({ path: join(output, '04-image-model-options.png'), fullPage: true })
     await page.getByRole('button', { name: 'Seedream Pro', exact: true }).click()
-    await selectDropdown(general.getByLabel('图片清晰度'), '1.5K')
-    await expectDropdownOptions(general.getByLabel('图片清晰度'), ['1K', '1.5K', '2K'])
+    await selectDropdown(general.getByLabel('图片清晰度'), '2K')
+    await expectDropdownOptions(general.getByLabel('图片清晰度'), ['1K', '2K'])
     for (const mode of ['定制通用分镜', '随机通用分镜']) {
       if (mode === '随机通用分镜') {
         await general.getByRole('button', { name: '取消', exact: true }).click()

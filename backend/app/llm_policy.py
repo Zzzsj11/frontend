@@ -28,6 +28,11 @@ def completion_options(model: str, max_tokens: int, temperature: float = 0.2) ->
     from .generation_preferences import text_selection
 
     options = _completion_options(model, max_tokens, temperature)
+    from .config import settings
+
+    if settings.llm_channel == "all-in-one" or model.endswith("-all-in-one"):
+        options.pop("reasoning_effort", None)
+        options.pop("temperature", None)
     selection = text_selection.get() or {}
     if selection.get("channel"):
         options["extra_body"] = {"channel": selection["channel"]}

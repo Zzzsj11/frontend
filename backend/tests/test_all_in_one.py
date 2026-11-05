@@ -38,7 +38,7 @@ async def test_chat_timeout_allows_long_outline_stage(configured):
 
 def test_catalog_scope_does_not_clone_yinghe_billing():
     result = rows({"minimax-h3": {"billing": {"currency": "CNY"}, "h3Modes": ["reference"]}})
-    assert len(result) == 19
+    assert len(result) == 23
     assert len([m for m in result if m["modality"] == "chat"]) == 5
     h3 = next(m for m in result if m["provider_model_id"] == "MiniMax-H3")
     assert h3["capabilities"]["billing"] == {
@@ -63,7 +63,7 @@ def test_normalized_result_preserves_pending_cost():
 
 @pytest.mark.parametrize("model", ["gpt-6.1-sol-all-in-one", "gpt-6-sol-all-in-one", "gpt-6-astra-all-in-one"])
 def test_reasoning_compatibility(model):
-    assert completion_options(model, 1400) == {"max_completion_tokens": 8192, "reasoning_effort": "low"}
+    assert completion_options(model, 1400) == {"max_completion_tokens": 8192}
 
 
 @pytest.mark.asyncio
@@ -87,6 +87,8 @@ async def test_create_maps_payload_and_durable_identity(configured, monkeypatch,
         import json
 
         captured.append((request, json.loads(request.content)))
+        if kind == "image":
+            return httpx.Response(200, json={"data": [{"url": "https://media.example/output.png"}]})
         return httpx.Response(202, json={"id": "upstream-job", "status": "queued"})
 
     original = httpx.AsyncClient
@@ -111,18 +113,28 @@ async def test_create_maps_payload_and_durable_identity(configured, monkeypatch,
         if kind == "image"
         else VideoGenerationCreate(model="minimax-h3-all-in-one", prompt="cup", image_urls=["https://media.example/input.png"], resolution="720p", duration=5)
     )
-    assert await aio.generate(request, job) == {"done": True}
+    monkeypatch.setattr("app.storage.import_remote_image", AsyncMock(return_value=("original", "thumbnail")))
+    monkeypatch.setattr("app.image_failover.record_outcome", AsyncMock())
+    result = await aio.generate(request, job)
+    if kind == "image":
+        assert result["urls"] == ["original"]
+    else:
+        assert result == {"done": True}
     req, body = captured[0]
     assert req.headers["Idempotency-Key"] == f"local-job:{kind}"
     assert req.headers["X-Agent-Run-Id"] == req.headers["X-Test-Run-Id"] == "test-run"
     assert "X-User-Id" not in req.headers
     assert body.get("channel") == selected_channel
     assert ("channel" in body) == (selected_channel is not None)
-    assert body["images"] == ["https://media.example/input.png"]
+    assert body["image" if kind == "image" else "images"] == ["https://media.example/input.png"]
     assert "realPersonMode" not in body
     if kind == "video":
         assert body["resolution"] == "768P"
     provider_request.assert_awaited_once_with(job, body)
+    if kind == "image":
+        assert req.url.path == "/v1/images/edits"
+        persist.assert_not_awaited()
+        return
     provider_response.assert_awaited_once_with(job, "submission", {"id": "upstream-job", "status": "queued"})
     persist.assert_awaited_once()
 

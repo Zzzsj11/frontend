@@ -27,10 +27,12 @@ def test_non_admin_cannot_access_admin_but_can_read_model_options(client):
     options = client.get("/api/model-options", headers=headers).json()
     assert any(x["id"] == "nano-banana-2.1-all-in-one" for x in options)
     image_models = {x["id"]: x for x in options if x["modality"] == "image"}
-    assert set(image_models) == {"nano-banana-2.1-all-in-one", "seedream-5.0-pro-all-in-one"}
+    assert set(image_models) == {
+        name + "-all-in-one" for name in ("nano-banana-2.1", "seedream-5.0-pro", "seedream-5.0-flash", "gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst")
+    }
     assert image_models["nano-banana-2.1-all-in-one"]["capabilities"]["resolutions"] == ["1K", "2K", "4K"]
     assert image_models["nano-banana-2.1-all-in-one"]["capabilities"]["referenceImage"] == {"min": 0, "max": 14}
-    assert image_models["seedream-5.0-pro-all-in-one"]["capabilities"]["resolutions"] == ["1K", "1.5K", "2K"]
+    assert image_models["seedream-5.0-pro-all-in-one"]["capabilities"]["resolutions"] == ["1K", "2K"]
     from app.all_in_one_catalog import VIDEO_MODEL_CODES
 
     videos = {item["id"]: item for item in options if item["modality"] == "video"}

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from copy import deepcopy
 from pathlib import Path
 
 TEXT_MODELS = (
@@ -13,17 +12,15 @@ TEXT_MODELS = (
     ("gpt-6-astra", "GPT 6 Astra"),
     ("gpt-6-sol", "GPT 6.0 Sol"),
 )
+BASE_RATIOS = ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"]
+EXTENDED_RATIOS = [*BASE_RATIOS, "5:4", "4:5"]
 IMAGE_MODELS = (
-    (
-        "nano-banana-2.1",
-        "Nano Banana 2.1",
-        {"ratios": ["16:9", "9:16", "4:3", "1:1", "3:2", "2:3", "3:4"], "resolutions": ["1K", "2K", "4K"], "imageToImage": True, "referenceImage": {"min": 0, "max": 14}},
-    ),
-    (
-        "seedream-5.0-pro",
-        "Seedream 5.0 Pro",
-        {"ratios": ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"], "resolutions": ["1K", "1.5K", "2K"], "imageToImage": True, "referenceImage": {"min": 0, "max": 10}},
-    ),
+    ("nano-banana-2.1", "Nano Banana 2.1", [*EXTENDED_RATIOS, "1:4", "4:1", "1:8", "8:1"], ["1K", "2K", "4K"], 14),
+    ("seedream-5.0-pro", "Seedream Pro", BASE_RATIOS, ["1K", "2K"], 10),
+    ("seedream-5.0-flash", "Seedream Flash", BASE_RATIOS, ["1K", "1.5K", "2K"], 10),
+    ("gpt-image-2", "GPT Image 2", ["1:1"], ["1K"], 1),
+    ("gpt-image-2.5-flare", "GPT Image 2.5 Flare", EXTENDED_RATIOS, ["1K", "2K", "4K"], 15),
+    ("gpt-image-2.5-sunburst", "GPT Image 2.5 Sunburst", EXTENDED_RATIOS, ["1K", "2K", "4K"], 15),
 )
 
 
@@ -43,13 +40,14 @@ def rows(source_capabilities: dict[str, dict]) -> list[dict]:
                 "provider_model_id": code,
                 "name": name + "（all in one）",
                 "modality": "chat",
-                "capabilities": {"structuredOutput": True, "providerCode": "all-in-one"},
+                "capabilities": {"systemManaged": True, "structuredOutput": False, "providerCode": "all-in-one"},
                 "sort_order": 100 + order,
             }
         )
-    for order, (code, name, capabilities) in enumerate(IMAGE_MODELS):
-        caps = deepcopy(capabilities)
+    for order, (code, name, ratios, resolutions, limit) in enumerate(IMAGE_MODELS):
+        caps = {"ratios": list(ratios), "resolutions": list(resolutions), "imageToImage": True, "referenceImage": {"min": 0, "max": limit}}
         caps.update(
+            systemManaged=True,
             providerCode="all-in-one",
             providerProtocol="all-in-one",
             executionPool=f"all-in-one:{code}",

@@ -31,6 +31,8 @@ async def _command(*args: str) -> bytes:
 async def content_parts(media: list[dict[str, Any]], user_id: str) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     counters = {"image": 0, "video": 0, "audio": 0}
+    if sum(3 if item["kind"] == "video" else int(item["kind"] == "image") for item in media) > 10:
+        raise ValueError("看图每次最多支持 10 张图片（含视频采样帧）")
     for item in media:
         kind, url = item["kind"], item["url"]
         if not is_user_owned_tos_url(url, user_id):

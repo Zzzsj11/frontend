@@ -101,11 +101,11 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
         },
         {
           id: 'seedream-5.0-pro-all-in-one',
-          name: 'Seedream 5.0 Pro',
+          name: 'Seedream Pro',
           modality: 'image',
           capabilities: {
             ratios: ['16:9', '9:16', '4:3', '1:1'],
-            resolutions: ['1K', '1.5K', '2K'],
+            resolutions: ['1K', '2K'],
             referenceImage: { max: 10 },
           },
         },
@@ -486,9 +486,9 @@ test('user generates an editable storyboard from ASS', async ({ page }) => {
   await selectDropdown(general.getByLabel('画幅'), '1:1')
   await general.getByLabel('图片模型').click()
   await page.getByRole('button', { name: 'Seedream Pro', exact: true }).click()
-  await expectDropdownOptions(general.getByLabel('图片清晰度'), ['1K', '1.5K', '2K'])
-  await selectDropdown(general.getByLabel('图片清晰度'), '1.5K')
-  await expect(general.getByLabel('图片清晰度')).toHaveAttribute('data-value', '1.5K')
+  await expectDropdownOptions(general.getByLabel('图片清晰度'), ['1K', '2K'])
+  await selectDropdown(general.getByLabel('图片清晰度'), '2K')
+  await expect(general.getByLabel('图片清晰度')).toHaveAttribute('data-value', '2K')
   await selectDropdown(general.getByLabel('画幅'), '16:9')
   await expect(general.getByLabel('图片模型')).toContainText('Seedream Pro')
   await page.screenshot({ path: test.info().outputPath('image-model-select.png') })

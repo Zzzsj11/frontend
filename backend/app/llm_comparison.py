@@ -93,7 +93,7 @@ async def call_chat_model(
     """单次模型调用；业务流程通过显式 model/protocol 注入测试模型，不改全局默认配置。"""
     if settings.llm_channel == "all-in-one" and not model.endswith("-all-in-one"):
         raise ValueError("旧渠道文本模型已停用，请选择平台模型")
-    caller = _call_anthropic if protocol == "anthropic" else _call_openai
+    caller = _call_anthropic if protocol == "anthropic" and not model.endswith("-all-in-one") else _call_openai
     if model.endswith("-all-in-one"):
         from .text_admission import text_slot
 
