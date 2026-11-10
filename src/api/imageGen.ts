@@ -41,7 +41,7 @@ export async function createImageTask(
       prompt,
       size: options.size ?? '1024x1024',
       quality: options.quality ?? 'auto',
-      resolution: options.resolution ?? '1K',
+      resolution: options.resolution,
       n: options.n ?? 1,
       purpose: 'digital_human',
       ...(options.portrait ? { portrait: options.portrait } : {}),

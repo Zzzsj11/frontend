@@ -43,6 +43,10 @@ async def apply_media_preference(db: AsyncSession, user_id: str, modality: str, 
     if selection:
         payload.model = selection["model"]
         payload.channel = selection.get("channel")
+    if modality == "image" and payload.images and "resolution" not in payload.model_fields_set:
+        selected_model = payload.model or settings.image_model
+        if selected_model in {"seedream-5.0-flash-all-in-one", "seedream-5.0-pro-all-in-one"}:
+            payload.resolution = "2K"
     if payload.channel:
         model = await visible_model(db, payload.model)
         catalog = await fetch_channels(model.provider_model_id, user_id)

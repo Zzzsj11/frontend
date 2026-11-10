@@ -49,3 +49,17 @@ def test_gpt2_edit_boundaries_and_text_generation():
         assert error.value.status_code == 422
     validate_image_selection(code, GPT2, size="9:21", resolution="4K")
     assert image_ratio("864x2016", code) == "9:21"
+
+
+@pytest.mark.parametrize("model", ["seedream-5.0-flash-all-in-one", "seedream-5.0-pro-all-in-one"])
+def test_seedream_text_and_edit_resolution_contract(model):
+    caps = next(row["capabilities"] for row in rows({}) if row["code"] == model)
+    assert caps["resolutions"] == ["1K", "2K"]
+    for refs in ([], ["https://example.test/ref.png"]):
+        for resolution in ("1K", "1.5K", "2K", "4K"):
+            if resolution == "2K" or (resolution == "1K" and not refs):
+                validate_image_selection(model, caps, size="1:1", resolution=resolution, images=refs)
+            else:
+                with pytest.raises(HTTPException) as exc:
+                    validate_image_selection(model, caps, size="1:1", resolution=resolution, images=refs)
+                assert exc.value.status_code == 422

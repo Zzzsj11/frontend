@@ -72,7 +72,7 @@ async def prepare_request(session, request: dict) -> dict:
     model, _provider = row
     caps = model.capabilities or {}
     # Seedream has no 4K output. Keep the requested ratio/references, record the downgrade.
-    resolution = "2K" if request.get("resolution") == "4K" else request.get("resolution", "1K")
+    resolution = "2K" if request.get("images") or request.get("resolution") == "4K" else request.get("resolution", "1K")
     from fastapi import HTTPException
 
     try:
