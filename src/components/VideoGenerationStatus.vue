@@ -8,7 +8,7 @@ const labels: Record<string, string> = {
   reviewing_assets: '人物素材审核中',
   archiving: '素材保存中',
   reconciling: '状态核对中',
-  auto_reconciling: '正在自动核对并恢复原视频，无需重新生成，不会重复扣费',
+  auto_reconciling: '正在查询原视频工单',
   manual_review: '待人工核对，请联系开发人员，不能重新生成',
 }
 const now = ref(Date.now())
@@ -32,3 +32,15 @@ const elapsed = computed(() => {
     }}{{ hasAssets ? '（已有素材可预览）' : '' }}</span
   >
 </template>
+
+<style scoped>
+.hint {
+  display: block;
+  min-width: 0;
+  margin-top: 4px;
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+</style>

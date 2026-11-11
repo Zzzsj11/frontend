@@ -290,6 +290,12 @@ onBeforeUnmount(() => {
       <p v-if="!isCreative" class="prompt editable-text" @click.stop="openShotDetail">
         {{ line.shotPrompt || line.scenePrompt || '暂无提示词，点击编辑场景与视频' }}
       </p>
+      <VideoGenerationStatus
+        v-if="line.shot.status === 'generating'"
+        :phase="line.shot.generationPhase"
+        :submitted-at="line.shot.generationSubmittedAt"
+        :has-assets="line.shot.assets.length > 0"
+      />
     </div>
 
     <ManualReviewNotice
@@ -298,12 +304,6 @@ onBeforeUnmount(() => {
       :line-number="index + 1"
     />
     <div class="line-actions" @click.stop>
-      <VideoGenerationStatus
-        v-if="line.shot.status === 'generating'"
-        :phase="line.shot.generationPhase"
-        :submitted-at="line.shot.generationSubmittedAt"
-        :has-assets="line.shot.assets.length > 0"
-      />
       <!-- 生成分镜视频片段 -->
       <BaseIconButton
         v-if="line.shot.generationPhase !== 'manual_review'"
