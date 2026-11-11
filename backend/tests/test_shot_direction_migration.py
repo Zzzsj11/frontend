@@ -11,7 +11,6 @@ from alembic.operations import Operations
 from alembic.script import ScriptDirectory
 
 from app.models import Base, PromptTemplateModel, PromptVersionModel
-from app.video_prompt_policy import CHARACTER_DIRECTION_RULE
 
 
 def test_shot_direction_migration_preserves_history_and_is_idempotent():
@@ -23,7 +22,7 @@ def test_shot_direction_migration_preserves_history_and_is_idempotent():
     assert len(scripts.get_heads()) == 1
     assert migration.revision in {revision.revision for revision in scripts.walk_revisions()}
     assert migration.down_revision == "e7a3b9c2f104"
-    assert migration.DATA["policy"] == CHARACTER_DIRECTION_RULE
+    assert "发型可按场景、动作和造型自然调整" in migration.DATA["policy"]
     templates, versions = PromptTemplateModel.__table__, PromptVersionModel.__table__
     engine = sa.create_engine("sqlite:///:memory:")
     stamp = datetime.now(timezone.utc)
@@ -59,7 +58,7 @@ def test_shot_direction_migration_preserves_history_and_is_idempotent():
         assert rows[2]["version"] == 10 and rows[2]["status"] == "published"
         assert "不得泄露隐私" in rows[2]["content"]
         assert "年龄感和发型" not in rows[2]["content"]
-        assert CHARACTER_DIRECTION_RULE in rows[2]["content"]
+        assert migration.DATA["policy"] in rows[2]["content"]
         assert all(row["deleted_at"] is None for row in rows)
         template = conn.execute(sa.select(templates)).mappings().one()
         assert template["name"] == "运营标题"

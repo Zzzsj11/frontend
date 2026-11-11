@@ -285,7 +285,7 @@ const cancel = () => store.closeEditor()
         <!-- 人物调整面板 -->
         <div v-if="showsCast && activeTab === 'cast'" class="tab-panel">
           <p class="identity-reference-tip">
-            人物身份参考图仅锁定五官、脸型、肤色、年龄感和发型，不从头肩照推断全身比例；白色 T
+            人物身份参考图仅锁定五官、脸型、肤色和年龄感，不从头肩照推断全身比例；白色 T
             恤、灰背景及历史身份卡的服装不会带入剧情镜头。
           </p>
           <div class="panel-head">

@@ -60,3 +60,12 @@ def test_generated_direction_removes_defaults_but_respects_explicit_solo_and_hai
     explicit = relax_generated_character_direction(source, user_requirement="单人独处，发型不变")
     assert "无其他人物" in explicit
     assert "发型不变" in explicit
+
+
+def test_period_hairstyle_request_does_not_preserve_generated_hair_lock():
+    from app.video_prompt_policy import relax_generated_character_direction
+
+    source = "保持五官、脸型、肤色、年龄感和发型不变。古代宫殿内。"
+    result = relax_generated_character_direction(source, user_requirement="古代人物，要适合古代发型")
+    assert "发型不变" not in result
+    assert "五官、脸型、肤色、年龄感" in result

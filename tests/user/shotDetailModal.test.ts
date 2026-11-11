@@ -87,9 +87,7 @@ describe('ShotDetailModal general MV character controls', () => {
     expect(document.body.textContent).toContain('出演角色')
     expect(document.body.textContent).toContain('定制人物')
     expect(document.body.textContent).toContain('管理阵容')
-    expect(document.body.textContent).toContain(
-      '人物身份参考图仅锁定五官、脸型、肤色、年龄感和发型',
-    )
+    expect(document.body.textContent).toContain('人物身份参考图仅锁定五官、脸型、肤色和年龄感')
     expect(document.body.textContent).toContain('不从头肩照推断全身比例')
     expect(document.body.textContent).toContain('灰背景及历史身份卡的服装不会带入剧情镜头')
   })
