@@ -69,7 +69,10 @@ describe('auth logout cleanup', () => {
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(
       async () =>
-        new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+        new Response('{"ok":true}', {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
     )
 
     await auth.logout()
@@ -102,8 +105,16 @@ describe('auth logout cleanup', () => {
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(
       async () =>
-        new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+        new Response('{"ok":true}', {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
     )
+
+    vi.mocked(globalThis.fetch).mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    await expect(auth.logout()).rejects.toThrow('退出登录失败，请再次尝试')
+    expect(auth.user?.id).toBe('u1')
+    expect(project.activeSongId).toBe('song-a')
 
     await auth.logout()
     expect(project.songProjects).toEqual([])

@@ -253,6 +253,7 @@ describe('apiRequest auth recovery (401/403)', () => {
       .spyOn(globalThis, 'fetch')
       .mockImplementation(async () => jsonResponse({ detail: 'token expired' }, 401))
 
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true }))
     await logoutRequest()
     // 退出后任何在途请求撞 401：不尝试 refresh、不弹“登录已过期”、不强制跳转
     fetchMock.mockClear()

@@ -27,6 +27,7 @@ from .agent_attribution import agent_attribution_middleware
 from .ass_storyboard import group_cues, parse_ass
 from .auth import (
     CurrentUser,
+    LogoutCredentials,
     clear_refresh_cookie,
     hash_password,
     issue_tokens,
@@ -409,7 +410,7 @@ async def all_in_one_credits(_user: CurrentUser) -> dict:
 
 
 @app.post("/api/auth/login")
-async def auth_login(payload: LoginCreate, request: Request, response: Response) -> dict:
+async def auth_login(payload: LoginCreate, request: Request, response: Response, db: AsyncSession = Depends(database_session)) -> dict:
     client_ip = request.client.host if request.client else "unknown"
     username = payload.username.strip().lower()
     identities = (
@@ -438,21 +439,21 @@ async def auth_login(payload: LoginCreate, request: Request, response: Response)
         await asyncio.gather(*(clear_login_attempts(identity) for identity in identities))
     except Exception:
         logger.exception("清理登录限流计数失败")
-    return await issue_tokens(user, request, response)
+    return await issue_tokens(user, request, response, db)
 
 
 @app.post("/api/auth/refresh")
-async def auth_refresh(request: Request, response: Response, refresh: Annotated[str | None, Depends(refresh_cookie_value)]) -> dict:
-    user = await rotate_refresh(refresh)
-    if not user:
+async def auth_refresh(request: Request, response: Response, refresh: Annotated[str | None, Depends(refresh_cookie_value)], db: AsyncSession = Depends(database_session)) -> dict:
+    tokens = await rotate_refresh(refresh, request, response, db)
+    if not tokens:
         clear_refresh_cookie(response)
         raise HTTPException(401, "刷新凭证无效或已过期")
-    return await issue_tokens(user, request, response)
+    return tokens
 
 
 @app.post("/api/auth/logout")
-async def auth_logout(response: Response, refresh: Annotated[str | None, Depends(refresh_cookie_value)]) -> dict:
-    await revoke_refresh(refresh)
+async def auth_logout(response: Response, credentials: LogoutCredentials, refresh: Annotated[str | None, Depends(refresh_cookie_value)]) -> dict:
+    await revoke_refresh(refresh, credentials)
     clear_refresh_cookie(response)
     return {"ok": True}
 
@@ -479,7 +480,7 @@ async def change_password(
     user.auth_version += 1
     await revoke_all_refresh_tokens(user.id, db)
     await db.commit()
-    tokens = await issue_tokens(user, request, response)
+    tokens = await issue_tokens(user, request, response, db)
     return {"ok": True, **tokens}
 
 

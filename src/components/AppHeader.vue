@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useLogout } from '../composables/useLogout'
 import { useAuthStore } from '../stores/auth'
 import DeploymentBadge from './DeploymentBadge.vue'
 
 const auth = useAuthStore()
-const router = useRouter()
+const { logout, loggingOut } = useLogout()
 const menuOpen = ref(false)
 const menu = ref<HTMLElement | null>(null)
 const userName = computed(() => auth.user?.displayName || auth.user?.username || '用户')
@@ -17,11 +17,6 @@ const allInOneTitle = computed(() => {
   return `当前 Key ${credits.keyMasked || '--'} · 月额度 ${credits.monthlyPoints || '--'} 积分 · 已用 ${credits.spentPoints || '--'} · 预占 ${credits.reservedPoints || '--'} · 点击刷新`
 })
 const hasAdminAccess = computed(() => auth.canAccessAdmin)
-const logout = async () => {
-  menuOpen.value = false
-  await auth.logout()
-  await router.replace('/login')
-}
 const closeFromOutside = (event: MouseEvent) => {
   if (menu.value && !menu.value.contains(event.target as Node)) menuOpen.value = false
 }
@@ -106,7 +101,9 @@ onBeforeUnmount(() => {
             >修改密码</RouterLink
           >
           <p v-if="auth.user?.mustChangePassword" class="password-warning">请尽快修改初始密码</p>
-          <button class="logout" role="menuitem" @click="logout">退出登录</button>
+          <button class="logout" role="menuitem" :disabled="loggingOut" @click="logout">
+            {{ loggingOut ? '正在退出登录…' : '退出登录' }}
+          </button>
         </div>
       </div>
     </div>

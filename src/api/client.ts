@@ -45,6 +45,7 @@ const refreshAccess = async () => {
       method: 'POST',
       credentials: 'include',
       headers: agentTestHeaders(),
+      signal: AbortSignal.timeout(15000),
     })
       .then(async (response) => {
         if (!response.ok) return false
@@ -254,6 +255,22 @@ export async function restoreSession(): Promise<AuthUser | null> {
 }
 export async function logoutRequest() {
   intentionalLogout = true
-  await apiRequest('/auth/logout', { method: 'POST' }, false).catch(() => undefined)
-  setAccessToken('')
+  try {
+    // 已发出的刷新可能轮换 Cookie，等它结束后再撤销当前凭证。
+    await refreshPromise?.catch(() => false)
+    const response = await fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        ...agentTestHeaders(),
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      signal: AbortSignal.timeout(15000),
+    })
+    if (!response.ok || (await response.json()).ok !== true) throw new Error()
+    setAccessToken('')
+  } catch {
+    intentionalLogout = false
+    throw reportApiError(new ApiError('退出登录失败，请再次尝试'))
+  }
 }

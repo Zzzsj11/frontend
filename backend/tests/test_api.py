@@ -126,3 +126,37 @@ def test_generation_is_persisted(client) -> None:
     fetched = client.get(f"/api/generations/{job_id}")
     assert fetched.status_code == 200
     assert fetched.json()["kind"] == "image"
+
+
+def test_logout_isolates_login_sessions_even_after_rotation(client):
+    from fastapi.testclient import TestClient
+
+    cookie = "mv_refresh_token"
+    login = {"username": "admin", "password": "secure-admin-123"}
+
+    def headers(response):
+        return {"Authorization": "Bearer " + response.json()["accessToken"]}
+
+    first = TestClient(client.app)
+    second = TestClient(client.app)
+    try:
+        original = first.post("/api/auth/login", json=login)
+        rotated = first.post("/api/auth/refresh")
+        other = second.post("/api/auth/login", json=login)
+        # An older tab can send the pre-rotation cookie while a refresh is finishing.
+        first.cookies.clear()
+        first.cookies.set(cookie, original.cookies[cookie])
+        assert first.post("/api/auth/logout", headers=headers(original)).status_code == 200
+        for token in (original, rotated):
+            assert first.get("/api/auth/me", headers=headers(token)).status_code == 401
+        first.cookies.clear()
+        first.cookies.set(cookie, rotated.cookies[cookie])
+        assert first.post("/api/auth/refresh").status_code == 401
+        assert second.get("/api/auth/me", headers=headers(other)).status_code == 200
+        assert second.post("/api/auth/refresh").status_code == 200
+        second.cookies.clear()
+        assert second.post("/api/auth/logout", headers=headers(other)).status_code == 200
+        assert second.get("/api/auth/me", headers=headers(other)).status_code == 401
+    finally:
+        first.close()
+        second.close()

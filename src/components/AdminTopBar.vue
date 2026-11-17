@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useLogout } from '../composables/useLogout'
 import AppIcon from './AppIcon.vue'
 import DeploymentBadge from './DeploymentBadge.vue'
 import { useAuthStore } from '../stores/auth'
@@ -8,17 +8,12 @@ import { useAuthStore } from '../stores/auth'
 defineProps<{ groupTitle: string; title: string; loading?: boolean }>()
 const emit = defineEmits<{ refresh: [] }>()
 const auth = useAuthStore()
-const router = useRouter()
+const { logout, loggingOut } = useLogout()
 const menuOpen = ref(false)
 const menu = ref<HTMLElement | null>(null)
 const userName = computed(() => auth.user?.displayName || auth.user?.username || '管理员')
 const userInitial = computed(() => userName.value.trim().charAt(0).toUpperCase() || 'A')
 
-const logout = async () => {
-  menuOpen.value = false
-  await auth.logout()
-  await router.replace('/login')
-}
 const closeOutside = (event: MouseEvent) => {
   if (menu.value && !menu.value.contains(event.target as Node)) menuOpen.value = false
 }
@@ -73,7 +68,15 @@ onBeforeUnmount(() => {
           <RouterLink role="menuitem" to="/account/password" @click="menuOpen = false"
             >修改密码</RouterLink
           >
-          <button type="button" role="menuitem" class="logout" @click="logout">退出登录</button>
+          <button
+            type="button"
+            role="menuitem"
+            class="logout"
+            :disabled="loggingOut"
+            @click="logout"
+          >
+            {{ loggingOut ? '正在退出登录…' : '退出登录' }}
+          </button>
         </div>
       </div>
     </div>

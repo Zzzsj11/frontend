@@ -8,6 +8,7 @@
 - 临时密码用户由后端强制只能访问 `/api/auth/me`、`/api/auth/change-password` 和 `/api/auth/logout`，不能只依赖前端路由。
 - 修改密码会提升 `users.auth_version`、软撤销该用户全部 refresh token，并签发新会话；旧 access/refresh token 均立即失效。
 - `APP_ENV=production` 时必须挂载权限为 `600` 的 `/run/secrets/runtime_secrets`，默认 JWT Secret 或缺少 Secret 挂载都会拒绝启动。敏感值不再作为 Docker 环境变量注入；PostgreSQL 使用独立的 `POSTGRES_PASSWORD_FILE`。
+- 每次独立登录创建一个会话，Access Token 的 `sid` 与刷新凭证的 `family_id` 对应。退出会撤销当前会话，其他设备可继续访问和续期。升级前签发的 Access Token 首次鉴权返回 401，浏览器可用仍有效的刷新凭证续期。
 - refresh cookie 为 HttpOnly + SameSite=Lax。仓库提供 `docker-compose.tls.yml`：启用后强制 HTTPS、HSTS 与 `REFRESH_COOKIE_SECURE=true`。当前 IP 环境没有可核验域名和证书时继续使用 HTTP 仅限测试，不得宣称生产 TLS 已完成。
 
 ## 网络与浏览器边界
