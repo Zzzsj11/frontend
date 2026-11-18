@@ -12,8 +12,7 @@ export function useLogout() {
     try {
       await auth.logout()
     } catch {
-      // 请求失败已通过全局错误提示展示，保留页面以便重试。
-      return
+      // 登录页显示待注销状态和重试入口。
     } finally {
       loggingOut.value = false
     }

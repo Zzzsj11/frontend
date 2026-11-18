@@ -2,7 +2,7 @@ import { expect, test, type Route } from '@playwright/test'
 
 test.use({ baseURL: 'http://127.0.0.1:4173', serviceWorkers: 'block' })
 
-test('退出等待确认，失败保留账号，再次退出成功', async ({ page }) => {
+test('退出等待确认，失败锁定工作区，再次退出成功', async ({ page }) => {
   const user = {
     id: 'logout-test',
     username: 'logout-test',
@@ -11,9 +11,11 @@ test('退出等待确认，失败保留账号，再次退出成功', async ({ pa
     role: 'user',
   }
   await page.route('http://127.0.0.1:4173/api/**', (route) => route.fulfill({ json: {} }))
-  await page.route('**/api/auth/refresh', (route) =>
-    route.fulfill({ json: { accessToken: 'test' } }),
-  )
+  let refreshCalls = 0
+  await page.route('**/api/auth/refresh', (route) => {
+    refreshCalls++
+    return route.fulfill({ json: { accessToken: 'test' } })
+  })
   await page.route('**/api/auth/me', (route) => route.fulfill({ json: user }))
   let capture!: (route: Route) => void
   const pending = new Promise<Route>((resolve) => {
@@ -24,14 +26,14 @@ test('退出等待确认，失败保留账号，再次退出成功', async ({ pa
   const menu = page.getByRole('button', { name: /退出测试用户/ })
   await menu.click()
   await page.getByRole('menuitem', { name: '退出登录' }).click()
-  await expect(page.getByRole('menuitem', { name: '正在退出登录…' })).toBeDisabled()
+  await expect(page.getByText('工作区已锁定，正在退出登录…')).toBeVisible()
   await (await pending).abort('internetdisconnected')
   await expect(page.getByText('退出登录失败，请再次尝试')).toBeVisible()
   await page.getByRole('button', { name: '我知道了' }).click()
-  await expect(page).toHaveURL(/account\/password/)
-  await expect(menu).toBeVisible()
+  await page.reload()
+  await expect(page.getByRole('heading', { name: '工作区已锁定' })).toBeVisible()
+  expect(refreshCalls).toBe(1)
   await page.route('**/api/auth/logout', (route) => route.fulfill({ json: { ok: true } }))
-  if ((await menu.getAttribute('aria-expanded')) !== 'true') await menu.click()
-  await page.getByRole('menuitem', { name: '退出登录' }).click()
-  await expect(page).toHaveURL(/\/login$/)
+  await page.getByRole('button', { name: '重试退出登录' }).click()
+  await expect(page.getByRole('button', { name: '登录', exact: true })).toBeVisible()
 })

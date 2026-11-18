@@ -8,6 +8,17 @@ const auth = useAuthStore(),
 const username = ref(''),
   password = ref(''),
   error = ref('')
+const retrying = ref(false)
+const retryLogout = async () => {
+  retrying.value = true
+  try {
+    await auth.logout()
+  } catch {
+    /* 全局错误提示 */
+  } finally {
+    retrying.value = false
+  }
+}
 const submit = async () => {
   error.value = ''
   try {
@@ -24,7 +35,12 @@ const submit = async () => {
 </script>
 <template>
   <main class="login-page">
-    <form class="login-card" @submit.prevent="submit">
+    <section v-if="auth.pendingLogout" class="login-card">
+      <h1>工作区已锁定</h1>
+      <p>服务器尚未确认退出，请重试。</p>
+      <button :disabled="retrying" @click="retryLogout">重试退出登录</button>
+    </section>
+    <form v-else class="login-card" @submit.prevent="submit">
       <h1>镜序 MV 工作台</h1>
       <p>登录后管理你的项目、角色和视频</p>
       <label>用户名<input v-model="username" autocomplete="username" required /></label

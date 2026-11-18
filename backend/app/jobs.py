@@ -75,6 +75,7 @@ class Job:
     idempotency_key: str | None = None
     worker_id: str | None = None
     phase: str = "queued"
+    execution_lease: tuple[str, str] | None = None
     attempt: int = 1
 
     def public(self) -> dict[str, Any]:
@@ -274,7 +275,11 @@ class JobManager:
         distributed_lease: tuple[str, str] | None = None
         lease_heartbeat: asyncio.Task | None = None
         try:
-            if slots:
+            if job.execution_lease:
+                distributed_lease = job.execution_lease
+                lease_heartbeat = self._lease_heartbeat(*distributed_lease)
+                await self._execute(job, runner)
+            elif slots:
                 async with slots:
                     distributed_lease, lease_heartbeat = await self._acquire_distributed_slot(job)
                     await self._execute(job, runner)
@@ -316,12 +321,17 @@ class JobManager:
                 break
             await asyncio.sleep(min(1.0, settings.worker_poll_seconds))
 
+        return (pool, token), self._lease_heartbeat(pool, token)
+
+    def _lease_heartbeat(self, pool: str, token: str) -> asyncio.Task:
+        ttl = max(60, settings.worker_stale_seconds)
+
         async def heartbeat() -> None:
             while True:
                 await asyncio.sleep(max(5.0, ttl / 3))
                 await renew_execution_lease(pool, token, ttl)
 
-        return (pool, token), asyncio.create_task(heartbeat())
+        return asyncio.create_task(heartbeat())
 
     async def _execute(self, job: Job, runner: JobRunner) -> None:
         """拿到执行槽位后才进入 running，供应商调用完成前一直占用槽位。"""

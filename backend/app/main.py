@@ -23,7 +23,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .admin import public_router as model_options_router
 from .admin import router as admin_router
-from .agent_attribution import agent_attribution_middleware
+from .agent_attribution import agent_attribution_middleware, require_generation_attribution
 from .ass_storyboard import group_cues, parse_ass
 from .auth import (
     CurrentUser,
@@ -770,7 +770,7 @@ async def preview_portrait_prompt(payload: PortraitPromptParams, user: CurrentUs
     return {"prompt": await _portrait_prompt(payload.description, payload.style)}
 
 
-@app.post("/api/generations/images", status_code=202)
+@app.post("/api/generations/images", status_code=202, dependencies=[Depends(require_generation_attribution)])
 async def create_image_generation(payload: ImageGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
     from .generation_preferences import apply_media_preference
 
@@ -859,7 +859,7 @@ async def _resolve_asset_avatar_urls(db: AsyncSession, image_urls: list[str], *,
     return [lookup.get(url, url) for url in image_urls]
 
 
-@app.post("/api/generations/videos", status_code=202)
+@app.post("/api/generations/videos", status_code=202, dependencies=[Depends(require_generation_attribution)])
 async def create_video_generation(payload: VideoGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
     job = await _enqueue_video_generation(payload, user, db)
     await db.commit()
@@ -1045,7 +1045,7 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
     return job
 
 
-@app.post("/api/generations/videos/batch", status_code=202)
+@app.post("/api/generations/videos/batch", status_code=202, dependencies=[Depends(require_generation_attribution)])
 async def create_video_generations_batch(
     payload: VideoGenerationBatchCreate,
     user: CurrentUser,
@@ -1212,7 +1212,7 @@ async def get_chat_session(session_id: str, user: CurrentUser) -> dict:
     return {**session.summary(), "messages": session.messages}
 
 
-@app.post("/api/chat/{session_id}/messages", status_code=202)
+@app.post("/api/chat/{session_id}/messages", status_code=202, dependencies=[Depends(require_generation_attribution)])
 async def post_chat_message(session_id: str, payload: ChatMessageCreate, user: CurrentUser) -> dict:
     session = await chat_or_404(user.id, session_id)
     try:

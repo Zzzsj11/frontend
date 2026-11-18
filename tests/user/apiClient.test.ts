@@ -206,17 +206,13 @@ describe('apiRequest auth recovery (401/403)', () => {
     expect(mockLocation.href).toBe('')
   })
 
-  it('treats 403 the same way: refresh then replay', async () => {
-    setAccessToken('old-token')
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-      const url = String(input)
-      if (url === '/api/auth/refresh') return jsonResponse({ accessToken: 'new-token' })
-      const auth = new Headers(init?.headers).get('Authorization')
-      if (auth === 'Bearer new-token') return jsonResponse({ ok: true })
-      return jsonResponse({ detail: 'forbidden' }, 403)
-    })
-
-    await expect(apiRequest<{ ok: boolean }>('/projects')).resolves.toEqual({ ok: true })
+  it('surfaces forbidden responses without replaying the request', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse({ detail: 'forbidden' }, 403))
+    await expect(apiRequest('/projects', { method: 'POST' })).rejects.toThrow('forbidden')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(mockLocation.href).toBe('')
   })
 
   it('forces logout with login redirect when the refresh fails', async () => {
@@ -365,12 +361,20 @@ describe('openApiStream auth recovery (401/403)', () => {
     expect(mockLocation.href).toBe('')
   })
 
+  it('surfaces forbidden streams without refreshing', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse({ detail: 'forbidden' }, 403))
+    await expect(openApiStream('/tasks/task-1/outline-events')).rejects.toThrow('forbidden')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(mockLocation.href).toBe('')
+  })
   it('forces logout with login redirect when the stream refresh fails', async () => {
     setAccessToken('old-token')
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input)
       if (url === '/api/auth/refresh') return jsonResponse({ detail: 'refresh expired' }, 401)
-      return jsonResponse({ detail: 'forbidden' }, 403)
+      return jsonResponse({ detail: 'expired' }, 401)
     })
 
     await expect(openApiStream('/tasks/task-1/outline-events')).rejects.toThrow(

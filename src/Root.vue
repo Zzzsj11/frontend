@@ -19,7 +19,10 @@ const isAdminRoute = computed(() => route.meta.admin === true)
        等初始化请求，此时 token 已清空 → 401 → refresh 失败 → 误弹“登录已过期” -->
   <div v-else class="app-shell" :class="{ authenticated: auth.authenticated }">
     <AppHeader v-if="auth.authenticated && !isAdminRoute" />
-    <main class="route-shell"><RouterView /></main>
+    <div v-if="auth.pendingLogout && !route.meta.public" class="boot">
+      工作区已锁定，正在退出登录…
+    </div>
+    <main v-else class="route-shell"><RouterView /></main>
   </div>
 </template>
 <style scoped>

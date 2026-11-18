@@ -313,11 +313,20 @@ def test_model_execution_pool_is_shared_across_job_managers(monkeypatch) -> None
     from app.jobs import Job, JobManager
 
     async def scenario() -> None:
+        from unittest.mock import AsyncMock
+
+        from app import redis_store
+
+        offline = True
+        broken = AsyncMock(side_effect=ConnectionError())
+        monkeypatch.setattr(redis_store.redis, "eval", broken)
         held: set[str] = set()
         serial = 0
 
         async def acquire(_pool: str, limit: int, _ttl: int) -> str | None:
             nonlocal serial
+            if offline:
+                return await redis_store.acquire_execution_lease(_pool, limit, _ttl)
             if len(held) >= limit:
                 return None
             serial += 1
@@ -352,6 +361,12 @@ def test_model_execution_pool_is_shared_across_job_managers(monkeypatch) -> None
             asyncio.create_task(managers[1]._run(Job(id="two", kind="video", request=request), runner)),
         ]
         await asyncio.sleep(0.05)
+        assert not started and broken.await_count >= 2
+        offline = False
+        for _ in range(60):
+            if started:
+                break
+            await asyncio.sleep(0.05)
         assert len(started) == 1
         gate.set()
         await asyncio.gather(*tasks)
@@ -3083,3 +3098,35 @@ def test_input_or_unknown_moderation_never_resubmits(monkeypatch, code):
         asyncio.run(providers.generate_video(request, job))
     assert submit.await_count == 1
     assert not job.request.get("_contentSafetyRetry")
+
+
+async def test_workers_keep_pool_jobs_queued_during_redis_outage(client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app import redis_store
+    from app.jobs import JobManager
+    from app.worker import _claim
+
+    kind = "regression-pool"
+    ids = ["outage-worker-one", "outage-worker-two"]
+    for job_id in ids:
+        _insert_job(job_id, kind=kind)
+    with sqlite3.connect(TEST_DB) as db:
+        db.executemany("UPDATE generation_jobs SET request = ? WHERE id = ?", [('{"_executionPool":"regression-pool","_executionConcurrency":1}', job_id) for job_id in ids])
+    with monkeypatch.context() as patch:
+        patch.setattr(redis_store.redis, "eval", AsyncMock(side_effect=ConnectionError()))
+        for worker_id in ("worker-a", "worker-b"):
+            assert await _claim((kind,), (), worker_id) is None
+        assert all(_job_row(job_id)["status"] == "queued" for job_id in ids)
+
+    manager = JobManager()
+    first = await _claim((kind,), (), "worker-a")
+    assert first and first.execution_lease
+    runner = AsyncMock(return_value={})
+    assert await _claim((kind,), (), "worker-b") is None
+    await manager.run_claimed(first, runner)
+    second = await _claim((kind,), (), "worker-b")
+    assert second and second.id != first.id
+    await manager.run_claimed(second, runner)
+    assert runner.await_count == 2
+    assert all(_job_row(job_id)["status"] == "succeeded" for job_id in ids)

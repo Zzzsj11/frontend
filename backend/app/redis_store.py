@@ -192,8 +192,7 @@ async def acquire_execution_lease(pool: str, limit: int, ttl_seconds: int) -> st
         )
         return token if int(acquired or 0) == 1 else None
     except Exception:
-        # PostgreSQL remains durable; local semaphores still provide a safe single-process fallback.
-        return "redis-unavailable"
+        return None
 
 
 _RENEW_POOL_LEASE = """
@@ -206,8 +205,6 @@ return 1
 
 
 async def renew_execution_lease(pool: str, token: str, ttl_seconds: int) -> None:
-    if token == "redis-unavailable":
-        return
     try:
         await redis.eval(_RENEW_POOL_LEASE, 1, f"execution-pool:{pool}", token, int(time.time() * 1000) + ttl_seconds * 1000, ttl_seconds)
     except Exception:
@@ -215,8 +212,6 @@ async def renew_execution_lease(pool: str, token: str, ttl_seconds: int) -> None
 
 
 async def release_execution_lease(pool: str, token: str) -> None:
-    if token == "redis-unavailable":
-        return
     try:
         await redis.zrem(f"execution-pool:{pool}", token)
     except Exception:

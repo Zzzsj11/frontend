@@ -20,6 +20,7 @@ from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .agent_attribution import require_generation_attribution
 from .auth import CurrentUser, hash_password, revoke_all_refresh_tokens, user_public
 from .config import settings
 from .database import database_session, session_factory
@@ -1344,7 +1345,7 @@ async def _run_general_outline_generation(
         return {"taskId": task_id, "storyBibleVersion": story_bible.get("version") or STORY_BIBLE_VERSION}
 
 
-@router.post("/tasks/{task_id}/storyboard-outline/regenerate", status_code=202)
+@router.post("/tasks/{task_id}/storyboard-outline/regenerate", status_code=202, dependencies=[Depends(require_generation_attribution)])
 async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
     task = await owned_task(db, user.id, task_id)
     task = (await db.execute(select(ProjectTaskModel).where(ProjectTaskModel.id == task.id).with_for_update())).scalar_one()
@@ -1815,7 +1816,7 @@ async def run_storyboard_job(job: Job) -> dict[str, Any]:
         raise
 
 
-@router.post("/tasks/{task_id}/storyboard-outline/segments/{scene_index}/regenerate", status_code=202)
+@router.post("/tasks/{task_id}/storyboard-outline/segments/{scene_index}/regenerate", status_code=202, dependencies=[Depends(require_generation_attribution)])
 async def regenerate_storyboard_outline_segment(task_id: str, scene_index: int, user: CurrentUser, db: AsyncSession = Db) -> dict:
     task = await owned_task(db, user.id, task_id)
     task = (await db.execute(select(ProjectTaskModel).where(ProjectTaskModel.id == task.id).with_for_update())).scalar_one()
@@ -2424,7 +2425,7 @@ def _compact_storyboard_line_context(task: ProjectTaskModel, lines: list[Storybo
     }
 
 
-@router.post("/tasks/{task_id}/storyboard-lines/{line_id}/generate")
+@router.post("/tasks/{task_id}/storyboard-lines/{line_id}/generate", dependencies=[Depends(require_generation_attribution)])
 async def generate_one_storyboard_line(task_id: str, line_id: str, payload: StoryboardLineGenerate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     task = await owned_task(db, user.id, task_id)
     line = await owned_line(db, user.id, line_id)
@@ -2551,7 +2552,7 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
     return response
 
 
-@router.post("/tasks/{task_id}/storyboard-lines/generate-batch", status_code=202)
+@router.post("/tasks/{task_id}/storyboard-lines/generate-batch", status_code=202, dependencies=[Depends(require_generation_attribution)])
 async def generate_storyboard_lines_batch(
     task_id: str,
     payload: StoryboardLinesBatchGenerate,
@@ -2594,7 +2595,7 @@ async def generate_storyboard_lines_batch(
     return {"taskId": task_id, "jobs": jobs_output, "count": len(jobs_output)}
 
 
-@router.post("/tasks/{task_id}/storyboard/retry-failed")
+@router.post("/tasks/{task_id}/storyboard/retry-failed", dependencies=[Depends(require_generation_attribution)])
 async def reset_failed_storyboard_lines(task_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
     task = await owned_task(db, user.id, task_id)
     failed = list(

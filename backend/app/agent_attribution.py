@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-from fastapi import Request, Response
+from fastapi import HTTPException, Request, Response
 from starlette.middleware.base import RequestResponseEndpoint
 
 _origin: ContextVar[str] = ContextVar("generation_origin", default="business")
@@ -20,10 +20,10 @@ async def agent_attribution_middleware(request: Request, call_next: RequestRespo
     test_run_id = request.headers.get("x-test-run-id", "").strip()[:160]
     run_id = explicit_run_id or test_run_id
     agent_name = request.headers.get("x-agent-name", "").strip()[:80]
-    if run_id and not agent_name:
-        agent_name = "code-agent"
-    origin_token = _origin.set("agent_test" if run_id else "business")
-    name_token = _agent_name.set(agent_name if run_id else "")
+    marked = any(key in request.headers for key in ("x-agent-name", "x-agent-run-id", "x-test-run-id"))
+    request.state.agent_headers_incomplete = marked and not (agent_name == "code-agent" and explicit_run_id and test_run_id)
+    origin_token = _origin.set("agent_test" if marked else "business")
+    name_token = _agent_name.set(agent_name or ("code-agent" if marked else ""))
     run_token = _agent_run_id.set(run_id)
     try:
         return await call_next(request)
@@ -31,6 +31,11 @@ async def agent_attribution_middleware(request: Request, call_next: RequestRespo
         _origin.reset(origin_token)
         _agent_name.reset(name_token)
         _agent_run_id.reset(run_token)
+
+
+async def require_generation_attribution(request: Request) -> None:
+    if request.state.agent_headers_incomplete:
+        raise HTTPException(422, "Agent 生成请求必须携带 X-Agent-Name: code-agent、X-Agent-Run-Id 和 X-Test-Run-Id")
 
 
 @contextmanager

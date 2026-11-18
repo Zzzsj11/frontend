@@ -518,3 +518,49 @@ def test_shared_bucket_backup_requires_customer_key_and_environment_directory(tm
         with pytest.raises(ValueError):
             archive_backup(client, "shared-media", prefix, path, digest, encryption_key=bad_key)
     client.upload_file.assert_not_called()
+
+
+def test_rotation_insert_failure_leaves_browser_cookie_usable(client):
+    import sqlite3
+
+    from conftest import TEST_DB
+
+    from app.auth import REFRESH_COOKIE
+
+    create_and_login_user(client, "review-rotation-rollback")
+    cookie = client.cookies.get(REFRESH_COOKIE)
+    with sqlite3.connect(TEST_DB) as connection:
+        connection.execute("CREATE TRIGGER reject_successor BEFORE INSERT ON refresh_tokens BEGIN SELECT RAISE(ABORT, 'injected rotation failure'); END")
+    try:
+        try:
+            response = client.post("/api/auth/refresh")
+        except Exception as exc:
+            assert "injected rotation failure" in str(exc)
+        else:
+            assert response.status_code == 500
+    finally:
+        with sqlite3.connect(TEST_DB) as connection:
+            connection.execute("DROP TRIGGER reject_successor")
+    assert client.cookies.get(REFRESH_COOKIE) == cookie
+    assert client.post("/api/auth/refresh").status_code == 200
+
+
+@pytest.mark.parametrize("missing", [("X-Agent-Run-Id", "X-Test-Run-Id"), ("X-Agent-Name",), ("X-Agent-Run-Id",), ("X-Test-Run-Id",)])
+def test_incomplete_agent_generation_never_creates_or_dispatches_job(client, monkeypatch, missing):
+    import sqlite3
+
+    from conftest import TEST_DB
+
+    dispatch = AsyncMock()
+    monkeypatch.setattr("app.main.jobs.dispatch", dispatch)
+    provider = AsyncMock()
+    monkeypatch.setattr("app.main.generate_video", provider)
+    request = client.build_request("POST", "/api/generations/videos", json={"prompt": "归因验证", "duration": 5, "model": "doubao-seedance-2.0-all-in-one"})
+    for key in missing:
+        del request.headers[key]
+    with sqlite3.connect(TEST_DB) as connection:
+        before = connection.execute("SELECT count(*) FROM generation_jobs").fetchone()
+        assert client.send(request).status_code == 422
+        assert connection.execute("SELECT count(*) FROM generation_jobs").fetchone() == before
+    dispatch.assert_not_awaited()
+    provider.assert_not_awaited()

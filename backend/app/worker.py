@@ -18,7 +18,7 @@ from .domain import _run_material_export, run_storyboard_job
 from .jobs import Job, JobExpiredError, jobs
 from .models import GenerationJobModel, ProjectTaskModel, WorkerInstanceModel, utcnow
 from .providers import ProviderError, generate_image, generate_video, resume_generation, validate_media_job_source
-from .redis_store import close_redis, wait_for_worker_wakeup
+from .redis_store import acquire_execution_lease, close_redis, release_execution_lease, wait_for_worker_wakeup
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
 
 logger = logging.getLogger("mvagent.worker")
@@ -95,17 +95,24 @@ async def _claim(kinds: tuple[str, ...], providers: tuple[str, ...], worker_id: 
         # Keep FIFO within a task, but distribute scarce worker slots across
         # concurrently active subprojects.  A large batch can no longer occupy
         # every media slot while another user's first image waits behind it.
-        model = min(
-            candidates,
-            key=lambda row: _claim_priority(row, active_by_task),
-            default=None,
-        )
-        if model is None:
+        lease = None
+        unavailable = set()
+        for model in sorted(candidates, key=lambda row: _claim_priority(row, active_by_task)):
+            request = model.request or {}
+            pool = str(request.get("_executionPool") or "").strip()
+            limit = request.get("_executionConcurrency")
+            if not pool or limit is None:
+                break
+            if pool in unavailable:
+                continue
+            token = await acquire_execution_lease(pool, max(1, min(1000, int(limit))), max(60, settings.worker_stale_seconds))
+            if token:
+                lease = (pool, token)
+                break
+            unavailable.add(pool)
+        else:
             await session.commit()
             return None
-        # Claim ownership without starting the execution clock. A model-level
-        # semaphore (for example H3=2) may still keep this job waiting; the
-        # JobManager writes started_at only after that final execution slot is acquired.
         now = utcnow()
         model.status = "running"
         model.phase = "claimed"
@@ -113,8 +120,15 @@ async def _claim(kinds: tuple[str, ...], providers: tuple[str, ...], worker_id: 
         model.claimed_at = now
         model.heartbeat_at = now
         model.lease_expires_at = now + timedelta(seconds=settings.worker_stale_seconds)
-        await session.commit()
-        return _job_from_model(model)
+        try:
+            await session.commit()
+        except BaseException:
+            if lease:
+                await release_execution_lease(*lease)
+            raise
+        job = _job_from_model(model)
+        job.execution_lease = lease
+        return job
 
 
 async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> tuple[int, int]:

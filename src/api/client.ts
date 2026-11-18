@@ -5,6 +5,12 @@ import { agentTestHeaders } from './agentTestContext'
 let accessToken = ''
 let refreshPromise: Promise<boolean> | null = null
 /** 用户主动退出登录后置位：在途请求/轮询撞上 401 时静默失败，不再弹“登录已过期”或强制跳转 */
+const logoutKey = 'mv:logout-pending'
+export const logoutPending = () => localStorage.getItem(logoutKey) === '1'
+// 共享刷新 Cookie 的其他页签也要立即卸载旧工作区。
+window.addEventListener('storage', (event) => {
+  if (event.key === logoutKey) window.location.reload()
+})
 let intentionalLogout = false
 const NETWORK_RETRY_DELAYS_MS = [500, 1500]
 // 502/503 不能证明后端未受理；仅重试读取，避免重复创建付费生成工单。
@@ -40,6 +46,7 @@ export function resetAuthState() {
   refreshPromise = null
 }
 const refreshAccess = async () => {
+  if (intentionalLogout || logoutPending()) return false
   if (!refreshPromise)
     refreshPromise = fetch('/api/auth/refresh', {
       method: 'POST',
@@ -49,7 +56,9 @@ const refreshAccess = async () => {
     })
       .then(async (response) => {
         if (!response.ok) return false
-        setAccessToken(((await response.json()) as { accessToken: string }).accessToken)
+        const { accessToken: token } = (await response.json()) as { accessToken: string }
+        if (intentionalLogout || logoutPending()) return false
+        setAccessToken(token)
         return true
       })
       .finally(() => {
@@ -71,6 +80,7 @@ export async function apiRequest<T>(
   retry = true,
   silentStatuses: readonly number[] = [],
 ): Promise<T> {
+  if (logoutPending()) throw new ApiError('工作区已锁定')
   const headers = new Headers(init.headers)
   for (const [name, value] of Object.entries(agentTestHeaders())) headers.set(name, value)
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
@@ -128,7 +138,7 @@ export async function apiRequest<T>(
   }
   // 请求完成后才被取消：不走 401 刷新/错误上报，直接按取消抛出（结果反正会被调用方丢弃）
   if (init.signal?.aborted) throw abortError()
-  if ((response.status === 401 || response.status === 403) && retry && !path.startsWith('/auth/')) {
+  if (response.status === 401 && retry && !path.startsWith('/auth/')) {
     if (!intentionalLogout && (await refreshAccess()))
       return apiRequest<T>(path, init, false, silentStatuses)
     if (intentionalLogout) throw new ApiError('已退出登录', response.status)
@@ -173,6 +183,7 @@ export async function openApiStream(
   retry = true,
   extraHeaders: Record<string, string> = {},
 ): Promise<Response> {
+  if (logoutPending()) throw new ApiError('工作区已锁定')
   const headers = new Headers(extraHeaders)
   for (const [name, value] of Object.entries(agentTestHeaders())) headers.set(name, value)
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
@@ -198,7 +209,7 @@ export async function openApiStream(
       retried: false,
     })
   }
-  if ((response.status === 401 || response.status === 403) && retry) {
+  if (response.status === 401 && retry) {
     if (!intentionalLogout && (await refreshAccess()))
       return openApiStream(path, signal, false, extraHeaders)
     if (intentionalLogout) throw new ApiError('已退出登录', response.status)
@@ -255,6 +266,9 @@ export async function restoreSession(): Promise<AuthUser | null> {
 }
 export async function logoutRequest() {
   intentionalLogout = true
+  localStorage.setItem(logoutKey, '1')
+  const token = accessToken
+  setAccessToken('')
   try {
     // 已发出的刷新可能轮换 Cookie，等它结束后再撤销当前凭证。
     await refreshPromise?.catch(() => false)
@@ -263,14 +277,13 @@ export async function logoutRequest() {
       credentials: 'include',
       headers: {
         ...agentTestHeaders(),
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       signal: AbortSignal.timeout(15000),
     })
     if (!response.ok || (await response.json()).ok !== true) throw new Error()
-    setAccessToken('')
+    localStorage.removeItem(logoutKey)
   } catch {
-    intentionalLogout = false
     throw reportApiError(new ApiError('退出登录失败，请再次尝试'))
   }
 }

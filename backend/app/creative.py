@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .agent_attribution import current_agent_attribution
+from .agent_attribution import current_agent_attribution, require_generation_attribution
 from .auth import CurrentUser
 from .config import settings
 from .database import database_session, session_factory
@@ -108,7 +108,7 @@ async def creative_upload(file: UploadFile, user: CurrentUser):
     return {"kind": kind, "url": url, "thumbnailUrl": thumbnail_url, "name": file.filename or "", "mimeType": mime_type, "size": len(content), "role": "reference"}
 
 
-@router.post("/optimizations", status_code=201)
+@router.post("/optimizations", status_code=201, dependencies=[Depends(require_generation_attribution)])
 async def create_optimization(payload: CreativeOptimizeIn, user: CurrentUser, db: AsyncSession = Db):
     if payload.provider not in PROVIDERS or payload.ratio not in RATIOS:
         raise HTTPException(422, "不支持的提示词优化参数")

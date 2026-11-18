@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .agent_attribution import current_agent_attribution
+from .agent_attribution import current_agent_attribution, require_generation_attribution
 from .auth import CurrentUser
 from .config import settings
 from .database import database_session
@@ -185,7 +185,7 @@ async def validate_comparison_channels(models: list[str], channels: dict[str, st
             raise HTTPException(422, "所选测试渠道不可用，请重新选择")
 
 
-@router.post("/chat-comparison/run")
+@router.post("/chat-comparison/run", dependencies=[Depends(require_generation_attribution)])
 async def run_chat_comparison(payload: ChatComparisonIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
     require_admin(user)
     models = list(dict.fromkeys(payload.models))
@@ -244,7 +244,7 @@ async def run_chat_comparison(payload: ChatComparisonIn, request: Request, user:
     return {"results": results}
 
 
-@router.post("/chat-comparison/general-outline")
+@router.post("/chat-comparison/general-outline", dependencies=[Depends(require_generation_attribution)])
 async def run_general_outline_comparison(payload: GeneralOutlineComparisonIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
     require_admin(user)
     if payload.empty_shot_count + payload.character_shot_count < 1:
@@ -2220,7 +2220,7 @@ async def prompt_optimizer_tasks(user: CurrentUser, db: AsyncSession = Db):
     return {"items": [_prompt_optimizer_json(item) for item in items]}
 
 
-@router.post("/prompt-optimizer/tasks", status_code=201)
+@router.post("/prompt-optimizer/tasks", status_code=201, dependencies=[Depends(require_generation_attribution)])
 async def prompt_optimizer_create(payload: PromptOptimizerRunIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
     require_admin(user)
     if payload.provider not in PROMPT_OPTIMIZER_PROVIDERS:
@@ -2492,7 +2492,7 @@ class RunningHubTaskIn(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-@router.post("/runninghub/tasks", status_code=201)
+@router.post("/runninghub/tasks", status_code=201, dependencies=[Depends(require_generation_attribution)])
 async def runninghub_task_create(payload: RunningHubTaskIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
     require_admin(user)
     raise HTTPException(410, "该视频渠道已退役，请使用 all in one 视频模型")
@@ -2601,7 +2601,7 @@ class KlingTaskIn(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-@router.post("/kling/tasks", status_code=201)
+@router.post("/kling/tasks", status_code=201, dependencies=[Depends(require_generation_attribution)])
 async def kling_task_create(payload: KlingTaskIn, request: Request, user: CurrentUser, db: AsyncSession = Db):
     require_admin(user)
     raise HTTPException(410, "该视频渠道已退役，请使用 all in one 视频模型")

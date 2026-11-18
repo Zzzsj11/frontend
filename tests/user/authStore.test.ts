@@ -113,8 +113,9 @@ describe('auth logout cleanup', () => {
 
     vi.mocked(globalThis.fetch).mockRejectedValueOnce(new TypeError('Failed to fetch'))
     await expect(auth.logout()).rejects.toThrow('退出登录失败，请再次尝试')
-    expect(auth.user?.id).toBe('u1')
-    expect(project.activeSongId).toBe('song-a')
+    expect(auth.user).toBeNull()
+    expect(auth.pendingLogout).toBe(true)
+    expect(project.activeSongId).toBe('')
 
     await auth.logout()
     expect(project.songProjects).toEqual([])

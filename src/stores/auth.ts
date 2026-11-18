@@ -3,6 +3,7 @@ import {
   apiRequest,
   loginRequest,
   logoutRequest,
+  logoutPending,
   restoreSession,
   type AuthUser,
 } from '../api/client'
@@ -52,6 +53,7 @@ export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null as AuthUser | null,
     ready: false,
+    pendingLogout: logoutPending(),
     loading: false,
     balance: null as AccountBalance | null,
     balanceLoading: false,
@@ -125,7 +127,7 @@ export const useAuthStore = defineStore('auth', {
     },
     async logout() {
       const uid = this.user?.id
-      await logoutRequest()
+      this.pendingLogout = true
       this.user = null
       useGenerationPreferences().$reset()
       this.balance = null
@@ -139,6 +141,8 @@ export const useAuthStore = defineStore('auth', {
       if (uid) localStorage.removeItem(`mv:pending-dh:${uid}`)
       // 清空工作区内存现场（项目列表/分镜/角色/缓存），防止下一账号看到上一账号数据
       useProjectStore().resetWorkspace()
+      await logoutRequest()
+      this.pendingLogout = false
     },
   },
 })
