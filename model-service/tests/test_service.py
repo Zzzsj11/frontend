@@ -19,6 +19,7 @@ sys.path[:0] = [str(ROOT / "public-api"), str(ROOT / "admin-api")]
 
 @pytest.fixture
 async def service(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKER_HEALTH_FILE", str(tmp_path / "worker-ready"))
     monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///" + str(tmp_path / "test.db"))
     monkeypatch.setenv("ADMIN_JWT_SECRET", "test-only-" * 8)
     monkeypatch.setenv("ADMIN_PASSWORD", "test-only-password")
@@ -284,15 +285,14 @@ async def test_deleted_model_window_does_not_starve_valid_jobs(service, monkeypa
                     created_at=dbmod.now() - timedelta(days=1, seconds=index),
                 )
             )
-    # The bounded first window is entirely obsolete; the next iteration must advance.
-    assert await queue.claim("worker") is None
+    # Quarantine the obsolete window and claim the independent valid job in the same pass.
+    assert await queue.claim("worker") == valid_id
     async with public.Session() as db:
         old = (await db.scalars(select(dbmod.Job).where(dbmod.Job.model_id == "deleted-test-model"))).all()
         assert len(old) == 100
         assert all(row.status == "manual_review" and row.worker_id is None and row.lease_until is None for row in old)
         assert all(row.provider_id == row.id.replace("job", "provider") and row.charged_points == Decimal("123.456789") for row in old)
         assert all(row.attempts == 0 and row.deleted_at is None for row in old)
-    assert await queue.claim("worker") == valid_id
     assert await queue.claim("worker") is None
     automatic.assert_not_called()
 
@@ -518,3 +518,95 @@ async def test_canonical_video_and_image_endpoints_persist_native_requests(servi
         row = await db.get(public.Job, response.json()["id"])
         assert row.payload["image"] == "https://example.com/original.jpg"
         assert row.origin == "agent_test"
+
+
+@pytest.mark.asyncio
+async def test_normal_client_needs_explicit_attribution_permission(service, monkeypatch):
+    api, ctl, _, _ = service
+    other = (await ctl.post("/admin/clients", json={"name": "shared", "billing_enabled": False})).json()
+    hdr = {"Authorization": "Bearer " + other["api_key"]}
+    assert (await api.post("/v1/jobs", json=body(), headers=hdr)).status_code == 403
+    monkeypatch.setenv("AGENT_ATTRIBUTION_CLIENT_IDS", other["id"])
+    created = await api.post("/v1/jobs", json=body(), headers=hdr)
+    assert created.status_code == 202 and created.json()["origin"] == "agent_test"
+
+
+@pytest.mark.asyncio
+async def test_archive_only_recovery_and_revoked_client_queue(service):
+    api, ctl, public, client = service
+    dbmod = importlib.import_module("gateway.db")
+    queue = importlib.import_module("gateway.queue")
+    first = (await api.post("/v1/jobs", json=body())).json()["id"]
+    async with public.Session.begin() as db:
+        j = await db.get(dbmod.Job, first)
+        j.kind, j.protocol, j.status = "image", "image-sync", "recoverable"
+        j.provider_response = {"data": [{"url": "https://example.invalid/original.png"}]}
+    assert (await ctl.post("/admin/jobs/" + first + "/recover")).status_code == 200
+    # The recovered payload survives the transition; a revoked owner cannot submit new work.
+    await ctl.delete("/admin/clients/" + client["id"])
+    other = (await ctl.post("/admin/clients", json={"name": "other", "billing_enabled": False, "require_agent": True})).json()
+    second = (await api.post("/v1/jobs", json=body(), headers={"Authorization": "Bearer " + other["api_key"]})).json()["id"]
+    assert await queue.claim("test-worker") == second
+    async with public.Session() as db:
+        prev = await db.get(dbmod.Job, first)
+        assert prev.status == "manual_review" and prev.provider_response["data"]
+
+
+@pytest.mark.asyncio
+async def test_chat_capacity_retry_does_not_leave_an_orphan(service, monkeypatch):
+    api, ctl, public, _ = service
+    payload = {"model": "gpt-5.6-sol", "messages": [{"role": "user", "content": "test"}]}
+    available = AsyncMock(side_effect=[False, True])
+    monkeypatch.setattr(public, "capacity", available)
+    assert (await api.post("/v1/chat/completions", json=payload)).status_code == 429
+    assert (await ctl.get("/admin/jobs")).json()["total"] == 0
+
+    def respond(request):
+        return httpx.Response(200, json={"choices": [{}], "usage": {"total_tokens": 1}})
+
+    factory = httpx.AsyncClient
+    monkeypatch.setattr(public.httpx, "AsyncClient", lambda **kwargs: factory(transport=httpx.MockTransport(respond), **kwargs))
+    assert (await api.post("/v1/chat/completions", json=payload)).status_code == 200
+    assert (await ctl.get("/admin/jobs")).json()["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_chunked_body_limit_and_auxiliary_capacity(service, monkeypatch):
+    api, _, public, client = service
+    queue = importlib.import_module("gateway.queue")
+    dbmod = importlib.import_module("gateway.db")
+    monkeypatch.setenv("MAX_REQUEST_BYTES", "50")
+
+    async def chunks():
+        yield b" " * 30
+        yield b" " * 30
+
+    assert (await api.post("/v1/jobs", content=chunks(), headers={"Content-Type": "application/json"})).status_code == 413
+    monkeypatch.setenv("MAX_REQUEST_BYTES", "10000")
+    monkeypatch.setenv("MAX_PENDING_PER_CLIENT", "1")
+    async with public.Session.begin() as db:
+        (await db.get(dbmod.Client, client["id"])).concurrency = 1
+        for idx, lease in enumerate([None, dbmod.now() + timedelta(minutes=2)]):
+            db.add(
+                dbmod.Job(
+                    id=f"asset-test-{idx}",
+                    kind="asset",
+                    client_id=client["id"],
+                    user_id="u1",
+                    model_id="asset",
+                    protocol="asset",
+                    channel="yseeai",
+                    payload={},
+                    status="submitting",
+                    created_at=dbmod.now() - timedelta(minutes=5),
+                    lease_until=lease,
+                    request_hash="test",
+                    idempotency_key=f"asset-{idx}",
+                )
+            )
+    created = await api.post("/v1/jobs", json=body())
+    assert created.status_code == 202
+    assert await queue.claim("worker") == created.json()["id"]
+    async with public.Session() as db:
+        assert (await db.get(dbmod.Job, "asset-test-0")).status == "manual_review"
+        assert (await db.get(dbmod.Job, "asset-test-1")).status == "submitting"

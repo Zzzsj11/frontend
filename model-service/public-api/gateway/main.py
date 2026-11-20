@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 
 from .adapters import video_payload
 from .channels import PATHS, config, headers, native
-from .credits import job_bill, reserve, settle
+from .credits import job_bill, reserve
 from .db import Client, Job, Model, Session, now
 from .errors import describe
 from .estimates import estimate
@@ -33,16 +33,31 @@ from .validation import validate
 app = FastAPI(title="Company Model API", version="1.0.0")
 
 
-@app.middleware("http")
-async def bounded_body(request: Request, call_next):
-    limit = int(os.getenv("MAX_REQUEST_BYTES", str(32 * 1024 * 1024)))
-    content = bytearray()
-    async for chunk in request.stream():
-        if len(content) + len(chunk) > limit:
-            return JSONResponse({"detail": "Request body too large; use original public URLs"}, status_code=413)
-        content.extend(chunk)
-    request._body = bytes(content)
-    return await call_next(request)
+class RequestSizeLimit:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        limit = int(os.getenv("MAX_REQUEST_BYTES", str(32 * 1024 * 1024)))
+        for name, raw in scope["headers"]:
+            if name == b"content-length" and (not raw.isdigit() or len(raw) > 19 or int(raw) > limit):
+                return await JSONResponse({"detail": "Request body too large"}, status_code=413)(scope, receive, send)
+        remaining = limit
+
+        async def limited_receive():
+            nonlocal remaining
+            message = await receive()
+            remaining -= len(message.get("body", b""))
+            if remaining < 0:
+                raise HTTPException(413, "Request body too large")
+            return message
+
+        await self.app(scope, limited_receive, send)
+
+
+app.add_middleware(RequestSizeLimit)
 
 
 class CreateJob(BaseModel):
@@ -143,7 +158,11 @@ async def enqueue(body, request, client, channel=None, path=None, expected_kind=
                 raise HTTPException(422, "Too many reference images")
         validate(model, payload)
         signature = hashlib.sha256(json.dumps({"model": model.id, "payload": payload, **attrs}, sort_keys=True).encode()).hexdigest()
-        await lock(db)
+        if model.kind == "chat":
+            if expected_kind != "chat":
+                raise HTTPException(422, "Use the synchronous chat endpoint")
+            await lock(db, "scheduler")
+        await lock(db, "wallet:" + (client.user_id or client.id))
         existing = await db.scalar(select(Job).where(Job.client_id == client.id, Job.user_id == uid, Job.idempotency_key == key))
         if existing:
             if existing.request_hash != signature:
@@ -152,7 +171,12 @@ async def enqueue(body, request, client, channel=None, path=None, expected_kind=
         pending = await db.scalar(
             select(func.count())
             .select_from(Job)
-            .where(Job.client_id == client.id, Job.status.in_(["queued", "preparing", "submitting", "running", "archiving"]))
+            .where(
+                Job.client_id == client.id,
+                Job.kind != "asset",
+                Job.deleted_at.is_(None),
+                Job.status.in_(["queued", "preparing", "submitting", "running", "archiving"]),
+            )
         )
         if pending >= int(os.getenv("MAX_PENDING_PER_CLIENT", "1000")):
             raise HTTPException(429, "Pending task limit reached")
@@ -172,6 +196,10 @@ async def enqueue(body, request, client, channel=None, path=None, expected_kind=
             **attrs,
         )
         await reserve(db, client, job, model)
+        if model.kind == "chat":
+            if not await capacity(db, job):
+                raise HTTPException(429, "Concurrency limit reached")
+            job.status, job.lease_until = "submitting", now() + timedelta(seconds=120)
         db.add(job)
         try:
             await db.commit()
@@ -264,18 +292,6 @@ async def chat(payload: dict, request: Request, client: Client = Depends(authent
         if job.status == "succeeded" and not payload.get("stream"):
             return job.result
         raise HTTPException(409, {"message": "Request already accepted; inspect job", "job_id": job.id})
-    async with Session.begin() as db:
-        await lock(db)
-        row = await db.get(Job, job.id)
-        if not await capacity(db, row):
-            row.status, row.error = "failed", "Concurrency limit reached"
-            await settle(db, row, 0, "system", "并发限制，未提交渠道，释放预占", "unsubmitted:" + row.id, {})
-            limited = True
-        else:
-            row.status, row.lease_until = "submitting", now() + timedelta(seconds=120)
-            limited = False
-    if limited:
-        raise HTTPException(429, "Concurrency limit reached")
     body = dict(job.payload)
     if body.get("stream"):
         if job.protocol == "chat":
@@ -410,7 +426,7 @@ async def native_create(channel: str, path: str, payload: dict, request: Request
             workflow_path = path
             path = "/task/openapi/create"
             payload["_gateway_workflow_path"] = workflow_path
-    if path not in set(PATHS.values()) - {"/v1/chat/completions", "/v1/messages"}:
+    if path not in set(PATHS.values()) - {"/v1/chat/completions", "/v1/messages", "/v1/responses"}:
         raise HTTPException(404, "Unsupported provider operation")
     job, _ = await enqueue(
         CreateJob(model=payload.get("model") or payload.get("model_name", ""), payload=payload), request, client, channel, path

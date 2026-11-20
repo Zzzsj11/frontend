@@ -17,5 +17,5 @@ fi
   -v "$root/backend/app/backup_archive.py:/srv/mvagent/app/backup_archive.py:ro" \
   -v "$root/backend/scripts/backup_to_tos.py:/srv/mvagent/scripts/backup_to_tos.py:ro" \
   backend scripts/backup_to_tos.py \
-  --bucket "$BACKUP_TOS_BUCKET" --prefix "${BACKUP_TOS_PREFIX:-mv-agent/database}" \
+  --bucket "$BACKUP_TOS_BUCKET" --prefix "${BACKUP_TOS_PREFIX:-}" \
   --name "$(basename "$file")" --sha256 "$checksum" < "$file"

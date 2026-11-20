@@ -76,10 +76,12 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
   let styleId = ''
   let humanId = ''
   let chatId = ''
-  const username = `e2e_${runId
-    .replace(/[^a-zA-Z0-9]/g, '')
-    .slice(-18)
-    .toLowerCase()}`
+  const username =
+    process.env.REMOTE_E2E_USER_USERNAME ||
+    `e2e_${runId
+      .replace(/[^a-zA-Z0-9]/g, '')
+      .slice(-18)
+      .toLowerCase()}`
   const initialPassword = `Remote-${runId.slice(-8)}-A1!`
   const changedPassword = `${initialPassword}x`
 

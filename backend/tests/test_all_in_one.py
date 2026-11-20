@@ -331,15 +331,41 @@ async def test_sd20_person_asset_mode_is_transmitted_with_identity_positions(con
 
 
 @pytest.mark.asyncio
-async def test_platform_proven_preacceptance_503_is_safe_rejection(configured, monkeypatch):
+async def test_platform_proven_preacceptance_503_is_safe_rejection(configured, client, monkeypatch):
     from app.providers import ProviderRejectedError
 
     original = httpx.AsyncClient
     response = httpx.Response(503, json={"detail": "all routes unavailable"}, headers={"X-Platform-Job-Created": "false", "X-Generation-Submitted": "false"})
     monkeypatch.setattr(aio.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(lambda _: response), **kw))
-    for name in ("mark_provider_submitting", "record_provider_request", "record_provider_response"):
+    for name in ("mark_provider_submitting", "record_provider_request"):
         monkeypatch.setattr(jobs, name, AsyncMock())
     request = VideoGenerationCreate(model="doubao-seedance-2.0-all-in-one", prompt="synthetic")
     job = Job(id="proven-unsubmitted", kind="video", user_id="owner", request={"_providerModelId": "seedance-2.0"})
     with pytest.raises(ProviderRejectedError, match="未提交视频"):
         await aio.generate(request, job)
+
+
+@pytest.mark.asyncio
+async def test_sync_image_archive_failure_keeps_original_charge_and_id(configured, monkeypatch):
+    billing = {"status": "settled", "points": "2.50"}
+    body = {"data": [{"url": "https://example.test/image.png"}], "billing": billing, "usage": {"total_tokens": 7}}
+    response = httpx.Response(200, json=body, headers={"x-job-id": "upstream-image", "x-request-id": "original-request"})
+    original = httpx.AsyncClient
+    post = []
+
+    def submit(request):
+        post.append(request)
+        return response
+
+    monkeypatch.setattr(aio.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(submit), **kw))
+    for name in ("mark_provider_submitting", "record_provider_request", "record_provider_response", "set_provider_task"):
+        monkeypatch.setattr(jobs, name, AsyncMock())
+    monkeypatch.setattr("app.storage.import_remote_image", AsyncMock(side_effect=RuntimeError("mocked archive offline")))
+    job = Job(id="uncertain-archive", kind="image", user_id="owner", request={"_providerModelId": "gpt-image-2"})
+    with pytest.raises(ProviderSubmissionUncertainError) as raised:
+        await aio.generate(ImageGenerationCreate(model="gpt-image-2-all-in-one", prompt="test"), job)
+    error = raised.value
+    assert (error.requires_reconciliation, error.provider, error.request_id) == (True, "all-in-one", "upstream-image")
+    assert error.usage == {"total_tokens": 7, "platformBilling": billing}
+    assert len(post) == 1
+    jobs.record_provider_response.assert_awaited_once_with(job, "submission", {"jobId": "upstream-image", "requestId": "original-request", "usage": error.usage})

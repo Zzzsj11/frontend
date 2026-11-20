@@ -4,6 +4,7 @@ import { useProjectStore } from '../stores/project'
 import type { SongProject, SongTask } from '../types'
 import { taskStatusAlert, taskStatusLabel } from '../taskStatus'
 import AppIcon from './AppIcon.vue'
+import { reportApiError } from '../errorBus'
 import { confirmDialog } from '../composables/useConfirmDialog'
 
 const store = useProjectStore()
@@ -27,12 +28,14 @@ const onSongDragOver = (e: DragEvent, index: number) => {
 }
 const onSongDrop = async (e: DragEvent) => {
   e.preventDefault()
+  const targetIndex = dragOverIndex.value
   dragOverIndex.value = null
+  if (targetIndex === null) return
   if (dragKind.value !== 'song' || !dragSongId.value) return
   const fromId = dragSongId.value
   const newOrder = store.songProjects.map((s) => s.id)
   const fromIdx = newOrder.indexOf(fromId)
-  const toIdx = store.songProjects.findIndex((_, i) => i === Math.max(0, dragOverIndex.value ?? 0))
+  const toIdx = targetIndex
   if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) {
     newOrder.splice(fromIdx, 1)
     newOrder.splice(toIdx, 0, fromId)
@@ -59,14 +62,16 @@ const onTaskDragOver = (e: DragEvent, index: number) => {
 }
 const onTaskDrop = async (e: DragEvent, songId: string) => {
   e.preventDefault()
+  const targetIndex = dragOverIndex.value
   dragOverIndex.value = null
+  if (targetIndex === null) return
   if (dragKind.value !== 'task' || dragSongId.value !== songId) return
   const song = store.songProjects.find((s) => s.id === songId)
   if (!song) return
   const draggedId = e.dataTransfer!.getData('text/plain')
   const newOrder = song.tasks.map((t) => t.id)
   const fromIdx = newOrder.indexOf(draggedId)
-  const toIdx = Math.max(0, dragOverIndex.value ?? 0)
+  const toIdx = targetIndex
   if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) {
     newOrder.splice(fromIdx, 1)
     newOrder.splice(toIdx, 0, draggedId)
@@ -113,7 +118,9 @@ const submitCreate = async () => {
 
 const pickTask = (songId: string, taskId: string) => {
   if (store.songSwitching) return
-  store.selectSongTask(songId, taskId)
+  void store.selectSongTask(songId, taskId).catch((error) => {
+    if (!(error instanceof DOMException && error.name === 'AbortError')) reportApiError(error)
+  })
 }
 
 // 重命名输入框挂载时自动聚焦选中
@@ -146,7 +153,7 @@ const removeSong = async (song: SongProject) => {
       danger: true,
     })
   )
-    store.deleteSongProject(song.id)
+    await store.deleteSongProject(song.id).catch((error) => reportApiError(error))
 }
 
 // ---------- 子项目(任务)：重命名 / 删除 ----------
@@ -172,7 +179,7 @@ const removeTask = async (songId: string, task: SongTask) => {
       danger: true,
     })
   )
-    store.deleteSongTask(songId, task.id)
+    await store.deleteSongTask(songId, task.id).catch((error) => reportApiError(error))
 }
 
 const startStoryboard = async (songId: string, type: 'ass' | 'general' | 'general_random') => {

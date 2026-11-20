@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .agent_attribution import attribution_context, current_agent_attribution
@@ -17,7 +17,7 @@ from .database import session_factory
 from .error_logging import _redact, redact_error_text
 from .generation_constraints import video_job_timeout_seconds
 from .models import GenerationJobModel, ProjectModel, ProjectTaskModel, SceneAssetModel, ShotAssetModel, StoryboardLineModel, TokenUsageModel, utcnow
-from .redis_store import acquire_execution_lease, cache_job, notify_worker, release_execution_lease, renew_execution_lease
+from .redis_store import ExecutionStoreUnavailable, acquire_execution_lease, cache_job, notify_worker, release_execution_lease, renew_execution_lease
 from .token_usage import add_token_usage, normalize_usage
 
 JobRunner = Callable[["Job"], Awaitable[dict[str, Any]]]
@@ -76,6 +76,7 @@ class Job:
     worker_id: str | None = None
     phase: str = "queued"
     execution_lease: tuple[str, str] | None = None
+    database_pool_reserved: bool = False
     attempt: int = 1
 
     def public(self) -> dict[str, Any]:
@@ -95,6 +96,70 @@ class Job:
             "retryAllowed": self.status not in {"queued", "running"} and not needs_provider_reconciliation(self),
             "attempt": self.attempt,
         }
+
+
+async def record_media_usage(session: AsyncSession, model: GenerationJobModel, usage, request_id, operation: str, provider: str, model_name: str) -> None:
+    """Upsert under the generation job row lock, retaining historical request attribution."""
+    record = await session.scalar(
+        select(TokenUsageModel)
+        .where(TokenUsageModel.generation_job_id == model.id, TokenUsageModel.request_id == request_id, TokenUsageModel.deleted_at.is_(None))
+        .order_by(TokenUsageModel.created_at.desc())
+        .limit(1)
+    )
+    if record is None and request_id:
+        # Older media jobs wrote their final usage without the upstream ID.
+        # Only adopt the matching final operation, never a separate failed attempt.
+        record = await session.scalar(
+            select(TokenUsageModel)
+            .where(
+                TokenUsageModel.generation_job_id == model.id, TokenUsageModel.operation == operation, TokenUsageModel.request_id.is_(None), TokenUsageModel.deleted_at.is_(None)
+            )
+            .order_by(TokenUsageModel.created_at.desc())
+            .limit(1)
+        )
+        if record is not None:
+            record.request_id = request_id
+    if record is None:
+        with attribution_context(model.generation_origin, model.agent_name, model.agent_run_id):
+            record, _ = add_token_usage(
+                session,
+                operation=operation,
+                provider=provider,
+                model=model_name,
+                usage=usage,
+                user_id=model.user_id,
+                project_id=model.project_id,
+                project_task_id=model.project_task_id,
+                storyboard_line_id=model.storyboard_line_id,
+                generation_job_id=model.id,
+                request_id=request_id,
+            )
+            record.id = "usage-" + uuid.uuid5(uuid.NAMESPACE_URL, f"mv/media/{model.id}/{request_id or ''}").hex
+    else:
+        record.operation, record.provider, record.model = operation, provider, model_name
+        record.generation_origin, record.agent_name, record.agent_run_id = model.generation_origin, model.agent_name, model.agent_run_id
+        if usage is not None:
+            normalized = normalize_usage(usage)
+            record.input_tokens, record.output_tokens = normalized["inputTokens"], normalized["outputTokens"]
+            record.cached_input_tokens, record.total_tokens = normalized["cachedInputTokens"], normalized["totalTokens"]
+            record.raw_usage = normalized["raw"]
+
+
+async def durable_pool_available(db: AsyncSession, pool: str, limit: int, job_id: str) -> bool:
+    """Serialize capacity check and the queued→running transition in the same PostgreSQL transaction."""
+    locked = await db.scalar(select(func.pg_try_advisory_xact_lock(func.hashtextextended("mv:execution:" + pool, 0))))
+    if not locked:
+        return False
+    occupied = await db.scalar(
+        select(func.count())
+        .select_from(GenerationJobModel)
+        .where(
+            GenerationJobModel.status == "running",
+            GenerationJobModel.id != job_id,
+            GenerationJobModel.request["_executionPool"].as_string() == pool,
+        )
+    )
+    return occupied < max(1, min(1000, limit))
 
 
 class JobManager:
@@ -275,7 +340,9 @@ class JobManager:
         distributed_lease: tuple[str, str] | None = None
         lease_heartbeat: asyncio.Task | None = None
         try:
-            if job.execution_lease:
+            if job.database_pool_reserved:
+                await self._execute(job, runner)
+            elif job.execution_lease:
                 distributed_lease = job.execution_lease
                 lease_heartbeat = self._lease_heartbeat(*distributed_lease)
                 await self._execute(job, runner)
@@ -285,6 +352,8 @@ class JobManager:
                     await self._execute(job, runner)
             else:
                 await self._execute(job, runner)
+        except ExecutionStoreUnavailable as exc:
+            job.status, job.phase, job.error = "failed", "failed", str(exc)
         except asyncio.CancelledError:
             job.status, job.phase = "cancelled", "cancelled"
             raise
@@ -315,12 +384,33 @@ class JobManager:
             return None, None
         limit = max(1, min(1000, int(raw_limit)))
         ttl = max(60, settings.worker_stale_seconds)
+        deadline = time.monotonic() + ttl
         while True:
-            token = await acquire_execution_lease(pool, limit, ttl)
+            if settings.database_url.startswith("postgresql"):
+                async with session_factory() as db:
+                    if await durable_pool_available(db, pool, limit, job.id):
+                        row = await db.get(GenerationJobModel, job.id, with_for_update=True)
+                        if not row or row.status not in {"queued", "running"}:
+                            raise JobExpiredError("工单已终止")
+                        row.status, row.phase = "running", "claimed"
+                        await db.commit()
+                        job.database_pool_reserved = True
+                        return None, None
+                token = None
+            else:
+                try:
+                    token = await acquire_execution_lease(pool, limit, ttl)
+                except ExecutionStoreUnavailable:
+                    if time.monotonic() >= deadline:
+                        raise
+                    await asyncio.sleep(min(1.0, settings.worker_poll_seconds))
+                    continue
+                deadline = time.monotonic() + ttl
             if token:
                 break
             await asyncio.sleep(min(1.0, settings.worker_poll_seconds))
 
+        job.execution_lease = (pool, token)
         return (pool, token), self._lease_heartbeat(pool, token)
 
     def _lease_heartbeat(self, pool: str, token: str) -> asyncio.Task:
@@ -329,7 +419,12 @@ class JobManager:
         async def heartbeat() -> None:
             while True:
                 await asyncio.sleep(max(5.0, ttl / 3))
-                await renew_execution_lease(pool, token, ttl)
+                try:
+                    if not await renew_execution_lease(pool, token, ttl):
+                        logger.warning("模型池租约已丢失 pool=%s", pool)
+                        return
+                except ExecutionStoreUnavailable:
+                    logger.warning("模型池续租暂不可用 pool=%s", pool)
 
         return asyncio.create_task(heartbeat())
 
@@ -364,24 +459,34 @@ class JobManager:
             job.error = redact_error_text(f"{prefix}{exc}")
             if not getattr(exc, "usage_recorded", False):
                 async with session_factory() as session:
-                    if job.worker_id:
-                        owner = await session.get(GenerationJobModel, job.id, with_for_update=True)
-                        if not owner or owner.worker_id != job.worker_id:
-                            logger.warning("Ignoring stale worker failure persistence: job_id=%s", job.id)
-                            return
-                    add_token_usage(
-                        session,
-                        operation=f"generation_{job.kind}_failed",
-                        provider=str(getattr(exc, "provider", "")),
-                        model=str(getattr(exc, "model", "") or (job.request or {}).get("model") or ""),
-                        usage=getattr(exc, "usage", {}),
-                        user_id=job.user_id,
-                        project_id=job.project_id,
-                        project_task_id=job.project_task_id,
-                        storyboard_line_id=job.storyboard_line_id,
-                        generation_job_id=job.id,
-                        request_id=getattr(exc, "request_id", None),
-                    )
+                    owner = await session.get(GenerationJobModel, job.id, with_for_update=True)
+                    if job.worker_id and (not owner or owner.worker_id != job.worker_id):
+                        logger.warning("Ignoring stale worker failure persistence: job_id=%s", job.id)
+                        return
+                    operation = f"generation_{job.kind}_failed"
+                    provider = str(getattr(exc, "provider", ""))
+                    model_name = str(getattr(exc, "model", "") or (job.request or {}).get("model") or "")
+                    usage, request_id = getattr(exc, "usage", {}), getattr(exc, "request_id", None)
+                    if owner and job.kind in {"image", "video"} and request_id:
+                        if job.kind == "image" and getattr(exc, "requires_reconciliation", False) and usage:
+                            # The original image call has usage even if local delivery failed.
+                            operation = "generation_image"
+                            job.result = {**(job.result or {}), "usage": usage}
+                        await record_media_usage(session, owner, usage, request_id, operation, provider, model_name)
+                    else:
+                        add_token_usage(
+                            session,
+                            operation=operation,
+                            provider=provider,
+                            model=model_name,
+                            usage=usage,
+                            user_id=job.user_id,
+                            project_id=job.project_id,
+                            project_task_id=job.project_task_id,
+                            storyboard_line_id=job.storyboard_line_id,
+                            generation_job_id=job.id,
+                            request_id=request_id,
+                        )
                     await session.commit()
 
     async def _persist_asset(self, job: Job, *, provider_confirmed_recovery: bool = False) -> None:
@@ -406,7 +511,7 @@ class JobManager:
             model = await session.get(GenerationJobModel, job.id, with_for_update=True)
             if job.worker_id and (not model or model.worker_id != job.worker_id):
                 raise JobExpiredError("工单已被其他 Worker 接管，停止写入资产和用量")
-            if not model or model.deleted_at is not None:
+            if not model or (provider_confirmed_recovery and model.deleted_at is not None):
                 raise JobExpiredError("工单已删除，停止恢复")
             if model.worker_id and model.worker_id.startswith("reconcile-") and model.worker_id != job.worker_id:
                 raise JobExpiredError("原工单已由自动恢复接管")
@@ -417,52 +522,41 @@ class JobManager:
                 if job.worker_id and model.lease_expires_at and _timestamp(model.lease_expires_at) <= time.time():
                     raise JobExpiredError("恢复租约已失效")
                 if job.worker_id and job.worker_id.startswith("reconcile-"):
-                    project = await session.get(ProjectModel, job.project_id)
-                    task = await session.get(ProjectTaskModel, job.project_task_id)
-                    if not project or not task or project.deleted_at or task.deleted_at or project.user_id != job.user_id or task.project_id != project.id:
+                    project = await session.get(ProjectModel, job.project_id) if job.project_id else None
+                    task = await session.get(ProjectTaskModel, job.project_task_id) if job.project_task_id else None
+                    if (job.project_id and (not project or project.deleted_at or project.user_id != job.user_id)) or (
+                        job.project_task_id and (not task or task.deleted_at or not project or task.project_id != project.id)
+                    ):
                         raise JobExpiredError("项目已删除或归属已变化，停止恢复")
                 line = await session.get(StoryboardLineModel, job.storyboard_line_id, with_for_update=True) if job.storyboard_line_id else None
-                if job.storyboard_line_id and (not line or line.deleted_at is not None):
+                if job.storyboard_line_id and (not line or line.deleted_at is not None or line.project_task_id != job.project_task_id):
                     raise JobExpiredError("镜头已删除，停止恢复")
             terminal = bool(not provider_confirmed_recovery and model and model.status in {"failed", "cancelled"})
             if job.kind in {"image", "video"}:
-                existing_usage = None
-                if provider_confirmed_recovery:
-                    existing_usage = await session.scalar(
-                        select(TokenUsageModel)
-                        .where(
-                            TokenUsageModel.generation_job_id == job.id,
-                            TokenUsageModel.request_id == job.result.get("providerTaskId"),
-                            TokenUsageModel.deleted_at.is_(None),
-                        )
-                        .order_by(TokenUsageModel.created_at.desc())
-                        .limit(1)
-                    )
-                if existing_usage and job.result.get("usage") is not None:
-                    normalized = normalize_usage(job.result.get("usage"))
-                    existing_usage.input_tokens = normalized["inputTokens"]
-                    existing_usage.output_tokens = normalized["outputTokens"]
-                    existing_usage.cached_input_tokens = normalized["cachedInputTokens"]
-                    existing_usage.total_tokens = normalized["totalTokens"]
-                    existing_usage.raw_usage = normalized["raw"]
-                elif not existing_usage:
-                    add_token_usage(
-                        session,
-                        operation=f"generation_{job.kind}",
-                        provider=str(job.result.get("provider") or ""),
-                        model=str(job.result.get("model") or (job.request or {}).get("model") or ""),
-                        usage=job.result.get("usage"),
-                        user_id=job.user_id,
-                        project_id=job.project_id,
-                        project_task_id=job.project_task_id,
-                        storyboard_line_id=job.storyboard_line_id,
-                        generation_job_id=job.id,
-                        request_id=job.result.get("providerTaskId"),
-                    )
+                await record_media_usage(
+                    session,
+                    model,
+                    job.result.get("usage"),
+                    job.result.get("providerTaskId"),
+                    f"generation_{job.kind}",
+                    str(job.result.get("provider") or model.provider or ""),
+                    str(job.result.get("model") or (job.request or {}).get("model") or ""),
+                )
             if terminal:
                 job.status, job.phase = model.status, model.phase
                 job.error = model.error if model else job.error
-            elif job.storyboard_line_id and job.kind == "image" and job.result.get("urls"):
+            elif model.deleted_at is None and job.storyboard_line_id and job.kind == "image" and job.result.get("urls"):
+                await session.execute(select(StoryboardLineModel.id).where(StoryboardLineModel.id == job.storyboard_line_id).with_for_update())
+                newer_job = await session.scalar(
+                    select(GenerationJobModel.id)
+                    .where(
+                        GenerationJobModel.storyboard_line_id == job.storyboard_line_id,
+                        GenerationJobModel.kind == "image",
+                        GenerationJobModel.deleted_at.is_(None),
+                        GenerationJobModel.created_at > model.created_at,
+                    )
+                    .limit(1)
+                )
                 current = (
                     (
                         await session.execute(
@@ -474,8 +568,10 @@ class JobManager:
                     .scalars()
                     .all()
                 )
-                for item in current:
-                    item.is_current = False
+                if not newer_job:
+                    for item in current:
+                        item.is_current = False
+                    await session.flush()
                 thumbnails = job.result.get("thumbnailUrls") or []
                 session.add(
                     SceneAssetModel(
@@ -485,10 +581,10 @@ class JobManager:
                         image_url=job.result["urls"][0],
                         image_thumbnail_url=thumbnails[0] if thumbnails else None,
                         prompt=str((job.request or {}).get("prompt") or ""),
-                        is_current=True,
+                        is_current=not newer_job,
                     )
                 )
-            elif job.storyboard_line_id and job.kind == "video" and job.result.get("videoUrl"):
+            elif model.deleted_at is None and job.storyboard_line_id and job.kind == "video" and job.result.get("videoUrl"):
                 await session.execute(select(StoryboardLineModel.id).where(StoryboardLineModel.id == job.storyboard_line_id).with_for_update())
                 existing_asset = await session.scalar(select(ShotAssetModel).where(ShotAssetModel.generation_job_id == job.id, ShotAssetModel.deleted_at.is_(None)).limit(1))
                 newer_job = await session.scalar(
@@ -546,15 +642,16 @@ class JobManager:
                             is_current=make_current,
                         )
                     )
-            if provider_confirmed_recovery:
+            if not terminal and job.kind in {"image", "video"}:
                 # Asset, usage and terminal state commit together; retries cannot duplicate them.
                 model.status, model.phase, model.progress = "succeeded", "succeeded", 100
                 model.result, model.error, model.finished_at = job.result, None, utcnow()
-                model.worker_id, model.lease_expires_at, model.reconciliation_next_at = None, None, None
+                if provider_confirmed_recovery:
+                    model.worker_id, model.lease_expires_at, model.reconciliation_next_at = None, None, None
                 from .video_billing import reconcile_video_job
 
                 await session.flush()
-                if job.kind == "video":
+                if provider_confirmed_recovery and job.kind == "video":
                     await reconcile_video_job(session, model)
             await session.commit()
 
@@ -603,9 +700,9 @@ class JobManager:
 
     async def record_provider_response(self, job: Job, stage: str, payload: dict[str, Any]) -> None:
         """Keep the upstream response with the durable job, including failed tasks."""
-        if stage not in {"submission", "terminal"}:
+        if stage not in {"submission", "terminal", "rejected_before_acceptance"}:
             raise ValueError("invalid provider response stage")
-        key = "_providerSubmissionResponse" if stage == "submission" else "_providerTerminalResponse"
+        key = "_providerTerminalResponse" if stage == "terminal" else "_providerSubmissionResponse"
         job.request = {**(job.request or {}), key: _redact(payload)}
         async with session_factory() as session:
             model = await session.get(GenerationJobModel, job.id)
@@ -696,10 +793,20 @@ class JobManager:
 
     async def mark_provider_submitting(self, job: Job) -> None:
         """标记供应商创建窗口，并在发请求前持久化已确定的幂等键。"""
-        job.phase = "submitting_provider"
+        if job.execution_lease and not await renew_execution_lease(*job.execution_lease, max(60, settings.worker_stale_seconds)):
+            raise ExecutionStoreUnavailable("模型执行槽已失效，请重试")
         async with session_factory() as session:
-            model = await session.get(GenerationJobModel, job.id)
-            if model and (not job.worker_id or model.worker_id == job.worker_id):
+            model = await session.get(GenerationJobModel, job.id, with_for_update=True)
+            if job.worker_id and (not model or model.worker_id != job.worker_id):
+                raise JobExpiredError("工单执行权已转移")
+            if model and model.status in {"failed", "cancelled", "succeeded"}:
+                job.status, job.phase, job.error = model.status, model.phase, model.error
+                raise JobExpiredError("工单已结束")
+            if model and model.deleted_at:
+                job.status, job.phase, job.error = "cancelled", "cancelled", "工单已删除"
+                raise JobExpiredError(job.error)
+            job.phase = "submitting_provider"
+            if model:
                 model.phase = job.phase
                 if job.idempotency_key:
                     model.idempotency_key = job.idempotency_key
@@ -718,7 +825,7 @@ class JobManager:
                         select(GenerationJobModel).where(
                             GenerationJobModel.kind.in_(("image", "video")),
                             GenerationJobModel.status.in_(("queued", "running")),
-                            GenerationJobModel.deleted_at.is_(None),
+                            GenerationJobModel.deleted_at.is_(None) | GenerationJobModel.provider_task_id.is_not(None),
                         )
                     )
                 )

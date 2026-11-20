@@ -91,8 +91,9 @@ export const savePendingDhDraft = (draft: PendingDhDraft) => {
   }
 }
 
-export const clearPendingDhDraft = () => {
+export const clearPendingDhDraft = (jobId: string) => {
   try {
+    if (readPendingDhDraft()?.jobId !== jobId) return
     localStorage.removeItem(pendingDhKey())
   } catch {
     /* ignore */

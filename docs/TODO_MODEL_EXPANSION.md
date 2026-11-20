@@ -33,7 +33,7 @@ PPIO 与 BFL（Black Forest Labs，历史 FLUX 3）已从 MV 与 model-service �
 - [x] 在 `generation_jobs` 和模型调用记录中保留最终供应商、模型及 H3 工作流信息。
 - [x] 账单层统一使用 `usage_type/usage_quantity/usage_unit/raw_usage` 表达 Token、秒和 RunningHub 币。
 - [x] 单机阶段把媒体生成和素材导出迁移到独立Worker，队列以 PostgreSQL 为事实源、Redis为唤醒通道，并继续按模型配置独立执行池。
-- [x] 模型执行池已使用 Redis 原子租约并带心跳续租，多 Worker 共享并发上限。
+- [x] PostgreSQL 模型执行池使用事务锁和运行中工单统计，多 Worker 共享并发上限；文本执行槽定期续租。
 - [x] 把通用Chat对话迁移到独立 `worker-chat`，保留现有Redis事件/SSE协议并支持跨进程中断。
 - [x] 把ASS/通用大纲、ASS场景段重试迁移到独立 `worker-storyboard`；完整输入、进度和心跳持久化，内部工单支持最多3次有界重放。
 - [x] SD2.0 按输出 Token、直连 H3 按输出秒数、RunningHub 暂排除；失败任务仍保留原始 usage 与失败标识。

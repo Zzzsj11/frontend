@@ -1,45 +1,29 @@
 import { useGenerationPreferences } from '../generationPreferences'
-import type { CreativeReferenceMedia, ScriptLine, ShotGenOptions } from '../../types'
+import type { CreativeReferenceMedia, ShotGenOptions } from '../../types'
 import * as api from '../../api/domain'
-import { nextId } from '../../utils/id'
 import { normalizeShotOptions } from '../../mediaConstraints'
 import { DEFAULT_SHOT_OPTIONS } from './shared'
 import type { ProjectContext } from './contracts'
 
 export const linesActions = {
   // ---------- 分镜行编辑 ----------
-  addLine() {
+  async addLine() {
+    const taskId = this.activeTaskId
+    if (!taskId) return
     const defaults = this.activeStoryboardConfig.videoModelDefaults as
       Partial<ShotGenOptions> | undefined
-    const line: ScriptLine = {
-      id: nextId(),
+    const saved = await api.createStoryboardLine(taskId, {
       source: 'manual',
       lyrics: '',
-      scenePrompt: '',
-      shotPrompt: '',
-      digitalHumanIds: [],
-      voice: { status: 'none' },
-      scene: { status: 'none' },
-      shot: { status: 'none', assets: [] },
-      manual: true,
-      shotOptions: normalizeShotOptions({ ...DEFAULT_SHOT_OPTIONS, ...defaults }),
-    }
-    this.lines.push(line)
-    this.selectedLineId = line.id
-    if (this.activeTaskId)
-      void api
-        .createStoryboardLine(this.activeTaskId, {
-          source: 'manual',
-          lyrics: '',
-          scene_prompt: '',
-          shot_prompt: '',
-          digital_human_ids: [],
-          shot_options: line.shotOptions,
-        })
-        .then((saved) => {
-          line.id = saved.id
-          this.selectedLineId = saved.id
-        })
+      scene_prompt: '',
+      shot_prompt: '',
+      digital_human_ids: [],
+      shot_options: normalizeShotOptions({ ...DEFAULT_SHOT_OPTIONS, ...defaults }),
+    })
+    if (this.activeTaskId !== taskId) return
+    saved.manual = true
+    this.lines.push(saved)
+    this.selectedLineId = saved.id
   },
 
   async addCreativeLine(input: {
@@ -50,8 +34,9 @@ export const linesActions = {
     optimizationTaskId?: string
     options: ShotGenOptions
   }) {
-    if (!this.activeTaskId) throw new Error('请先选择一个项目')
-    const saved = await api.createStoryboardLine(this.activeTaskId, {
+    const taskId = this.activeTaskId
+    if (!taskId) throw new Error('请先选择一个项目')
+    const saved = await api.createStoryboardLine(taskId, {
       source: 'creative',
       shot_type: 'creative',
       planned_duration: input.options.duration,
@@ -66,6 +51,7 @@ export const linesActions = {
       shot_options: input.options,
       digital_human_ids: [],
     })
+    if (this.activeTaskId !== taskId) throw new DOMException('已切换子项目', 'AbortError')
     const line = saved
     line.manual = true
     this.lines.push(line)
@@ -74,13 +60,15 @@ export const linesActions = {
     return line
   },
 
-  removeLine(lineId: string) {
+  async removeLine(lineId: string) {
     const idx = this.lines.findIndex((l) => l.id === lineId)
     if (idx < 0) return
     // 脚本生成的分镜不允许删除，仅手动添加的分镜可删
     if (!this.lines[idx].manual) return
-    void api.deleteStoryboardLine(lineId)
-    this.lines.splice(idx, 1)
+    await api.deleteStoryboardLine(lineId)
+    const current = this.lines.findIndex((line) => line.id === lineId)
+    if (current < 0) return
+    this.lines.splice(current, 1)
     if (this.selectedLineId === lineId) {
       this.selectedLineId = this.lines[Math.min(idx, this.lines.length - 1)]?.id ?? null
     }

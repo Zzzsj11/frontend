@@ -295,3 +295,39 @@ def test_selected_history_is_persisted_and_used_by_export(client, export_case):
 
     asyncio.run(verify_selection())
     assert client.put(path, headers=headers).status_code == 404
+
+
+def test_recovered_ready_export_keeps_delivered_archive(client, export_case):
+    from app.worker import _recover_stale
+
+    headers, task_id = export_case
+    created = client.post(f"/api/tasks/{task_id}/video-exports", headers=headers).json()
+
+    async def check():
+        async with session_factory() as db:
+            job = await db.get(GenerationJobModel, created["jobId"])
+            job.status, job.attempt = "running", 3
+            job.lease_expires_at = utcnow() - timedelta(minutes=1)
+            record = await db.get(MaterialExportModel, created["id"])
+            record.status, record.archive_url, record.archive_size = "ready", "https://assets.example.test/delivered", 100
+            await db.commit()
+        await _recover_stale(("mv_export",), ())
+        async with session_factory() as db:
+            job = await db.get(GenerationJobModel, created["jobId"])
+            assert job.status == "succeeded"
+            assert job.result["archiveUrl"] == "https://assets.example.test/delivered"
+            assert (await db.get(MaterialExportModel, created["id"])).status == "ready"
+
+    asyncio.run(check())
+
+
+def test_render_gb18030_ass(media):
+    source = media / "source.ass"
+    content = source.read_text(encoding="utf-8")
+    source.write_bytes((content + "\n; 中文字幕\n").encode("gb18030"))
+
+    async def run():
+        await render(media, {"audioOffset": 0, "clips": [{"start": 0}, {"start": 3.5}]}, None)
+        assert "中文字幕" in (media / "subtitles.ass").read_text(encoding="utf-8")
+
+    asyncio.run(run())

@@ -4,10 +4,11 @@
 from __future__ import annotations
 
 import base64
-import secrets
+import fcntl
 import os
 import re
-import shutil
+import secrets
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -41,9 +42,39 @@ DEFAULTS = {
 def main():
     if os.getenv("DEPLOY_ENV") != "production":
         raise SystemExit("This configuration migration is only for production deployment")
+    state = ROOT / ".deployment"
+    state.mkdir(exist_ok=True)
+    # deploy.sh holds the same inode while it changes running services.
+    with os.fdopen(os.open(state / "deploy.lock", os.O_CREAT | os.O_RDWR, 0o600), "r+") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise SystemExit("another configuration or deployment is in progress") from None
+        configure()
+
+
+def write_private(path: Path, content: bytes, owner: os.stat_result | None = None) -> None:
+    fd, name = tempfile.mkstemp(prefix=".env.single-platform-", suffix=".tmp", dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as out:
+            os.fchmod(out.fileno(), 0o600)
+            out.write(content)
+            out.flush()
+            if owner is not None:
+                actual = os.fstat(out.fileno())
+                if (owner.st_uid, owner.st_gid) != (actual.st_uid, actual.st_gid):
+                    os.fchown(out.fileno(), owner.st_uid, owner.st_gid)
+            os.fsync(out.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def configure():
     deploy_file = ROOT / ".env.production"
     deployment = dict(line.split("=", 1) for line in deploy_file.read_text().splitlines() if "=" in line and not line.startswith("#")) if deploy_file.is_file() else {}
-    tier = os.getenv("DEPLOYMENT_TIER") or deployment.get("DEPLOYMENT_TIER", "production")
+    tier = os.getenv("DEPLOYMENT_TIER") or deployment.get("DEPLOYMENT_TIER")
     if tier not in {"production", "test"}:
         raise SystemExit("DEPLOYMENT_TIER must be production or test")
     expected_domain = "mv-test.epaipix.com" if tier == "test" else "mv.epaipix.com"
@@ -69,7 +100,8 @@ def main():
     for path in paths:
         if not path.is_file():
             continue
-        old = path.read_text()
+        old_bytes = path.read_bytes()
+        old = old_bytes.decode().replace("\r\n", "\n").replace("\r", "\n")
         retained = []
         removed = 0
         for line in old.splitlines():
@@ -79,25 +111,22 @@ def main():
                 removed += 1
                 continue
             retained.append(line)
+        if path == deploy_file:
+            retained = [line for line in retained if not line.startswith(("DEPLOYMENT_TIER=", "TLS_DOMAIN="))]
+            retained.extend([f"DEPLOYMENT_TIER={tier}", f"TLS_DOMAIN={domain}"])
         if path == ROOT / ".env.production" and os.getenv("DEPLOY_TLS") == "1":
             retained = [line for line in retained if not line.startswith("APP_CORS_ORIGINS=")]
             retained.append("APP_CORS_ORIGINS=https://" + domain)
         if path == runtime:
             if not any(line.startswith("BACKUP_TOS_ENCRYPTION_KEY=") for line in retained):
                 retained.append("BACKUP_TOS_ENCRYPTION_KEY=" + base64.b64encode(secrets.token_bytes(32)).decode())
-            if not any(re.match(r"^\s*AGENT_TEST_USERNAMES\s*=", line) for line in retained):
-                retained.append("AGENT_TEST_USERNAMES=dev01")
             retained.extend(key + "=" + value for key, value in defaults.items())
         new = "\n".join(retained) + "\n"
         if old != new:
             target = backup / ("root-" if path.parent == ROOT else "backend-")
             target = target.with_name(target.name + path.name.lstrip("."))
-            shutil.copy2(path, target)
-            target.chmod(0o600)
-            temp = path.with_name(path.name + ".single-platform.tmp")
-            temp.write_text(new)
-            temp.chmod(0o600)
-            temp.replace(path)
+            write_private(target, old_bytes)
+            write_private(path, new.encode(), path.stat())
             print(f"updated {path.relative_to(ROOT)}: retired {removed} legacy/config override entries")
     print(f"private configuration backup: {backup}")
 

@@ -1,3 +1,4 @@
+import { currentSession } from '../../api/client'
 import { useAuthStore } from '../auth'
 import type { OutlineProgress, ScriptLine, SongProject } from '../../types'
 import * as api from '../../api/domain'
@@ -8,10 +9,12 @@ import type { ProjectContext } from './contracts'
 export const workspaceActions = {
   /** 载入歌曲项目列表（侧边栏挂载时调用） */
   async loadSongProjects() {
-    if (this.songProjectsLoading) return
     // 账号切换兜底：属主变化时先清上一账号的工作区现场（主动登出已在 logout 清理，此处覆盖异常路径）
     const ownerUid = useAuthStore().user?.id || ''
     if (this.ownerUserId !== ownerUid) this.resetWorkspace()
+    if (this.songProjectsLoading) return
+    const session = currentSession()
+    const current = () => !session.aborted && this.ownerUserId === ownerUid
     this.ownerUserId = ownerUid
     this.songProjectsLoading = true
     this.songProjectsError = null
@@ -21,6 +24,7 @@ export const workspaceActions = {
         api.fetchDigitalHumans(),
         api.fetchDigitalHumanStyles(),
       ])
+      if (!current()) return
       this.songProjects = projects
       this.digitalHumans = humans
       this.dhStyles = styles.map((item) => item.name)
@@ -42,15 +46,18 @@ export const workspaceActions = {
         else this.activeSongId = song.id
       }
     } catch (err) {
+      if (!current()) return
       this.songProjectsError = err instanceof Error ? err.message : '歌曲项目加载失败'
     } finally {
-      this.songProjectsLoading = false
+      if (current()) this.songProjectsLoading = false
     }
   },
 
   /** 新建歌曲项目并加入列表 */
   async createSongProject(name: string): Promise<SongProject> {
+    const session = currentSession()
     const song = await api.createSongProject(name)
+    session.throwIfAborted()
     this.songProjects.push(song)
     // Creating a project is also a navigation action. Keep both operations in
     // one store transaction so a concurrent/finishing selection cannot leave
@@ -60,7 +67,7 @@ export const workspaceActions = {
     try {
       await this._loadTask(song.id, null)
     } finally {
-      this.songSwitching = false
+      if (!session.aborted) this.songSwitching = false
     }
     return song
   },
@@ -91,6 +98,7 @@ export const workspaceActions = {
     for (const id of cachedTaskIds.slice(0, Math.max(0, cachedTaskIds.length - 20))) {
       if (id !== this.activeTaskId && id !== taskId) delete this.taskScripts[id]
     }
+    const session = currentSession()
     const loadVersion = ++this.taskLoadVersion
     // P1 统一轮询调度：切走旧子项目时立即停止其全部轮询/SSE（后端任务照跑，切回后恢复）
     if (this.activeTaskId && this.activeTaskId !== taskId) cancelTaskWatchers(this.activeTaskId)
@@ -113,7 +121,10 @@ export const workspaceActions = {
     this.selectedLineId = null
     this.currentTime = 0
     const script = taskId
-      ? await api.fetchSongScript(taskId)
+      ? await api.fetchSongScript(taskId).catch((error) => {
+          if (!session.aborted && loadVersion === this.taskLoadVersion) this.activeTaskId = null
+          throw error
+        })
       : {
           cast: [],
           lines: [] as ScriptLine[],
@@ -121,7 +132,7 @@ export const workspaceActions = {
           storyBible: undefined,
           status: '',
         }
-    if (loadVersion !== this.taskLoadVersion) return
+    if (session.aborted || loadVersion !== this.taskLoadVersion) return
     if (taskId) this.taskScripts[taskId] = script
     this.castIds = [...script.cast]
     this.lines = script.lines
@@ -182,6 +193,7 @@ export const workspaceActions = {
 
   /** 切换到某歌曲的处理任务(子项目)：每个任务是独立脚本，当前编辑现场先写入缓存 */
   async selectSongTask(songId: string, taskId: string | null = null) {
+    const session = currentSession()
     if (this.songSwitching) return
     // 已在该任务上无需切换（无 taskId 时仅按歌曲判断）
     if (taskId ? taskId === this.activeTaskId : songId === this.activeSongId) return
@@ -190,7 +202,7 @@ export const workspaceActions = {
       this._cacheCurrentTask()
       await this._loadTask(songId, taskId)
     } finally {
-      this.songSwitching = false
+      if (!session.aborted) this.songSwitching = false
     }
   },
 
@@ -205,10 +217,14 @@ export const workspaceActions = {
 
   /** 删除歌曲项目(目录)：连同其下所有子项目与脚本缓存；删除激活项时切到其余首个任务 */
   async deleteSongProject(songId: string) {
+    const session = currentSession()
     const idx = this.songProjects.findIndex((s) => s.id === songId)
     if (idx < 0) return
-    const [removed] = this.songProjects.splice(idx, 1)
     await api.deleteSongProject(songId)
+    if (session.aborted) return
+    const current = this.songProjects.findIndex((song) => song.id === songId)
+    if (current < 0) return
+    const [removed] = this.songProjects.splice(current, 1)
     removed.tasks.forEach((t) => {
       delete this.taskScripts[t.id]
       cancelTaskWatchers(t.id)
@@ -231,7 +247,7 @@ export const workspaceActions = {
         this.currentTime = 0
       }
     } finally {
-      this.songSwitching = false
+      if (!session.aborted) this.songSwitching = false
     }
   },
 
@@ -273,12 +289,16 @@ export const workspaceActions = {
 
   /** 删除子项目(任务)：删除激活任务时切到同歌曲相邻任务，否则清空编辑区 */
   async deleteSongTask(songId: string, taskId: string) {
+    const session = currentSession()
     const song = this.songProjects.find((s) => s.id === songId)
     if (!song) return
     const idx = song.tasks.findIndex((t) => t.id === taskId)
     if (idx < 0) return
-    song.tasks.splice(idx, 1)
     await api.deleteSongTask(taskId)
+    if (session.aborted) return
+    const current = song.tasks.findIndex((task) => task.id === taskId)
+    if (current < 0) return
+    song.tasks.splice(current, 1)
     delete this.taskScripts[taskId]
     cancelTaskWatchers(taskId)
     const auth = useAuthStore()
@@ -299,7 +319,7 @@ export const workspaceActions = {
         this.currentTime = 0
       }
     } finally {
-      this.songSwitching = false
+      if (!session.aborted) this.songSwitching = false
     }
   },
 } satisfies ThisType<ProjectContext>

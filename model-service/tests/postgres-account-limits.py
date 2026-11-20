@@ -37,6 +37,7 @@ from gateway.db import Client, Job, Model, PricingRule, Session, User, engine  #
 
 async def check():
     async with Session.begin() as db:
+        db.add(Model(id="quota-fixture", provider_model="fixture", kind="chat", channel="fixture", protocol="chat"))
         db.add(User(id="quota-owner", username="quota@star-net.cn", password_hash="fixture", monthly_points=20))
         for ident in ("a", "b"):
             c = Client(
@@ -56,16 +57,16 @@ async def check():
             await reset(db, c)
         db.add(
             PricingRule(
-                id="quota-price", model_id="gpt-5.6-sol", actor="test", config={"confirmed": True, "reserve_points": "10", "rates": []}
+                id="quota-price", model_id="quota-fixture", actor="test", config={"confirmed": True, "reserve_points": "10", "rates": []}
             )
         )
 
     async def submit(i):
         try:
             async with Session.begin() as db:
-                await lock(db)
+                await lock(db, "wallet:quota-owner")
                 c = await db.get(Client, "a" if i % 2 else "b")
-                m = await db.get(Model, "gpt-5.6-sol")
+                m = await db.get(Model, "quota-fixture")
                 j = Job(
                     id=f"quota-{i}",
                     client_id=c.id,
@@ -94,7 +95,7 @@ async def check():
     async def create(i):
         try:
             async with Session.begin() as db:
-                await lock(db)
+                await lock(db, "wallet:quota-owner")
                 await ensure_key_slot(db, "quota-owner")
                 db.add(Client(id=f"new-{i}", name="fixture", user_id="quota-owner", key_hash=f"new-{i}", key_prefix="fixture"))
             return 201

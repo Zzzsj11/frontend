@@ -278,11 +278,11 @@ function expectGeneration(body: Body, description: string, reference?: string) {
     prompt: '',
     size: '1024x1536',
     quality: 'auto',
-    resolution: '1K',
     n: 1,
     purpose: 'digital_human',
     portrait: { description, style: STYLE },
   })
+  expect(body).not.toHaveProperty('resolution') // The selected model supplies its portrait default.
   if (reference) expect(body.images).toEqual([reference])
   else expect(body).not.toHaveProperty('images')
 }
@@ -363,6 +363,7 @@ test('上传参考原图生成竖版大头照，入库成功后展示，阵容�
     const job = mock.jobs[0]!
     expect(mock.creates[0]).toMatchObject({
       name: '上传新人物',
+      source_job_id: job.id,
       style_id: 'style-private',
       description: '黑发、圆脸、青年',
       avatar_url: job.result.urls[0],
@@ -538,6 +539,7 @@ test('无参考图时省略 images；生成等待中刷新从 mv:pending-dh 续�
     .poll(() => page.evaluate(() => localStorage.getItem('mv:pending-dh:user-headshot')))
     .toBeNull()
   expect(mock.creates).toHaveLength(1)
+  expect(mock.creates[0]?.source_job_id).toBe(draft.jobId)
   await page.reload()
   await expect(page.getByRole('heading', { name: '视频编辑器' })).toBeVisible()
   await page.getByRole('button', { name: /^角色阵容/ }).click()

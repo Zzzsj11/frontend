@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { updateStoryboardLine } from '../api/domain'
 import ManualReviewNotice from './ManualReviewNotice.vue'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { DEFAULT_SHOT_OPTIONS, useProjectStore } from '../stores/project'
@@ -238,17 +239,46 @@ const regenShot = async () => {
   store.generateShotFor(line.id, shotPromptDraft.value, { ...optionsDraft.value })
 }
 
-const save = () => {
+const saving = ref(false)
+const save = async () => {
   const line = store.editingLine
-  if (line) {
-    if (line.source === 'creative')
-      store.updateCreativePrompts(line.id, originalPromptDraft.value, shotPromptDraft.value)
-    store.updateLyrics(line.id, lyricsDraft.value)
-    store.updateScenePrompt(line.id, scenePromptDraft.value)
-    store.updateShotPrompt(line.id, shotPromptDraft.value)
-    store.updateShotOptions(line.id, { ...optionsDraft.value })
+  if (!line || saving.value) return
+  const draft = {
+    lyrics: lyricsDraft.value,
+    scene_prompt: scenePromptDraft.value,
+    shot_prompt: shotPromptDraft.value,
+    shot_options: normalizeShotOptions(optionsDraft.value),
+    ...(line.source === 'creative'
+      ? { original_prompt: originalPromptDraft.value, optimized_prompt: shotPromptDraft.value }
+      : {}),
   }
-  store.closeEditor()
+  saving.value = true
+  try {
+    const saved = await updateStoryboardLine(line.id, draft)
+    if (store.editingLine?.id !== line.id) return
+    Object.assign(store.editingLine, {
+      lyrics: draft.lyrics,
+      scenePrompt: draft.scene_prompt,
+      shotPrompt: draft.shot_prompt,
+      shotOptions: draft.shot_options,
+      ...(line.source === 'creative'
+        ? { originalPrompt: draft.original_prompt, optimizedPrompt: draft.optimized_prompt }
+        : {}),
+      ...(saved.generationStatus === 'succeeded'
+        ? {
+            generationStatus: 'succeeded',
+            generationError: undefined,
+            generationErrorSummary: undefined,
+            generationFailedAt: undefined,
+          }
+        : {}),
+    })
+    store.closeEditor()
+  } catch {
+    // The API reports the error and the editor retains the draft.
+  } finally {
+    saving.value = false
+  }
 }
 
 const cancel = () => store.closeEditor()
@@ -257,6 +287,7 @@ const cancel = () => store.closeEditor()
 <template>
   <BaseModal
     :open="!!store.editingLine"
+    :loading="saving"
     width="620px"
     max-height="90vh"
     mask-variant="emphasized"
@@ -476,8 +507,8 @@ const cancel = () => store.closeEditor()
         :job-id="store.editingLine.shot.generationJobId"
         :line-number="store.lines.findIndex((l) => l.id === store.editingLine?.id) + 1"
       />
-      <button class="btn-cancel" @click="cancel">取消</button>
-      <button class="btn-primary" @click="save">
+      <button class="btn-cancel" :disabled="saving" @click="cancel">取消</button>
+      <button class="btn-primary" :disabled="saving" @click="save">
         <AppIcon name="check" :size="14" />
         保存
       </button>

@@ -20,7 +20,7 @@ import BaseModal from '../components/base/BaseModal.vue'
 import { perfSnapshot } from '../perf'
 import { useAuthStore } from '../stores/auth'
 import type { AdminNavGroup, AdminNavItem } from '../types'
-import { formatChinaDateTime, formatChinaTime } from '../utils/dateTime'
+import { formatAdminCell, formatAdminJson, formatChinaDateTime } from '../utils/dateTime'
 
 /** 管理后台列表行：各 tab 返回列不一致，未建模的列由 columns 动态渲染 */
 interface AdminRow {
@@ -309,7 +309,9 @@ const endpoint = computed(
 const rows = computed<AdminRow[]>(() =>
   Array.isArray(data.value) ? (data.value as AdminRow[]) : data.value?.items || [],
 )
+let queryVersion = 0
 const load = async () => {
+  const version = ++queryVersion
   // 性能页不走通用 endpoint（数据为后端聚合 + 本会话快照）
   if (tab.value === 'perf') return loadPerf()
   // 提示词页由 AdminPromptsPanel 自管数据
@@ -332,16 +334,21 @@ const load = async () => {
   loading.value = true
   error.value = ''
   try {
-    data.value = await apiRequest<AdminData>(endpoint.value)
+    const result = await apiRequest<AdminData>(endpoint.value)
+    if (version === queryVersion) data.value = result
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '加载失败'
+    if (version === queryVersion) error.value = e instanceof Error ? e.message : '加载失败'
   } finally {
-    loading.value = false
+    if (version === queryVersion) loading.value = false
   }
 }
 const select = async (key: string) => {
   const value = key as Tab
   if (!availableTabs.value.has(value)) return
+  ++queryVersion
+  data.value = null
+  loading.value = false
+  error.value = ''
   tab.value = value
   rememberActiveTab(value)
   pageOffset.value = 0
@@ -381,6 +388,7 @@ const backendSlow = ref<ReqLogRow[]>([])
 const backendSummary = ref<ReqSummaryRow[]>([])
 const frontPerf = ref(perfSnapshot())
 const loadPerf = async () => {
+  const version = ++queryVersion
   loading.value = true
   error.value = ''
   try {
@@ -390,13 +398,14 @@ const loadPerf = async () => {
         '/admin/request-logs?minMs=1000&orderBy=duration&limit=30',
       ),
     ])
+    if (version !== queryVersion) return
     backendSummary.value = summary
     backendSlow.value = slow.items || []
     frontPerf.value = perfSnapshot()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '加载失败'
+    if (version === queryVersion) error.value = e instanceof Error ? e.message : '加载失败'
   } finally {
-    loading.value = false
+    if (version === queryVersion) loading.value = false
   }
 }
 const openReqDetail = async (row: AdminRow) => {
@@ -614,7 +623,7 @@ onMounted(() => {
           </article>
           <article class="wide">
             <h3>任务状态</h3>
-            <pre>{{ JSON.stringify(data.jobStatuses, null, 2) }}</pre>
+            <pre>{{ formatAdminJson(data.jobStatuses, 2) }}</pre>
           </article>
           <article class="wide">
             <h3>Token 构成</h3>
@@ -753,7 +762,7 @@ onMounted(() => {
                         >
                       </td>
                       <td class="path">{{ task.target || '-' }}</td>
-                      <td class="muted">{{ formatChinaTime(task.at) }}</td>
+                      <td class="muted">{{ formatChinaDateTime(task.at) }}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -930,7 +939,7 @@ onMounted(() => {
                         status: c === 'status',
                         slow: tab === 'requests' && c === 'durationMs' && Number(row[c]) >= 1000,
                       }"
-                      >{{ typeof row[c] === 'object' ? JSON.stringify(row[c]) : row[c] }}</span
+                      >{{ formatAdminCell(row[c]) }}</span
                     ><span v-if="c === 'status' && row.stale" class="stale-flag">（疑似中断）</span>
                   </td>
                   <td v-if="tab === 'models'">
@@ -1019,9 +1028,9 @@ onMounted(() => {
             <template v-if="reqDetail.queryString"> · query: {{ reqDetail.queryString }}</template>
           </p>
           <h3>输入参数</h3>
-          <pre class="payload">{{ JSON.stringify(reqDetail.requestPayload, null, 2) }}</pre>
+          <pre class="payload">{{ formatAdminJson(reqDetail.requestPayload, 2) }}</pre>
           <h3>输出</h3>
-          <pre class="payload">{{ JSON.stringify(reqDetail.responseBody, null, 2) }}</pre>
+          <pre class="payload">{{ formatAdminJson(reqDetail.responseBody, 2) }}</pre>
         </template>
       </div>
     </BaseModal>

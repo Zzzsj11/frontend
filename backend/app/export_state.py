@@ -6,6 +6,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .models import GenerationJobModel, MaterialExportModel, utcnow
 
 
+async def locked_export(session: AsyncSession, job, export_id: str) -> MaterialExportModel | None:
+    # Match recovery's job -> export lock order. An expired owner may not mutate
+    # the replacement worker's output or failure state.
+    if job.worker_id:
+        owner = await session.scalar(
+            select(GenerationJobModel.id)
+            .where(
+                GenerationJobModel.id == job.id,
+                GenerationJobModel.worker_id == job.worker_id,
+                GenerationJobModel.status == "running",
+                GenerationJobModel.deleted_at.is_(None),
+                GenerationJobModel.lease_expires_at > utcnow(),
+            )
+            .with_for_update()
+        )
+        if not owner:
+            return None
+    row = await session.get(MaterialExportModel, export_id, with_for_update=True)
+    return row if row and row.deleted_at is None else None
+
+
 async def sync_export_failure(session: AsyncSession, job: GenerationJobModel) -> None:
     if job.kind not in {"export", "mv_export"} or job.status not in {"failed", "cancelled"}:
         return

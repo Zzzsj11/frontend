@@ -1,5 +1,5 @@
 ARG NODE_BASE_IMAGE=node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
-ARG NGINX_BASE_IMAGE=nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+ARG NGINX_BASE_IMAGE=nginx:1.30-alpine@sha256:caf4e1e032a20f9c3c5e28fc7f25ffd768ad8677b4975c54193075997b3a97e3
 FROM ${NODE_BASE_IMAGE} AS build
 
 WORKDIR /app
@@ -10,7 +10,9 @@ ARG NPM_REGISTRY=https://registry.npmmirror.com
 RUN npm config set registry "$NPM_REGISTRY" \
     && npm config set replace-registry-host always \
     && npm ci --fetch-retries=3 --fetch-timeout=120000
-COPY . .
+COPY index.html vite.config.ts tsconfig.json tsconfig.app.json tsconfig.node.json ./
+COPY src/ ./src/
+COPY public/ ./public/
 RUN npm run build
 
 FROM ${NGINX_BASE_IMAGE}

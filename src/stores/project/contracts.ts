@@ -49,6 +49,7 @@ export type ProjectState = {
     }
   >
   /** 全局角色阵容：本 MV 选定的数字人（全片统一），分镜只能从阵容中挑选出演角色 */
+  castSaving: boolean
   castIds: string[]
   selectedLineId: string | null
   /** 当前在弹窗中编辑的分镜行 */
@@ -247,7 +248,7 @@ export type ProjectActions = {
   renameSongTask(songId: string, taskId: string, title: string): void
   /** 删除子项目(任务)：删除激活任务时切到同歌曲相邻任务，否则清空编辑区 */
   deleteSongTask(songId: string, taskId: string): Promise<void>
-  addLine(): void
+  addLine(): Promise<void>
   addCreativeLine(input: {
     originalPrompt: string
     optimizedPrompt: string
@@ -256,7 +257,7 @@ export type ProjectActions = {
     optimizationTaskId?: string
     options: ShotGenOptions
   }): Promise<ScriptLine>
-  removeLine(lineId: string): void
+  removeLine(lineId: string): Promise<void>
   updateLyrics(lineId: string, lyrics: string): void
   updateScenePrompt(lineId: string, scenePrompt: string): void
   updateShotPrompt(lineId: string, shotPrompt: string): void
@@ -276,9 +277,10 @@ export type ProjectActions = {
   openLibrary(): void
   closeLibrary(): void
   /** 加入/移出全局角色阵容；移出时同步从所有分镜的出演角色中移除，保证全局统一 */
-  toggleCast(digitalHumanId: string): void
+  toggleCast(digitalHumanId: string): Promise<void>
   /** 数字人落库：确保风格存在 → 创建记录 → 更新本地列表（AI 生成 / 自定义上传 / 刷新恢复共用） */
   _finalizeDigitalHuman(input: {
+    sourceJobId?: string
     name: string
     style: string
     description: string
@@ -308,7 +310,7 @@ export type ProjectActions = {
   /** 新增风格分类；名称为空或已存在时返回 false */
   addDhStyle(name: string): boolean
   /** 重命名风格分类：同步更新该分类下所有数字人；目标名已存在时合并到该分类 */
-  renameDhStyle(oldName: string, newName: string): boolean
+  renameDhStyle(oldName: string, newName: string): Promise<boolean>
   /** 删除风格分类：该分类下的数字人归入「未分类」 */
   deleteDhStyle(name: string): void
   /** 编辑数字人基础信息 / 提示词 */

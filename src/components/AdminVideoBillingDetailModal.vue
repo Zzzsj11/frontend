@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatAdminJson } from '../utils/dateTime'
 import ImageZoom from './ImageZoom.vue'
 import type { VideoBillingDetail } from '../api/adminVideoBilling'
 import BaseModal from './base/BaseModal.vue'
@@ -163,7 +164,7 @@ const money = (value: number) => `¥${value.toFixed(6)}`
 
         <section>
           <h3>供应商原始用量</h3>
-          <pre class="raw">{{ JSON.stringify(detail.rawUsage, null, 2) }}</pre>
+          <pre class="raw">{{ formatAdminJson(detail.rawUsage, 2) }}</pre>
         </section>
       </template>
     </div>

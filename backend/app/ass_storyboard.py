@@ -34,7 +34,10 @@ def parse_time(value: str) -> float:
     hour, minute, second, centisecond = map(int, match.groups())
     if minute >= 60 or second >= 60:
         raise ValueError(f"非法 ASS 时间范围：{value}")
-    return hour * 3600 + minute * 60 + second + centisecond / 100
+    seconds = hour * 3600 + minute * 60 + second + centisecond / 100
+    if seconds > 3600:
+        raise ValueError("歌曲时间轴最长为 1 小时")
+    return seconds
 
 
 def parse_ass(content: bytes) -> tuple[list[AssCue], str]:
@@ -54,6 +57,8 @@ def parse_ass(content: bytes) -> tuple[list[AssCue], str]:
         if end <= start:
             raise ValueError(f"ASS 第 {line_number} 行结束时间不晚于开始时间")
         if lyric:
+            if len(cues) >= 3600:
+                raise ValueError("字幕歌词条数不能超过 3600")
             cues.append(AssCue(start, end, lyric))
     if not cues:
         raise ValueError("ASS 文件中没有有效 Dialogue 歌词")

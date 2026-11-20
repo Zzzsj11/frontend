@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ScriptEditor from '../../src/components/ScriptEditor.vue'
 import { useProjectStore } from '../../src/stores/project'
 import type { ScriptLine } from '../../src/types'
+import * as domain from '../../src/api/domain'
 import * as apiClient from '../../src/api/client'
 import * as confirmDialogModule from '../../src/composables/useConfirmDialog'
 
@@ -157,6 +158,8 @@ describe('ScriptEditor batch generation confirmation', () => {
 
   it('从底部新增单个视频后将已有滚动条的列表滚到底部', async () => {
     const store = useProjectStore()
+    store.activeTaskId = 'task-1'
+    vi.spyOn(domain, 'createStoryboardLine').mockResolvedValue(pendingLine('persisted-id'))
     store.lines = Array.from({ length: 8 }, (_, index) => pendingLine(`line-${index}`))
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
       callback(0)
@@ -172,6 +175,7 @@ describe('ScriptEditor batch generation confirmation', () => {
     await wrapper.get('.editor-footer .btn-add').trigger('click')
     await vi.waitFor(() => expect(scrollTo).toHaveBeenCalled())
 
+    expect(store.lines.at(-1)?.id).toBe('persisted-id')
     expect(store.lines).toHaveLength(9)
     expect(scrollTo).toHaveBeenCalledWith({ top: 1200, behavior: 'smooth' })
     wrapper.unmount()
@@ -181,6 +185,7 @@ describe('ScriptEditor batch generation confirmation', () => {
     const store = useProjectStore()
     const wrapper = mount(ScriptEditor)
     const buttons = wrapper.findAll('.editor-footer .btn-add')
+    expect(buttons[0].attributes('disabled')).toBeDefined()
     expect(buttons.map((button) => button.text())).toEqual(['单个视频', '创意视频'])
     await buttons[1].trigger('click')
     expect(store.creativeOpen).toBe(true)

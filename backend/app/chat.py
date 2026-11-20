@@ -109,10 +109,6 @@ class ChatManager:
         ]
 
     async def delete(self, user_id: str, session_id: str) -> bool:
-        await redis.set(f"chat:{session_id}:cancel", "1", ex=300)
-        task = self.tasks.pop(session_id, None)
-        if task and not task.done():
-            task.cancel()
         async with session_factory() as session:
             model = await session.get(ChatSessionModel, session_id)
             if not model or model.user_id != user_id or model.deleted_at is not None:
@@ -122,39 +118,39 @@ class ChatManager:
                 update(ChatMessageModel).where(ChatMessageModel.session_id == session_id, ChatMessageModel.deleted_at.is_(None)).values(deleted_at=model.deleted_at)
             )
             await session.commit()
+        await self.interrupt(session_id)
         await redis.delete(f"chat:{session_id}:seq", f"chat:{session_id}:events")
         return True
 
     async def post(self, session: ChatSession, text: str) -> int:
-        if session.status == "running":
-            raise RuntimeError("助手仍在回复，请等待或先中断")
-        task = self.tasks.get(session.id)
-        if task and not task.done():
-            raise RuntimeError("助手仍在回复，请等待或先中断")
+        if not text.strip():
+            raise ValueError("聊天消息不能为空")
         async with session_factory() as db:
+            claimed = await db.scalar(
+                update(ChatSessionModel)
+                .where(ChatSessionModel.id == session.id, ChatSessionModel.user_id == session.user_id, ChatSessionModel.deleted_at.is_(None), ChatSessionModel.status != "running")
+                .values(status="running")
+                .returning(ChatSessionModel.id)
+            )
+            if not claimed:
+                raise RuntimeError("助手仍在回复或对话已删除")
+            await consume_daily_quota(db, user_id=session.user_id, category="chat", commit=False)
             model = await db.get(ChatSessionModel, session.id)
-            if not model:
-                raise RuntimeError("对话不存在")
-            await consume_daily_quota(db, user_id=session.user_id, category="chat")
             if not session.messages:
                 model.title = text.splitlines()[0][:60]
-            model.status = "running"
             db.add(ChatMessageModel(session_id=session.id, role="user", content=text))
+            job = await jobs.enqueue(db, "chat", {"session_id": session.id}, user_id=session.user_id)
+            # Clear the previous cancellation before publishing the new job.
+            await redis.delete(f"chat:{session.id}:cancel")
             await db.commit()
-        session.messages.append({"role": "user", "content": text})
-        user_event = await append_chat_event(session.id, "user", {"text": text})
-        await append_chat_event(session.id, "state", {"status": "running"})
-        await redis.delete(f"chat:{session.id}:cancel")
-        if settings.job_execution_mode == "worker":
-            await jobs.create(
-                "chat",
-                {"session_id": session.id},
-                lambda item: self.run_persisted(session.id, item),
-                user_id=session.user_id,
-            )
-        else:
-            self.tasks[session.id] = asyncio.create_task(self._run(session))
-        return user_event["seq"]
+        try:
+            event = await append_chat_event(session.id, "user", {"text": text})
+            await append_chat_event(session.id, "state", {"status": "running"})
+        except Exception:
+            # PostgreSQL holds the message and job, even when notifications fail.
+            event = {"seq": session.last_seq}
+        await jobs.dispatch(job, lambda item: self.run_persisted(session.id, item))
+        return event["seq"]
 
     async def run_persisted(self, session_id: str, _job: Job | None = None) -> dict[str, str]:
         async with session_factory() as db:
@@ -164,10 +160,10 @@ class ChatManager:
             model = result.scalar_one_or_none()
         if not model:
             raise RuntimeError("对话不存在")
-        await self._run(self._from_model(model))
+        await self._run(self._from_model(model), propagate=True)
         return {"sessionId": session_id}
 
-    async def _run(self, session: ChatSession) -> None:
+    async def _run(self, session: ChatSession, *, propagate: bool = False) -> None:
         usage: Any = {}
         request_id: str | None = None
         usage_recorded = False
@@ -291,6 +287,8 @@ class ChatManager:
                     )
                     await db.commit()
             await append_chat_event(session.id, "interrupted", {})
+            if propagate:
+                raise
         except Exception as exc:
             usage = getattr(exc, "platform_usage", usage)
             request_id = getattr(exc, "platform_job_id", request_id)
@@ -310,6 +308,9 @@ class ChatManager:
                     )
                     await db.commit()
             await append_chat_event(session.id, "error", {"text": redact_error_text(str(exc))})
+            if propagate:
+                exc.usage_recorded = True
+                raise
         finally:
             if text_scope is not None:
                 await text_scope.__aexit__(None, None, None)
@@ -329,7 +330,11 @@ class ChatManager:
             task.cancel()
 
     async def events_after(self, user_id: str, session_id: str, after: int) -> list[dict[str, Any]]:
-        if not await self.get(user_id, session_id):
+        async with session_factory() as db:
+            exists = await db.scalar(
+                select(ChatSessionModel.id).where(ChatSessionModel.id == session_id, ChatSessionModel.user_id == user_id, ChatSessionModel.deleted_at.is_(None))
+            )
+        if not exists:
             return []
         return await chat_events_after(session_id, after)
 

@@ -222,3 +222,5 @@ curl "$MODEL_API/v1/chat/completions" \
 用户 Vue 门户目录为 `user-web/`，本机 http://127.0.0.1:5181。管理员开通账号并设置月总额后，用户登录创建自己的 API Key（最多 10 个），可分别设置月消费上限；绑定用户的 Key 自动确定所有权，不需要 `X-User-Id`，不得覆盖为他人。
 
 1 积分 = ¥0.01。每个模型及生成方式的费率由管理员配置，用户文档读取同一组规则。以渠道实际输入/输出等用量乘对应费率扣积分，接单时保存费率快照。`GET /v1/jobs/{id}` 的 `billing` 返回本任务积分、人民币金额、计费状态与预占。完整字段、月额度和流水语义见 [PORTAL-AND-CREDITS.md](PORTAL-AND-CREDITS.md)。
+
+Agent 专用 Key 使用 require_agent 并强制三项归因头。需要同时承载业务与开发验收的受信服务 Key，可由管理员在公开 API 的 AGENT_ATTRIBUTION_CLIENT_IDS 中按逗号列出其客户端 ID。普通 Key 发送费用归因头会返回 403。

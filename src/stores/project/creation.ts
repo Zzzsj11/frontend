@@ -4,6 +4,8 @@ import type {
   ScriptLine,
   StoryBible,
 } from '../../types'
+import { currentSession } from '../../api/client'
+import { ApiError } from '../../errorBus'
 import * as api from '../../api/domain'
 import { nextId } from '../../utils/id'
 import { normalizeShotOptions } from '../../mediaConstraints'
@@ -218,6 +220,7 @@ export const creationActions = {
 
   /** 随机通用没有图片/人物参考，创建任务后一次性把全部纯文本视频持久化入队。 */
   async _generateRandomShotsBatch(taskId: string, lines: ScriptLine[]) {
+    const session = currentSession()
     const targets = lines.filter((line) => !['done', 'generating'].includes(line.shot.status))
     if (!targets.length) return
     for (const line of targets) {
@@ -254,14 +257,22 @@ export const creationActions = {
         }),
       )
     } catch (error) {
+      if (session.aborted) return
+      const status = error instanceof ApiError ? error.status : undefined
+      const rejected =
+        status !== undefined && status >= 400 && status < 500 && ![408, 409].includes(status)
       for (const line of targets) {
-        if (line.shot.status === 'generating') {
+        if (rejected) {
+          line.shot.status = 'failed'
+          line.shot.generationPhase = undefined
+          line.shot.error = error instanceof Error ? error.message : '视频提交失败'
+        } else if (line.shot.status === 'generating') {
           // Submission may have committed before the response was lost. Only query; never POST again here.
           line.shot.generationPhase = 'reconciling'
           line.shot.error = error instanceof Error ? error.message : '提交状态核对中'
         }
       }
-      await this.resumeActiveGenerations(taskId)
+      if (!rejected) await this.resumeActiveGenerations(taskId)
     }
   },
 

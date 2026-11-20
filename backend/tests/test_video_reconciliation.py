@@ -177,3 +177,30 @@ def test_late_inline_runner_cannot_write_after_recovery_claim(client, recovery):
         assert (await jobs.get(jid)).status == "succeeded"
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("standalone", [True, False])
+def test_optional_video_context_and_agent_costs_survive_recovery(client, recovery, standalone):
+    module, jid, _, _, _ = recovery
+    with sqlite3.connect(TEST_DB) as db:
+        db.execute("UPDATE generation_jobs SET storyboard_line_id=NULL,generation_origin='agent_test',agent_name='code-agent',agent_run_id='recovery-run' WHERE id=?", (jid,))
+        if standalone:
+            db.execute("UPDATE generation_jobs SET project_task_id=NULL,project_id=NULL WHERE id=?", (jid,))
+    assert asyncio.run(module.reconcile_one(jid))["action"] == "recovered"
+    with sqlite3.connect(TEST_DB) as db:
+        assert db.execute("SELECT generation_origin,agent_name,agent_run_id FROM token_usage_records WHERE generation_job_id=?", (jid,)).fetchall() == [
+            ("agent_test", "code-agent", "recovery-run")
+        ]
+
+
+@pytest.mark.parametrize("billing_status,points", [("settled", "1.75"), ("refunded", "0")])
+def test_confirmed_platform_failure_ends_reconciliation_and_retains_charge(client, recovery, billing_status, points):
+    module, jid, _, query, store = recovery
+    bill = {"status": billing_status, "points": points}
+    query.return_value = {"id": "original-id", "status": "FAILED", "billing": bill, "usage": {"platformBilling": bill}}
+    assert asyncio.run(module.reconcile_one(jid))["action"] == "failed"
+    assert asyncio.run(module.claim(jid)) is None
+    store.assert_not_awaited()
+    with sqlite3.connect(TEST_DB) as db:
+        assert db.execute("SELECT status,phase,reconciliation_next_at FROM generation_jobs WHERE id=?", (jid,)).fetchone() == ("failed", "failed", None)
+        assert db.execute("SELECT json_extract(raw_usage,'$.platformBilling.points') FROM token_usage_records WHERE generation_job_id=?", (jid,)).fetchone() == (points,)

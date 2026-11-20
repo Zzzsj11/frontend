@@ -23,14 +23,18 @@ def amount(value):
         raise HTTPException(422, "Invalid decimal points") from None
 
 
-async def lock(db):
-    if db.info.get("credit_locked"):
-        return
+async def lock(db, resource=None):
+    # Administrative operations spanning several accounts retain an exclusive barrier.
+    # Single-resource transactions may run concurrently and interoperate with older releases.
     if db.bind.dialect.name == "postgresql":
-        await db.execute(text("SELECT pg_advisory_xact_lock(739215)"))
-    else:
+        if resource is None:
+            await db.execute(text("SELECT pg_advisory_xact_lock(739215)"))
+        else:
+            await db.execute(text("SELECT pg_advisory_xact_lock_shared(739215)"))
+            await db.execute(text("SELECT pg_advisory_xact_lock(739215, hashtext(:key))"), {"key": resource})
+    elif db.info.get("locked_transaction") is not db.sync_session.get_transaction() or not db.in_transaction():
         await db.execute(text("BEGIN IMMEDIATE"))
-    db.info["credit_locked"] = True
+        db.info["locked_transaction"] = db.sync_session.get_transaction()
 
 
 def month():

@@ -28,14 +28,17 @@ async def create_database():
     await conn.close()
 
 
+assert url.host in {"localhost", "127.0.0.1", "::1"}, "Use an isolated local database"
 asyncio.run(create_database())
 target = url.set(database=name).render_as_string(hide_password=False)
 os.environ["DATABASE_URL"] = target
 subprocess.run([sys.executable, "-m", "alembic", "-c", str(root / "alembic.ini"), "upgrade", "head"], check=True)
 subprocess.run([sys.executable, str(root / "scripts/seed.py")], env={**os.environ, "PYTHONPATH": str(root / "public-api")}, check=True)
 sys.path.insert(0, str(root / "public-api"))
+from gateway.credits import lock, reserve  # noqa: E402
 from gateway.db import Client, Job, Ledger, Model, PricingRule, Session, engine, now  # noqa: E402
 from gateway.queue import claim  # noqa: E402
+from gateway.queue import update as update_job  # noqa: E402
 
 
 async def check():
@@ -51,8 +54,8 @@ async def check():
                 require_agent=True,
             )
         )
-        m = await db.get(Model, "veo-3.1-generate-preview")
-        m.concurrency = 2
+        m = Model(id="concurrency-fixture", provider_model="fixture", kind="video", channel="fixture", protocol="fixture", concurrency=2)
+        db.add(m)
         for i in range(12):
             db.add(
                 Job(
@@ -75,7 +78,14 @@ async def check():
     claims = await asyncio.gather(*(claim("worker-" + str(i)) for i in range(12)))
     acquired = [x for x in claims if x]
     assert len(acquired) == 2 and len(set(acquired)) == 2, acquired
-    (root / ".runtime/postgres-validation.json").write_text(
+    # A busy account must not serialize unrelated wallets or its own execution heartbeat.
+    async with Session.begin() as busy:
+        await lock(busy, "wallet:test-client")
+        async with asyncio.timeout(5), Session.begin() as independent:
+            await lock(independent, "wallet:other-client")
+            await update_job(acquired[0], lease_until=now())
+    print("PostgreSQL: independent wallet and job heartbeat completed while the first wallet lock was held")
+    (Path(os.getenv("TEST_RESULT_DIR", root / ".runtime")) / "postgres-validation.json").write_text(
         json.dumps({"database": name, "parallel_claimers": 12, "model_limit": 2, "claimed": acquired, "passed": True})
     )
     print("PostgreSQL: 12 concurrent claimers, exactly 2 unique leases; no model calls")
@@ -83,8 +93,6 @@ async def check():
         await db.execute(update(Job).where(Job.client_id == "test-client").values(deleted_at=now()))
         client = await db.get(Client, "test-client")
         client.deleted_at, client.enabled = now(), False
-    from gateway.credits import lock, reserve
-    from gateway.queue import update as update_job
 
     async with Session.begin() as db:
         db.add(
@@ -100,7 +108,7 @@ async def check():
         db.add(
             PricingRule(
                 id="fixture-price",
-                model_id="veo-3.1-generate-preview",
+                model_id="concurrency-fixture",
                 actor="test",
                 config={
                     "confirmed": True,
@@ -113,9 +121,9 @@ async def check():
 
     async def submit(index):
         async with Session.begin() as db:
-            await lock(db)
+            await lock(db, "wallet:wallet-client")
             c = await db.get(Client, "wallet-client")
-            model = await db.get(Model, "veo-3.1-generate-preview")
+            model = await db.get(Model, "concurrency-fixture")
             j = Job(
                 id=f"wallet-job-{index}",
                 client_id=c.id,
@@ -151,7 +159,7 @@ async def check():
         assert len(entries) == 2
         await db.execute(update(Job).where(Job.client_id == wallet.id).values(deleted_at=now()))
         wallet.deleted_at, wallet.enabled = now(), False
-    (root / ".runtime/postgres-wallet-validation.json").write_text(
+    (Path(os.getenv("TEST_RESULT_DIR", root / ".runtime")) / "postgres-wallet-validation.json").write_text(
         json.dumps(
             {
                 "database": name,

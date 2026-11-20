@@ -50,6 +50,7 @@ export const useProjectStore = defineStore('project', {
     /** 各子项目(任务)的脚本编辑现场缓存(按 taskId)，切回时不丢编辑状态 */
     taskScripts: {} as Record<string, { cast: string[]; lines: ScriptLine[] }>,
     /** 全局角色阵容：本 MV 选定的数字人（全片统一），分镜只能从阵容中挑选出演角色 */
+    castSaving: false,
     castIds: [] as string[],
     selectedLineId: null as string | null,
     /** 当前在弹窗中编辑的分镜行 */
@@ -123,6 +124,26 @@ export const useProjectStore = defineStore('project', {
 
     /** 时间轴片段（分镜/配音两轨共用同一时间划分） */
     timelineClips(state): TimelineClip[] {
+      const audioEnd = (state.projectAudio?.duration ?? 0) + state.audioOffsetSeconds
+      if (
+        state.activeStoryboardType === 'ass' &&
+        state.projectAudio &&
+        audioEnd > 0 &&
+        state.lines[0]?.start === 0 &&
+        state.lines.every(
+          (line, i) =>
+            Number.isFinite(line.start) && (i === 0 || line.start! > state.lines[i - 1]!.start!),
+        )
+      ) {
+        return state.lines
+          .filter((line) => line.start! < audioEnd)
+          .map((line, index) => ({
+            lineId: line.id,
+            index,
+            start: line.start!,
+            duration: Math.min(state.lines[index + 1]?.start ?? audioEnd, audioEnd) - line.start!,
+          }))
+      }
       let start = 0
       return state.lines.map((line, index) => {
         const asset = line.shot.assets.find((a) => a.id === line.shot.currentAssetId)

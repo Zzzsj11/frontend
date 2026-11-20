@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ApiError } from '../errorBus'
 import TextModelSelect from './TextModelSelect.vue'
 import ImageZoom from './ImageZoom.vue'
 import BaseSelect from './base/BaseSelect.vue'
@@ -47,6 +48,9 @@ const loading = ref(false)
 const uploading = ref(false)
 const error = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
+let open = true
+let intent: { input: string; id: string } | undefined
+const optimizing = computed(() => ['queued', 'running'].includes(task.value?.status ?? ''))
 let pollTimer: ReturnType<typeof setTimeout> | undefined
 
 const counts = computed(() => ({
@@ -55,11 +59,14 @@ const counts = computed(() => ({
   audio: media.value.filter((item) => item.kind === 'audio').length,
 }))
 const canOptimize = computed(() => {
-  if (!originalPrompt.value.trim() || loading.value || uploading.value) return false
+  if (!originalPrompt.value.trim() || loading.value || uploading.value || optimizing.value)
+    return false
   if (provider.value === 'minimax' && !media.value.length) return false
   return Boolean(status.value?.providers[provider.value].configured)
 })
-const canCreate = computed(() => Boolean(optimizedPrompt.value.trim()) && !loading.value)
+const canCreate = computed(
+  () => Boolean(optimizedPrompt.value.trim()) && !loading.value && !optimizing.value,
+)
 const videoCaps = computed(() => videoModelCapabilities(videoModel.value))
 const durationChoices = computed(() => videoDurationChoices(videoModel.value))
 const ratios = computed(() => videoRatioChoices(videoModel.value))
@@ -121,14 +128,24 @@ const onFiles = async (event: Event) => {
 }
 const poll = (id: string) => {
   const tick = async () => {
+    if (!open || task.value?.id !== id) return
     try {
-      task.value = await queryCreativeOptimization(id)
+      const latest = await queryCreativeOptimization(id)
+      if (!open || task.value?.id !== id) return
+      task.value = latest
       if (task.value.status === 'queued' || task.value.status === 'running') {
         pollTimer = setTimeout(tick, 3500)
       } else if (task.value.status === 'succeeded') optimizedPrompt.value = task.value.outputPrompt
       else error.value = task.value.error || '提示词优化失败'
     } catch (reason) {
+      if (!open || task.value?.id !== id) return
       error.value = reason instanceof Error ? reason.message : '查询优化任务失败'
+      const code = reason instanceof ApiError ? reason.status : undefined
+      if (code && code >= 400 && code < 500 && code !== 429 && code !== 408) {
+        task.value = { ...task.value, status: 'failed' }
+      } else {
+        pollTimer = setTimeout(tick, 5000)
+      }
     }
   }
   pollTimer = setTimeout(tick, 1200)
@@ -138,13 +155,20 @@ const optimize = async () => {
   loading.value = true
   error.value = ''
   try {
-    task.value = await optimizeCreativePrompt({
+    const input = {
       provider: provider.value,
       prompt: originalPrompt.value.trim(),
       duration: duration.value,
       ratio: ratio.value,
       media: media.value,
-    })
+    }
+    const fingerprint = JSON.stringify(input)
+    if (!intent || intent.input !== fingerprint)
+      intent = { input: fingerprint, id: crypto.randomUUID() }
+    const result = await optimizeCreativePrompt({ ...input, request_id: intent.id })
+    if (!open) return
+    intent = undefined
+    task.value = result
     if (task.value.status === 'succeeded') optimizedPrompt.value = task.value.outputPrompt
     else if (task.value.status === 'queued' || task.value.status === 'running') poll(task.value.id)
     else error.value = task.value.error || '提示词优化失败'
@@ -201,7 +225,10 @@ onMounted(async () => {
     error.value = reason instanceof Error ? reason.message : '加载优化服务失败'
   }
 })
-onBeforeUnmount(() => pollTimer && clearTimeout(pollTimer))
+onBeforeUnmount(() => {
+  open = false
+  clearTimeout(pollTimer)
+})
 </script>
 
 <template>

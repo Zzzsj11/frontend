@@ -103,7 +103,7 @@ async def test_public_download_connects_to_validated_ip_and_preserves_tls_identi
 def test_login_fails_closed_when_rate_limit_storage_is_unavailable(client, monkeypatch):
     from app import main
 
-    monkeypatch.setattr(main, "login_attempt_count", AsyncMock(side_effect=ConnectionError("redis unavailable")))
+    monkeypatch.setattr(main, "reserve_login_attempt", AsyncMock(side_effect=ConnectionError("redis unavailable")))
     response = client.post("/api/auth/login", json={"username": "admin", "password": "secure-admin-123"})
     assert response.status_code == 503
     assert response.headers["retry-after"] == "5"
@@ -330,8 +330,14 @@ def test_production_runtime_requires_secure_refresh_cookie(monkeypatch, tmp_path
     secret_file.chmod(0o600)
     monkeypatch.setattr(config, "RUNTIME_SECRETS_FILE", secret_file)
     monkeypatch.delenv("MODEL_GATEWAY_URL", raising=False)
+    monkeypatch.setenv("DEPLOYMENT_TIER", "test")
+    monkeypatch.setenv("TLS_DOMAIN", "mv-test.epaipix.com")
     secure = replace(
         config.settings,
+        all_in_one_base_url="https://mg-test.epaipix.com",
+        llm_base_url="https://mg-test.epaipix.com/v1",
+        tos_reference_prefix="mv/test/references",
+        tos_video_prefix="mv/test/videos",
         app_env="production",
         jwt_secret="review-runtime-secret-longer-than-32-bytes",
         llm_channel="all-in-one",
@@ -509,11 +515,14 @@ def test_shared_bucket_backup_requires_customer_key_and_environment_directory(tm
     client.head_object.return_value = SimpleNamespace(
         content_length=path.stat().st_size, meta={"sha256": digest}, header={"x-tos-server-side-encryption-customer-algorithm": "AES256"}
     )
-    archive_backup(client, "shared-media", "mv/production/backups/database", path, digest, encryption_key=key)
+    archive_backup(client, "shared-media", "", path, digest, encryption_key=key, tier="production")
+    assert client.upload_file.call_args.args[1] == "mv/production/backups/database/snapshot.dump"
     assert client.upload_file.call_args.kwargs["ssec_key"] == key
     assert client.put_object.call_args.kwargs["ssec_key"] == key
     client.get_bucket_acl.assert_not_called()
     client.reset_mock()
+    with pytest.raises(ValueError, match="部署环境"):
+        archive_backup(client, "shared-media", "mv/production/backups/database", path, digest, encryption_key=key, tier="test")
     for prefix, bad_key in (("public", key), ("mv/test/backups/database", "bad-key")):
         with pytest.raises(ValueError):
             archive_backup(client, "shared-media", prefix, path, digest, encryption_key=bad_key)

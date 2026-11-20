@@ -1,4 +1,5 @@
 import hashlib
+import os
 import re
 
 from fastapi import HTTPException, Request
@@ -50,6 +51,9 @@ def attribution(request: Request, client: Client):
     if client.require_agent or agent or run or test:
         if agent != "code-agent" or not run or not test:
             raise HTTPException(400, "Agent calls require X-Agent-Name: code-agent, X-Agent-Run-Id and X-Test-Run-Id")
+        approved = os.getenv("AGENT_ATTRIBUTION_CLIENT_IDS", "").split(",")
+        if not client.require_agent and client.id not in {cid.strip() for cid in approved if cid.strip()}:
+            raise HTTPException(403, "This API key is not authorized for Agent attribution")
         identifier(run, "X-Agent-Run-Id")
         identifier(test, "X-Test-Run-Id")
     return dict(origin="agent_test" if run else "business", agent_name=agent, agent_run_id=run, test_run_id=test)

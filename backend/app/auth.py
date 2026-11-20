@@ -7,6 +7,7 @@ from datetime import timedelta, timezone
 from typing import Annotated
 
 import jwt
+from anyio import CapacityLimiter, to_thread
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from fastapi import Cookie, Depends, HTTPException, Request, Response
@@ -19,6 +20,12 @@ from .database import database_session, session_factory
 from .models import RefreshTokenModel, UserModel, utcnow
 from .rbac import attach_admin_access, is_super_admin, load_admin_access
 
+
+async def password_work(function, *args):
+    return await to_thread.run_sync(function, *args, limiter=_password_limit)
+
+
+_password_limit = CapacityLimiter(4)
 password_hasher = PasswordHasher()
 bearer = HTTPBearer(auto_error=False)
 REFRESH_COOKIE = "mv_refresh_token"
@@ -141,6 +148,9 @@ async def require_user(
 
     set_owner(user.id)
     request.state.user_id = user.id
+    request.state.access_expiry = payload["exp"]
+    request.state.auth_version = token_version
+    request.state.session_family = payload["sid"]
     await attach_admin_access(session, user)
     from .agent_attribution import current_agent_attribution
 
@@ -153,15 +163,35 @@ async def require_user(
 CurrentUser = Annotated[UserModel, Depends(require_user)]
 
 
-async def login(username: str, password: str) -> UserModel | None:
+async def login(username: str, password: str, session: AsyncSession) -> UserModel | None:
+    user = await session.scalar(select(UserModel).where(UserModel.username == username.strip().lower(), UserModel.deleted_at.is_(None)).with_for_update())
+    if not user or user.status != "active" or not await password_work(verify_password, user.password_hash, password):
+        return None
+    user.last_login_at = utcnow()
+    return user
+
+
+async def stream_session_active(request: Request, user_id: str) -> bool:
+    if utcnow().timestamp() >= request.state.access_expiry:
+        return False
     async with session_factory() as session:
-        result = await session.execute(select(UserModel).where(UserModel.username == username.strip().lower(), UserModel.deleted_at.is_(None)))
-        user = result.scalar_one_or_none()
-        if not user or user.status != "active" or not verify_password(user.password_hash, password):
-            return None
-        user.last_login_at = utcnow()
-        await session.commit()
-        return user
+        return bool(
+            await session.scalar(
+                select(RefreshTokenModel.id)
+                .join(UserModel, UserModel.id == RefreshTokenModel.user_id)
+                .where(
+                    RefreshTokenModel.user_id == user_id,
+                    RefreshTokenModel.family_id == request.state.session_family,
+                    RefreshTokenModel.deleted_at.is_(None),
+                    RefreshTokenModel.revoked_at.is_(None),
+                    RefreshTokenModel.expires_at > utcnow(),
+                    UserModel.deleted_at.is_(None),
+                    UserModel.status == "active",
+                    UserModel.auth_version == request.state.auth_version,
+                )
+                .limit(1)
+            )
+        )
 
 
 async def _locked_refresh(session: AsyncSession, raw_token: str) -> tuple[UserModel | None, RefreshTokenModel | None]:

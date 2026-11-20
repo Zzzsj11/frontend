@@ -23,9 +23,9 @@ async def claim(job_id: str | None = None):
     async with session_factory() as db:
         query = (
             select(GenerationJobModel)
-            .join(ProjectModel, GenerationJobModel.project_id == ProjectModel.id)
-            .join(ProjectTaskModel, GenerationJobModel.project_task_id == ProjectTaskModel.id)
-            .join(StoryboardLineModel, GenerationJobModel.storyboard_line_id == StoryboardLineModel.id)
+            .outerjoin(ProjectModel, GenerationJobModel.project_id == ProjectModel.id)
+            .outerjoin(ProjectTaskModel, GenerationJobModel.project_task_id == ProjectTaskModel.id)
+            .outerjoin(StoryboardLineModel, GenerationJobModel.storyboard_line_id == StoryboardLineModel.id)
             .where(
                 GenerationJobModel.kind == "video",
                 GenerationJobModel.provider == "all-in-one",
@@ -38,9 +38,9 @@ async def claim(job_id: str | None = None):
                 ProjectModel.deleted_at.is_(None),
                 ProjectTaskModel.deleted_at.is_(None),
                 StoryboardLineModel.deleted_at.is_(None),
-                ProjectModel.user_id == GenerationJobModel.user_id,
-                ProjectTaskModel.project_id == ProjectModel.id,
-                StoryboardLineModel.project_task_id == ProjectTaskModel.id,
+                or_(GenerationJobModel.project_id.is_(None), ProjectModel.user_id == GenerationJobModel.user_id),
+                or_(GenerationJobModel.project_task_id.is_(None), ProjectTaskModel.project_id == ProjectModel.id),
+                or_(GenerationJobModel.storyboard_line_id.is_(None), StoryboardLineModel.project_task_id == ProjectTaskModel.id),
             )
         )
         if job_id:
@@ -93,6 +93,29 @@ async def recover(job):
             result = await store_provider_result(job, data)
             await jobs.finalize_success(job, result)
             return {"action": "recovered", "providerStatus": status}
+        if status in {"FAILED", "CANCELLED", "CANCELED"}:
+            from .image_billing import settled
+            from .jobs import record_media_usage
+            from .video_billing import reconcile_video_job
+
+            bill = data.get("billing") or (data.get("usage") or {}).get("platformBilling")
+            if data.get("id") == job.provider_task_id and settled(bill, allow_refund=True):
+                async with session_factory() as db:
+                    model = await db.get(GenerationJobModel, job.id, with_for_update=True)
+                    if not model or model.worker_id != job.worker_id or model.deleted_at or model.status != "failed":
+                        raise JobExpiredError("核对任务已结束")
+                    usage = {**(data.get("usage") or {}), "platformBilling": bill}
+                    model.result = {**(model.result or {}), "usage": usage}
+                    model.request = {**(model.request or {}), "_providerTerminalResponse": data}
+                    model.error = f"平台已确认终态 {status}，费用已结算"
+                    model.phase = "failed"
+                    model.worker_id = model.lease_expires_at = model.reconciliation_next_at = None
+                    await record_media_usage(db, model, usage, model.provider_task_id, "generation_video_failed", model.provider, str((model.request or {}).get("model") or ""))
+                    await db.flush()
+                    await reconcile_video_job(db, model)
+                    await db.commit()
+                    await cache_job(model.id, jobs._from_model(model).public())
+                return {"action": "failed", "providerStatus": status}
         # Do not infer a refund or permit recreation from transient/ambiguous platform states.
         detail = f"原平台任务状态 {status or '未知'}，系统将继续自动核对，不会重复生成"
         return {"action": "waiting", "providerStatus": status}
@@ -110,6 +133,8 @@ async def recover(job):
             if model and model.worker_id == job.worker_id and model.status == "failed":
                 model.worker_id, model.lease_expires_at = None, None
                 model.reconciliation_next_at = utcnow() + timedelta(seconds=min(900, 30 * 2 ** min(model.reconciliation_attempts, 5)))
+                if model.reconciliation_attempts == 8 or model.reconciliation_attempts % 96 == 0:
+                    logger.warning("视频核对持续未完成，需要人工检查 job_id=%s attempts=%s", model.id, model.reconciliation_attempts)
                 model.error = detail
                 await db.commit()
                 await cache_job(model.id, jobs._from_model(model).public())

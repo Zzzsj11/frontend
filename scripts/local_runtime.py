@@ -171,7 +171,9 @@ def develop(env):
                     PYTHON,
                     "-m",
                     "uvicorn",
-                    "app.main:app",
+                    "app.proxy_entrypoint:create_app",
+                    "--factory",
+                    "--no-proxy-headers",
                     "--host",
                     "127.0.0.1",
                     "--port",
@@ -227,7 +229,15 @@ def interrupted(_signum, _frame):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "mode", choices=["heads", "migration", "middleware", "dev", "build"]
+        "mode",
+        choices=[
+            "heads",
+            "migration",
+            "middleware",
+            "gateway-postgres",
+            "dev",
+            "build",
+        ],
     )
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, interrupted)
@@ -246,6 +256,16 @@ def main():
         redis=args.mode in {"middleware", "dev"}, build=args.mode == "build"
     ) as env:
         if args.mode == "build":
+            return
+        if args.mode == "gateway-postgres":
+            service = ROOT / "model-service"
+            with tempfile.TemporaryDirectory(prefix="mv-gateway-proof-") as results:
+                for script in ("postgres-concurrency.py", "postgres-account-limits.py"):
+                    run(
+                        [PYTHON, service / "tests" / script],
+                        cwd=service,
+                        env={**env, "TEST_RESULT_DIR": results},
+                    )
             return
         migrate(env)
         if args.mode == "middleware":

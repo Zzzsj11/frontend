@@ -27,7 +27,7 @@ all in one 的 `gemini-3.8-flash` 供应商调用连续失败 5 次时，Redis �
 
 ASS 与定制通用分镜默认使用 `OUTLINE_PROTOCOL_VERSION=v2` 的紧凑大纲协议。定制通用一次输出全片导演决策骨架；ASS 固定为一次大场景规划加一次全曲镜头骨架，不再按大场景并行重复提交人物长描述。后续逐镜提示词仍消费兼容的标准大纲字段，因此无需改动下游图片、视频和导出链路。紧急回滚可将该变量设为 `v1`，恢复旧提示词和旧调用编排。
 
-Chat对话、媒体生成、素材导出、ASS/通用大纲、逐镜提示词和ASS场景段重试支持两种执行模式：默认 `inline` 保持本地单进程行为；服务器设置 `JOB_EXECUTION_MODE=worker` 后，API只在同一事务中写领域状态和 `generation_jobs`，`worker-chat`、`worker-image`、`worker-media`（仅视频）、`worker-export` 与 `worker-storyboard` 使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 领取。图片和视频使用独立执行池，避免长视频轮询占满图片槽；单机默认分别为32并发。分镜工单的完整人物、上下文、大纲和重试快照保存在 `generation_jobs.request`，进度与心跳同时落PostgreSQL；Worker中断后最多自动重放3次。Redis承担低延迟 Worker 唤醒、Chat跨进程取消、热状态与事件，短暂不可用不会丢失数据库工单。模型注册中心的 `executionPool/executionConcurrency` 同时由进程内信号量和 Redis 原子租约约束，多 Worker 或多节点共享同一并发上限；Redis不可用时降级为进程内限制。新视频生成全部使用 all in one，按模型拆分执行池；旧供应商适配保留用于历史查询。人物入库或换图时，TOS 原图注册为英合虚拟人物资产；生成英合 Seedance 视频时使用 `asset_avatar_url` 中的 `asset://`，原始 TOS URL 始终保留用于展示和对账。各 H3 通道共享提示词编译与参考素材约束，但分别适配创建、查询、恢复和结果解析协议。顶部余额接口仅查询英和商户与子账号 Key；批量任务按模型 `billing` 声明决定估价和余额预检，不跨渠道兜底。独立 model-service 的管理余额采集支持 yinghe、yseeai、toapis，不等同于 MV 生成预检范围。新模型接入现状和剩余清单见 `TODO_MODEL_EXPANSION.md`。
+Chat对话、媒体生成、素材导出、ASS/通用大纲、逐镜提示词和ASS场景段重试支持两种执行模式：默认 `inline` 保持本地单进程行为；服务器设置 `JOB_EXECUTION_MODE=worker` 后，API只在同一事务中写领域状态和 `generation_jobs`，`worker-chat`、`worker-image`、`worker-media`（仅视频）、`worker-export` 与 `worker-storyboard` 使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 领取。图片和视频使用独立执行池，避免长视频轮询占满图片槽；单机默认分别为32并发。分镜工单的完整人物、上下文、大纲和重试快照保存在 `generation_jobs.request`，进度与心跳同时落PostgreSQL；Worker中断后最多自动重放3次。Redis承担低延迟 Worker 唤醒、Chat跨进程取消、热状态与事件，短暂不可用不会丢失数据库工单。PostgreSQL 环境按模型的 `executionPool/executionConcurrency` 在受理事务内获取模型池锁、统计运行工单并领取工单。Redis 断连或清空不改变已占用的容量。SQLite 验收模式保留 Redis 租约。新视频生成全部使用 all in one，按模型拆分执行池；旧供应商适配保留用于历史查询。人物入库或换图时，TOS 原图注册为英合虚拟人物资产；生成英合 Seedance 视频时使用 `asset_avatar_url` 中的 `asset://`，原始 TOS URL 始终保留用于展示和对账。各 H3 通道共享提示词编译与参考素材约束，但分别适配创建、查询、恢复和结果解析协议。顶部余额接口仅查询英和商户与子账号 Key；批量任务按模型 `billing` 声明决定估价和余额预检，不跨渠道兜底。独立 model-service 的管理余额采集支持 yinghe、yseeai、toapis，不等同于 MV 生成预检范围。新模型接入现状和剩余清单见 `TODO_MODEL_EXPANSION.md`。
 
 余额展示查询使用 60 秒服务端缓存，前端仅在页面可见时每 5 分钟按需刷新；用户手动点击可请求实时刷新，但服务端会合并 5 秒内的并发强刷。生成确认弹窗读取短时缓存，真正提交时仅对任务涉及的渠道执行最终余额校验，因此降频不削弱任务提交卡口。
 
@@ -73,7 +73,7 @@ all in one 仅在英和国内与 RunningHub SD2.0 Token 之间路由：英和先
 
 ## 文本生成可靠性（2026-10-20）
 
-文本默认保持 Gemini，`LLM_FAILOVER_ENABLED=false`；只有显式开启才允许旧备用模型策略。`TEXT_GENERATION_CONCURRENCY` 默认8，API/Worker 共用 Redis 文本槽位与60次/分钟的提交窗口，平台异常触发共享短冷却；Redis 故障退回进程内限流。逐镜等待槽位不计入720秒执行预算，单次非流式平台调用最多300秒，给结构修复留出时间。
+文本默认保持 Gemini，`LLM_FAILOVER_ENABLED=false`；只有显式开启才允许旧备用模型策略。`TEXT_GENERATION_CONCURRENCY` 默认8，PostgreSQL 环境的 API/Worker 通过 `text_execution_slots` 共享并续租文本执行槽位。Redis 提供每分钟 60 次的提交窗口和短冷却，Redis 故障期间仍由数据库约束并发。逐镜等待槽位不计入720秒执行预算，单次非流式平台调用最多300秒，给结构修复留出时间。
 
 平台 TLS 握手失败由平台以同一工单有限重试；明确未提交且零结算的错误，MV 最多尝试3次并逐次记录用量。提交/计费不确定时只查询原平台工单，不盲目重提，保留平台工单号与账务状态。文本请求幂等键由本地工单、模型、操作、消息摘要及尝试序号派生，Worker 重放复用原请求。Chat 只允许在建流前安全重试，输出开始后的断流不重放。
 

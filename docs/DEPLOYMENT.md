@@ -298,6 +298,8 @@ DEPLOY_TLS=1 DEPLOY_ENV=production ./scripts/deploy-local-images.sh
 
 部署脚本会校验证书文件，并组合 `docker-compose.tls.yml`：80 自动 308 跳转、443 仅启用 TLS 1.2/1.3、响应带 HSTS，后端 Refresh Cookie 自动启用 Secure，发布准备同时更新共享 runtime 配置，Worker 可正常启动。生产应用禁止在 Secure 未开启时启动；当前仍为 HTTP 的服务器测试环境必须先完成域名和证书配置。发布会验证证书链、域名和密钥匹配，解引用复制证书到忽略目录后只读挂载，并在切换前执行 nginx -t；续期后再次发布会平滑 reload。成功后保存非敏感 TLS 配置，后续普通发布和回滚默认沿用，避免意外退回 HTTP。没有 DNS 与证书控制权时禁止用自签证书冒充完成。
 
+HTTP 与 HTTPS 入口的 Nginx 使用实际对端地址重建 `X-Forwarded-For`。Compose 为 backend 设置 `TRUST_COMPOSE_FRONTEND=1`，API 只信任 Compose DNS 返回的 `frontend` 容器地址，最多缓存 5 秒。首次部署期间健康检查可直接访问 backend。解析失败时 API 使用 TCP 对端地址，1 秒后可重试解析。宿主机入口默认使用 TCP 对端地址。额外代理须在部署环境的 `TRUSTED_PROXY_NETWORKS` 中显式列出 IP 或 CIDR，以逗号分隔，并确保这些代理覆盖或正确追加转发头。多跳链从最近的代理向外取第一个未受信对端。
+
 ### 5.1 本地侧
 
 ```bash
@@ -369,10 +371,12 @@ DEPLOY_ENV=production ./scripts/deploy-local-images.sh
 2. 读取当前完整 Git SHA；
 3. 构建 `mvagent-local/mv-agent-frontend:git-<sha>` 和后端镜像；
 4. 不从远程镜像仓库拉取；首次部署会先启动并等待 PostgreSQL、Redis 健康，后续发布为空操作；
-5. 先更新 frontend 容器（新 nginx 配置先就绪）；
+5. 保持当前 frontend 服务，预检新镜像配置；
 6. 启动带时间戳和进程号的一次性 green 容器（`compose run` 继承服务的环境、密钥与网络）。通过容器内和 Nginx 容器内两次健康检查后，显式将 Nginx 上游切至 green，再重建正式 backend。切流配置校验或 reload 失败会恢复旧配置并退出；green 健康检查失败则清理本次 green，当前 backend 继续服务；
-7. 正式 backend 健康后将 Nginx 切回 backend，给 green 最多 60 秒终止排空窗口后删除。若切流之后发生失败，脚本保留可能承载流量的 green 并输出名称；修复 backend、确认切回后才能清理该容器。随后更新其余服务；
-8. 将当前和上一版本写入 `.deployed-version`、`.previous-version`；全部容器健康后再原子更新 `.deployment/info.json`。工作台与管理后台顶部栏通过 `/api/release` 展示这次实际部署完成时间及 Git 版本短号，测试人员可据此确认页面是否为最新部署。
+7. 正式 backend 健康后将 Nginx 切回 backend，给 green 最多 60 秒终止排空窗口后删除。若切流之后发生失败，脚本保留可能承载流量的 green 并输出名称；修复 backend、确认切回后才能清理该容器。首次发布在正式 backend 就绪后启动 frontend。已有服务随后更新 Worker 和 frontend；
+8. 用最终 frontend 的公开端口分别检查首页、经 Nginx 转发的 API 健康接口，均须返回 200。TLS 模式先校验并重载最终容器的证书，使用本机地址及真实域名验证 HTTPS。通过检查后将当前版本、上一版本和时间原子写入 `.deployment/info.json`，同步两个兼容版本文件。部署和回滚共用主机上的排他锁。工作台与管理后台顶部栏通过 `/api/release` 展示这次实际部署完成时间及 Git 版本短号，测试人员可据此确认页面是否为最新部署。
+
+首次跨过数据库版本 `eb617531ca10` 时，镜像构建完成后先优雅排空并停止旧 `worker-image`，确认旧实例已停止再启动 green 执行迁移。Worker 模式下 API 仍会持久化受理图片请求，新 Worker 启动后消费积压，详见[分镜当前图片的唯一约束](ROLLBACK.md#分镜当前图片的唯一约束)。
 
 部署脚本会无条件重建 backend 与全部 Worker。原因是运行时 Secret 虽以只读文件挂载，但应用只在进程启动时加载；即使镜像版本未变化，Key 轮换也必须启动新进程才能生效。
 
@@ -396,7 +400,7 @@ docker system df
 
 ```bash
 cd /opt/mv-agent-frontend
-export RELEASE_VERSION="$(cat .deployed-version)"
+export RELEASE_VERSION="$(python3 -c 'import json; print(json.load(open(".deployment/info.json"))["version"])')"
 printf 'RELEASE_VERSION=%s\n' "$RELEASE_VERSION"
 docker compose --env-file .env.production \
   -f docker-compose.yml -f docker-compose.production.yml ps
@@ -414,7 +418,7 @@ docker compose --env-file .env.production \
   -f docker-compose.yml -f docker-compose.production.yml logs --tail=200 backend frontend
 ```
 
-`docker-compose.production.yml` 的镜像名要求 `RELEASE_VERSION`。若未先从 `.deployed-version` 导出，会出现 `required variable RELEASE_VERSION is missing`；这是检查命令缺少参数，不代表容器故障。
+`docker-compose.production.yml` 的镜像名要求 `RELEASE_VERSION`。若未先从 `.deployment/info.json` 导出，会出现 `required variable RELEASE_VERSION is missing`；这是检查命令缺少参数，不代表容器故障。
 
 日志中不得出现持续重启、迁移失败、数据库认证失败或供应商密钥缺失。
 
@@ -519,8 +523,7 @@ curl -v http://127.0.0.1:8000/api/health
 
 ```bash
 cd /opt/mv-agent-frontend
-cat .deployed-version
-cat .previous-version
+python3 -m json.tool .deployment/info.json
 ```
 
 服务器本地仍保留上一版本镜像时执行：

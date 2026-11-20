@@ -6,6 +6,7 @@ import shutil
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -52,7 +53,9 @@ def client():
     main.settings = dataclasses.replace(main.settings, toapis_api_key="test-only-toapis-key")
     app = main.app
 
-    with TestClient(app) as test_client:
+    # Unit tests explicitly claim synthetic jobs. A background scheduler would race
+    # those assertions and could poll fixture IDs after their provider doubles expire.
+    with patch("app.video_reconciliation.serve", new=asyncio.Event().wait), TestClient(app) as test_client:
         # 统一打上测试批次头，每次全量测试的 API 耗时自动入库（管理后台「接口耗时」可见）
         run_id = f"pytest-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}-{uuid4().hex[:12]}"
         test_client.headers.update({"X-Test-Run-Id": run_id, "X-Agent-Name": "code-agent", "X-Agent-Run-Id": run_id})

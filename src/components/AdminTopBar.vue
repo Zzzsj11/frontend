@@ -37,7 +37,7 @@ onBeforeUnmount(() => {
       <h1>{{ title }}</h1>
     </div>
     <div class="topbar-actions">
-      <DeploymentBadge />
+      <DeploymentBadge full-date />
       <RouterLink class="icon-button" to="/projects" title="返回工作台" aria-label="返回工作台">
         <AppIcon name="home" :size="18" />
       </RouterLink>

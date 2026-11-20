@@ -2,8 +2,8 @@ import asyncio
 import base64
 import io
 import json
+import re
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 
@@ -72,6 +72,29 @@ def replace_urls(value, replacements):
     return replacements.get(value, value) if isinstance(value, str) else value
 
 
+async def run_media_tool(*args, timeout=60):
+    proc = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+
+    async def collect():
+        output = bytearray()
+        while chunk := await proc.stdout.read(65536):
+            output.extend(chunk[: max(0, 131072 - len(output))])
+        if await proc.wait():
+            raise ValueError("Video metadata or cover extraction failed")
+        return bytes(output)
+
+    try:
+        return await asyncio.wait_for(collect(), timeout)
+    except (TimeoutError, asyncio.CancelledError):
+        if proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+        await proc.communicate()
+        raise
+
+
 async def archive(job, body):
     urls = output_urls(body, job.kind)
     prefix = f"clients/{job.client_id}/users/{job.user_id}/{job.id}"
@@ -98,59 +121,51 @@ async def archive(job, body):
 
                     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
 
-                def probe():
-                    if shutil.which("ffprobe"):
-                        result = subprocess.run(
-                            [
-                                "ffprobe",
-                                "-v",
-                                "error",
-                                "-select_streams",
-                                "v:0",
-                                "-show_entries",
-                                "stream=width,height,r_frame_rate,duration,codec_name:format=duration,size",
-                                "-of",
-                                "json",
-                                str(path),
-                            ],
-                            capture_output=True,
-                            text=True,
-                            check=True,
-                            timeout=60,
-                        )
-                        metadata = json.loads(result.stdout)
-                        return {"stream": metadata.get("streams", [{}])[0], "format": metadata.get("format", {})}
-                    import imageio_ffmpeg
-
-                    reader = imageio_ffmpeg.read_frames(str(path))
-                    try:
-                        metadata = next(reader)
-                        return {
-                            "width": metadata["size"][0],
-                            "height": metadata["size"][1],
-                            "fps": metadata["fps"],
-                            "duration": metadata["duration"],
-                        }
-                    finally:
-                        reader.close()
-
-                metadata = await asyncio.to_thread(probe)
                 cover = Path(temp) / "cover.jpg"
-                proc = await asyncio.create_subprocess_exec(
+                probe = shutil.which("ffprobe")
+                if probe:
+                    report = await run_media_tool(
+                        probe,
+                        "-v",
+                        "error",
+                        "-select_streams",
+                        "v:0",
+                        "-show_entries",
+                        "stream=width,height,r_frame_rate,duration,codec_name:format=duration,size",
+                        "-of",
+                        "json",
+                        str(path),
+                    )
+                    parsed = json.loads(report)
+                    metadata = {"stream": parsed["streams"][0], "format": parsed.get("format", {})}
+                output = await run_media_tool(
                     ffmpeg,
+                    "-nostdin",
+                    "-hide_banner",
+                    "-nostats",
                     "-v",
-                    "error",
+                    "error" if probe else "info",
                     "-i",
                     str(path),
+                    "-map",
+                    "0:v:0",
                     "-frames:v",
                     "1",
                     str(cover),
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.PIPE,
                 )
-                _, err = await proc.communicate()
-                if proc.returncode:
-                    raise ValueError("Video cover extraction failed")
+                if not probe:
+                    # The bundled ffmpeg also prints input metadata while extracting the cover.
+                    header = output.decode("utf-8", "replace").partition("Output #")[0]
+                    video = next((line for line in header.splitlines() if "Stream #" in line and "Video:" in line), "")
+                    fps = re.search(r"(\d+(?:\.\d+)?) fps", video)
+                    duration = re.search(r"Duration: (\d+):(\d+):([\d.]+)", header)
+                    with Image.open(cover) as frame:
+                        metadata = {
+                            "width": frame.width,
+                            "height": frame.height,
+                            "fps": float(fps[1]) if fps else 0,
+                            "duration": int(duration[1]) * 3600 + int(duration[2]) * 60 + float(duration[3]) if duration else 0,
+                        }
                 cover_url, thumb = await put_image_with_thumbnail(
                     safe_key(prefix + "/covers", f"{i}.jpg"), cover.read_bytes(), "image/jpeg"
                 )

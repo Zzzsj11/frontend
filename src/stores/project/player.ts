@@ -31,7 +31,7 @@ export const playerActions = {
         activeVideoEl.readyState >= 2 &&
         !activeVideoEl.paused
       ) {
-        t = clip.start + activeVideoEl.currentTime
+        t = clip.start + activeVideoEl.currentTime / (activeVideoEl.playbackRate || 1)
       }
       const range = this.playRange
       if (t >= range.end) {
@@ -91,9 +91,7 @@ export const playerActions = {
       audioTrackVisible: this.audioTrackVisible,
       audioOffsetSeconds: this.audioOffsetSeconds,
     }
-    await api.updateTask(this.activeTaskId, {
-      storyboard_config: this.activeStoryboardConfig,
-    })
+    await api.saveAudioTrack(this.activeTaskId, this.audioTrackVisible, this.audioOffsetSeconds)
   },
 
   clampCurrentTime() {

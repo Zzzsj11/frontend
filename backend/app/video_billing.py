@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import GenerationJobModel, TokenUsageModel, VideoBillingRecordModel, VideoPricingRuleModel
@@ -126,6 +126,11 @@ async def reconcile_video_job(
         return None
     record = existing_record
     if not preloaded:
+        if db.get_bind().dialect.name == "sqlite":
+            # SQLite lacks row locks. Reserve the writer before reading a possibly absent bill.
+            await db.execute(text("UPDATE video_billing_records SET id=id WHERE 0"))
+        else:
+            await db.execute(select(GenerationJobModel.id).where(GenerationJobModel.id == job.id).with_for_update())
         record = (await db.execute(select(VideoBillingRecordModel).where(VideoBillingRecordModel.generation_job_id == job.id))).scalar_one_or_none()
         usage = (
             await db.execute(select(TokenUsageModel).where(TokenUsageModel.generation_job_id == job.id).order_by(TokenUsageModel.created_at.desc()).limit(1))
@@ -251,7 +256,9 @@ async def reconcile_video_billing(
         query = query.where(GenerationJobModel.id.in_(job_ids))
     if after_id:
         query = query.where(GenerationJobModel.id > after_id)
-    query = query.order_by(GenerationJobModel.id)
+    if db.get_bind().dialect.name == "sqlite":
+        await db.execute(text("UPDATE video_billing_records SET id=id WHERE 0"))
+    query = query.order_by(GenerationJobModel.id).with_for_update()
     if limit:
         query = query.limit(limit)
     jobs = list((await db.execute(query)).scalars())

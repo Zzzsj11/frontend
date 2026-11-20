@@ -36,7 +36,13 @@ const syncVideo = (force = false) => {
   if (!video) return
   const clip = store.currentClip
   if (clip) {
-    const offset = Math.max(0, store.currentTime - clip.start)
+    const timed = store.activeStoryboardType === 'ass' && store.projectAudio
+    const rate =
+      timed && video.duration > 0 && Number.isFinite(video.duration) && clip.duration > 0
+        ? Math.max(2 / 3, Math.min(1, video.duration / clip.duration))
+        : 1
+    video.playbackRate = rate
+    const offset = Math.max(0, store.currentTime - clip.start) * rate
     if (Math.abs(video.currentTime - offset) > 0.15) {
       const now = performance.now()
       // 拖动中连续 seek 会触发解码风暴：~120ms 节流；松手（force）或正常播放立即对齐
@@ -67,7 +73,7 @@ watch(
 )
 
 watch(
-  () => [store.isPlaying, currentVideoUrl.value] as const,
+  () => [store.isPlaying, store.currentClip?.lineId, currentVideoUrl.value] as const,
   () => syncVideo(),
   { flush: 'post' },
 )

@@ -62,3 +62,5 @@
 - 实际使用前管理员需填写并发布各模型/生成方式费率；没有有效规则的受控 Key 不会进入付费调用。未取得必要用量的任务显示待核账并保留预占。
 
 证据：`.runtime/portal-browser.json`、`.runtime/postgres-wallet-validation.json`；日志 `/tmp/portal-check.log`、`/tmp/portal-browser.log`、`/tmp/portal-postgres.log`、`/tmp/portal-mv-preflight.log`、`/tmp/portal-docker-build.log`。生产 MV 流量仍未切换。
+
+网关领取、钱包并发及账号共享额度可在项目根目录执行 `python3 scripts/local_runtime.py gateway-postgres`。运行器创建独占 PostgreSQL 与临时结果目录，完成后自动清理。验证使用合成账户和工单，供应商调用数为零。

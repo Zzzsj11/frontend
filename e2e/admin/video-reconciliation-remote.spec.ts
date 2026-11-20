@@ -26,9 +26,9 @@ test('test server: original-video recovery and duplicate-submit guard', async ({
   await expect(page).toHaveURL(/projects/)
   await page.getByText('待人工核对验收', { exact: true }).click()
   if (process.env.RECONCILE_PHASE === 'waiting') {
-    await expect(page.getByText(/正在自动核对并恢复原视频/)).toBeVisible()
+    await expect(page.getByText(/正在查询原视频工单/)).toBeVisible()
     await page.reload()
-    await expect(page.getByText(/正在自动核对并恢复原视频/)).toBeVisible()
+    await expect(page.getByText(/正在查询原视频工单/)).toBeVisible()
     for (let i = 0; i < 3; i++) {
       const retry = await request.post('/api/generations/videos', {
         headers: auth,

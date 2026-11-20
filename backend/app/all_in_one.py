@@ -180,12 +180,18 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
                 await jobs.record_provider_response(job, "submission", {"requestId": request_id, "jobId": task_id, "usage": usage})
                 item = next(iter(body.get("data") or []), {})
                 owner = f"users/{job.user_id}/generated/images"
-                if item.get("url"):
-                    original, thumbnail = await import_remote_image(item["url"], owner)
-                elif item.get("b64_json"):
-                    original, thumbnail = await put_image_with_thumbnail(safe_key(owner, f"{job.id}.png"), base64.b64decode(item["b64_json"], validate=True), "image/png")
-                else:
-                    raise ProviderSubmissionUncertainError("图片响应缺少 URL 或 Base64 数据，请核查原请求")
+                try:
+                    if item.get("url"):
+                        original, thumbnail = await import_remote_image(item["url"], owner)
+                    elif item.get("b64_json"):
+                        original, thumbnail = await put_image_with_thumbnail(safe_key(owner, f"{job.id}.png"), base64.b64decode(item["b64_json"], validate=True), "image/png")
+                    else:
+                        raise ProviderSubmissionUncertainError("图片响应缺少 URL 或 Base64 数据，请核查原请求")
+                except Exception as exc:
+                    error = ProviderSubmissionUncertainError("平台图片已返回，归档未完成，请核查原任务")
+                    error.requires_reconciliation = True
+                    error.usage, error.provider, error.request_id = usage, PROVIDER, task_id or request_id
+                    raise error from exc
                 await record_outcome(job, succeeded=True)
                 return {"provider": PROVIDER, "providerTaskId": task_id or request_id, "model": request.model, "urls": [original], "thumbnailUrls": [thumbnail], "usage": usage}
             await jobs.record_provider_response(job, "submission", body)

@@ -3,7 +3,11 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { getReleaseInfo, type ReleaseInfo } from '../api/release'
 import { formatChinaDateTime } from '../utils/dateTime'
 
-const props = defineProps<{ currentVersion?: string; checkIntervalMs?: number }>()
+const props = defineProps<{
+  fullDate?: boolean
+  currentVersion?: string
+  checkIntervalMs?: number
+}>()
 
 const DEFAULT_CHECK_INTERVAL_MS = 90_000
 const buildVersion = String(import.meta.env.VITE_RELEASE_VERSION || 'development').trim()
@@ -25,6 +29,7 @@ const shortVersion = (version: string) => version.replace(/^git-/, '').slice(0, 
 const completedAt = computed(() => {
   if (!release.value?.deployedAt)
     return localVersion.value === 'development' ? '本地' : shortVersion(localVersion.value)
+  if (props.fullDate) return formatChinaDateTime(release.value.deployedAt)
   return new Intl.DateTimeFormat('zh-CN', {
     timeZone: 'Asia/Shanghai',
     month: '2-digit',

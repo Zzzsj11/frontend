@@ -7,7 +7,7 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     environment: 'jsdom',
     // 控制组件库 DOM 测试并行度，避免多进程争用导致虚假的交互超时。
-    maxWorkers: 4,
+    maxWorkers: 2,
     setupFiles: ['./tests/setup.ts'],
     restoreMocks: true,
   },

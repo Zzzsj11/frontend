@@ -18,18 +18,24 @@ from .token_usage import add_token_usage
 logger = logging.getLogger(__name__)
 
 
-def settled(bill):
-    if not isinstance(bill, dict) or bill.get("status") != "settled":
+def settled(bill, *, allow_refund=False):
+    if not isinstance(bill, dict) or bill.get("status") not in ({"settled", "refunded"} if allow_refund else {"settled"}):
         return False
     try:
         points = Decimal(str(bill.get("points")))
-        return points.is_finite() and points >= 0
+        return points.is_finite() and points >= 0 and (bill["status"] != "refunded" or points == 0)
     except InvalidOperation:
         return False
 
 
 def eligible():
-    return (Job.kind == "image", Job.provider == "all-in-one", Job.status == "succeeded", Job.deleted_at.is_(None), Job.provider_task_id.is_not(None), Job.provider_task_id != "")
+    return (
+        Job.kind == "image",
+        Job.provider == "all-in-one",
+        or_(Job.status == "succeeded", (Job.status == "failed") & (Job.phase == "manual_review")),
+        Job.provider_task_id.is_not(None),
+        Job.provider_task_id != "",
+    )
 
 
 async def refresh_image_bill(db, job):

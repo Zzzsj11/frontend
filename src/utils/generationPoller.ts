@@ -11,7 +11,7 @@
  *   旧任务的轮询立即停止（后端任务仍在跑，资产落库；切回时由 resumeActiveGenerations 恢复）；
  * - taskWatchers 同时管理 SSE 长连接（大纲/素材导出）与脚本轮询的 AbortController。
  */
-import { apiRequest } from '../api/client'
+import { apiRequest, currentSession } from '../api/client'
 import { ApiError } from '../errorBus'
 
 /** 轮询被主动取消（切换子项目）时抛出：调用方静默处理，不弹错误、不标失败 */
@@ -47,8 +47,9 @@ interface WatchEntry<T> {
   reject: (error: unknown) => void
   failureMessage: string
   timeoutMessage: string
-  /** 是否已至少查询过一次（新注册的任务需要尽快首查，不等待完整周期间隔） */
-  polled: boolean
+  /** 连续查询失败次数决定退避时间。 */
+  failures: number
+  nextPollAt: number
   onUpdate?: (snapshot: GenerationJobSnapshot) => void
 }
 
@@ -90,11 +91,11 @@ async function fetchBatchSnapshots(
         )
         .map((item) => item.id)
       if (terminalIds.length) {
-        await apiRequest('/generations/observed', {
+        void apiRequest('/generations/observed', {
           method: 'POST',
           headers: { 'X-Polling': '1' },
           body: JSON.stringify({ ids: terminalIds }),
-          signal,
+          signal: AbortSignal.timeout(5000),
         }).catch(() => undefined)
       }
       return response
@@ -111,11 +112,16 @@ async function fetchBatchSnapshots(
 
 function settleEntry(entry: WatchEntry<unknown>, job: GenerationJobSnapshot): boolean {
   if (job.phase === 'auto_reconciling') entry.deadline = Date.now() + 660_000
-  entry.polled = true
+  entry.failures = 0
+  entry.nextPollAt = Date.now() + POLL_INTERVAL_MS
   entry.onUpdate?.(job)
   const status = (job.status ?? '').toLowerCase()
   if (status === 'succeeded') {
-    entry.resolve(entry.select(job))
+    try {
+      entry.resolve(entry.select(job))
+    } catch (error) {
+      entry.reject(error)
+    }
     return true
   }
   if (status === 'failed' && job.phase === 'manual_review') {
@@ -141,15 +147,22 @@ async function tick() {
   try {
     const current = [...entries.values()]
     const active: WatchEntry<unknown>[] = []
+    const now = Date.now()
     for (const entry of current) {
+      // 合并同一调度窗口注册的任务；限流或出错后的等待必须严格到期。
+      const dueThrough = entry.failures ? now : now + FIRST_POLL_DELAY_MS
+      if (!entry.signal?.aborted && entry.nextPollAt > dueThrough) continue
       if (!entries.delete(entry.watchKey)) continue
       if (entry.signal?.aborted) {
         entry.reject(new PollingCancelledError())
+      } else if (entry.failures && Date.now() >= entry.deadline) {
+        entry.reject(new GenerationObservationTimeout(entry.timeoutMessage))
       } else active.push(entry)
     }
     for (let offset = 0; offset < active.length; offset += 500) {
       const batch = active.slice(offset, offset + 500)
       const batchController = new AbortController()
+      const timeout = window.setTimeout(() => batchController.abort(), 12_000)
       const abortBatchWhenUnused = () => {
         if (batch.every((entry) => entry.signal?.aborted)) batchController.abort()
       }
@@ -184,10 +197,22 @@ async function tick() {
             entry.onUpdate?.({ id: entry.id, status: 'running', phase: 'reconciling' })
             if (Date.now() >= entry.deadline)
               entry.reject(new GenerationObservationTimeout(entry.timeoutMessage))
-            else entries.set(entry.watchKey, entry)
+            else {
+              const backoff = Math.min(
+                30_000,
+                POLL_INTERVAL_MS * 2 ** Math.min(entry.failures++, 4),
+              )
+              const retryAfter = error instanceof ApiError ? (error.retryAfterMs ?? 0) : 0
+              entry.nextPollAt = Math.min(
+                entry.deadline,
+                Date.now() + Math.max(backoff, retryAfter),
+              )
+              entries.set(entry.watchKey, entry)
+            }
           } else entry.reject(error)
         }
       } finally {
+        window.clearTimeout(timeout)
         for (const entry of batch) entry.signal?.removeEventListener('abort', abortBatchWhenUnused)
       }
     }
@@ -200,18 +225,19 @@ async function tick() {
 
 function scheduleNext() {
   if (timer !== null || ticking || entries.size === 0) return
-  const hasFresh = [...entries.values()].some((entry) => !entry.polled)
-  timer = window.setTimeout(
-    tick,
-    document.hidden ? 15_000 : hasFresh ? FIRST_POLL_DELAY_MS : POLL_INTERVAL_MS,
-  )
+  const next = Math.min(...Array.from(entries.values(), (entry) => entry.nextPollAt))
+  timer = window.setTimeout(tick, Math.max(document.hidden ? 15_000 : 0, next - Date.now()))
 }
 
 // 后台标签页降低查询频率，回到前台立即同步；后端任务不受影响。
 document.addEventListener('visibilitychange', () => {
   if (document.hidden || ticking || entries.size === 0) return
   if (timer !== null) window.clearTimeout(timer)
-  timer = window.setTimeout(tick, 0)
+  for (const entry of entries.values()) {
+    if (!entry.failures) entry.nextPollAt = Date.now()
+  }
+  timer = null
+  scheduleNext()
 })
 
 /**
@@ -233,13 +259,14 @@ export function watchGenerationJob<T>(
     watchKey: Symbol(jobId),
     id: jobId,
     deadline: Date.now() + (options.timeoutMs ?? 660_000),
-    signal: options.signal,
+    signal: options.signal ? AbortSignal.any([currentSession(), options.signal]) : currentSession(),
     select: options.select,
     resolve: undefined as never,
     reject: undefined as never,
     failureMessage: options.failureMessage ?? '生成失败',
     timeoutMessage: options.timeoutMessage ?? '生成超时，请稍后重试',
-    polled: false,
+    failures: 0,
+    nextPollAt: Date.now() + FIRST_POLL_DELAY_MS,
     onUpdate: options.onUpdate,
   }
   const promise = new Promise<T>((resolve, reject) => {
@@ -251,6 +278,8 @@ export function watchGenerationJob<T>(
     return promise
   }
   entries.set(entry.watchKey, entry as WatchEntry<unknown>)
+  if (timer !== null && !ticking) window.clearTimeout(timer)
+  if (!ticking) timer = null
   scheduleNext()
   return promise
 }

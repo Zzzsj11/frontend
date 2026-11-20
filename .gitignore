@@ -19,6 +19,7 @@ backend/.env.chat
 e2e/.env
 backend/.provider_config.py
 backend/.runtime_secrets.env
+.env.single-platform-*.tmp
 backend/.postgres_password
 backend/data/
 __pycache__/

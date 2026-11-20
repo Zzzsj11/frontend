@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import GeneralStoryboardModal from '../../src/components/GeneralStoryboardModal.vue'
 import { DEFAULT_SHOT_OPTIONS, useProjectStore } from '../../src/stores/project'
+import * as models from '../../src/generationModels'
 import * as apiClient from '../../src/api/client'
 import * as confirmDialogModule from '../../src/composables/useConfirmDialog'
 
@@ -26,7 +27,8 @@ describe('general storyboard defaults', () => {
   })
 
   it('defaults the modal resolution select to 720p', async () => {
-    // loadGenerationModels 拉取失败会静默回退内置默认模型，无需 mock fetch
+    // 本用例验证弹窗默认值，直接保留内置目录，避免网络重试跨越测试结束边界。
+    vi.spyOn(models, 'loadGenerationModels').mockResolvedValue()
     const store = useProjectStore()
     // 模板里的 select 依赖 generalStoryboardOptions 渲染，直接注入最小选项集
     store.generalStoryboardOptions = {

@@ -4,7 +4,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import quote_plus
+from urllib.parse import quote
 
 from .generation_constraints import STORYBOARD_LINE_TIMEOUT_SECONDS
 
@@ -22,6 +22,8 @@ def _load_runtime_secrets() -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
+        if key.strip() in {"APP_ENV", "DEPLOYMENT_TIER", "TLS_DOMAIN"}:
+            continue  # Deployment identity comes from the orchestrator, independently of provider credentials.
         os.environ[key.strip()] = value.strip().strip('"').strip("'")
 
 
@@ -103,7 +105,7 @@ class Settings:
     port: int = int(os.getenv("APP_PORT", "8000"))
     cors_origins: tuple[str, ...] = tuple(value.strip() for value in os.getenv("APP_CORS_ORIGINS", "http://localhost:5173").split(",") if value.strip())
     database_url: str = os.getenv("DATABASE_URL") or (
-        f"postgresql+asyncpg://{quote_plus(os.getenv('POSTGRES_USER', 'mvagent'))}:{quote_plus(os.getenv('POSTGRES_PASSWORD', 'mvagent'))}@"
+        f"postgresql+asyncpg://{quote(os.getenv('POSTGRES_USER', 'mvagent'), safe='')}:{quote(os.getenv('POSTGRES_PASSWORD', 'mvagent'), safe='')}@"
         f"{os.getenv('POSTGRES_HOST', '127.0.0.1')}:{os.getenv('POSTGRES_PORT', '5433')}/{os.getenv('POSTGRES_DB', 'mvagent')}"
     )
     redis_url: str = os.getenv("REDIS_URL", "redis://127.0.0.1:6380/0")
@@ -142,6 +144,8 @@ class Settings:
     export_upload_concurrency: int = max(1, min(8, int(os.getenv("EXPORT_UPLOAD_CONCURRENCY", "4"))))
     # TOS SDK 单分片请求默认约30秒超时；实测弱上传链路下16 MiB会在99%后失败。
     # 5 MiB让单分片保持在超时窗内，同时由task_num维持总体吞吐。
+    export_temp_limit_mb: int = max(1, int(os.getenv("EXPORT_TEMP_LIMIT_MB", "16384")))
+    export_temp_reserve_mb: int = max(1, int(os.getenv("EXPORT_TEMP_RESERVE_MB", "1024")))
     export_upload_part_size_mb: int = max(5, min(64, int(os.getenv("EXPORT_UPLOAD_PART_SIZE_MB", "5"))))
     tos_request_timeout_seconds: int = max(30, min(600, int(os.getenv("TOS_REQUEST_TIMEOUT_SECONDS", "180"))))
     tos_socket_timeout_seconds: int = max(30, min(600, int(os.getenv("TOS_SOCKET_TIMEOUT_SECONDS", "180"))))
@@ -232,6 +236,15 @@ def validate_runtime_security() -> None:
     if "*" in settings.cors_origins:
         raise RuntimeError("启用凭证时 APP_CORS_ORIGINS 禁止使用通配符")
     if settings.app_env == "production":
+        tier = os.environ.get("DEPLOYMENT_TIER")
+        domains = {"production": ("mv.epaipix.com", "mg.epaipix.com"), "test": ("mv-test.epaipix.com", "mg-test.epaipix.com")}
+        if tier not in domains:
+            raise RuntimeError("服务器必须明确配置 DEPLOYMENT_TIER")
+        domain, platform = domains[tier]
+        if os.environ.get("TLS_DOMAIN") != domain or settings.all_in_one_base_url != f"https://{platform}" or settings.llm_base_url != f"https://{platform}/v1":
+            raise RuntimeError("应用域名或平台 HTTPS 地址与 DEPLOYMENT_TIER 不匹配")
+        if (settings.tos_reference_prefix, settings.tos_video_prefix) != (f"mv/{tier}/references", f"mv/{tier}/videos"):
+            raise RuntimeError("媒体存储目录与 DEPLOYMENT_TIER 不匹配")
         if not settings.refresh_cookie_secure:
             raise RuntimeError("生产环境必须启用 HTTPS 和 REFRESH_COOKIE_SECURE=true")
         if settings.llm_channel != "all-in-one" or not all(model.endswith("-all-in-one") for model in (settings.llm_model, settings.general_outline_llm_model)):

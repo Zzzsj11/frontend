@@ -13,9 +13,14 @@ from typing import Awaitable, Callable, Protocol
 from urllib.parse import quote, unquote, urljoin, urlparse
 
 import httpx
+from anyio import CapacityLimiter, to_thread
 from PIL import Image, ImageOps
 
 from .config import settings
+
+_IMAGE_WORKERS = CapacityLimiter(2)
+MAX_IMAGE_BYTES = 32 * 1024**2
+MAX_IMAGE_PIXELS = 40_000_000
 
 
 class Storage(Protocol):
@@ -44,14 +49,18 @@ def safe_key(category: str, filename: str) -> str:
     return f"{clean_category}/{uuid.uuid4().hex[:12]}-{clean_name}"
 
 
-def is_tos_url(url: str) -> bool:
-    host = (urlparse(url).hostname or "").lower()
+def is_platform_storage_host(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
     allowed = {settings.tos_public_domain.lower()} if settings.tos_public_domain else set()
     endpoint = settings.tos_endpoint.replace("https://", "").replace("http://", "").strip("/").lower()
     for bucket in (settings.tos_reference_bucket, settings.tos_video_bucket):
         if bucket and endpoint:
             allowed.add(f"{bucket}.{endpoint}")
-    return urlparse(url).scheme == "https" and host in allowed
+    return host in allowed
+
+
+def is_tos_url(url: str) -> bool:
+    return urlparse(url).scheme == "https" and is_platform_storage_host(url)
 
 
 def is_user_owned_tos_url(url: str, user_id: str) -> bool:
@@ -182,19 +191,44 @@ def get_storage() -> Storage:
     return TosStorage()
 
 
-async def import_remote(url: str, category: str, filename: str | None = None) -> str:
+async def import_remote(
+    url: str, category: str, filename: str | None = None, *, validate_media: bool = False, authorize_source: Callable[[str], Awaitable[None]] | None = None
+) -> str:
     with tempfile.TemporaryDirectory(prefix="mvagent-import-") as temp_dir:
         target = Path(temp_dir) / "remote.bin"
         response_url, content_type, _size = await download_public_url_to_path(url, target)
+        if authorize_source:
+            await authorize_source(response_url)
         guessed = filename or Path(httpx.URL(response_url).path).name or "asset.bin"
         if "." not in guessed:
             guessed += mimetypes.guess_extension(content_type) or ""
-        return await get_storage().put_file(safe_key(category, guessed), target, content_type)
+        key = safe_key(category, guessed)
+        if validate_media:
+            from .upload_validation import ALLOWED_UPLOAD_TYPES, validate_av_path
+
+            suffix = Path(guessed).suffix.lower()
+            if suffix not in ALLOWED_UPLOAD_TYPES or content_type not in ALLOWED_UPLOAD_TYPES[suffix]:
+                raise ValueError("文件扩展名与受支持的媒体格式不符")
+            if content_type.startswith("image/"):
+                if _size > MAX_IMAGE_BYTES:
+                    raise ValueError("图片文件过大")
+                thumbnail = await image_thumbnail(target, content_type)
+                storage = get_storage()
+                url = await storage.put_file(key, target, content_type)
+                await storage.put_bytes(f"{key.rsplit('.', 1)[0]}-thumbnail.jpg", thumbnail, "image/jpeg")
+                return url
+            await validate_av_path(target, suffix, content_type)
+        return await get_storage().put_file(key, target, content_type)
 
 
-def make_image_thumbnail(content: bytes, max_size: tuple[int, int] = (640, 640)) -> bytes:
+def make_image_thumbnail(content: bytes | Path, max_size: tuple[int, int] = (640, 640), expected_type: str | None = None) -> bytes:
     """Create a lightweight JPEG preview while preserving the complete image aspect ratio."""
-    with Image.open(io.BytesIO(content)) as source:
+    if isinstance(content, bytes) and len(content) > MAX_IMAGE_BYTES:
+        raise ValueError("图片文件过大")
+    with Image.open(io.BytesIO(content) if isinstance(content, bytes) else content) as source:
+        if source.width * source.height > MAX_IMAGE_PIXELS or (expected_type and Image.MIME.get(source.format) != expected_type):
+            raise ValueError("图片尺寸超限或格式与声明不一致")
+        source.thumbnail(max_size, Image.Resampling.LANCZOS)
         image = ImageOps.exif_transpose(source).convert("RGB")
         image.thumbnail(max_size, Image.Resampling.LANCZOS)
         output = io.BytesIO()
@@ -202,18 +236,32 @@ def make_image_thumbnail(content: bytes, max_size: tuple[int, int] = (640, 640))
         return output.getvalue()
 
 
+async def image_thumbnail(content: bytes | Path, content_type: str | None = None) -> bytes:
+    try:
+        return await to_thread.run_sync(make_image_thumbnail, content, (640, 640), content_type, limiter=_IMAGE_WORKERS)
+    except (Image.DecompressionBombError, OSError) as exc:
+        raise ValueError("图片文件无法解析或尺寸过大") from exc
+
+
 async def put_image_with_thumbnail(key: str, content: bytes, content_type: str | None = None) -> tuple[str, str]:
     storage = get_storage()
+    thumbnail = await image_thumbnail(content, content_type)
     original_url = await storage.put_bytes(key, content, content_type)
     thumbnail_key = f"{key.rsplit('.', 1)[0]}-thumbnail.jpg"
-    thumbnail_url = await storage.put_bytes(thumbnail_key, make_image_thumbnail(content), "image/jpeg")
+    thumbnail_url = await storage.put_bytes(thumbnail_key, thumbnail, "image/jpeg")
     return original_url, thumbnail_url
 
 
 async def import_remote_image(url: str, category: str, filename: str | None = None) -> tuple[str, str]:
-    response_url, content, content_type = await download_public_url(url)
-    guessed = filename or Path(httpx.URL(response_url).path).name or "image.png"
-    return await put_image_with_thumbnail(safe_key(category, guessed), content, content_type)
+    with tempfile.TemporaryDirectory(prefix="mv-image-") as directory:
+        target = Path(directory) / "image"
+        response_url, content_type, _ = await download_public_url_to_path(url, target, max_bytes=MAX_IMAGE_BYTES)
+        thumbnail = await image_thumbnail(target)
+        key = safe_key(category, filename or Path(httpx.URL(response_url).path).name or "image.png")
+        storage = get_storage()
+        original = await storage.put_file(key, target, content_type)
+        preview = await storage.put_bytes(f"{key.rsplit('.', 1)[0]}-thumbnail.jpg", thumbnail, "image/jpeg")
+        return original, preview
 
 
 _HTTP_PUBLIC_URL_ALLOWLIST = frozenset({"store.vod-qcloud.com"})

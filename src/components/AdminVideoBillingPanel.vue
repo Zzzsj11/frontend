@@ -62,7 +62,9 @@ const billingLabel = (value: string) =>
     pending: '待平台结算',
   })[value] || value
 
+let queryVersion = 0
 const load = async () => {
+  const version = ++queryVersion
   loading.value = true
   error.value = ''
   const query = new URLSearchParams({ limit: String(pageSize), offset: String(offset.value) })
@@ -71,11 +73,12 @@ const load = async () => {
   if (origin.value) query.set('origin', origin.value)
   if (keyword.value.trim()) query.set('q', keyword.value.trim())
   try {
-    data.value = await getVideoBilling(query)
+    const result = await getVideoBilling(query)
+    if (version === queryVersion) data.value = result
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : '加载失败'
+    if (version === queryVersion) error.value = cause instanceof Error ? cause.message : '加载失败'
   } finally {
-    loading.value = false
+    if (version === queryVersion) loading.value = false
   }
 }
 const search = () => {

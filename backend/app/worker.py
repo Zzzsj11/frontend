@@ -15,10 +15,10 @@ from .chat import chat_manager
 from .config import settings, validate_runtime_security
 from .database import close_database, init_database, session_factory
 from .domain import _run_material_export, run_storyboard_job
-from .jobs import Job, JobExpiredError, jobs
+from .jobs import Job, JobExpiredError, durable_pool_available, jobs
 from .models import GenerationJobModel, ProjectTaskModel, WorkerInstanceModel, utcnow
 from .providers import ProviderError, generate_image, generate_video, resume_generation, validate_media_job_source
-from .redis_store import acquire_execution_lease, close_redis, release_execution_lease, wait_for_worker_wakeup
+from .redis_store import ExecutionStoreUnavailable, acquire_execution_lease, close_redis, release_execution_lease, wait_for_worker_wakeup
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
 
 logger = logging.getLogger("mvagent.worker")
@@ -56,7 +56,7 @@ async def _claim(kinds: tuple[str, ...], providers: tuple[str, ...], worker_id: 
             .where(
                 GenerationJobModel.kind.in_(kinds),
                 GenerationJobModel.status == "queued",
-                GenerationJobModel.deleted_at.is_(None),
+                or_(GenerationJobModel.deleted_at.is_(None), GenerationJobModel.kind.in_(("image", "video")) & GenerationJobModel.provider_task_id.is_not(None)),
             )
             .order_by(GenerationJobModel.created_at)
             .with_for_update(skip_locked=True)
@@ -73,46 +73,61 @@ async def _claim(kinds: tuple[str, ...], providers: tuple[str, ...], worker_id: 
             )
             if rendering:
                 query = query.where(GenerationJobModel.kind != "mv_export")
-        rows = list((await session.execute(query)).scalars())
-        supported = [row for row in rows if not _reject_unsupported_media_job(row)]
-        candidates = [row for row in supported if not providers or str((row.request or {}).get("_provider") or "internal") in providers]
-        task_ids = {row.project_task_id for row in candidates if row.project_task_id}
-        active_by_task: dict[str, int] = {}
-        if task_ids:
-            active_by_task = dict(
-                (
-                    await session.execute(
-                        select(GenerationJobModel.project_task_id, func.count(GenerationJobModel.id))
-                        .where(
-                            GenerationJobModel.project_task_id.in_(task_ids),
-                            GenerationJobModel.status == "running",
-                            GenerationJobModel.deleted_at.is_(None),
-                        )
-                        .group_by(GenerationJobModel.project_task_id)
-                    )
-                ).all()
-            )
-        # Keep FIFO within a task, but distribute scarce worker slots across
-        # concurrently active subprojects.  A large batch can no longer occupy
-        # every media slot while another user's first image waits behind it.
-        lease = None
         unavailable = set()
-        for model in sorted(candidates, key=lambda row: _claim_priority(row, active_by_task)):
-            request = model.request or {}
-            pool = str(request.get("_executionPool") or "").strip()
-            limit = request.get("_executionConcurrency")
-            if not pool or limit is None:
-                break
-            if pool in unavailable:
+        while True:
+            rows = list((await session.execute(query)).scalars())
+            supported = [row for row in rows if not _reject_unsupported_media_job(row)]
+            candidates = [row for row in supported if not providers or str((row.request or {}).get("_provider") or "internal") in providers]
+            task_ids = {row.project_task_id for row in candidates if row.project_task_id}
+            active_by_task: dict[str, int] = {}
+            if task_ids:
+                active_by_task = dict(
+                    (
+                        await session.execute(
+                            select(GenerationJobModel.project_task_id, func.count(GenerationJobModel.id))
+                            .where(
+                                GenerationJobModel.project_task_id.in_(task_ids),
+                                GenerationJobModel.status == "running",
+                                GenerationJobModel.deleted_at.is_(None),
+                            )
+                            .group_by(GenerationJobModel.project_task_id)
+                        )
+                    ).all()
+                )
+            # Keep FIFO within a task, but distribute scarce worker slots across
+            # concurrently active subprojects.  A large batch can no longer occupy
+            # every media slot while another user's first image waits behind it.
+            lease = None
+            for model in sorted(candidates, key=lambda row: _claim_priority(row, active_by_task)):
+                request = model.request or {}
+                pool = str(request.get("_executionPool") or "").strip()
+                limit = request.get("_executionConcurrency")
+                if not pool or limit is None:
+                    break
+                if pool in unavailable:
+                    continue
+                if session.get_bind().dialect.name == "postgresql":
+                    if await durable_pool_available(session, pool, int(limit), model.id):
+                        break
+                    unavailable.add(pool)
+                    continue
+                try:
+                    token = await acquire_execution_lease(pool, max(1, min(1000, int(limit))), max(60, settings.worker_stale_seconds))
+                except ExecutionStoreUnavailable:
+                    unavailable.add(pool)
+                    continue
+                if token:
+                    lease = (pool, token)
+                    break
+                unavailable.add(pool)
+            else:
+                await session.commit()
+                if len(rows) < 100 or not unavailable:
+                    return None
+                # Skip already-tested saturated pools before reading another candidate page.
+                query = query.where(func.coalesce(GenerationJobModel.request["_executionPool"].as_string(), "").not_in(unavailable))
                 continue
-            token = await acquire_execution_lease(pool, max(1, min(1000, int(limit))), max(60, settings.worker_stale_seconds))
-            if token:
-                lease = (pool, token)
-                break
-            unavailable.add(pool)
-        else:
-            await session.commit()
-            return None
+            break
         now = utcnow()
         model.status = "running"
         model.phase = "claimed"
@@ -127,6 +142,7 @@ async def _claim(kinds: tuple[str, ...], providers: tuple[str, ...], worker_id: 
                 await release_execution_lease(*lease)
             raise
         job = _job_from_model(model)
+        job.database_pool_reserved = session.get_bind().dialect.name == "postgresql"
         job.execution_lease = lease
         return job
 
@@ -150,7 +166,7 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
                             GenerationJobModel.lease_expires_at < utcnow(),
                             GenerationJobModel.lease_expires_at.is_(None) & (GenerationJobModel.updated_at < threshold),
                         ),
-                        GenerationJobModel.deleted_at.is_(None),
+                        or_(GenerationJobModel.deleted_at.is_(None), GenerationJobModel.kind.in_(("image", "video"))),
                     )
                     .with_for_update(skip_locked=True)
                 )
@@ -163,7 +179,22 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
             provider = str((model.request or {}).get("_provider") or "internal")
             if providers and provider not in providers:
                 continue
-            if model.kind in REPLAYABLE_INTERNAL_KINDS and model.attempt < MAX_INTERNAL_ATTEMPTS:
+            if model.kind in {"export", "mv_export"}:
+                from .models import MaterialExportModel
+
+                delivered = await session.get(MaterialExportModel, (model.request or {}).get("export_id", ""), with_for_update=True)
+                if delivered and delivered.deleted_at is None and delivered.generation_job_id == model.id and delivered.status == "ready":
+                    model.status, model.phase, model.progress = "succeeded", "succeeded", 100
+                    model.result = {"exportId": delivered.id, "archiveUrl": delivered.archive_url, "archiveSize": delivered.archive_size}
+                    model.finished_at = delivered.finished_at or utcnow()
+                    model.worker_id = model.heartbeat_at = model.lease_expires_at = None
+                    continue
+            if model.deleted_at is not None and not model.provider_task_id:
+                model.status = "cancelled"
+                model.phase = "manual_review" if model.phase == "submitting_provider" else "cancelled"
+                model.finished_at = utcnow()
+                failed += 1
+            elif model.kind in REPLAYABLE_INTERNAL_KINDS and model.attempt < MAX_INTERNAL_ATTEMPTS:
                 model.status = "queued"
                 model.phase = "queued"
                 model.started_at = None
@@ -204,7 +235,27 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
                     else "Worker中断且供应商任务ID尚未落库，请重新提交"
                 )
                 model.finished_at = utcnow()
-                if model.kind == "storyboard_line" and model.storyboard_line_id:
+                if model.kind == "chat" and (model.request or {}).get("session_id"):
+                    from .models import ChatSessionModel
+
+                    chat_id = model.request["session_id"]
+                    chat = await session.get(ChatSessionModel, chat_id, with_for_update=True)
+                    if chat and chat.user_id == model.user_id and chat.status == "running":
+                        newer = await session.scalar(
+                            select(GenerationJobModel.id)
+                            .where(
+                                GenerationJobModel.kind == "chat",
+                                GenerationJobModel.user_id == model.user_id,
+                                GenerationJobModel.request["session_id"].as_string() == chat_id,
+                                GenerationJobModel.created_at > model.created_at,
+                                GenerationJobModel.status.in_(("queued", "running")),
+                                GenerationJobModel.deleted_at.is_(None),
+                            )
+                            .limit(1)
+                        )
+                        if not newer:
+                            chat.status = "idle"
+                elif model.kind == "storyboard_line" and model.storyboard_line_id:
                     from .models import StoryboardLineModel
 
                     line = await session.get(StoryboardLineModel, model.storyboard_line_id)
@@ -215,7 +266,7 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...]) -> 
                     from .models import MaterialExportModel
 
                     export = await session.get(MaterialExportModel, (model.request or {}).get("export_id", ""))
-                    if export and export.deleted_at is None:
+                    if export and export.deleted_at is None and export.status != "ready":
                         export.status, export.stage, export.error = "failed", "合成中断，请重试", model.error
                         export.finished_at = utcnow()
                 elif model.kind == "prompt_optimization":
@@ -345,16 +396,6 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
                     await asyncio.sleep(heartbeat_interval)
                     try:
                         await jobs.heartbeat(job)
-                        if job.kind in REPLAYABLE_INTERNAL_KINDS - {"export", "mv_export"} and job.project_task_id:
-                            async with session_factory() as session:
-                                task = await session.get(ProjectTaskModel, job.project_task_id)
-                                if task and task.deleted_at is None:
-                                    config = dict(task.storyboard_config or {})
-                                    progress = dict(config.get("outlineProgress") or {})
-                                    progress.update(heartbeatAt=utcnow().isoformat(), jobId=job.id)
-                                    config["outlineProgress"] = progress
-                                    task.storyboard_config = config
-                                    await session.commit()
                     except JobExpiredError:
                         execution_task.cancel()
                         return

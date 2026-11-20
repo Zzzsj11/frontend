@@ -1,16 +1,21 @@
 # 回滚旧镜像也必须跳过其无条件 Alembic 入口，数据库保留兼容的扩展迁移。
 services:
   backend:
+    # The previous image can predate the proxy middleware. Reuse the exact
+    # launcher from the release checkout, even for that image.
+    configs:
+      - source: rollback_proxy_entrypoint
+        target: /srv/mvagent/mv_rollback_proxy.py
     entrypoint:
       [
         'uvicorn',
-        'app.main:app',
+        'mv_rollback_proxy:create_app',
+        '--factory',
         '--host',
         '0.0.0.0',
         '--port',
         '8000',
-        '--proxy-headers',
-        '--forwarded-allow-ips=*',
+        '--no-proxy-headers',
       ]
   worker-media:
     healthcheck: &rollback-worker-health
@@ -29,3 +34,7 @@ services:
     healthcheck: *rollback-worker-health
   worker-storyboard:
     healthcheck: *rollback-worker-health
+
+configs:
+  rollback_proxy_entrypoint:
+    file: ./backend/app/proxy_entrypoint.py

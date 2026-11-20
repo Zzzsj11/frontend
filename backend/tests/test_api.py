@@ -65,13 +65,13 @@ def test_login_rate_limit_is_shared_and_returns_retry_after(client) -> None:
 
     ip_key = hashlib.sha256(b"ip\0testclient").hexdigest()
     username_key = hashlib.sha256(b"username\0rate-limit-probe").hexdigest()
-    asyncio.run(redis.delete(f"auth:login:{ip_key}", f"auth:login:{username_key}"))
+    asyncio.run(redis.delete(f"auth:attempts:{ip_key}", f"auth:attempts:{username_key}"))
     for _ in range(8):
         assert client.post("/api/auth/login", json={"username": "rate-limit-probe", "password": "wrong-pass"}).status_code == 401
     blocked = client.post("/api/auth/login", json={"username": "rate-limit-probe", "password": "wrong-pass"})
     assert blocked.status_code == 429
     assert blocked.headers["Retry-After"] == "300"
-    asyncio.run(redis.delete(f"auth:login:{ip_key}", f"auth:login:{username_key}"))
+    asyncio.run(redis.delete(f"auth:attempts:{ip_key}", f"auth:attempts:{username_key}"))
 
 
 def test_upload_rejects_unsupported_or_mismatched_media(client) -> None:

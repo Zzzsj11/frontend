@@ -3,8 +3,11 @@
 import asyncio
 import hashlib
 import hmac
+import ipaddress
+import os
 import re
 import secrets
+import socket
 import uuid
 from datetime import timedelta, timezone
 from decimal import Decimal
@@ -57,36 +60,65 @@ def token_hash(value):
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-async def throttle(request, action):
-    peer = request.client.host if request.client else "unknown"
-    async with Session.begin() as db:
-        await lock(db)
-        count = await db.scalar(
-            select(func.count())
-            .select_from(Audit)
-            .where(Audit.action == action, Audit.target == peer, Audit.created_at > now() - timedelta(minutes=10))
-        )
-        if count >= (5 if action == "portal.register" else 20):
-            raise HTTPException(429, "尝试次数过多，请 10 分钟后重试")
-        db.add(Audit(id=uuid.uuid4().hex, actor="anonymous", action=action, target=peer, detail={}))
-
-
 @router.post("/register")
 async def register():
     raise HTTPException(403, "账号由管理员创建，请联系管理员")
 
 
+async def login_source(request):
+    peer = request.client.host if request.client else "unknown"
+    proxy = os.getenv("PORTAL_TRUSTED_PROXY_HOST")
+    forwarded = request.headers.get("x-real-ip")
+    if proxy and forwarded:
+        try:
+            address = str(ipaddress.ip_address(forwarded))
+            trusted = await asyncio.get_running_loop().getaddrinfo(proxy, None, type=socket.SOCK_STREAM)
+            if peer in {info[4][0] for info in trusted}:
+                return address
+        except (OSError, ValueError):
+            pass
+    return peer
+
+
+async def check_login_failures(db, username, peer):
+    recent = (
+        select(func.count())
+        .select_from(Audit)
+        .where(Audit.action == "portal.login.failed", Audit.created_at > now() - timedelta(minutes=10))
+    )
+    if await db.scalar(recent.where(Audit.actor == username)) >= 20 or await db.scalar(recent.where(Audit.target == peer)) >= 200:
+        raise HTTPException(429, "尝试次数过多，请 10 分钟后重试")
+
+
 @router.post("/login")
 async def login(body: Credentials, request: Request):
-    await throttle(request, "portal.login")
+    username = body.username.lower()
+    peer = await login_source(request)
+    async with Session() as db:
+        await check_login_failures(db, username, peer)
+        stored = await db.scalar(select(User.password_hash).where(User.username == username, User.deleted_at.is_(None)))
+    stored = stored or "00" * 16 + ":" + "00" * 64
+    candidate = await asyncio.to_thread(password_hash, body.password, stored.split(":")[0])
+    valid = hmac.compare_digest(stored, candidate)
     async with Session.begin() as db:
-        user = await db.scalar(select(User).where(User.username == body.username.lower(), User.deleted_at.is_(None)).with_for_update())
-        stored = user.password_hash if user else "00" * 16 + ":" + "00" * 64
-        candidate = await asyncio.to_thread(password_hash, body.password, stored.split(":")[0])
-        if not user or not user.enabled or not hmac.compare_digest(stored, candidate):
-            raise HTTPException(401, "邮箱或密码不正确")
-        token = secrets.token_urlsafe(40)
-        db.add(UserSession(id=uuid.uuid4().hex, user_id=user.id, token_hash=token_hash(token), expires_at=now() + timedelta(hours=8)))
+        if valid:
+            user = await db.scalar(
+                select(User)
+                .where(User.username == username, User.deleted_at.is_(None), User.enabled.is_(True), User.password_hash == stored)
+                .with_for_update()
+            )
+            valid = user is not None
+        if not valid:
+            await lock(db, "login-peer:" + peer)
+            await lock(db, "login-user:" + username)
+            await check_login_failures(db, username, peer)
+        if valid:
+            token = secrets.token_urlsafe(40)
+            db.add(UserSession(id=uuid.uuid4().hex, user_id=user.id, token_hash=token_hash(token), expires_at=now() + timedelta(hours=8)))
+        else:
+            db.add(Audit(id=uuid.uuid4().hex, actor=username, action="portal.login.failed", target=peer, detail={}))
+    if not valid:
+        raise HTTPException(401, "邮箱或密码不正确")
     return {"access_token": token, "expires_in": 28800, "user": {"id": user.id, "username": user.username}}
 
 
@@ -110,7 +142,16 @@ async def current_user(user=Depends(authenticated_user)):
 
 @router.post("/change-password", status_code=204)
 async def change_password(body: PasswordChange, request: Request, user=Depends(authenticated_user)):
-    await throttle(request, "portal.change_password")
+    async with Session.begin() as db:
+        await lock(db, "password-change:" + user.id)
+        count = await db.scalar(
+            select(func.count())
+            .select_from(Audit)
+            .where(Audit.action == "portal.change_password", Audit.target == user.id, Audit.created_at > now() - timedelta(minutes=10))
+        )
+        if count >= 20:
+            raise HTTPException(429, "尝试次数过多，请 10 分钟后重试")
+        db.add(Audit(id=uuid.uuid4().hex, actor=user.id, action="portal.change_password", target=user.id, detail={}))
     if body.new_password != body.confirmation:
         raise HTTPException(400, "两次输入的新密码不一致")
     if body.new_password == body.current_password:
@@ -156,7 +197,7 @@ async def me(user=Depends(authenticated_user)):
     if user.password_changed_at is None:
         return {"id": user.id, "username": user.username, "must_change_password": True, "keys": []}
     async with Session.begin() as db:
-        await lock(db)
+        await lock(db, "wallet:" + user.id)
         clients = (await db.scalars(select(Client).where(Client.user_id == user.id, Client.deleted_at.is_(None)))).all()
         accounts = [await account(db, c) for c in clients]
         owner = await db.get(User, user.id)
@@ -174,7 +215,7 @@ class KeyCreate(BaseModel):
 async def create_key(body: KeyCreate, user=Depends(current_user)):
     key = "ms_" + secrets.token_urlsafe(32)
     async with Session.begin() as db:
-        await lock(db)
+        await lock(db, "wallet:" + user.id)
         await ensure_key_slot(db, user.id)
         c = Client(
             id="client-" + uuid.uuid4().hex,
@@ -207,7 +248,7 @@ async def create_key(body: KeyCreate, user=Depends(current_user)):
 @router.post("/keys/{cid}/revoke", status_code=204)
 async def revoke_key(cid: str, user=Depends(current_user)):
     async with Session.begin() as db:
-        await lock(db)
+        await lock(db, "wallet:" + user.id)
         c = await db.get(Client, cid)
         if not c or c.deleted_at or c.user_id != user.id:
             raise HTTPException(404, "Key 不存在")
@@ -221,7 +262,7 @@ async def revoke_key(cid: str, user=Depends(current_user)):
 @router.delete("/keys/{cid}", status_code=204)
 async def delete_key(cid: str, user=Depends(current_user)):
     async with Session.begin() as db:
-        await lock(db)
+        await lock(db, "wallet:" + user.id)
         c = await db.get(Client, cid)
         if not c or c.deleted_at or c.user_id != user.id:
             raise HTTPException(404, "Key 不存在")
@@ -238,7 +279,7 @@ class KeyQuota(BaseModel):
 @router.post("/keys/{cid}/quota")
 async def key_quota(cid: str, body: KeyQuota, user=Depends(current_user)):
     async with Session.begin() as db:
-        await lock(db)
+        await lock(db, "wallet:" + user.id)
         c = await db.get(Client, cid)
         if not c or c.deleted_at or c.user_id != user.id:
             raise HTTPException(404, "Key 不存在")

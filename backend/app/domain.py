@@ -17,14 +17,17 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import case, func, or_, select, update
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from .agent_attribution import require_generation_attribution
-from .auth import CurrentUser, hash_password, revoke_all_refresh_tokens, user_public
+from .auth import CurrentUser, hash_password, password_work, revoke_all_refresh_tokens, stream_session_active, user_public
 from .config import settings
 from .database import database_session, session_factory
 from .error_logging import redact_error_text
+from .export_space import ExportSpace
+from .export_state import locked_export
 from .generation_constraints import OUTLINE_STALE_SECONDS
 from .generation_timing import generation_elapsed_seconds
 from .image_model_policy import validate_image_selection
@@ -59,6 +62,7 @@ from .models import (
 )
 from .rbac import attach_admin_access
 from .schemas import (
+    AudioTrackUpdate,
     CastUpdate,
     DigitalHumanCreate,
     DigitalHumanUpdate,
@@ -178,13 +182,13 @@ async def list_users(user: CurrentUser, limit: int = 100, db: AsyncSession = Db)
 async def create_user(payload: UserCreate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     require_admin(user)
     username = payload.username.strip().lower()
-    exists = (await db.execute(select(UserModel).where(UserModel.username == username, UserModel.deleted_at.is_(None)))).scalar_one_or_none()
+    exists = (await db.execute(select(UserModel).where(UserModel.username == username))).scalar_one_or_none()
     if exists:
         raise HTTPException(409, "用户名已存在")
     item = UserModel(
         id=uid("user"),
         username=username,
-        password_hash=hash_password(payload.password),
+        password_hash=await password_work(hash_password, payload.password),
         display_name=payload.display_name,
         role=payload.role,
         must_change_password=True,
@@ -193,7 +197,13 @@ async def create_user(payload: UserCreate, user: CurrentUser, db: AsyncSession =
         daily_video_limit=payload.daily_video_limit or settings.daily_video_limit,
     )
     db.add(item)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        if await db.scalar(select(UserModel.id).where(UserModel.username == username)):
+            raise HTTPException(409, "用户名已存在") from None
+        raise
     return user_public(item)
 
 
@@ -470,11 +480,15 @@ def project_audio_json(item: ProjectAudioAssetModel | None) -> dict | None:
 
 
 @router.get("/projects")
-async def list_projects(user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
+async def list_projects(user: CurrentUser, db: AsyncSession = Db, limit: int = 100, offset: int = 0) -> list[dict]:
     projects = list(
         (
             await db.execute(
-                select(ProjectModel).where(ProjectModel.user_id == user.id, ProjectModel.deleted_at.is_(None)).order_by(ProjectModel.sort_order, ProjectModel.updated_at.desc())
+                select(ProjectModel)
+                .where(ProjectModel.user_id == user.id, ProjectModel.deleted_at.is_(None))
+                .order_by(ProjectModel.sort_order, ProjectModel.updated_at.desc(), ProjectModel.id)
+                .limit(max(1, min(limit, 200)))
+                .offset(max(0, offset))
             )
         )
         .scalars()
@@ -486,6 +500,16 @@ async def list_projects(user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
         (
             await db.execute(
                 select(ProjectTaskModel)
+                .options(
+                    load_only(
+                        ProjectTaskModel.id,
+                        ProjectTaskModel.project_id,
+                        ProjectTaskModel.title,
+                        ProjectTaskModel.storyboard_type,
+                        ProjectTaskModel.status,
+                        ProjectTaskModel.updated_at,
+                    )
+                )
                 .where(ProjectTaskModel.project_id.in_([p.id for p in projects]), ProjectTaskModel.deleted_at.is_(None))
                 .order_by(ProjectTaskModel.sort_order, ProjectTaskModel.created_at)
             )
@@ -493,10 +517,19 @@ async def list_projects(user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
         .scalars()
         .all()
     )
-    by_project: dict[str, list[ProjectTaskModel]] = {}
+    by_project: dict[str, list[dict]] = {}
     for task in tasks:
-        by_project.setdefault(task.project_id, []).append(task)
-    return [project_json(project, by_project.get(project.id, [])) for project in projects]
+        by_project.setdefault(task.project_id, []).append(
+            {
+                "id": task.id,
+                "projectId": task.project_id,
+                "title": task.title,
+                "storyboardType": task.storyboard_type,
+                "status": task.status,
+                "updatedAt": task.updated_at.isoformat(),
+            }
+        )
+    return [{**project_json(project), "tasks": by_project.get(project.id, [])} for project in projects]
 
 
 class ReorderRequest(BaseModel):
@@ -903,25 +936,23 @@ async def get_task(task_id: str, user: CurrentUser, db: AsyncSession = Db, histo
         )
         for job in generation_jobs
     }
-    prompt_jobs = list(
-        (
-            await db.execute(
-                select(GenerationJobModel)
-                .where(
-                    GenerationJobModel.storyboard_line_id.in_(line_ids) if line_ids else False,
-                    GenerationJobModel.kind == "storyboard_line",
-                    GenerationJobModel.deleted_at.is_(None),
-                )
-                .order_by(GenerationJobModel.created_at.desc())
-            )
+    ranked = (
+        select(
+            GenerationJobModel.id,
+            func.row_number().over(partition_by=GenerationJobModel.storyboard_line_id, order_by=(GenerationJobModel.created_at.desc(), GenerationJobModel.id.desc())).label("rank"),
         )
-        .scalars()
-        .all()
+        .where(GenerationJobModel.storyboard_line_id.in_(line_ids), GenerationJobModel.kind == "storyboard_line", GenerationJobModel.deleted_at.is_(None))
+        .subquery()
     )
-    latest_prompt_job: dict[str, GenerationJobModel] = {}
-    for prompt_job in prompt_jobs:
-        if prompt_job.storyboard_line_id:
-            latest_prompt_job.setdefault(prompt_job.storyboard_line_id, prompt_job)
+    latest_rows = (
+        await db.scalars(
+            select(GenerationJobModel)
+            .join(ranked, ranked.c.id == GenerationJobModel.id)
+            .where(ranked.c.rank == 1)
+            .options(load_only(GenerationJobModel.id, GenerationJobModel.storyboard_line_id, GenerationJobModel.created_at, GenerationJobModel.finished_at))
+        )
+    ).all()
+    latest_prompt_job = {row.storyboard_line_id: row for row in latest_rows}
     project_audio = (
         await db.execute(
             select(ProjectAudioAssetModel).where(
@@ -959,10 +990,23 @@ async def get_task(task_id: str, user: CurrentUser, db: AsyncSession = Db, histo
     }
 
 
+@router.patch("/tasks/{task_id}/audio-track")
+async def update_audio_track(task_id: str, payload: AudioTrackUpdate, user: CurrentUser, db: AsyncSession = Db) -> dict:
+    task = await owned_task(db, user.id, task_id)
+    await db.refresh(task, with_for_update=True)
+    task.storyboard_config = {**(task.storyboard_config or {}), **payload.model_dump()}
+    await db.commit()
+    return payload.model_dump()
+
+
 @router.patch("/tasks/{task_id}")
 async def update_task(task_id: str, payload: TaskUpdate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     item = await owned_task(db, user.id, task_id)
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    changes = payload.model_dump(exclude_unset=True)
+    if "storyboard_config" in changes:
+        await db.refresh(item, with_for_update=True)
+        changes["storyboard_config"] = {**(item.storyboard_config or {}), **(changes["storyboard_config"] or {})}
+    for key, value in changes.items():
         setattr(item, key, value)
     await db.commit()
     await db.refresh(item)
@@ -1072,11 +1116,14 @@ async def _run_ass_outline_generation(
 
     async def on_progress(progress: dict) -> None:
         async with session_factory() as progress_session:
-            item = await progress_session.get(ProjectTaskModel, task_id)
+            item = await progress_session.get(ProjectTaskModel, task_id, with_for_update=True)
             if not item or item.deleted_at is not None:
                 return
             config = dict(item.storyboard_config or {})
-            config["outlineProgress"] = progress
+            active_id = (config.get("outlineProgress") or {}).get("jobId")
+            if job and active_id and active_id != job.id:
+                return
+            config["outlineProgress"] = {**progress, **({"jobId": job.id} if job else {})}
             item.storyboard_config = config
             await progress_session.commit()
         if job:
@@ -1088,6 +1135,7 @@ async def _run_ass_outline_generation(
         task = await session.get(ProjectTaskModel, task_id)
         if not task or task.deleted_at is not None:
             return
+        await session.commit()  # Release the checkout during model I/O.
         try:
             outline = await generate_ass_story_outline(
                 segments=segments,
@@ -1107,11 +1155,14 @@ async def _run_ass_outline_generation(
                 generation_job_id=job.id if job else None,
                 operation_suffix="_failed",
             )
+            await session.refresh(task, with_for_update=True)
             config = dict(task.storyboard_config or {})
             config["outlineProgress"] = {"phase": "error", "segmentsDone": 0, "segmentsTotal": 0, "error": f"ASS 分镜大纲生成失败：{exc}"[:300]}
             task.storyboard_config = config
             task.status = "outline_failed"
             await session.commit()
+            if getattr(exc, "usage_records", None):
+                exc.usage_recorded = True
             raise
         story_bible = await build_ass_story_bible(
             segments=segments,
@@ -1131,6 +1182,7 @@ async def _run_ass_outline_generation(
             .scalars()
             .all()
         )
+        await session.refresh(task, with_for_update=True)
         config = dict(task.storyboard_config or {})
         config["storyBible"] = story_bible
         config["outlineProtocolVersion"] = outline.get("protocolVersion", "v1")
@@ -1248,11 +1300,14 @@ async def _run_general_outline_generation(
 
     async def on_progress(progress: dict) -> None:
         async with session_factory() as progress_session:
-            item = await progress_session.get(ProjectTaskModel, task_id)
+            item = await progress_session.get(ProjectTaskModel, task_id, with_for_update=True)
             if not item or item.deleted_at is not None:
                 return
             config = dict(item.storyboard_config or {})
-            config["outlineProgress"] = progress
+            active_id = (config.get("outlineProgress") or {}).get("jobId")
+            if job and active_id and active_id != job.id:
+                return
+            config["outlineProgress"] = {**progress, **({"jobId": job.id} if job else {})}
             item.storyboard_config = config
             await progress_session.commit()
         if job:
@@ -1283,7 +1338,7 @@ async def _run_general_outline_generation(
                 raise ValueError("视频模型不可用，请重新选择模型")
             durations = exact_durations(config.get("total_duration", 0), total, video_model.capabilities or {})
             config["total_duration"] = sum(durations)
-            task.storyboard_config = config
+            await session.commit()  # Subsequent progress writes use short transactions.
             outline = await generate_general_story_outline(config=config, selected_humans=selected_humans, on_progress=on_progress)
         except Exception as exc:
             _persist_llm_calls(
@@ -1296,11 +1351,14 @@ async def _run_general_outline_generation(
                 generation_job_id=job.id if job else None,
                 operation_suffix="_failed",
             )
+            await session.refresh(task, with_for_update=True)
             failed_config = dict(task.storyboard_config or {})
             failed_config["outlineProgress"] = {"phase": "error", "shotsDone": 0, "shotsTotal": total, "error": f"通用分镜大纲生成失败：{exc}"[:300]}
             task.storyboard_config = failed_config
             task.status = "outline_failed"
             await session.commit()
+            if getattr(exc, "usage_records", None):
+                exc.usage_recorded = True
             raise
         for shot in outline["shots"]:
             composition = _general_character_composition(shot, config, selected_humans)
@@ -1318,7 +1376,9 @@ async def _run_general_outline_generation(
             .scalars()
             .all()
         )
+        await session.refresh(task, with_for_update=True)
         done_config = dict(task.storyboard_config or {})
+        done_config["total_duration"] = sum(durations)
         done_config["storyBible"] = story_bible
         done_config["outlineProtocolVersion"] = outline.get("protocolVersion", "v1")
         done_config.pop("outlineProgress", None)
@@ -1347,8 +1407,9 @@ async def _run_general_outline_generation(
 
 @router.post("/tasks/{task_id}/storyboard-outline/regenerate", status_code=202, dependencies=[Depends(require_generation_attribution)])
 async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
+    await db.scalar(select(UserModel.id).where(UserModel.id == user.id).with_for_update())
     task = await owned_task(db, user.id, task_id)
-    task = (await db.execute(select(ProjectTaskModel).where(ProjectTaskModel.id == task.id).with_for_update())).scalar_one()
+    task = (await db.execute(select(ProjectTaskModel).where(ProjectTaskModel.id == task.id).with_for_update().execution_options(populate_existing=True))).scalar_one()
     if task.storyboard_type not in ("ass", "general"):
         raise HTTPException(422, "该分镜类型不支持生成全局大纲")
     current_progress = (task.storyboard_config or {}).get("outlineProgress") or {}
@@ -1361,7 +1422,16 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
         if updated_at and updated_at.tzinfo is None:
             updated_at = updated_at.replace(tzinfo=utcnow().tzinfo)
         stale_seconds = (utcnow() - updated_at).total_seconds() if updated_at else 999999
-        if stale_seconds < OUTLINE_STALE_SECONDS:
+        if stale_seconds < OUTLINE_STALE_SECONDS or await db.scalar(
+            select(GenerationJobModel.id)
+            .where(
+                GenerationJobModel.project_task_id == task_id,
+                GenerationJobModel.kind.in_(("ass_outline", "general_outline")),
+                GenerationJobModel.status.in_(("queued", "running")),
+                GenerationJobModel.deleted_at.is_(None),
+            )
+            .limit(1)
+        ):
             raise HTTPException(409, "分镜大纲正在生成中，请等待本轮完成后再提交")
     cast_links = list(
         (await db.execute(select(ProjectCastModel).where(ProjectCastModel.project_task_id == task.id, ProjectCastModel.deleted_at.is_(None)).order_by(ProjectCastModel.sort_order)))
@@ -1394,7 +1464,7 @@ async def regenerate_storyboard_outline(task_id: str, user: CurrentUser, db: Asy
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         task.storyboard_config = {**config_for_cast, "total_duration": sum(durations)}
-    await consume_daily_quota(db, user_id=user.id, category="chat")
+    await consume_daily_quota(db, user_id=user.id, category="chat", commit=False)
 
     if task.storyboard_type == "general":
         config = dict(task.storyboard_config or {})
@@ -1467,9 +1537,11 @@ async def storyboard_outline_events(task_id: str, request: Request, user: Curren
     """大纲生成进度的 SSE 推送：轮询任务行的 status 与 outlineProgress，终态后关闭。"""
     await owned_task(db, user.id, task_id)
 
+    await db.close()
+
     async def stream():
         last = None
-        while not await request.is_disconnected():
+        while not await request.is_disconnected() and await stream_session_active(request, user.id):
             async with session_factory() as session:
                 current = (
                     await session.execute(
@@ -1483,18 +1555,18 @@ async def storyboard_outline_events(task_id: str, request: Request, user: Curren
                         )
                     )
                 ).scalar_one_or_none()
-                if not current:
-                    return
-                progress = (current.storyboard_config or {}).get("outlineProgress") or {}
-                has_outline = current.status == "outlining"
-                has_segment_retry = progress.get("phase") == "segment_retry"
-                marker = (current.status, json.dumps(progress, sort_keys=True, ensure_ascii=False))
-                if marker != last:
-                    payload = {"type": "outline", "taskId": task_id, "status": current.status, "progress": progress}
-                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                    last = marker
-                if not has_outline and not has_segment_retry:
-                    return
+            if not current:
+                return
+            progress = (current.storyboard_config or {}).get("outlineProgress") or {}
+            has_outline = current.status == "outlining"
+            has_segment_retry = progress.get("phase") == "segment_retry"
+            marker = (current.status, json.dumps(progress, sort_keys=True, ensure_ascii=False))
+            if marker != last:
+                payload = {"type": "outline", "taskId": task_id, "status": current.status, "progress": progress}
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                last = marker
+            if not has_outline and not has_segment_retry:
+                return
             await asyncio.sleep(0.75)
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -1545,6 +1617,8 @@ async def _run_segment_retry(
             config["outlineProgress"] = {"phase": "segment_retry_failed", "sceneIndex": scene_index, "error": str(exc)[:300]}
             task.storyboard_config = config
             await session.commit()
+        if getattr(exc, "usage_records", None):
+            exc.usage_recorded = True
         raise
     async with session_factory() as session:
         task = await session.get(ProjectTaskModel, task_id)
@@ -1645,13 +1719,11 @@ async def _persist_storyboard_line_failure(job: Job, line_id: str, task_id: str,
         if not line or line.deleted_at is not None or not task or task.deleted_at is not None:
             raise exc
         line.generation_status, line.generation_error = "failed", redact_error_text(str(exc))
-        failed_calls = getattr(exc, "usage_records", None) or [
-            {"operation": "storyboard_line_failed", "usage": getattr(exc, "usage", {}), "requestId": getattr(exc, "request_id", None)}
-        ]
+        failed_calls = getattr(exc, "usage_records", None) or [{"operation": "storyboard_line", "usage": getattr(exc, "usage", {}), "requestId": getattr(exc, "request_id", None)}]
         _persist_llm_calls(
             session,
             failed_calls,
-            default_operation="storyboard_line_failed",
+            default_operation="storyboard_line",
             user_id=job.user_id,
             project_id=job.project_id,
             project_task_id=task.id,
@@ -1736,6 +1808,7 @@ async def _run_storyboard_line_generation(job: Job) -> dict[str, Any]:
             await session.commit()
     except Exception as exc:
         await _persist_storyboard_line_failure(job, line_id, task_id, exc)
+        exc.usage_recorded = True
         raise
     try:
         await _refresh_storyboard_status_for_task(task_id)
@@ -1818,8 +1891,9 @@ async def run_storyboard_job(job: Job) -> dict[str, Any]:
 
 @router.post("/tasks/{task_id}/storyboard-outline/segments/{scene_index}/regenerate", status_code=202, dependencies=[Depends(require_generation_attribution)])
 async def regenerate_storyboard_outline_segment(task_id: str, scene_index: int, user: CurrentUser, db: AsyncSession = Db) -> dict:
+    await db.scalar(select(UserModel.id).where(UserModel.id == user.id).with_for_update())
     task = await owned_task(db, user.id, task_id)
-    task = (await db.execute(select(ProjectTaskModel).where(ProjectTaskModel.id == task.id).with_for_update())).scalar_one()
+    task = (await db.execute(select(ProjectTaskModel).where(ProjectTaskModel.id == task.id).with_for_update().execution_options(populate_existing=True))).scalar_one()
     if task.storyboard_type != "ass":
         raise HTTPException(422, "只有 ASS 分镜支持场景段重试")
     if task.status == "outlining":
@@ -1866,7 +1940,7 @@ async def regenerate_storyboard_outline_segment(task_id: str, scene_index: int, 
     current_progress = (task.storyboard_config or {}).get("outlineProgress") or {}
     if current_progress.get("phase") == "segment_retry":
         raise HTTPException(409, "已有场景段正在重新生成中，请等待本轮完成后再提交")
-    await consume_daily_quota(db, user_id=user.id, category="chat")
+    await consume_daily_quota(db, user_id=user.id, category="chat", commit=False)
     emotion = (task.storyboard_config or {}).get("songEmotion") or {}
     progress = {"phase": "segment_retry", "sceneIndex": scene_index, "startedAt": utcnow().isoformat()}
     config = dict(task.storyboard_config or {})
@@ -1922,10 +1996,68 @@ async def list_styles(user: CurrentUser, db: AsyncSession = Db) -> list[dict]:
 
 @router.post("/digital-human-styles", status_code=201)
 async def create_style(payload: StyleCreate, user: CurrentUser, db: AsyncSession = Db) -> dict:
-    item = DigitalHumanStyleModel(id=uid("style"), user_id=user.id, name=payload.name.strip(), scope="private")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(422, "分类名称不能为空")
+    await db.scalar(select(UserModel.id).where(UserModel.id == user.id).with_for_update())
+    existing = await db.scalar(
+        select(DigitalHumanStyleModel)
+        .where(
+            DigitalHumanStyleModel.name == name,
+            DigitalHumanStyleModel.deleted_at.is_(None),
+            or_(DigitalHumanStyleModel.scope == "system", DigitalHumanStyleModel.user_id == user.id),
+        )
+        .order_by(DigitalHumanStyleModel.scope.desc(), DigitalHumanStyleModel.id)
+        .limit(1)
+    )
+    if existing:
+        return {"id": existing.id, "name": existing.name, "scope": existing.scope, "readOnly": existing.scope == "system"}
+    item = DigitalHumanStyleModel(id=uid("style"), user_id=user.id, name=name, scope="private")
     db.add(item)
     await db.commit()
     return {"id": item.id, "name": item.name, "scope": item.scope, "readOnly": False}
+
+
+@router.patch("/digital-human-styles/{style_id}")
+async def rename_style(style_id: str, payload: StyleCreate, user: CurrentUser, db: AsyncSession = Db) -> dict:
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(422, "分类名称不能为空")
+    await db.scalar(select(UserModel.id).where(UserModel.id == user.id).with_for_update())
+    style = await db.scalar(
+        select(DigitalHumanStyleModel)
+        .where(
+            DigitalHumanStyleModel.id == style_id,
+            DigitalHumanStyleModel.user_id == user.id,
+            DigitalHumanStyleModel.scope == "private",
+            DigitalHumanStyleModel.deleted_at.is_(None),
+        )
+        .with_for_update()
+    )
+    if not style:
+        raise HTTPException(404, "私有分类不存在")
+    target = await db.scalar(
+        select(DigitalHumanStyleModel)
+        .where(
+            DigitalHumanStyleModel.id != style_id,
+            DigitalHumanStyleModel.name == name,
+            DigitalHumanStyleModel.deleted_at.is_(None),
+            or_(DigitalHumanStyleModel.scope == "system", DigitalHumanStyleModel.user_id == user.id),
+        )
+        .order_by(DigitalHumanStyleModel.scope.desc(), DigitalHumanStyleModel.id)
+        .limit(1)
+    )
+    if target:
+        await db.execute(
+            update(DigitalHumanModel)
+            .where(DigitalHumanModel.user_id == user.id, DigitalHumanModel.scope == "private", DigitalHumanModel.style_id == style_id, DigitalHumanModel.deleted_at.is_(None))
+            .values(style_id=target.id)
+        )
+        style.deleted_at = utcnow()
+    else:
+        style.name = name
+    await db.commit()
+    return {"id": (target or style).id, "name": name}
 
 
 @router.delete("/digital-human-styles/{style_id}")
@@ -2006,12 +2138,33 @@ async def _sync_human_asset_avatar(human: DigitalHumanModel) -> None:
 async def create_human(payload: DigitalHumanCreate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     if not is_user_owned_tos_url(payload.avatar_url, user.id) or (payload.avatar_thumbnail_url and not is_user_owned_tos_url(payload.avatar_thumbnail_url, user.id)):
         raise HTTPException(422, "角色图片必须先上传到当前用户的 TOS 目录")
+    human_id = uid("dh")
+    if payload.source_job_id:
+        job = await db.scalar(
+            select(GenerationJobModel)
+            .where(
+                GenerationJobModel.id == payload.source_job_id,
+                GenerationJobModel.user_id == user.id,
+                GenerationJobModel.kind == "image",
+                GenerationJobModel.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if not job or job.status != "succeeded" or payload.avatar_url not in ((job.result or {}).get("urls") or []):
+            raise HTTPException(422, "人物图片与已完成的生成工单不匹配")
+        human_id = "dh-" + uuid.uuid5(uuid.NAMESPACE_URL, f"mv:portrait:{user.id}:{job.id}").hex
+        existing = await db.get(DigitalHumanModel, human_id)
+        if existing:
+            if existing.deleted_at:
+                raise HTTPException(410, "人物已删除")
+            style = await db.get(DigitalHumanStyleModel, existing.style_id) if existing.style_id else None
+            return human_json(existing, style.name if style else None)
     style = None
     if payload.style_id:
         style = await db.get(DigitalHumanStyleModel, payload.style_id)
         if not style or style.deleted_at is not None or (style.scope != "system" and style.user_id != user.id):
             raise HTTPException(422, "角色分类不可用")
-    item = DigitalHumanModel(id=uid("dh"), user_id=user.id, scope="private", **payload.model_dump())
+    item = DigitalHumanModel(id=human_id, user_id=user.id, scope="private", **payload.model_dump(exclude={"source_job_id"}))
     db.add(item)
     await db.commit()
     await _sync_human_asset_avatar(item)
@@ -2068,18 +2221,34 @@ async def delete_human(human_id: str, user: CurrentUser, db: AsyncSession = Db) 
 
 @router.put("/tasks/{task_id}/cast")
 async def replace_cast(task_id: str, payload: CastUpdate, user: CurrentUser, db: AsyncSession = Db) -> dict:
-    await owned_task(db, user.id, task_id)
-    visible = await visible_humans(db, user.id, payload.digital_human_ids)
-    if len({item.id for item in visible}) != len(set(payload.digital_human_ids)):
+    task = await owned_task(db, user.id, task_id)
+    await db.refresh(task, with_for_update=True)
+    ids = list(dict.fromkeys(payload.digital_human_ids))
+    visible = await visible_humans(db, user.id, ids) if ids else []
+    if {item.id for item in visible} != set(ids):
         raise HTTPException(422, "包含不可用角色")
-    old = list((await db.execute(select(ProjectCastModel).where(ProjectCastModel.project_task_id == task_id, ProjectCastModel.deleted_at.is_(None)))).scalars().all())
-    now = utcnow()
-    for item in old:
-        item.deleted_at = now
-    for index, human_id in enumerate(payload.digital_human_ids):
-        db.add(ProjectCastModel(id=uid("cast"), project_task_id=task_id, digital_human_id=human_id, sort_order=index))
+    old = {
+        item.digital_human_id: item
+        for item in (await db.scalars(select(ProjectCastModel).where(ProjectCastModel.project_task_id == task_id, ProjectCastModel.deleted_at.is_(None)))).all()
+    }
+    removed = old.keys() - set(ids)
+    if removed:
+        now = utcnow()
+        for human_id in removed:
+            old[human_id].deleted_at = now
+        lines = select(StoryboardLineModel.id).where(StoryboardLineModel.project_task_id == task_id, StoryboardLineModel.deleted_at.is_(None))
+        await db.execute(
+            update(StoryboardLineCastModel)
+            .where(StoryboardLineCastModel.storyboard_line_id.in_(lines), StoryboardLineCastModel.digital_human_id.in_(removed), StoryboardLineCastModel.deleted_at.is_(None))
+            .values(deleted_at=now)
+        )
+    for index, human_id in enumerate(ids):
+        if human_id in old:
+            old[human_id].sort_order = index
+        else:
+            db.add(ProjectCastModel(id=uid("cast"), project_task_id=task_id, digital_human_id=human_id, sort_order=index))
     await db.commit()
-    return {"cast": payload.digital_human_ids}
+    return {"cast": ids}
 
 
 @router.post("/tasks/{task_id}/storyboard/lines", status_code=201)
@@ -2425,25 +2594,15 @@ def _compact_storyboard_line_context(task: ProjectTaskModel, lines: list[Storybo
     }
 
 
-@router.post("/tasks/{task_id}/storyboard-lines/{line_id}/generate", dependencies=[Depends(require_generation_attribution)])
-async def generate_one_storyboard_line(task_id: str, line_id: str, payload: StoryboardLineGenerate, user: CurrentUser, db: AsyncSession = Db) -> dict:
-    task = await owned_task(db, user.id, task_id)
-    line = await owned_line(db, user.id, line_id)
-    if line.project_task_id != task.id:
-        raise HTTPException(422, "分镜不属于指定子项目")
-    if task.storyboard_type == "ass" and (line.shot_options or {}).get("outlineStatus") in {"pending", "failed"}:
-        raise HTTPException(422, "该分镜所在场景段尚未生成大纲，请先生成分镜大纲")
-    if line.generation_status == "running":
-        raise HTTPException(409, "该分镜正在生成")
-    # 单账号并行上限：统计该用户全部子项目中处于 running 的提示词生成行数，达到 100 拒绝受理
-    running_count = int(
+async def _running_line_count(db: AsyncSession, user_id: str) -> int:
+    return int(
         (
             await db.execute(
                 select(func.count(StoryboardLineModel.id))
                 .join(ProjectTaskModel, StoryboardLineModel.project_task_id == ProjectTaskModel.id)
                 .join(ProjectModel, ProjectTaskModel.project_id == ProjectModel.id)
                 .where(
-                    ProjectModel.user_id == user.id,
+                    ProjectModel.user_id == user_id,
                     ProjectModel.deleted_at.is_(None),
                     ProjectTaskModel.deleted_at.is_(None),
                     StoryboardLineModel.deleted_at.is_(None),
@@ -2452,17 +2611,14 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
             )
         ).scalar_one()
     )
-    if running_count >= 100:
-        raise HTTPException(429, "同时进行的提示词生成已达上限（100 条），请等待部分完成后再试")
-    lines = list(
-        (
-            await db.execute(
-                select(StoryboardLineModel).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None)).order_by(StoryboardLineModel.sort_order)
-            )
-        )
-        .scalars()
-        .all()
-    )
+
+
+async def _enqueue_storyboard_line(db, task, line, lines, force, user):
+    if task.storyboard_type == "ass" and (line.shot_options or {}).get("outlineStatus") in {"pending", "failed"}:
+        raise HTTPException(422, "该分镜所在场景段尚未生成大纲，请先生成分镜大纲")
+    if line.generation_status == "running":
+        raise HTTPException(409, "该分镜正在生成")
+    # 单账号并行上限：统计该用户全部子项目中处于 running 的提示词生成行数，达到 100 拒绝受理
     line_cast = list(
         (
             await db.execute(
@@ -2510,9 +2666,9 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
             sort_keys=True,
         ).encode()
     ).hexdigest()
-    if not payload.force and line.generation_status == "succeeded" and line.prompt_context_hash == context_hash:
+    if not force and line.generation_status == "succeeded" and line.prompt_context_hash == context_hash:
         return await line_json(db, line, [item.digital_human_id for item in line_cast])
-    await consume_daily_quota(db, user_id=user.id, category="chat")
+    await consume_daily_quota(db, user_id=user.id, category="chat", commit=False)
     line.generation_status, line.generation_error = "running", None
     line.generation_attempt += 1
     queued = await jobs.enqueue(
@@ -2536,7 +2692,12 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
     if persisted_job:
         persisted_job.attempt = line.generation_attempt
         persisted_job.idempotency_key = queued.idempotency_key
-    await db.commit()
+    return queued
+
+
+async def _finish_storyboard_submission(db, user, queued):
+    if isinstance(queued, dict):
+        return queued
     if settings.job_execution_mode == "worker":
         await jobs.dispatch(queued, run_storyboard_job)
         return queued.public()
@@ -2544,55 +2705,58 @@ async def generate_one_storyboard_line(task_id: str, line_id: str, payload: Stor
     await jobs.run_claimed(queued, run_storyboard_job)
     if queued.status != "succeeded":
         raise HTTPException(502, f"单条分镜生成失败：{queued.error}")
-    fresh = await owned_line(db, user.id, line.id)
+    fresh = await owned_line(db, user.id, queued.storyboard_line_id)
     await db.refresh(fresh)
-    response = await line_json(db, fresh, list((queued.result or {}).get("digitalHumanIds") or planned_role_ids))
+    response = await line_json(db, fresh, list((queued.result or {}).get("digitalHumanIds") or ((queued.request or {}).get("current") or {}).get("plannedDigitalHumanIds") or []))
+    await db.commit()  # Release the read transaction before the next inline batch item calls a model.
     normalized = normalize_usage((queued.result or {}).get("usage"))
     response["usage"] = {key: normalized[key] for key in ("inputTokens", "outputTokens", "cachedInputTokens", "totalTokens")}
     return response
 
 
+async def _submit_storyboard_lines(db, task_id, line_ids, force, user, *, batch=False):
+    # Serialize a user's admission across single and batch endpoints. Lock before loading snapshots.
+    await db.execute(select(UserModel.id).where(UserModel.id == user.id).with_for_update())
+    task = await owned_task(db, user.id, task_id)
+    lines = list(
+        (
+            await db.execute(
+                select(StoryboardLineModel).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None)).order_by(StoryboardLineModel.sort_order)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_id = {line.id: line for line in lines}
+    if any(line_id not in by_id for line_id in line_ids):
+        raise HTTPException(404, "分镜不存在或不属于指定子项目")
+    if await _running_line_count(db, user.id) + len(line_ids) > 100:
+        raise HTTPException(429, "同时进行的提示词生成已达上限（100 条），请等待部分完成后再试")
+    accepted = [await _enqueue_storyboard_line(db, task, by_id[line_id], lines, force, user) for line_id in line_ids]
+    await db.commit()
+    results = []
+    for item in accepted:
+        try:
+            results.append(await _finish_storyboard_submission(db, user, item))
+        except HTTPException:
+            if not batch or not isinstance(item, Job):
+                raise
+            results.append(item.public())
+    return results
+
+
+@router.post("/tasks/{task_id}/storyboard-lines/{line_id}/generate", dependencies=[Depends(require_generation_attribution)])
+async def generate_one_storyboard_line(task_id: str, line_id: str, payload: StoryboardLineGenerate, user: CurrentUser, db: AsyncSession = Db) -> dict:
+    return (await _submit_storyboard_lines(db, task_id, [line_id], payload.force, user))[0]
+
+
 @router.post("/tasks/{task_id}/storyboard-lines/generate-batch", status_code=202, dependencies=[Depends(require_generation_attribution)])
-async def generate_storyboard_lines_batch(
-    task_id: str,
-    payload: StoryboardLinesBatchGenerate,
-    user: CurrentUser,
-    db: AsyncSession = Db,
-) -> dict[str, Any]:
-    """一次请求将最多100条逐镜提示词工单全部持久化，页面无需维持低并发提交循环。"""
-    await owned_task(db, user.id, task_id)
+async def generate_storyboard_lines_batch(task_id: str, payload: StoryboardLinesBatchGenerate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     line_ids = list(dict.fromkeys(payload.line_ids))
     if not line_ids:
         raise HTTPException(422, "至少选择一条分镜")
-    running_count = int(
-        (
-            await db.execute(
-                select(func.count(StoryboardLineModel.id))
-                .join(ProjectTaskModel, StoryboardLineModel.project_task_id == ProjectTaskModel.id)
-                .join(ProjectModel, ProjectTaskModel.project_id == ProjectModel.id)
-                .where(
-                    ProjectModel.user_id == user.id,
-                    ProjectModel.deleted_at.is_(None),
-                    ProjectTaskModel.deleted_at.is_(None),
-                    StoryboardLineModel.deleted_at.is_(None),
-                    StoryboardLineModel.generation_status == "running",
-                )
-            )
-        ).scalar_one()
-    )
-    if running_count + len(line_ids) > 100:
-        raise HTTPException(429, "同时进行的提示词生成已达上限（100 条），请等待部分完成后再试")
-    jobs_output: list[dict[str, Any]] = []
-    for line_id in line_ids:
-        result = await generate_one_storyboard_line(
-            task_id,
-            line_id,
-            StoryboardLineGenerate(force=payload.force),
-            user,
-            db,
-        )
-        jobs_output.append({**result, "storyboard_line_id": line_id})
-    return {"taskId": task_id, "jobs": jobs_output, "count": len(jobs_output)}
+    results = await _submit_storyboard_lines(db, task_id, line_ids, payload.force, user, batch=True)
+    return {"taskId": task_id, "jobs": [{**row, "storyboard_line_id": line_id} for row, line_id in zip(results, line_ids)], "count": len(results)}
 
 
 @router.post("/tasks/{task_id}/storyboard/retry-failed", dependencies=[Depends(require_generation_attribution)])
@@ -2617,20 +2781,26 @@ async def reset_failed_storyboard_lines(task_id: str, user: CurrentUser, db: Asy
 
 
 @router.get("/token-usage")
-async def list_token_usage(user: CurrentUser, project_task_id: str | None = None, db: AsyncSession = Db) -> dict:
+async def list_token_usage(user: CurrentUser, project_task_id: str | None = None, db: AsyncSession = Db, offset: int = 0, limit: int = 100) -> dict:
     filters = [TokenUsageModel.user_id == user.id, TokenUsageModel.deleted_at.is_(None)]
     if project_task_id:
         await owned_task(db, user.id, project_task_id)
         filters.append(TokenUsageModel.project_task_id == project_task_id)
-    items = list((await db.execute(select(TokenUsageModel).where(*filters).order_by(TokenUsageModel.created_at))).scalars().all())
+    totals = (
+        await db.execute(
+            select(
+                func.sum(TokenUsageModel.input_tokens),
+                func.sum(TokenUsageModel.output_tokens),
+                func.sum(TokenUsageModel.cached_input_tokens),
+                func.sum(TokenUsageModel.total_tokens),
+                func.count(),
+            ).where(*filters)
+        )
+    ).one()
+    query = select(TokenUsageModel).where(*filters).order_by(TokenUsageModel.created_at, TokenUsageModel.id).offset(max(0, offset)).limit(max(1, min(limit, 500)))
+    items = (await db.scalars(query)).all()
     return {
-        "summary": {
-            "inputTokens": sum(item.input_tokens for item in items),
-            "outputTokens": sum(item.output_tokens for item in items),
-            "cachedInputTokens": sum(item.cached_input_tokens for item in items),
-            "totalTokens": sum(item.total_tokens for item in items),
-            "calls": len(items),
-        },
+        "summary": dict(zip(("inputTokens", "outputTokens", "cachedInputTokens", "totalTokens", "calls"), (int(value or 0) for value in totals))),
         "records": [
             {
                 "id": item.id,
@@ -2686,9 +2856,11 @@ async def _set_export_progress(
     lock = export_progress_locks.setdefault(export_id, asyncio.Lock())
     async with lock:
         async with session_factory() as session:
-            item = await session.get(MaterialExportModel, export_id)
+            item = await locked_export(session, job, export_id)
             if not item or item.deleted_at is not None:
                 raise RuntimeError("导出任务不存在")
+            if item.status not in {"queued", "running"}:
+                raise RuntimeError("导出任务已结束")
             progress = max(item.progress, job.progress, min(progress, 99))
             item.status = "running"
             item.progress = progress
@@ -2713,6 +2885,8 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
                 export = await session.get(MaterialExportModel, export_id)
                 if not export or export.deleted_at is not None:
                     raise RuntimeError("导出任务不存在")
+                if export.status == "ready":
+                    return {"exportId": export.id, "archiveUrl": export.archive_url, "archiveSize": export.archive_size}
                 task = await session.get(ProjectTaskModel, export.project_task_id)
                 if not task or task.deleted_at is not None:
                     raise RuntimeError("子项目不存在")
@@ -2830,6 +3004,7 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
             last_progress = 5
             with tempfile.TemporaryDirectory(prefix=f"mvagent-export-{export_id}-") as temporary_directory:
                 temporary_path = Path(temporary_directory)
+                space = ExportSpace(temporary_path)
                 archive_path = temporary_path / f"{export_id}.zip"
                 # 并发下载到临时目录，完成后按清单顺序写入 ZIP，保证包内镜序稳定。
                 # 共用 AsyncClient 复用 TLS/HTTP 连接；文件仍流式落盘，提升并发不会线性放大内存。
@@ -2842,6 +3017,7 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
 
                     async def on_download(current: int, declared: int | None) -> None:
                         nonlocal last_progress
+                        space.download(position, current, declared)
                         in_flight[position] = current / declared if declared else 0.0
                         progress = 5 + int(65 * (processed_assets + sum(in_flight.values())) / max(1, total_assets))
                         if progress > last_progress:
@@ -2894,12 +3070,17 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
                     max_keepalive_connections=settings.export_download_concurrency,
                 )
                 async with httpx.AsyncClient(timeout=180, follow_redirects=False, limits=limits) as download_client:
-                    await asyncio.gather(*(download_one(position, item) for position, item in enumerate(downloads)))
+                    async with asyncio.TaskGroup() as group:
+                        for position, item in enumerate(downloads):
+                            group.create_task(download_one(position, item))
                 # 打包 70–85%：按清单顺序写入（videos/01.mp4… 与镜序一致）
                 with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_STORED, allowZip64=True) as bundle:
                     for written, item in enumerate(downloads, start=1):
-                        bundle.write(item["path"], item["arcname"])
+                        if item["path"].stat().st_size > space.output_limit(bundle.fp.tell()):
+                            raise ValueError("素材包超过服务器临时空间限额")
+                        await asyncio.to_thread(bundle.write, item["path"], item["arcname"])
                         item["path"].unlink(missing_ok=True)
+                        space.inputs.pop(written - 1, None)
                         progress = 70 + int(15 * written / max(1, total_assets))
                         if progress > last_progress:
                             last_progress = progress
@@ -2944,7 +3125,11 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
                         )
                 archive_url = await upload_task
             async with session_factory() as session:
-                export = await session.get(MaterialExportModel, export_id)
+                export = await locked_export(session, job, export_id)
+                if not export or export.status not in {"running", "queued", "ready"}:
+                    raise RuntimeError("导出任务已结束")
+                if export.status == "ready":
+                    return {"exportId": export.id, "archiveUrl": export.archive_url, "archiveSize": export.archive_size}
                 export.status = "ready"
                 export.progress = 100
                 export.stage = "导出完成"
@@ -2955,8 +3140,8 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
             return {"exportId": export_id, "archiveUrl": archive_url, "archiveSize": archive_size}
     except Exception as exc:
         async with session_factory() as session:
-            export = await session.get(MaterialExportModel, export_id)
-            if export:
+            export = await locked_export(session, job, export_id)
+            if export and export.deleted_at is None and export.status in {"queued", "running"}:
                 export.status = "failed"
                 export.stage = "导出失败"
                 export.error = str(exc).strip() or type(exc).__name__
@@ -3067,20 +3252,22 @@ async def material_export_events(export_id: str, request: Request, user: Current
     if not item or item.deleted_at is not None or item.user_id != user.id:
         raise HTTPException(404, "导出任务不存在")
 
+    await db.close()
+
     async def stream():
         last = None
-        while not await request.is_disconnected():
+        while not await request.is_disconnected() and await stream_session_active(request, user.id):
             async with session_factory() as session:
                 current = await session.get(MaterialExportModel, export_id)
-                if not current or current.deleted_at is not None or current.user_id != user.id:
-                    return
-                marker = (current.status, current.progress, current.stage, current.updated_at)
-                if marker != last:
-                    payload = {"type": "export", "export": material_export_public(current)}
-                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                    last = marker
-                if current.status in {"ready", "failed"}:
-                    return
+            if not current or current.deleted_at is not None or current.user_id != user.id:
+                return
+            marker = (current.status, current.progress, current.stage, current.updated_at)
+            if marker != last:
+                payload = {"type": "export", "export": material_export_public(current)}
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                last = marker
+            if current.status in {"ready", "failed"}:
+                return
             await asyncio.sleep(0.75)
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

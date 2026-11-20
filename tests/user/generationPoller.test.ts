@@ -110,27 +110,27 @@ describe('generationPoller 统一轮询调度器', () => {
     ).rejects.toThrow('生成超时，请稍后重试')
   })
 
-  it('多个任务共享调度：同周期合并为一个请求并各自独立落定', async () => {
-    const request = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      json([
-        { id: 'job-multi-a', status: 'succeeded', result: 'A' },
-        { id: 'job-multi-b', status: 'succeeded', result: 'B' },
-      ]),
-    )
-    const [a, b] = await Promise.all([
-      watchGenerationJob('job-multi-a', { select: (s) => s.result as string }),
-      watchGenerationJob('job-multi-b', { select: (s) => s.result as string }),
-    ])
-    expect([a, b]).toEqual(['A', 'B'])
-    expect(request).toHaveBeenCalledTimes(2)
-    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body)).ids).toEqual([
-      'job-multi-a',
-      'job-multi-b',
-    ])
-    expect(JSON.parse(String(request.mock.calls[1]?.[1]?.body)).ids).toEqual([
-      'job-multi-a',
-      'job-multi-b',
-    ])
+  it('相隔 1 毫秒注册的任务共享同一首查窗口，按各自 ID 一次落定', async () => {
+    vi.useFakeTimers()
+    try {
+      const groups: string[][] = []
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (path, init) => {
+        const { ids } = JSON.parse(String(init?.body)) as { ids: string[] }
+        groups.push(ids)
+        return path === '/api/generations/observed'
+          ? json({})
+          : json(ids.map((id) => ({ id, status: 'succeeded', result: id })))
+      })
+      const first = watchGenerationJob('job-multi-a', { select: (s) => s.result })
+      await vi.advanceTimersByTimeAsync(1)
+      const second = watchGenerationJob('job-multi-b', { select: (s) => s.result })
+      await vi.advanceTimersByTimeAsync(49)
+      const expected = ['job-multi-a', 'job-multi-b']
+      expect(groups).toEqual([expected, expected])
+      await expect(Promise.all([first, second])).resolves.toEqual(expected)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
@@ -177,5 +177,76 @@ describe('abortableSleep', () => {
     setTimeout(() => controller.abort(), 20)
     await abortableSleep(5000, controller.signal)
     expect(Date.now() - started).toBeLessThan(1000)
+  })
+})
+
+describe('bounded status observation', () => {
+  it('honors the server retry window even after the first status request fails', async () => {
+    vi.useFakeTimers()
+    try {
+      let statusCalls = 0
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (path) => {
+        if (path === '/api/generations/observed') return json({})
+        statusCalls++
+        return statusCalls === 1
+          ? new Response('{}', { status: 429, headers: { 'Retry-After': '8' } })
+          : json([{ id: 'rate-limit', status: 'succeeded', result: 'done' }])
+      })
+      const result = watchGenerationJob('rate-limit', { select: (s) => s.result })
+      await vi.advanceTimersByTimeAsync(50)
+      await vi.advanceTimersByTimeAsync(7999)
+      expect(statusCalls).toBe(1)
+      await vi.advanceTimersByTimeAsync(1)
+      await expect(result).resolves.toBe('done')
+      expect(statusCalls).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('delivers 501 simultaneous subscriptions in two bounded requests', async () => {
+    vi.useFakeTimers()
+    try {
+      const groups: string[][] = []
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (path, init) => {
+        if (path === '/api/generations/observed') return json({})
+        const ids: string[] = JSON.parse(String(init?.body)).ids
+        groups.push(ids)
+        return json(ids.map((id) => ({ id, status: 'succeeded', result: id })))
+      })
+      const ids = Array.from({ length: 501 }, (_, i) => 'job-' + i)
+      const results = Promise.all(
+        ids.map((id) => watchGenerationJob(id, { select: (snapshot) => snapshot.result })),
+      )
+      await vi.advanceTimersByTimeAsync(50)
+      await expect(results).resolves.toEqual(ids)
+      expect(groups.map((group) => group.length)).toEqual([500, 1])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a hung status fetch times out and a hung observation receipt never blocks delivery', async () => {
+    vi.useFakeTimers()
+    try {
+      let statusCalls = 0
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (path, init) => {
+        if (path === '/api/generations/status' && ++statusCalls === 2)
+          return json([{ id: 'bounded', status: 'succeeded', result: 'ok' }])
+        return new Promise<Response>((_resolve, reject) =>
+          init!.signal!.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          ),
+        )
+      })
+      const result = watchGenerationJob('bounded', { select: (s) => s.result })
+      await vi.advanceTimersByTimeAsync(50 + 12000 + 3000)
+      expect(statusCalls).toBe(2)
+      await expect(result).resolves.toBe('ok')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

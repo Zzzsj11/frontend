@@ -4,6 +4,8 @@ services:
     image: ${MODEL_IMAGE_REGISTRY:-local}/model-public:${VERSION:?Set an immutable version}
     build: ./public-api
     env_file: .env.public
+    environment:
+      PORTAL_TRUSTED_PROXY_HOST: user-web
     ports: ['127.0.0.1:8011:8011']
     restart: unless-stopped
     cpus: 1.0
@@ -26,13 +28,12 @@ services:
     stop_grace_period: 120s
     cpus: 2.0
     mem_limit: 2g
-    # Process liveness only; queue progress still needs an attributed smoke test.
     healthcheck:
       test:
         - CMD
         - python
         - -c
-        - "import os; from pathlib import Path; os.kill(1, 0); assert b'gateway.queue' in Path('/proc/1/cmdline').read_bytes().split(bytes([0]))"
+        - "import os,time; from pathlib import Path; assert time.time()-Path(os.getenv('WORKER_HEALTH_FILE','/tmp/model-worker-ready')).stat().st_mtime < 45"
       interval: 10s
       timeout: 5s
       retries: 3

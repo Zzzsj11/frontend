@@ -383,3 +383,59 @@ describe('openApiStream auth recovery (401/403)', () => {
     expect(mockLocation.href).toBe(`/login?redirect=${encodeURIComponent('/projects?tab=1')}`)
   })
 })
+
+describe('workspace session cancellation', () => {
+  afterEach(() => resetAuthState())
+
+  it('cancels both a mutation and a stream even when the caller supplied its own signal', async () => {
+    const signals: AbortSignal[] = []
+    const completions: Array<(value: Response) => void> = []
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation((_path, init) => {
+      signals.push(init!.signal!)
+      return new Promise<Response>((resolve) => completions.push(resolve))
+    })
+    const caller = new AbortController()
+    const requests = [
+      apiRequest('/fixture/edit', { method: 'PATCH', signal: caller.signal }),
+      openApiStream('/fixture/stream', caller.signal),
+    ]
+    resetAuthState()
+    expect(signals.every((signal) => signal.aborted)).toBe(true)
+    expect(caller.signal.aborted).toBe(false)
+    for (const complete of completions) complete(new Response('{}', { status: 401 }))
+    for (const request of requests)
+      await expect(request).rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('a late refresh from the former user cannot replace the new token or release the current refresh', async () => {
+    const refreshes: Array<{ complete: (response: Response) => void; signal: AbortSignal }> = []
+    const writes: string[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (path, init) => {
+      if (path === '/api/auth/refresh') {
+        return new Promise<Response>((complete) =>
+          refreshes.push({ complete, signal: init!.signal! }),
+        )
+      }
+      const token = new Headers(init!.headers).get('Authorization')
+      if (path === '/api/fixture/old') writes.push(token ?? '')
+      return new Response('{}', { status: token === 'Bearer new-fresh' ? 200 : 401 })
+    })
+    setAccessToken('old')
+    const old = apiRequest('/fixture/old', { method: 'POST' })
+    await vi.waitFor(() => expect(refreshes).toHaveLength(1))
+    resetAuthState()
+    setAccessToken('new')
+    expect(refreshes[0].signal.aborted).toBe(true)
+    const first = apiRequest('/fixture/current')
+    await vi.waitFor(() => expect(refreshes).toHaveLength(2))
+    refreshes[0].complete(new Response(JSON.stringify({ accessToken: 'old-fresh' })))
+    await expect(old).rejects.toMatchObject({ name: 'AbortError' })
+    const second = apiRequest('/fixture/current')
+    await Promise.resolve()
+    refreshes[1].complete(new Response(JSON.stringify({ accessToken: 'new-fresh' })))
+    await Promise.all([first, second])
+    expect(refreshes).toHaveLength(2)
+    expect(writes).toEqual(['Bearer old'])
+  })
+})

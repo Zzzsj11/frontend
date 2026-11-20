@@ -5,12 +5,13 @@ import time
 import uuid
 from contextvars import ContextVar
 from datetime import timedelta
+from pathlib import Path
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 
 from .channels import PATHS, config, headers, task_id, task_state, unwrap
-from .credits import automatic, lock, reset
+from .credits import automatic, lock, month, reset, settle
 from .db import Client, Job, Model, ModelRoute, Session, now
 from .errors import describe
 from .media import archive, gemini_images, output_urls
@@ -26,7 +27,7 @@ class LeaseLost(RuntimeError):
 ACTIVE = ("preparing", "submitting", "running", "archiving")
 
 
-async def quarantine_unavailable_target(db, job):
+async def quarantine_unavailable_target(db, job, *, include_queued=False):
     model = await db.get(Model, job.model_id)
     target = None
     if not model or model.deleted_at:
@@ -38,9 +39,29 @@ async def quarantine_unavailable_target(db, job):
     if target is None:
         return False
     # Do not use update/automatic: quarantine must preserve historical financial records.
-    job.status = "manual_review"
-    job.error = f"{target} is missing or soft-deleted; job is not recoverable and must not be resubmitted"
-    job.worker_id = job.lease_until = None
+    affected = [job]
+    if include_queued:
+        same_target = Job.model_id == job.model_id if target == "Model" else Job.route_id == job.route_id
+        affected.extend(
+            (
+                await db.scalars(
+                    select(Job)
+                    .where(
+                        same_target,
+                        Job.status == "queued",
+                        Job.deleted_at.is_(None),
+                        Job.id != job.id,
+                    )
+                    .order_by(Job.created_at, Job.id)
+                    .limit(99)
+                    .with_for_update(skip_locked=True)
+                )
+            ).all()
+        )
+    for row in affected:
+        row.status = "manual_review"
+        row.error = f"{target} is missing or soft-deleted; job is not recoverable and must not be resubmitted"
+        row.worker_id = row.lease_until = None
     return True
 
 
@@ -50,7 +71,9 @@ async def capacity(db, job):
     acceptance = job.origin == "agent_test" and job.route_id and client and client.require_agent
     if not model or not client or (not model.enabled and not acceptance) or not client.enabled or model.deleted_at or client.deleted_at:
         return False
-    active = select(func.count()).select_from(Job).where(Job.status.in_(ACTIVE), Job.deleted_at.is_(None), Job.id != job.id)
+    active = (
+        select(func.count()).select_from(Job).where(Job.status.in_(ACTIVE), Job.kind != "asset", Job.deleted_at.is_(None), Job.id != job.id)
+    )
     per_model = await db.scalar(active.where(Job.model_id == model.id))
     per_client = await db.scalar(active.where(Job.client_id == client.id))
     per_channel = await db.scalar(active.where(Job.channel == job.channel))
@@ -65,27 +88,64 @@ async def capacity(db, job):
 
 async def claim(worker):
     async with Session.begin() as db:
-        await lock(db)
-        stale = list(
-            (await db.scalars(select(Job).where(Job.status.in_(ACTIVE), Job.lease_until < now()).with_for_update(skip_locked=True))).all()
-        )
-        for row in stale:
-            if row.status == "submitting" or row.kind == "chat":
-                row.status, row.error = "manual_review", "Worker interrupted while submitting; do not resubmit without reconciliation"
-            else:
-                row.status = "queued"  # provider_id resumes polling; saved response resumes archive
-            row.worker_id = None
-        candidates = (
+        await lock(db, "scheduler")
+        stale = (
             await db.scalars(
                 select(Job)
-                .where(Job.status == "queued", Job.kind != "chat", Job.deleted_at.is_(None))
-                .order_by(Job.created_at)
+                .where(
+                    Job.deleted_at.is_(None),
+                    Job.status.in_(ACTIVE),
+                    or_(
+                        Job.lease_until < now(),
+                        and_(Job.kind == "asset", Job.lease_until.is_(None), Job.created_at < now() - timedelta(seconds=120)),
+                    ),
+                )
                 .limit(100)
                 .with_for_update(skip_locked=True)
             )
         ).all()
-        for row in candidates:
-            if await quarantine_unavailable_target(db, row):
+        for row in stale:
+            if row.status == "submitting" or row.kind in {"asset", "chat"}:
+                row.status, row.error = "manual_review", "Worker interrupted while submitting; do not resubmit without reconciliation"
+            else:
+                row.status = "queued"
+            row.worker_id = row.lease_until = None
+    async with Session.begin() as db:
+        await lock(db, "scheduler")
+        # Each resource combination has the same capacity decision. Inspect its oldest
+        # queued job so a saturated tenant cannot occupy the entire candidate window.
+        rank = func.row_number().over(
+            partition_by=(Job.client_id, Job.model_id, Job.route_id, Job.channel, Job.origin, Job.kind),
+            order_by=(Job.created_at, Job.id),
+        )
+        heads = select(Job.id, rank.label("rank")).where(Job.status == "queued", Job.deleted_at.is_(None)).subquery()
+        candidates = (
+            await db.execute(
+                select(Job.id, Job.kind, Client.id, Client.user_id, Client.enabled, Client.deleted_at)
+                .join(heads, heads.c.id == Job.id)
+                .outerjoin(Client, Client.id == Job.client_id)
+                .where(heads.c.rank == 1)
+                .order_by(Job.created_at, Job.id)
+            )
+        ).all()
+        for jid, kind, client_id, user_id, enabled, deleted_at in candidates:
+            unavailable = not enabled or deleted_at is not None or kind == "chat"
+            if unavailable and client_id:
+                # Terminal updates take the wallet before the job row.
+                await lock(db, "wallet:" + (user_id or client_id))
+            row = await db.scalar(select(Job).where(Job.id == jid, Job.status == "queued").with_for_update(skip_locked=True))
+            if not row:
+                continue
+            if await quarantine_unavailable_target(db, row, include_queued=True):
+                continue
+            if unavailable:
+                # Legacy queued chats never reached submission. A previously claimed
+                # media job can carry billable provider state and must be reconciled.
+                if client_id and not row.attempts and not row.provider_id and not row.provider_response and row.charged_points is None:
+                    row.status, row.error = "failed", "Request not submitted; execution no longer available"
+                    await settle(db, row, 0, "system", row.error, "unsubmitted:" + row.id, {})
+                else:
+                    row.status, row.error = "manual_review", "Execution unavailable; reconcile existing task"
                 continue
             if not await capacity(db, row):
                 continue
@@ -98,13 +158,18 @@ async def claim(worker):
 
 async def update(jid, **values):
     async with Session.begin() as db:
-        await lock(db)
+        terminal = values.get("status") in {"succeeded", "failed", "recoverable", "manual_review"}
+        if terminal:
+            client = await db.scalar(select(Client).join(Job, Job.client_id == Client.id).where(Job.id == jid))
+            if client:
+                await lock(db, "wallet:" + (client.user_id or client.id))
         row = await db.get(Job, jid, with_for_update=True)
         if _worker.get() and row.worker_id != _worker.get():
             raise LeaseLost("Worker lease transferred")
         for key, value in values.items():
             setattr(row, key, value)
-        await automatic(db, row)
+        if terminal and row.kind != "asset":
+            await automatic(db, row)
 
 
 async def heartbeat(jid):
@@ -127,7 +192,6 @@ def usage(body):
 
 async def process(jid):
     async with Session.begin() as db:
-        await lock(db)
         job = await db.get(Job, jid, with_for_update=True)
         # A target may have been deleted after claim, including during a migration.
         if await quarantine_unavailable_target(db, job):
@@ -278,16 +342,30 @@ async def main(stop=None, drain_seconds=None):
     balance_task = asyncio.create_task(balance_loop())
     worker = "worker-" + uuid.uuid4().hex
     tasks = set()
+    health = Path(os.getenv("WORKER_HEALTH_FILE", "/tmp/model-worker-ready"))
+    health.unlink(missing_ok=True)
+    last_probe = 0.0
+    last_completion = time.monotonic()
     last_reset = 0.0
     try:
         while not stop.is_set():
             if time.monotonic() - last_reset >= 60:
-                async with Session.begin() as db:
-                    await lock(db)
-                    clients = (await db.scalars(select(Client).where(Client.billing_enabled.is_(True), Client.deleted_at.is_(None)))).all()
-                    for client in clients:
-                        await reset(db, client)
-                last_reset = time.monotonic()
+                async with Session() as db:
+                    due = (
+                        await db.execute(
+                            select(Client.id, Client.user_id)
+                            .where(Client.billing_enabled.is_(True), Client.deleted_at.is_(None), Client.billing_month != month())
+                            .order_by(Client.id)
+                            .limit(100)
+                        )
+                    ).all()
+                for cid, uid in due:
+                    async with Session.begin() as db:
+                        await lock(db, "wallet:" + (uid or cid))
+                        client = await db.get(Client, cid)
+                        if client and not client.deleted_at and client.billing_enabled:
+                            await reset(db, client)
+                last_reset = time.monotonic() if len(due) < 100 else 0.0
             if balance_task.done():
                 await asyncio.gather(balance_task, return_exceptions=True)
                 balance_task = asyncio.create_task(balance_loop())
@@ -295,7 +373,17 @@ async def main(stop=None, drain_seconds=None):
             if completed:
                 await asyncio.gather(*completed, return_exceptions=True)
                 tasks -= completed
-            if len(tasks) < int(os.getenv("WORKER_CONCURRENCY", "16")):
+                last_completion = time.monotonic()
+            concurrency = int(os.getenv("WORKER_CONCURRENCY", "16"))
+            if len(tasks) < concurrency:
+                last_completion = time.monotonic()
+            if time.monotonic() - last_probe >= 5:
+                async with Session() as db:
+                    await db.execute(select(1))
+                if time.monotonic() - last_completion < float(os.getenv("WORKER_STALL_SECONDS", "7200")):
+                    health.touch()
+                last_probe = time.monotonic()
+            if len(tasks) < concurrency:
                 jid = await claim(worker)
                 if jid:
                     tasks.add(asyncio.create_task(process(jid)))
@@ -305,6 +393,7 @@ async def main(stop=None, drain_seconds=None):
             except TimeoutError:
                 pass
     finally:
+        health.unlink(missing_ok=True)
         balance_task.cancel()
         await asyncio.gather(balance_task, return_exceptions=True)
         if tasks:

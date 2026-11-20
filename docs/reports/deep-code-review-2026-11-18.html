@@ -1,0 +1,3370 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>MV Agent 性能、安全与稳定性评审 · 2026-11-18</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #192d34;
+        --muted: #506168;
+        --line: #ccd6d5;
+        --paper: #fff;
+        --bg: #f4f7f6;
+        --teal: #005657;
+        --p1: #932e20;
+        --p2: #684817;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          16px/1.65 Inter,
+          'PingFang SC',
+          'Microsoft YaHei',
+          sans-serif;
+      }
+      main {
+        max-width: 1060px;
+        margin: 0 auto;
+        padding: 36px 32px 70px;
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+      h1 {
+        font-size: clamp(28px, 4vw, 45px);
+        line-height: 1.2;
+        margin: 0.35em 0;
+      }
+      h2 {
+        font-size: 25px;
+        margin: 1.6em 0 0.5em;
+      }
+      h3 {
+        font-size: 19px;
+        line-height: 1.5;
+        margin: 0.35em 0;
+      }
+      a {
+        color: var(--teal);
+        text-underline-offset: 3px;
+      }
+      a:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      button:focus-visible {
+        outline: 3px solid #007d75;
+        outline-offset: 3px;
+      }
+      .meta,
+      .mode,
+      .desc,
+      .counts {
+        color: var(--muted);
+      }
+      .meta,
+      .item-id,
+      .counts,
+      code {
+        font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      }
+      .meta,
+      .item-id,
+      .mode,
+      .counts {
+        font-size: 13px;
+      }
+      .intro {
+        border-bottom: 2px solid var(--teal);
+        padding-bottom: 20px;
+      }
+      .scope {
+        max-width: 87ch;
+      }
+      .stats {
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+        margin: 17px 0;
+        font-weight: 600;
+      }
+      .stats span {
+        padding: 3px 12px;
+        background: #dfecea;
+        border-radius: 4px;
+      }
+      .stats span:nth-child(2) {
+        color: var(--p1);
+        background: #f7e1dc;
+      }
+      .stats span:nth-child(3) {
+        color: var(--p2);
+        background: #f4e9d0;
+      }
+      .summary {
+        padding-left: 1.6em;
+      }
+      .summary li {
+        margin-bottom: 0.55em;
+      }
+      .summary p {
+        display: inline;
+      }
+      .summary strong {
+        margin-right: 0.5em;
+      }
+      .jump,
+      .item-id {
+        font-size: 13px;
+      }
+      .jump {
+        white-space: nowrap;
+      }
+      nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 19px;
+      }
+      nav a {
+        white-space: nowrap;
+      }
+      nav span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .filters {
+        display: flex;
+        align-items: end;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 18px 0 8px;
+      }
+      .filters label {
+        display: grid;
+        gap: 4px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .filters input,
+      select,
+      button {
+        font: inherit;
+        color: var(--ink);
+        background: var(--paper);
+        border: 1px solid #889b9b;
+        border-radius: 4px;
+        padding: 7px 10px;
+        min-height: 38px;
+      }
+      .filters input {
+        width: min(67vw, 270px);
+      }
+      button {
+        cursor: pointer;
+      }
+      .group {
+        margin-top: 28px;
+      }
+      .group > h2 {
+        display: flex;
+        gap: 12px;
+        align-items: baseline;
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 8px;
+      }
+      .group .counts {
+        font-weight: 400;
+      }
+      article {
+        scroll-margin-top: 12px;
+        background: var(--paper);
+        border: 1px solid var(--line);
+        padding: 16px 22px;
+        margin: 11px 0;
+        border-radius: 5px;
+      }
+      article:target {
+        border: 2px solid var(--teal);
+      }
+      article header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      article p {
+        margin: 0.42em 0;
+      }
+      .tag {
+        font:
+          bold 12px/1.5 ui-monospace,
+          monospace;
+        border-radius: 3px;
+        padding: 2px 8px;
+      }
+      .p1 {
+        color: var(--p1);
+        background: #f9e7e2;
+      }
+      .p2 {
+        color: var(--p2);
+        background: #f5ecd9;
+      }
+      .fix strong,
+      .evidence strong {
+        margin-right: 0.4em;
+      }
+      .refs {
+        display: flex;
+        gap: 3px 13px;
+        flex-wrap: wrap;
+      }
+      .ref {
+        font-size: 12px;
+        overflow-wrap: anywhere;
+      }
+      .sources {
+        font-size: 13px;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 10px 0;
+      }
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        padding: 8px 12px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #e4eeeb;
+      }
+      td:first-child {
+        width: 26%;
+      }
+      .notes {
+        margin: 8px 0;
+      }
+      .notes p {
+        margin: 0.4em 0;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (max-width: 570px) {
+        main {
+          padding: 22px 15px 45px;
+        }
+        article {
+          padding: 14px;
+        }
+        .group > h2 {
+          display: block;
+        }
+        .group .counts {
+          display: block;
+        }
+        td,
+        th {
+          padding: 7px 5px;
+        }
+      }
+      @media print {
+        body,
+        main {
+          background: white;
+        }
+        main {
+          max-width: none;
+          padding: 0;
+        }
+        .filters,
+        nav,
+        .live {
+          display: none !important;
+        }
+        .group[hidden],
+        article[hidden] {
+          display: block !important;
+        }
+        article {
+          break-inside: avoid;
+        }
+        .group > h2 {
+          break-after: avoid;
+        }
+        a {
+          color: inherit;
+        }
+        .summary,
+        .notes,
+        table {
+          font-size: 13px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="intro">
+        <p class="meta">2026-11-18 · 工作树基线 3dbf6c5e</p>
+        <h1>MV Agent 性能、安全与稳定性评审</h1>
+        <div class="stats"><span>91 项发现</span><span>35 项 P1</span><span>56 项 P2</span></div>
+        <p class="scope">
+          检查了当前工作树的用户端、管理端、FastAPI、Worker、数据库与缓存、媒体处理、部署和备份脚本，以及仓库中的独立模型服务。范围包含开始评审时已有的
+          10 个已修改文件。独立服务的发现仅适用于采用该组件的部署，主应用生产配置已禁用旧网关。
+        </p>
+      </header>
+      <section aria-labelledby="critical">
+        <h2 id="critical">建议先处理的风险</h2>
+        <ol class="summary">
+          <li>
+            <strong>账号隔离与日志</strong>
+            <p>
+              共享浏览器切换账号时，旧请求可以向新账号写入。后端还会在校验聊天所有者前取消任务，验证错误的原始异常可能把密码写入日志。
+              <a class="jump" href="#WEB-03">WEB-03</a> <a class="jump" href="#API-01">API-01</a>
+              <a class="jump" href="#API-05">API-05</a>
+            </p>
+          </li>
+          <li>
+            <strong>生成费用与交付</strong>
+            <p>
+              任务恢复时可能重复入账，或把 Agent
+              费用记入普通业务。镜头在执行中被删除时，还可能漏记平台已发生的用量。
+              <a class="jump" href="#JOB-02">JOB-02</a> <a class="jump" href="#JOB-04">JOB-04</a>
+              <a class="jump" href="#JOB-10">JOB-10</a>
+            </p>
+          </li>
+          <li>
+            <strong>正常操作造成数据丢失</strong>
+            <p>
+              新建 ASS 并完成大纲后调整音轨，客户端可能只送出两个字段，后端却替换整份配置。
+              <a class="jump" href="#WEB-01">WEB-01</a>
+            </p>
+          </li>
+          <li>
+            <strong>连接池与资源上限</strong>
+            <p>
+              订阅大纲或导出会长期占用数据库连接。字幕按时间跨度展开且没有分镜数预算，错误时间码也会拖累其他请求。
+              <a class="jump" href="#API-04">API-04</a> <a class="jump" href="#API-22">API-22</a>
+            </p>
+          </li>
+          <li>
+            <strong>发布与依赖</strong>
+            <p>
+              平台地址未与发布环境强绑定，错配可能把平台密钥送往错误环境。图片上传处理可到达已披露的
+              Pillow 问题。 <a class="jump" href="#OPS-01">OPS-01</a>
+              <a class="jump" href="#OPS-11">OPS-11</a>
+            </p>
+          </li>
+        </ol>
+      </section>
+      <section aria-labelledby="method">
+        <h2 id="method">证据与验证范围</h2>
+        <div class="notes">
+          <p>
+            <strong>P1</strong>
+            表示可能造成跨账号操作、隐私或凭据泄露、资产与费用错误、核心服务不可用，或关键备份与恢复失效。<strong
+              >P2</strong
+            >
+            表示有具体触发条件的性能退化、恢复缺口、状态不一致或暴露面受限的问题。优先级按本项目影响评定。每项列出触发条件及代码位置。
+          </p>
+          <p>
+            “源码审查”表示已追踪相关代码分支。故障发生次数、线上实际配置与影响规模仍需运营数据核验。“本地模拟”列出观测到的具体现象。“版本与公告”对照锁文件与公开公告，并单独说明运行入口和影响条件。公告别名和跨层重复发现已合并。
+          </p>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">本次检查</th>
+              <th scope="col">结果</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>主应用预检</td>
+              <td>
+                <code>make preflight-lite</code> 通过。后端 749 项通过，1 项预期失败，覆盖率
+                72.95%。前端 53 个文件、277 项测试通过，构建成功，前端 lint 有 5 条警告。
+              </td>
+            </tr>
+            <tr>
+              <td>数据库与执行租约</td>
+              <td>
+                <code>make test-middleware</code> 通过。一次性 PostgreSQL/Redis 完成迁移至
+                <code>a103e9c7d251</code>。12 个竞争者中 1 个取得租约，20 次并发受理中 3
+                次获准。验证完成后已清理临时环境。
+              </td>
+            </tr>
+            <tr>
+              <td>浏览器用户流程</td>
+              <td>
+                本地 Chromium 共执行 27 个模拟场景，21 个通过、6 个失败。通过项包含 ASS
+                主流程、退出、管理渠道、导出、全屏播放和批量进度。一个失败源于恢复状态文案，另五个源于人物请求字段断言，详见
+                <a href="#WEB-19">WEB-19</a> 与 <a href="#WEB-20">WEB-20</a>。ASS 流程另出现
+                ResizeObserver 通知警告，本次未定位到业务影响。
+              </td>
+            </tr>
+            <tr>
+              <td>独立模型服务</td>
+              <td>
+                <code>make -C model-service test</code> 中 107
+                项通过。独立管理端与用户门户均构建成功。
+              </td>
+            </tr>
+            <tr>
+              <td>前端依赖公告</td>
+              <td>
+                主项目仅运行依赖审计为 0。包含开发依赖时，npm 报告 1 个 High、12 个 Moderate
+                软件包条目（含传递链）。两个独立门户各自报告 1 个运行依赖 High，完整审计各为 2 个
+                High。相同根因在发现清单中只计一次。
+              </td>
+            </tr>
+            <tr>
+              <td>后端依赖公告</td>
+              <td>
+                核对主后端锁文件与 PyPI 版本公告、维护者修复说明。Pillow、certifi、OpenTelemetry
+                的对应条件见下文。独立服务的 Python
+                依赖采用版本区间，线上实际解析版本需结合镜像核实。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="desc">
+          验证均使用本机、隔离中间件或模拟上游。未访问线上业务、生产日志或账单，未触发真实模型生成，未对部署端施压。项目在真实流量下的延迟、资源峰值和实际影响人数尚未测量。
+        </p>
+      </section>
+      <section aria-labelledby="index">
+        <h2 id="index">全部发现</h2>
+        <nav aria-label="模块目录">
+          <a href="#api">主应用 API 与数据访问 <span>27</span></a>
+          <a href="#jobs">生成、费用与任务恢复 <span>18</span></a>
+          <a href="#web">工作区与管理前端 <span>20</span></a>
+          <a href="#ops">部署、备份与依赖 <span>14</span></a>
+          <a href="#gateway">独立模型服务与门户 <span>12</span></a>
+        </nav>
+        <div class="filters">
+          <label for="term"
+            >搜索发现或代码位置<input
+              id="term"
+              type="search"
+              placeholder="输入关键词或编号" /></label
+          ><label for="priority"
+            >优先级<select id="priority">
+              <option value="">全部</option>
+              <option>P1</option>
+              <option>P2</option>
+            </select></label
+          ><label for="mode"
+            >证据<select id="mode">
+              <option value="">全部</option>
+              <option>源码审查</option>
+              <option>本地模拟</option>
+              <option>版本与公告</option>
+            </select></label
+          ><button id="reset" type="button">清除筛选</button>
+        </div>
+        <p class="live counts" id="count" role="status" aria-live="polite">显示 91 / 91 项</p>
+      </section>
+      <section class="group" id="api" aria-labelledby="h-api">
+        <h2 id="h-api">主应用 API 与数据访问<span class="counts">27 项 · 10 项 P1</span></h2>
+        <article id="API-01" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#API-01">API-01</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>删除聊天在校验所有者之前中断目标任务</h3>
+          <p>
+            删除入口先设置会话取消标志、取消进程内任务，之后才检查 user_id。非所有者知晓会话 ID
+            时，即使最终收到 404，也会中断他人的回复。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            先检查活动会话归属，再产生取消副作用。验证跨用户请求前后任务和取消标志均无变化。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/chat.py#L112"
+              ><code>backend/app/chat.py:112</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L1234"
+              ><code>backend/app/main.py:1234</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-02" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#API-02">API-02</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>旧密码认证和新会话签发之间存在撤销竞态</h3>
+          <p>
+            登录在独立事务中核对密码并提交，然后在另一个事务签发
+            refresh。若改密恰在两步之间完成，新建 refresh 未被撤销，轮换时还能按最新 auth_version
+            换取 access。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            将登录与改密串行化，在同一事务锁住用户、重新确认凭据版本并建立会话。覆盖并发登录和改密。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/auth.py#L156"
+              ><code>backend/app/auth.py:156</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L442"
+              ><code>backend/app/main.py:442</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L481"
+              ><code>backend/app/main.py:481</code></a
+            >
+            <a class="ref" href="../../backend/app/auth.py#L204"
+              ><code>backend/app/auth.py:204</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-03" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#API-03">API-03</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>聊天事件流在客户端会话撤销后仍继续传消息</h3>
+          <p>
+            SSE 只在握手时检查 access 和 refresh 家族。已建立的聊天订阅无限轮询，后续只按用户 ID
+            查询聊天。退出、改密、停用账号或 access 过期后，该连接仍能收到此后产生的消息。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 让流订阅受会话撤销和 token
+            到期约束。保留已有连接再撤销凭据，验证下一批私有事件不会送达。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/main.py#L1246"
+              ><code>backend/app/main.py:1246</code></a
+            >
+            <a class="ref" href="../../backend/app/chat.py#L331"
+              ><code>backend/app/chat.py:331</code></a
+            >
+            <a class="ref" href="../../backend/app/auth.py#L121"
+              ><code>backend/app/auth.py:121</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-04" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#API-04">API-04</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>长连接可耗尽数据库连接池，使普通 API 超时</h3>
+          <p>
+            大纲和导出 SSE 的入口查库已经借出连接，request-scope
+            数据库依赖在整个响应结束才释放。流内每 0.75
+            秒还要从同一池新借连接。连接全被观察者占用后，轮询本身和普通接口都会等待池超时。Chat/生成
+            SSE 的鉴权数据库依赖也会跨越整段响应。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            在进入流前结束鉴权及资源检查事务，只捕获必要标量。将查询、序列化与发送分开，使网络等待不占连接。以小池与多个本地
+            mock 观察者验证。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/domain.py#L1468"
+              ><code>backend/app/domain.py:1468</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L3070"
+              ><code>backend/app/domain.py:3070</code></a
+            >
+            <a class="ref" href="../../backend/app/database.py#L25"
+              ><code>backend/app/database.py:25</code></a
+            >
+            <a class="ref" href="../../backend/app/auth.py#L104"
+              ><code>backend/app/auth.py:104</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-05" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#API-05">API-05</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>请求验证失败可能将密码原值写入错误日志</h3>
+          <p>
+            422 处理会过滤结构化请求体，却也将原始 RequestValidationError 交给
+            traceback.format_exception。锁定版本的 FastAPI 会在异常文本中输出验证错误的
+            input，包括不满足长度约束的密码。查询字符串和通用异常文本也直接写库。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 对校验错误仅保留字段与类型，删除 input。统一清洗
+            trace、message 和 query，使用标记字符串验证所有错误日志字段。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/main.py#L257"
+              ><code>backend/app/main.py:257</code></a
+            >
+            <a class="ref" href="../../backend/app/error_logging.py#L60"
+              ><code>backend/app/error_logging.py:60</code></a
+            >
+            <a class="ref" href="../../backend/app/error_logging.py#L70"
+              ><code>backend/app/error_logging.py:70</code></a
+            >
+            <a class="ref" href="../../backend/app/error_logging.py#L75"
+              ><code>backend/app/error_logging.py:75</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-06" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#API-06">API-06</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>请求日志整包缓冲上传和 JSON 响应</h3>
+          <p>
+            在全量日志或带批次头时，中间件对所有内容类型先调用 request.body()。100 MiB 的 multipart
+            上传会被额外保留。JSON 返回也在检查 8 KiB 阈值前完整拼接。并发放大进程的峰值内存。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 按类型跳过媒体，只在流经时截取有界 JSON 摘要。通过本地大文件
+            mock 检查记录大小、流式传输和峰值内存。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/request_logging.py#L49"
+              ><code>backend/app/request_logging.py:49</code></a
+            >
+            <a class="ref" href="../../backend/app/request_logging.py#L56"
+              ><code>backend/app/request_logging.py:56</code></a
+            >
+            <a class="ref" href="../../docker/nginx.conf#L4"><code>docker/nginx.conf:4</code></a>
+          </div>
+        </article>
+
+        <article id="API-07" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#API-07">API-07</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>并发发送聊天消息可能重复调用模型，受理中断可使会话卡住</h3>
+          <p>
+            并发请求基于锁外的 idle 快照通过检查。配额、running 与用户消息、Redis
+            事件、生成工单依次独立写入。并发可创建多个任务。消息提交后若 Redis
+            或工单写入失败，后续消息会被 running 状态拒绝。
+            已开始的聊天工单失租后，回收分支也没有恢复会话状态。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            锁定会话并原子检查状态，将配额、消息及工单放到同一事务，提交后再通知。覆盖双提交及 Redis
+            故障。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/chat.py#L129"
+              ><code>backend/app/chat.py:129</code></a
+            >
+            <a class="ref" href="../../backend/app/chat.py#L138"
+              ><code>backend/app/chat.py:138</code></a
+            >
+            <a class="ref" href="../../backend/app/chat.py#L143"
+              ><code>backend/app/chat.py:143</code></a
+            >
+            <a class="ref" href="../../backend/app/chat.py#L149"
+              ><code>backend/app/chat.py:149</code></a
+            >
+            <a class="ref" href="../../backend/app/worker.py#L197"
+              ><code>backend/app/worker.py:197</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-08" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#API-08">API-08</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>仓库默认代理链将不可信转发地址作为客户端地址</h3>
+          <p>
+            Nginx 接续来访 X-Forwarded-For，Uvicorn
+            信任全部代理。当仓库提供的入口直接接收流量、前置负载均衡未清洗原头时，审计客户端地址和
+            IP 登录限流的键可受来访请求影响。用户名限流仍单独存在。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 在可信边界重建地址头，并把 Uvicorn
+            的可信源限制为明确的代理。覆盖直连和多级可信代理链。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../docker/nginx.conf#L33"><code>docker/nginx.conf:33</code></a>
+            <a class="ref" href="../../docker/nginx-tls.conf#L42"
+              ><code>docker/nginx-tls.conf:42</code></a
+            >
+            <a class="ref" href="../../backend/docker-entrypoint.sh#L7"
+              ><code>backend/docker-entrypoint.sh:7</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L414"
+              ><code>backend/app/main.py:414</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-09" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#API-09">API-09</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>重新领取导出工单可覆盖已经交付的文件状态</h3>
+          <p>
+            素材 ZIP 运行器缺少 ready 幂等返回。归档成功但工单终态尚未提交时若进程中断，重放会写回
+            running 并再次上传，失败可覆为 failed。两种导出的最后一次失租分支也不加条件覆盖现有
+            ready。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 两种运行器都复用 ready
+            记录，进度、失败和重放状态更新使用条件更新。覆盖交付提交后、工单终态提交前的故障。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/domain.py#L2713"
+              ><code>backend/app/domain.py:2713</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L2693"
+              ><code>backend/app/domain.py:2693</code></a
+            >
+            <a class="ref" href="../../backend/app/worker.py#L218"
+              ><code>backend/app/worker.py:218</code></a
+            >
+            <a class="ref" href="../../backend/app/mv_export.py#L165"
+              ><code>backend/app/mv_export.py:165</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-10" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#API-10">API-10</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>并发与部分失败会破坏共享登录限流</h3>
+          <p>
+            失败次数先读后记，并发请求可以一起通过判断。同 IP 的一次成功登录还会清掉该 IP
+            的全部失败记录。计数首次 INCR 和 EXPIRE 分开执行，二者之间发生故障可能留下无 TTL
+            的计数键。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            原子维护带期限的两个维度，只撤销本次成功请求的预留。覆盖并发、同 IP
+            多账号和首次计数中断。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/main.py#L421"
+              ><code>backend/app/main.py:421</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L434"
+              ><code>backend/app/main.py:434</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L439"
+              ><code>backend/app/main.py:439</code></a
+            >
+            <a class="ref" href="../../backend/app/redis_store.py#L38"
+              ><code>backend/app/redis_store.py:38</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-11" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#API-11">API-11</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>密码哈希计算阻塞 API 事件循环</h3>
+          <p>
+            异步登录和改密直接调用同步 Argon2 验证、哈希。单进程处理认证计算时不能及时调度其他 API
+            请求和 SSE 心跳。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            用有界线程池执行密码计算，监测本地并发认证期间独立轻量接口的延迟。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/auth.py#L160"
+              ><code>backend/app/auth.py:160</code></a
+            >
+            <a class="ref" href="../../backend/app/auth.py#L33"
+              ><code>backend/app/auth.py:33</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L478"
+              ><code>backend/app/main.py:478</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-12" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#API-12">API-12</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>聊天订阅每秒重读整段聊天记录和 Redis 全量事件</h3>
+          <p>
+            每个 SSE 客户端每秒都加载包含所有消息的 ORM 会话。Redis 接着读取整段最多 2000 条事件，在
+            Python 解码再按游标过滤。无新消息时仍付出相同开销。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            把权限检查改为轻量投影，按游标读取增量事件。让长会话空闲订阅的每轮查询量保持有界。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/chat.py#L332"
+              ><code>backend/app/chat.py:332</code></a
+            >
+            <a class="ref" href="../../backend/app/chat.py#L85"
+              ><code>backend/app/chat.py:85</code></a
+            >
+            <a class="ref" href="../../backend/app/redis_store.py#L241"
+              ><code>backend/app/redis_store.py:241</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L1254"
+              ><code>backend/app/main.py:1254</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-13" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#API-13">API-13</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>轻量任务详情和恢复接口仍载入全部历史工单</h3>
+          <p>
+            history=false 仅限制资产，提示词任务仍获取历史所有版本和完整工单 JSON，在 Python
+            只留每镜最新。恢复活动任务的查询也加载子项目全部工单。重试多或历史较长时，切项目开销持续增长。
+            高频工单状态轮询还会读取未返回给浏览器的整份请求与供应商回包。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            在数据库按镜头和类型选取最新行，并投影摘要字段。在有大量旧版本的子项目中检查返回行数和读取字段。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/domain.py#L909"
+              ><code>backend/app/domain.py:909</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L924"
+              ><code>backend/app/domain.py:924</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L1138"
+              ><code>backend/app/main.py:1138</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L1087"
+              ><code>backend/app/main.py:1087</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-14" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#API-14">API-14</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>项目首页和用量接口按账户全历史加载</h3>
+          <p>
+            项目列表包括所有子项目的完整 storyboardConfig 和整体提示词。用量接口加载用户全部
+            TokenUsage ORM 对象，在 Python 汇总后再逐条返回。日常请求带宽和内存随账户年龄增长。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            项目首页只取摘要，子项目和用量明细分页，汇总用数据库聚合。比较旧数据增长前后首屏响应体与内存。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/domain.py#L488"
+              ><code>backend/app/domain.py:488</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L453"
+              ><code>backend/app/domain.py:453</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L2625"
+              ><code>backend/app/domain.py:2625</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-15" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#API-15">API-15</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>ZIP 下载失败后兄弟协程继续运行</h3>
+          <p>
+            asyncio.gather 中单个下载失败会提前抛出，其他下载仍可能继续使用已关闭的 HTTP
+            客户端或即将清理的目录。迟到进度仍可把失败记录改回运行中。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 改用 TaskGroup
+            并等待兄弟取消。进度更新只允许应用到非终态任务。验证一项失败后无在途写入、状态稳定。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/domain.py#L2897"
+              ><code>backend/app/domain.py:2897</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L2693"
+              ><code>backend/app/domain.py:2693</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L2959"
+              ><code>backend/app/domain.py:2959</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-16" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#API-16">API-16</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>远程导入绕过媒体内容校验</h3>
+          <p>
+            用户远程导入将远端提供的 Content-Type
+            和调用方给出的文件名直接写入TOS。流式大小限制与公网地址校验均已具备，但内容无需属于媒体类型。创意上传对音视频也直接写入存储。可占用平台存储并通过返回的媒体地址分发非媒体内容。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 把下载的文件和专用上传统一交给内容检测，写入规范
+            MIME。验证非媒体和扩展名/内容不一致时均不创建对象。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/main.py#L514"
+              ><code>backend/app/main.py:514</code></a
+            >
+            <a class="ref" href="../../backend/app/storage.py#L192"
+              ><code>backend/app/storage.py:192</code></a
+            >
+            <a class="ref" href="../../backend/app/creative.py#L105"
+              ><code>backend/app/creative.py:105</code></a
+            >
+            <a class="ref" href="../../backend/app/upload_validation.py#L23"
+              ><code>backend/app/upload_validation.py:23</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-17" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#API-17">API-17</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>合并成片不支持已成功导入的 GB18030 字幕</h3>
+          <p>
+            ASS 解析兼容 UTF-8 和 GB18030，TOS 保留原始字节。成片阶段只按 utf-8-sig
+            重新解码。包含中文且未兼容 UTF-8 的 GB18030 字幕会在生成完成并下载素材后导出失败。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 渲染端复用 decode_ass，再转换成 UTF-8 给 FFmpeg。用 GB18030
+            中文 ASS 覆盖导入到导出。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/ass_storyboard.py#L22"
+              ><code>backend/app/ass_storyboard.py:22</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L589"
+              ><code>backend/app/main.py:589</code></a
+            >
+            <a class="ref" href="../../backend/app/mv_render.py#L95"
+              ><code>backend/app/mv_render.py:95</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-18" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#API-18">API-18</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>同一项目并发导入 ASS 与音频会触发唯一约束</h3>
+          <p>
+            替换当前音频时先读旧音轨再插入新行，没有串行锁。同一项目的两个并发 ASS
+            导入可同时判定可以插入当前音轨。数据库的活动音轨唯一索引会使其一失败，此时 ASS
+            和音频已分别上传。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            锁项目后重新确认当前音轨，把并发冲突映射为可重试语义并处理未引用对象。覆盖同项目双上传。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/main.py#L604"
+              ><code>backend/app/main.py:604</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L631"
+              ><code>backend/app/main.py:631</code></a
+            >
+            <a class="ref" href="../../backend/app/models.py#L103"
+              ><code>backend/app/models.py:103</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-19" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#API-19">API-19</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>图片缩略图处理的解码峰值与事件循环阻塞</h3>
+          <p>
+            API 在事件循环内执行 Pillow 全尺寸转换再缩放。生成图片归档允许高达 500 MiB
+            的远端内容内存分块、拼接，再进入解码。请求的压缩字节上限不能代表实际像素缓冲大小，数个正常的大图并发可造成严重停顿。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            采用图片专用字节及像素上限，在有界线程池生成缩略图，并优先从临时文件解码。用大幅面合法图片观测事件循环和
+            RSS。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/main.py#L496"
+              ><code>backend/app/main.py:496</code></a
+            >
+            <a class="ref" href="../../backend/app/storage.py#L198"
+              ><code>backend/app/storage.py:198</code></a
+            >
+            <a class="ref" href="../../backend/app/storage.py#L214"
+              ><code>backend/app/storage.py:214</code></a
+            >
+            <a class="ref" href="../../backend/app/storage.py#L277"
+              ><code>backend/app/storage.py:277</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-20" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#API-20">API-20</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>导出暂存缺少总字节预算</h3>
+          <p>
+            成片只在开始时比较固定 2 GiB 剩余空间，随后可以下载多个各达 500 MiB
+            的镜头，且还要为成片保留输出空间。素材 ZIP
+            也先持有所有输入再开始打包。任务级并发槽不能限制请求合计占用，可能写满共享临时分区。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            设置任务级及全局暂存预算，按实际累计字节和可用空间持续检查，预留输出空间。验证多文件超过总预算时安全退出。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/mv_export.py#L171"
+              ><code>backend/app/mv_export.py:171</code></a
+            >
+            <a class="ref" href="../../backend/app/mv_export.py#L199"
+              ><code>backend/app/mv_export.py:199</code></a
+            >
+            <a class="ref" href="../../backend/app/storage.py#L284"
+              ><code>backend/app/storage.py:284</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L2897"
+              ><code>backend/app/domain.py:2897</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-21" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#API-21">API-21</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>空白聊天消息消耗配额后返回内部错误</h3>
+          <p>
+            输入只校验字符数，入口随后 strip。首条全空白消息会先提交日配额，再在空字符串的
+            splitlines()[0] 处抛出 IndexError。已有历史的会话则会把空内容送入调用链。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 先对 strip 后的正文判空并返回
+            422，在消息和配额受理前验证。覆盖首条和后续空白消息。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/main.py#L1219"
+              ><code>backend/app/main.py:1219</code></a
+            >
+            <a class="ref" href="../../backend/app/chat.py#L138"
+              ><code>backend/app/chat.py:138</code></a
+            >
+            <a class="ref" href="../../backend/app/chat.py#L140"
+              ><code>backend/app/chat.py:140</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-22" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#API-22">API-22</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>ASS 时间轴展开缺少资源上限</h3>
+          <p>
+            导入只限制文件字节数，解析不限制小时数、总时长或生成镜头数。间奏拆分会按时间跨度一次分配列表，再逐项建立分镜字典。错误时间码即可使单个导入耗尽
+            API 内存或长期阻塞事件循环。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            在构建列表之前校验歌曲总时长和预计镜头数量，对合法上限与超限输入分别验证受理、拒绝及内存上限。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/ass_storyboard.py#L37"
+              ><code>backend/app/ass_storyboard.py:37</code></a
+            >
+            <a class="ref" href="../../backend/app/ass_storyboard.py#L76"
+              ><code>backend/app/ass_storyboard.py:76</code></a
+            >
+            <a class="ref" href="../../backend/app/ass_storyboard.py#L107"
+              ><code>backend/app/ass_storyboard.py:107</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L586"
+              ><code>backend/app/main.py:586</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L697"
+              ><code>backend/app/main.py:697</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-23" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#API-23">API-23</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>指定渠道的批量视频逐镜重复访问远端目录并长期持有用户锁</h3>
+          <p>
+            视频批量受理在同一事务中逐个处理最多 200
+            项。每项取得用户行锁后，对指定渠道重新发起独立的目录 HTTP
+            请求。即使所有镜头使用同一模型和渠道，外部延迟也串行累加，同时阻塞同账号的提交、会话轮换和偏好更新。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            按模型与渠道为整批生成一次校验快照，在获取用户锁前完成远端读取，入锁后校对快照版本、幂等和配额。对重复渠道组合断言只产生一次目录请求。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/main.py#L1056"
+              ><code>backend/app/main.py:1056</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L875"
+              ><code>backend/app/main.py:875</code></a
+            >
+            <a class="ref" href="../../backend/app/generation_preferences.py#L52"
+              ><code>backend/app/generation_preferences.py:52</code></a
+            >
+            <a class="ref" href="../../backend/app/generation_preferences.py#L101"
+              ><code>backend/app/generation_preferences.py:101</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-24" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#API-24">API-24</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>软删除账号重建同名用户会触发 500</h3>
+          <p>
+            创建用户只检查活动账号，数据库却对所有记录的 username
+            强制唯一。管理端在删除账号后重新录入同一用户名时，预检查通过，提交因唯一约束异常回滚，返回内部错误。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 按既定产品规则显式保留用户名并返回清晰冲突，或用 Alembic
+            改为活动行唯一并保持数据隔离。验证删除后再次创建的稳定结果。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/domain.py#L181"
+              ><code>backend/app/domain.py:181</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L196"
+              ><code>backend/app/domain.py:196</code></a
+            >
+            <a class="ref" href="../../backend/app/models.py#L27"
+              ><code>backend/app/models.py:27</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L326"
+              ><code>backend/app/domain.py:326</code></a
+            >
+          </div>
+        </article>
+
+        <article id="API-25" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#API-25">API-25</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>常见客户端错误每次都同步写入业务数据库</h3>
+          <p>
+            统一异常处理器为每次 401、404、422
+            等错误打开数据库会话、插入并提交日志，即使请求来自匿名访问或已经触发限流。默认反代没有单独的请求频率限制，日志积压会占用业务连接、磁盘及备份容量。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            保留审计所需的身份与安全事件，对重复异常按时间窗口聚合，给错误事件队列设置容量与保留期，并跟踪写入延迟。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/main.py#L225"
+              ><code>backend/app/main.py:225</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L257"
+              ><code>backend/app/main.py:257</code></a
+            >
+            <a class="ref" href="../../backend/app/error_logging.py#L62"
+              ><code>backend/app/error_logging.py:62</code></a
+            >
+            <a class="ref" href="../../backend/app/error_logging.py#L80"
+              ><code>backend/app/error_logging.py:80</code></a
+            >
+          </div>
+        </article>
+        <article id="API-26" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#API-26">API-26</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>内联参考图的原始数据长期保存在工单 JSON</h3>
+          <p>
+            图片接口允许将图片以 Data URL 传入，参考列表的文本总量可接近 32
+            MiB。创建工单时直接保存整个请求快照，原始参考图未先归档到用户
+            TOS。支持该输入的正常请求也会增大 PostgreSQL 工单、WAL 和备份，并使恢复读取昂贵。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 在受理边界校验并将内联图片归档至用户
+            TOS，工单只保存引用和必要摘要。用内联的普通图片验证恢复和用量归因。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/image_model_policy.py#L58"
+              ><code>backend/app/image_model_policy.py:58</code></a
+            >
+            <a class="ref" href="../../backend/app/image_model_policy.py#L64"
+              ><code>backend/app/image_model_policy.py:64</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L307"
+              ><code>backend/app/main.py:307</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L803"
+              ><code>backend/app/main.py:803</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L181"
+              ><code>backend/app/jobs.py:181</code></a
+            >
+          </div>
+        </article>
+        <article id="API-27" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#API-27">API-27</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>直接生成接口未校验平台私有参考素材的所属账号</h3>
+          <p>
+            保存镜头引用会校验素材 URL 的用户前缀，直接图片生成对 HTTPS
+            参考图只检查格式。视频入口识别系统和本人身份图后仍将其余引用作为普通素材传给平台。已知他人私有素材的完整
+            URL
+            且平台可读取该对象时，可以将其用于自己的工单。影响是未经授权的素材使用，入口本身不会枚举地址。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            对平台自有存储统一检查当前用户、系统资产或显式共享授权。保留项目支持的外部公开素材，覆盖跨账号的图片、音频和视频引用。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/domain.py#L2097"
+              ><code>backend/app/domain.py:2097</code></a
+            >
+            <a class="ref" href="../../backend/app/image_model_policy.py#L55"
+              ><code>backend/app/image_model_policy.py:55</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L921"
+              ><code>backend/app/main.py:921</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L963"
+              ><code>backend/app/main.py:963</code></a
+            >
+            <a class="ref" href="../../backend/app/all_in_one.py#L116"
+              ><code>backend/app/all_in_one.py:116</code></a
+            >
+            <a class="ref" href="../../backend/app/all_in_one.py#L132"
+              ><code>backend/app/all_in_one.py:132</code></a
+            >
+          </div>
+        </article>
+      </section>
+      <section class="group" id="jobs" aria-labelledby="h-jobs">
+        <h2 id="h-jobs">生成、费用与任务恢复<span class="counts">18 项 · 12 项 P1</span></h2>
+        <article id="JOB-01" data-priority="P1" data-mode="本地模拟">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#JOB-01">JOB-01</a
+            ><span class="mode">本地模拟</span>
+          </header>
+          <h3>平台明确拒绝受理的视频被锁为待人工核对</h3>
+          <p>
+            平台 503 同时证明未建单、未提交时，记录响应的阶段值不在持久化函数白名单内。ValueError
+            又被捕获为提交不确定，原本可以重试的请求需要人工解除。已有单测替换了整个持久化函数，遗漏此路径。
+          </p>
+          <p class="evidence">
+            <strong>验证记录</strong> 在内存中使用模拟平台响应和实际响应记录函数，得到
+            ProviderSubmissionUncertainError。
+          </p>
+          <p class="fix">
+            <strong>修复与验证</strong>
+            统一响应阶段约定，保留平台证据。用真实账本函数和模拟平台响应断言工单可重试。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/all_in_one.py#L163"
+              ><code>backend/app/all_in_one.py:163</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L606"
+              ><code>backend/app/jobs.py:606</code></a
+            >
+            <a class="ref" href="../../backend/app/all_in_one.py#L199"
+              ><code>backend/app/all_in_one.py:199</code></a
+            >
+            <a class="ref" href="../../backend/tests/test_all_in_one.py#L340"
+              ><code>backend/tests/test_all_in_one.py:340</code></a
+            >
+          </div>
+        </article>
+
+        <article id="JOB-02" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#JOB-02">JOB-02</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>媒体资产和用量先于工单终态提交，恢复时可能重复入账</h3>
+          <p>
+            普通成功路径先提交资产和用量，稍后才在另一事务写工单成功。中间退出会让恢复进程重新处理已交付的上游任务，图片可重复入库，图片和视频均可重复记用量。按工单查找已有视频素材无法防止重复计账。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            以同一事务提交资产、用量和成功状态，并给原工单及上游请求的账本键设置幂等约束。对提交边界注入中断后验证只留下一个交付结果。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/jobs.py#L549"
+              ><code>backend/app/jobs.py:549</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L559"
+              ><code>backend/app/jobs.py:559</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L298"
+              ><code>backend/app/jobs.py:298</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L430"
+              ><code>backend/app/jobs.py:430</code></a
+            >
+            <a class="ref" href="../../backend/app/worker.py#L178"
+              ><code>backend/app/worker.py:178</code></a
+            >
+          </div>
+        </article>
+
+        <article id="JOB-03" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#JOB-03">JOB-03</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>管理后台同步会与持有租约的媒体 Worker 并行执行</h3>
+          <p>
+            后台检查的是 API 进程内的活跃集合。原任务在独立 Worker 执行时，同步到非终态后 API
+            会从原记录复制
+            worker_id，再自行启动轮询。两个执行者因此能以同一所有者身份更新工单，重复归档或写账。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            同步应先从数据库判断原租约是否有效，只为过期工单原子领取独立恢复租约。覆盖两进程同时观察同一上游工单的情况。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/admin.py#L576"
+              ><code>backend/app/admin.py:576</code></a
+            >
+            <a class="ref" href="../../backend/app/admin.py#L638"
+              ><code>backend/app/admin.py:638</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L744"
+              ><code>backend/app/jobs.py:744</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L657"
+              ><code>backend/app/jobs.py:657</code></a
+            >
+          </div>
+        </article>
+
+        <article id="JOB-04" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#JOB-04">JOB-04</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>视频恢复补建用量时可能把 Agent 费用记为普通业务</h3>
+          <p>
+            后台视频恢复仅在查询供应商时进入原工单上下文。回填成功时若账本没有匹配行，会继承后台任务默认的
+            business
+            归因。超时巡检使视频进入核对时本身不写用量。管理员手动补建缺失账本行也会继承当前管理员请求归因。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 从原工单复制来源、Agent
+            名称和运行批次到恢复后的所有账本行。对无账本的 Agent
+            超时单执行自动和手工补账，断言三项归因一致。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/video_reconciliation.py#L90"
+              ><code>backend/app/video_reconciliation.py:90</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L449"
+              ><code>backend/app/jobs.py:449</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L581"
+              ><code>backend/app/jobs.py:581</code></a
+            >
+            <a class="ref" href="../../backend/app/token_usage.py#L51"
+              ><code>backend/app/token_usage.py:51</code></a
+            >
+            <a class="ref" href="../../backend/app/admin.py#L621"
+              ><code>backend/app/admin.py:621</code></a
+            >
+          </div>
+        </article>
+
+        <article id="JOB-05" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#JOB-05">JOB-05</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>独立视频进入自动恢复后无人能领取</h3>
+          <p>
+            视频允许不指定镜头或子项目。只要有 all-in-one
+            平台工单号，超时任务就对外显示自动核对，但恢复查询必须同时内连接项目、任务和镜头，管理员同步也会走同一查询并跳过。即使平台已有结果，这部分任务仍无法交付。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            按工单实际关联范围校验所有权和软删除状态，覆盖独立视频、仅绑定任务视频和逐镜视频的超时恢复。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/main.py#L725"
+              ><code>backend/app/main.py:725</code></a
+            >
+            <a class="ref" href="../../backend/app/schemas.py#L260"
+              ><code>backend/app/schemas.py:260</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L49"
+              ><code>backend/app/jobs.py:49</code></a
+            >
+            <a class="ref" href="../../backend/app/video_reconciliation.py#L26"
+              ><code>backend/app/video_reconciliation.py:26</code></a
+            >
+            <a class="ref" href="../../backend/app/admin.py#L569"
+              ><code>backend/app/admin.py:569</code></a
+            >
+          </div>
+        </article>
+
+        <article id="JOB-06" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#JOB-06">JOB-06</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>同步图片已交付但归档失败时丢失结算用量</h3>
+          <p>
+            同步图片响应中的用量只作为普通变量参与后续流程。如果带上游工单号的结果在导入 TOS
+            时异常，工单已离开提交阶段，通用失败分支会按普通失败并使用空用量记账。异步恢复分支会附加已知用量，后台补账又只处理成功图片。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            收到同步图片后持久化交付证据，并给归档错误携带原工单号、用量和待恢复状态。在模拟 TOS
+            失败后核对账本和重试行为。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/all_in_one.py#L179"
+              ><code>backend/app/all_in_one.py:179</code></a
+            >
+            <a class="ref" href="../../backend/app/all_in_one.py#L183"
+              ><code>backend/app/all_in_one.py:183</code></a
+            >
+            <a class="ref" href="../../backend/app/all_in_one.py#L249"
+              ><code>backend/app/all_in_one.py:249</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L372"
+              ><code>backend/app/jobs.py:372</code></a
+            >
+            <a class="ref" href="../../backend/app/image_billing.py#L31"
+              ><code>backend/app/image_billing.py:31</code></a
+            >
+          </div>
+        </article>
+
+        <article id="JOB-07" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#JOB-07">JOB-07</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>图片的并发检查、配额和工单受理不原子</h3>
+          <p>
+            同一账号的图片请求能在各自的 COUNT
+            查询里同时看到空位，之后才扣配额并创建工单。并发可超过账号配置上限。在扣配额提交与工单提交之间退出还会扣除未被受理的次数。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 复用视频受理路径的用户行锁和同一事务入队，在 PostgreSQL
+            并发场景断言限额边界和异常回滚。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/main.py#L799"
+              ><code>backend/app/main.py:799</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L801"
+              ><code>backend/app/main.py:801</code></a
+            >
+            <a class="ref" href="../../backend/app/usage_quota.py#L67"
+              ><code>backend/app/usage_quota.py:67</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L134"
+              ><code>backend/app/jobs.py:134</code></a
+            >
+          </div>
+        </article>
+
+        <article id="JOB-08" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#JOB-08">JOB-08</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>大纲和逐镜提示词可重复受理并重复调用模型</h3>
+          <p>
+            生成全局大纲或重试场景段时，扣配额函数会在受理中途提交，释放任务行锁，随后才设置进行中状态和入队。逐镜生成对进行中状态的检查本身无锁。并发请求可能各自通过检查，用不同工单调用供应商并覆盖同一份大纲或镜头结果。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            锁内重新读取当前任务或镜头并原子写入受理状态、配额和工单。并发提交相同镜头后应只有一个活动工单。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/domain.py#L1351"
+              ><code>backend/app/domain.py:1351</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L1397"
+              ><code>backend/app/domain.py:1397</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L1869"
+              ><code>backend/app/domain.py:1869</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L2436"
+              ><code>backend/app/domain.py:2436</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L2515"
+              ><code>backend/app/domain.py:2515</code></a
+            >
+            <a class="ref" href="../../backend/app/usage_quota.py#L67"
+              ><code>backend/app/usage_quota.py:67</code></a
+            >
+          </div>
+        </article>
+
+        <article id="JOB-09" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#JOB-09">JOB-09</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>大纲等待模型响应时持续占用数据库连接</h3>
+          <p>
+            ASS
+            和通用大纲先开启事务读取任务，在同一会话内等待可达数分钟的模型响应，进度回调又单独申请数据库连接。当同时等待的大纲占满同一进程的连接池时，进度写入、心跳和其他任务可能等待超时。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            仿照逐镜生成在模型调用前释放会话，只用短事务更新进度、结果和账本。在限制池大小的测试里验证多个慢请求仍可持续更新心跳。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/domain.py#L1087"
+              ><code>backend/app/domain.py:1087</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L1092"
+              ><code>backend/app/domain.py:1092</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L1263"
+              ><code>backend/app/domain.py:1263</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L1287"
+              ><code>backend/app/domain.py:1287</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L1250"
+              ><code>backend/app/domain.py:1250</code></a
+            >
+          </div>
+        </article>
+
+        <article id="JOB-10" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#JOB-10">JOB-10</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>删除生成中的分镜可能漏记真实模型用量</h3>
+          <p>
+            删除镜头或任务会连同生成工单软删除。媒体供应商随后成功交付时，资产持久化先因工单已删除而退出，再也走不到记用量操作，执行器又吞掉
+            JobExpiredError。只要外部调用已产生费用，内部用量与平台账单便可能不一致。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            将交付展示与财务留痕拆开处理。删除后禁止发布素材，但按原工单所有者及来源记录供应商结果和费用，覆盖生成中删除场景。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/domain.py#L2188"
+              ><code>backend/app/domain.py:2188</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L421"
+              ><code>backend/app/domain.py:421</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L409"
+              ><code>backend/app/jobs.py:409</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L428"
+              ><code>backend/app/jobs.py:428</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L348"
+              ><code>backend/app/jobs.py:348</code></a
+            >
+          </div>
+        </article>
+
+        <article id="JOB-11" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#JOB-11">JOB-11</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>逐镜心跳会覆盖整份子项目配置</h3>
+          <p>
+            storyboard_line 与大纲共用心跳分支，定期读取、修改并保存整个
+            storyboard_config，还会把逐镜工单号写成
+            outlineProgress.jobId。并行镜头产生对同一行的高频写入，交错的配置更新可能退回旧值。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            逐镜心跳只更新工单租约。大纲进度按工单和版本条件做局部更新，断言运行多个镜头时其他配置编辑保留，且大纲工单号不变。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/worker.py#L348"
+              ><code>backend/app/worker.py:348</code></a
+            >
+            <a class="ref" href="../../backend/app/worker.py#L354"
+              ><code>backend/app/worker.py:354</code></a
+            >
+            <a class="ref" href="../../backend/app/worker.py#L356"
+              ><code>backend/app/worker.py:356</code></a
+            >
+          </div>
+        </article>
+
+        <article id="JOB-12" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#JOB-12">JOB-12</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>一批逐镜提示词在中途失败时仍会执行前面的工单</h3>
+          <p>
+            批量 API
+            循环调用会独立提交并派发的单镜处理函数。后一条验证或配额失败时，整个请求返回错误，前几条已受理甚至开始调用，响应没有相应工单号。每条还重新读取同一任务下的全部镜头，N
+            镜批量会读取约 N² 个镜头行。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            在批量入口预加载镜头与公共上下文并统一校验，整批同事务提交或明确返回逐项结果。覆盖中途配额用尽及
+            100 镜批次查询数量。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/domain.py#L2586"
+              ><code>backend/app/domain.py:2586</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L2457"
+              ><code>backend/app/domain.py:2457</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L2539"
+              ><code>backend/app/domain.py:2539</code></a
+            >
+          </div>
+        </article>
+
+        <article id="JOB-13" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#JOB-13">JOB-13</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>个别模型池满额时阻塞其他模型的工单</h3>
+          <p>
+            领取查询先锁定最早的 100 行，然后才逐模型检查 Redis 槽位。如果这 100
+            行全属于满额模型，排在其后的可用模型本轮完全不可见。多个视频模型共用 all-in-one
+            供应商，供应商级 SQL 过滤不能解决该情况。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            按模型池选待处理队首或支持向后扫描，避免反复选取同一满额池。以超过 100
+            个满额池任务加一个空闲池任务验证后者可立即启动。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/worker.py#L62"
+              ><code>backend/app/worker.py:62</code></a
+            >
+            <a class="ref" href="../../backend/app/worker.py#L100"
+              ><code>backend/app/worker.py:100</code></a
+            >
+            <a class="ref" href="../../backend/app/worker.py#L113"
+              ><code>backend/app/worker.py:113</code></a
+            >
+          </div>
+        </article>
+
+        <article id="JOB-14" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#JOB-14">JOB-14</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>失败或中断的聊天工单被记为成功</h3>
+          <p>
+            执行聊天时供应商异常和 CancelledError 分支记录账本并发事件，却正常返回给
+            run_persisted。工单执行器收到正常返回后写 succeeded 和 100%，与 chat_failed 或
+            chat_cancelled 实际记录不符。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 向 Worker
+            返回明确终态或传播已记账的异常。验证后台工单、会话事件和费用记录在供应商失败及主动中断时一致。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/chat.py#L279"
+              ><code>backend/app/chat.py:279</code></a
+            >
+            <a class="ref" href="../../backend/app/chat.py#L312"
+              ><code>backend/app/chat.py:312</code></a
+            >
+            <a class="ref" href="../../backend/app/chat.py#L167"
+              ><code>backend/app/chat.py:167</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L345"
+              ><code>backend/app/jobs.py:345</code></a
+            >
+          </div>
+        </article>
+
+        <article id="JOB-15" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#JOB-15">JOB-15</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>分镜失败会增加一条额外的模型调用记录</h3>
+          <p>
+            逐镜失败处理先把每次真实模型尝试写入
+            TokenUsage，随后重新抛出异常。通用工单处理器发现异常没有 usage_recorded 标记后又插入一条
+            generation_storyboard_line_failed。账户用量接口直接按账本行数计算调用次数。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            领域层与工单层只由一方记录已归档的模型尝试，工单失败事件独立记录。对一次失败尝试断言恰有一条对应的用量记录。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/domain.py#L1651"
+              ><code>backend/app/domain.py:1651</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L1738"
+              ><code>backend/app/domain.py:1738</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L365"
+              ><code>backend/app/jobs.py:365</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L2632"
+              ><code>backend/app/domain.py:2632</code></a
+            >
+          </div>
+        </article>
+
+        <article id="JOB-16" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#JOB-16">JOB-16</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>同一镜头的两次图片交付可能各自成为当前版本</h3>
+          <p>
+            图片受理允许同一镜头存在多个工单。两份图片同时完成时，各自锁的是各自工单，读取旧的当前资产后分别新增
+            is_current=true 行，没有锁定镜头或唯一约束。稍早请求晚返回时也会覆盖较新的生成意图。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            按镜头序列化选择当前图像，对每个镜头的当前版本加防重约束，并定义交付顺序。验证同时完成和倒序完成都只有一份当前资产。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/jobs.py#L465"
+              ><code>backend/app/jobs.py:465</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L488"
+              ><code>backend/app/jobs.py:488</code></a
+            >
+            <a class="ref" href="../../backend/app/models.py#L260"
+              ><code>backend/app/models.py:260</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L798"
+              ><code>backend/app/main.py:798</code></a
+            >
+          </div>
+        </article>
+
+        <article id="JOB-17" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#JOB-17">JOB-17</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>已获平台失败终态的视频可能永久停在自动核对</h3>
+          <p>
+            有原平台工单号的自动核对分支只处理成功。即使平台已返回明确取消或失败并附最终结算，该分支仍只更新下次核对时间。管理员同步也走同一分支，手工解除入口则排除已有平台工单号的记录。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            保存并校验平台终态与最终结算证明，明确记录已结算失败或待人工处理。为无最终证据的长期等待设置告警，继续复用原工单号。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/video_reconciliation.py#L92"
+              ><code>backend/app/video_reconciliation.py:92</code></a
+            >
+            <a class="ref" href="../../backend/app/video_reconciliation.py#L112"
+              ><code>backend/app/video_reconciliation.py:112</code></a
+            >
+            <a class="ref" href="../../backend/app/admin.py#L531"
+              ><code>backend/app/admin.py:531</code></a
+            >
+            <a class="ref" href="../../backend/app/admin.py#L569"
+              ><code>backend/app/admin.py:569</code></a
+            >
+            <a class="ref" href="../../backend/app/admin.py#L607"
+              ><code>backend/app/admin.py:607</code></a
+            >
+          </div>
+        </article>
+        <article id="JOB-18" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#JOB-18">JOB-18</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>Redis 租约故障可同时造成停领和恢复后超并发</h3>
+          <p>
+            模型槽的获取函数把 Redis 错误与容量已满都返回为 None。Worker
+            停止领取带限额的工单，inline 执行则一直等待。对已运行任务，续租忽略 Redis
+            异常及租约不存在的返回值。若 Redis 丢失租约或中断超过
+            TTL，原任务继续运行，恢复后新领取者还可重新占满同一模型的额度。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            区分服务故障和满额，记录模型池状态并给等待设置上限。租约丢失时停止未提交的调用，对平台已受理任务保留查询和对账，并恢复容量统计。用租约过期与
+            Redis 重连覆盖两种状态。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/redis_store.py#L194"
+              ><code>backend/app/redis_store.py:194</code></a
+            >
+            <a class="ref" href="../../backend/app/redis_store.py#L207"
+              ><code>backend/app/redis_store.py:207</code></a
+            >
+            <a class="ref" href="../../backend/app/worker.py#L108"
+              ><code>backend/app/worker.py:108</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L319"
+              ><code>backend/app/jobs.py:319</code></a
+            >
+            <a class="ref" href="../../backend/app/jobs.py#L332"
+              ><code>backend/app/jobs.py:332</code></a
+            >
+          </div>
+        </article>
+      </section>
+      <section class="group" id="web" aria-labelledby="h-web">
+        <h2 id="h-web">工作区与管理前端<span class="counts">20 项 · 3 项 P1</span></h2>
+        <article id="WEB-01" data-priority="P1" data-mode="本地模拟">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#WEB-01">WEB-01</a
+            ><span class="mode">本地模拟</span>
+          </header>
+          <h3>保存音轨配置会覆盖服务端大纲</h3>
+          <p>
+            新建带歌曲的 ASS
+            后，前端仅缓存音轨显隐及偏移。大纲完成后只刷新展示对象，切换音轨或保存偏移仍把这个不完整配置整体
+            PATCH。后端直接替换 JSON，已生成的 storyBible、songEmotion、画幅及模型设置会被清除。
+          </p>
+          <p class="evidence">
+            <strong>验证记录</strong>
+            内存模拟确认客户端补丁只有两个音轨字段。服务端整列替换另经源码核对。
+          </p>
+          <p class="fix">
+            <strong>修复与验证</strong>
+            将音轨更新限制为两个字段，在事务内合并当前配置。测试同页新建、完成大纲、调整偏移并重载后大纲与模型字段一致。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/stores/project/player.ts#L94"
+              ><code>src/stores/project/player.ts:94</code></a
+            >
+            <a class="ref" href="../../src/stores/project/creation.ts#L335"
+              ><code>src/stores/project/creation.ts:335</code></a
+            >
+            <a class="ref" href="../../src/stores/project/outline.ts#L134"
+              ><code>src/stores/project/outline.ts:134</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L965"
+              ><code>backend/app/domain.py:965</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L642"
+              ><code>backend/app/main.py:642</code></a
+            >
+          </div>
+        </article>
+
+        <article id="WEB-02" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#WEB-02">WEB-02</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>上个账号的请求可以回填新账号的工作区</h3>
+          <p>
+            项目列表、私有人物和分类并行请求完成后直接写 Pinia。登出只取消工单观察并重置
+            store。共享浏览器先后登录 A、B，A 已经鉴权的在途响应晚于 B 时，可覆盖 B
+            当前看到的项目及头像列表。详情的加载序号也会被 $reset 重置，不能作为跨会话标识。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            为登录会话分配独立代号，每次写回前核验属主及代号，登出中止工作区读请求。用延迟的 A
+            响应覆盖 B 先返回的顺序验证隔离。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/stores/project/workspace.ts#L24"
+              ><code>src/stores/project/workspace.ts:24</code></a
+            >
+            <a class="ref" href="../../src/stores/project/workspace.ts#L76"
+              ><code>src/stores/project/workspace.ts:76</code></a
+            >
+            <a class="ref" href="../../src/stores/project/workspace.ts#L124"
+              ><code>src/stores/project/workspace.ts:124</code></a
+            >
+            <a class="ref" href="../../src/stores/auth.ts#L143"
+              ><code>src/stores/auth.ts:143</code></a
+            >
+          </div>
+        </article>
+
+        <article id="WEB-03" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#WEB-03">WEB-03</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>旧账号返回的 401 可在新账号下重放写请求</h3>
+          <p>
+            apiRequest 对非认证路径的 401 使用当前刷新
+            Cookie，并携带原始请求体递归重试，包括写操作。若旧请求在用户退出并登录另一个账号后才返回
+            401，重新登录已清除退出标识，旧的项目创建等请求会在新账号执行。后端只接收到新会话的有效凭证。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 把会话代号绑定在请求起点，刷新和重放前比较。验证旧会话延迟
+            401 不触发新会话下的写入，保留同会话正常续期。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/api/client.ts#L141"
+              ><code>src/api/client.ts:141</code></a
+            >
+            <a class="ref" href="../../src/api/client.ts#L259"
+              ><code>src/api/client.ts:259</code></a
+            >
+            <a class="ref" href="../../src/api/domain.ts#L192"
+              ><code>src/api/domain.ts:192</code></a
+            >
+          </div>
+        </article>
+
+        <article id="WEB-04" data-priority="P2" data-mode="本地模拟">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#WEB-04">WEB-04</a
+            ><span class="mode">本地模拟</span>
+          </header>
+          <h3>新工单首查失败会高频重试</h3>
+          <p>
+            新工单只有收到可解析快照才设置 polled。首查遇到 429、5xx
+            或短网错会原样重新入队，前台页仍按 50 毫秒首查延迟调度，故障时会持续给状态服务加压。
+          </p>
+          <p class="evidence">
+            <strong>验证记录</strong> 模拟连续 429，观察到六次后续调度均为 50 毫秒。
+          </p>
+          <p class="fix">
+            <strong>修复与验证</strong> 完成一次查询尝试即取消首查加速，临时失败使用退避，优先遵循
+            Retry-After。用假时钟断言持续故障时的请求数上限。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/utils/generationPoller.ts#L114"
+              ><code>src/utils/generationPoller.ts:114</code></a
+            >
+            <a class="ref" href="../../src/utils/generationPoller.ts#L187"
+              ><code>src/utils/generationPoller.ts:187</code></a
+            >
+            <a class="ref" href="../../src/utils/generationPoller.ts#L206"
+              ><code>src/utils/generationPoller.ts:206</code></a
+            >
+          </div>
+        </article>
+
+        <article id="WEB-05" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#WEB-05">WEB-05</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>全局阵容切换造成逐镜并发写放大</h3>
+          <p>
+            加入一个人物时没有镜头演员发生变化，仍提交一次阵容更新以及每个镜头的
+            PATCH。后端对每个镜头软删并重建演员关联，分别提交。长项目拖慢其他请求，移人时部分失败还会导致阵容与镜头不同步。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            由一次服务端阵容事务处理差异，只修改涉及的镜头。验证加入时无逐行
+            PATCH，移除失败时各级演员关系一起回滚。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/stores/project/characters.ts#L28"
+              ><code>src/stores/project/characters.ts:28</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L2075"
+              ><code>backend/app/domain.py:2075</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L2145"
+              ><code>backend/app/domain.py:2145</code></a
+            >
+          </div>
+        </article>
+
+        <article id="WEB-06" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#WEB-06">WEB-06</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>分镜编辑保存可部分成功且立即关窗</h3>
+          <p>
+            一次保存不等待地发出四个
+            PATCH，创意镜头为五个，随后关闭弹窗。任一请求失败就产生部分保存。同时补齐两个缺失提示词时，两个事务也可能分别看到另一个旧值，使已填写的行仍为失败。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 合并同一次编辑的更改到一个
+            PATCH，确认提交后关窗，失败保留草稿。覆盖部分写故障与同时补齐两种提示词。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/components/ShotDetailModal.vue#L246"
+              ><code>src/components/ShotDetailModal.vue:246</code></a
+            >
+            <a class="ref" href="../../src/stores/project/lines.ts#L114"
+              ><code>src/stores/project/lines.ts:114</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L2133"
+              ><code>backend/app/domain.py:2133</code></a
+            >
+          </div>
+        </article>
+
+        <article id="WEB-07" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#WEB-07">WEB-07</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>随机视频批次明确被拒后仍显示核对中</h3>
+          <p>
+            提交前把整批镜头标为 generating，任何异常都只标记 reconciling
+            并查询一次活动工单。余额拒绝等发生在后端提交事务之前，没有工单可供恢复，按钮一直被生成中状态阻止。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            对确定未受理的响应恢复可调整/重试状态。对不明结果以原请求标识查询。验证 402/422
+            与响应丢失分别走正确分支。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/stores/project/creation.ts#L259"
+              ><code>src/stores/project/creation.ts:259</code></a
+            >
+            <a class="ref" href="../../src/stores/project/storyboard.ts#L220"
+              ><code>src/stores/project/storyboard.ts:220</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L1061"
+              ><code>backend/app/main.py:1061</code></a
+            >
+            <a class="ref" href="../../src/stores/project/media.ts#L81"
+              ><code>src/stores/project/media.ts:81</code></a
+            >
+          </div>
+        </article>
+
+        <article id="WEB-08" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#WEB-08">WEB-08</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>创意优化尚在运行时可重复受理和覆盖结果</h3>
+          <p>
+            优化任务刚被受理就清除 loading。按钮仅检查 loading
+            与上传态，可再次创建付费优化任务，每次都会扣减 chat
+            配额，多个轮询还会竞争同一份输出提示词。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            同一输入绑定工单和请求标识。窗口内仅接纳当前工单的结果。用两个乱序完成的工单断言不会覆写最新结果。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/components/CreativeVideoModal.vue#L57"
+              ><code>src/components/CreativeVideoModal.vue:57</code></a
+            >
+            <a class="ref" href="../../src/components/CreativeVideoModal.vue#L125"
+              ><code>src/components/CreativeVideoModal.vue:125</code></a
+            >
+            <a class="ref" href="../../src/components/CreativeVideoModal.vue#L154"
+              ><code>src/components/CreativeVideoModal.vue:154</code></a
+            >
+            <a class="ref" href="../../backend/app/creative.py#L126"
+              ><code>backend/app/creative.py:126</code></a
+            >
+          </div>
+        </article>
+
+        <article id="WEB-09" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#WEB-09">WEB-09</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>同一人物生成在多个标签页恢复会重复建档</h3>
+          <p>
+            第二个标签页会读取同账号生成草稿并等待同一张图片，两个页面分别向创建人物接口提交。写入没有生成工单唯一性约束，每次都分配独立的人物
+            ID。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            服务端按用户和源工单幂等建档，草稿仅在成功或确定终态清理。验证两页同时恢复后只产生一条人物记录。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/stores/project/workspace.ts#L29"
+              ><code>src/stores/project/workspace.ts:29</code></a
+            >
+            <a class="ref" href="../../src/stores/project/characters.ts#L73"
+              ><code>src/stores/project/characters.ts:73</code></a
+            >
+            <a class="ref" href="../../src/stores/project/characters.ts#L53"
+              ><code>src/stores/project/characters.ts:53</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L2014"
+              ><code>backend/app/domain.py:2014</code></a
+            >
+          </div>
+        </article>
+
+        <article id="WEB-10" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#WEB-10">WEB-10</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>空工作区可添加无法保存的手动分镜</h3>
+          <p>
+            没有子项目时界面仍提供「单个视频」。新增行立刻出现在编辑器，但只有存在 activeTaskId
+            才发创建请求。刷新后消失，编辑和生成使用服务端不认识的临时
+            ID。即使有子项目，创建未完成时也可对临时 ID 操作。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 建立可持久化的子项目后再启用新增，使用服务端返回的行与真实
+            ID。覆盖空工作区和延迟响应时立即编辑。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/components/ScriptEditor.vue#L435"
+              ><code>src/components/ScriptEditor.vue:435</code></a
+            >
+            <a class="ref" href="../../src/stores/project/lines.ts#L29"
+              ><code>src/stores/project/lines.ts:29</code></a
+            >
+            <a class="ref" href="../../src/stores/project/lines.ts#L39"
+              ><code>src/stores/project/lines.ts:39</code></a
+            >
+          </div>
+        </article>
+
+        <article id="WEB-11" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#WEB-11">WEB-11</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>项目与子项目拖拽总是插入第一项</h3>
+          <p>
+            两种 drop 处理函数都先把目标索引清空，再使用该索引计算目的地。移动到中间或末尾也会按 0
+            持久化排序。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 移动前捕获有效目标索引，结束后才清空。断言拖到中间及末尾后的
+            API 顺序。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/components/SongSidebar.vue#L30"
+              ><code>src/components/SongSidebar.vue:30</code></a
+            >
+            <a class="ref" href="../../src/components/SongSidebar.vue#L35"
+              ><code>src/components/SongSidebar.vue:35</code></a
+            >
+            <a class="ref" href="../../src/components/SongSidebar.vue#L62"
+              ><code>src/components/SongSidebar.vue:62</code></a
+            >
+            <a class="ref" href="../../src/components/SongSidebar.vue#L69"
+              ><code>src/components/SongSidebar.vue:69</code></a
+            >
+          </div>
+        </article>
+
+        <article id="WEB-12" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#WEB-12">WEB-12</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>后台账单和列表乱序响应覆盖当前筛选</h3>
+          <p>
+            快速切换分页、来源或栏目时，所有在途请求无条件写同一个结果对象。较旧请求最后返回可让表格在新筛选标题下显示旧账单或另一栏目的数据。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 为列表查询分配递增编号或中止旧请求，数据、错误和 loading
+            只接收当前请求的结果。验证不同来源先后请求倒序返回。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/views/AdminConsoleView.vue#L335"
+              ><code>src/views/AdminConsoleView.vue:335</code></a
+            >
+            <a class="ref" href="../../src/components/AdminVideoBillingPanel.vue#L74"
+              ><code>src/components/AdminVideoBillingPanel.vue:74</code></a
+            >
+          </div>
+        </article>
+
+        <article id="WEB-13" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#WEB-13">WEB-13</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>子项目详情加载失败后无法点击原项重试</h3>
+          <p>
+            切换时先写入新任务 ID 并清空编辑器，再拉取详情。请求失败不还原
+            ID，而选择函数又跳过已激活的
+            ID，用户再次点击同一任务仍是空编辑器，直至刷新或先切到别项。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 区分选中、加载中与已载入状态，失败时可重试同一 ID
+            或恢复上一个已加载现场。验证瞬时断网后点击原任务可恢复。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/stores/project/workspace.ts#L101"
+              ><code>src/stores/project/workspace.ts:101</code></a
+            >
+            <a class="ref" href="../../src/stores/project/workspace.ts#L116"
+              ><code>src/stores/project/workspace.ts:116</code></a
+            >
+            <a class="ref" href="../../src/stores/project/workspace.ts#L187"
+              ><code>src/stores/project/workspace.ts:187</code></a
+            >
+          </div>
+        </article>
+
+        <article id="WEB-14" data-priority="P2" data-mode="本地模拟">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#WEB-14">WEB-14</a
+            ><span class="mode">本地模拟</span>
+          </header>
+          <h3>长 ASS 一次生成会静默丢下第 101 镜以后的提示词</h3>
+          <p>
+            ASS 允许导入超过 100 个分段。大纲完成和「生成全部」把全部待生成行交给同一个
+            action，但它截取前 100 条且本轮结束后不会调度剩余部分，用户须手动续跑。
+          </p>
+          <p class="evidence">
+            <strong>验证记录</strong> 内存模拟将 101 个待生成镜头提交给该 action，观察到仅 100
+            个被送出。
+          </p>
+          <p class="fix">
+            <strong>修复与验证</strong> 按容量分批受理，上一批完成后继续提交剩余
+            ID，或在服务端维护可恢复的待派发队列。验证 101 个有效镜头都受理一次。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/stores/project/storyboard.ts#L115"
+              ><code>src/stores/project/storyboard.ts:115</code></a
+            >
+            <a class="ref" href="../../src/stores/project/outline.ts#L149"
+              ><code>src/stores/project/outline.ts:149</code></a
+            >
+            <a class="ref" href="../../backend/app/ass_storyboard.py#L150"
+              ><code>backend/app/ass_storyboard.py:150</code></a
+            >
+          </div>
+        </article>
+
+        <article id="WEB-15" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#WEB-15">WEB-15</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>人物分类改名只在浏览器内生效</h3>
+          <p>
+            重命名仅替换本地名称，再用新名称查 style_id 更新人物。新名称尚无 ID，请求序列化会丢弃
+            undefined，服务端也没有风格重命名调用。刷新后旧名复现。合并到已有分类也保留旧空分类。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            用一次按当前用户授权的事务重命名或合并分类，并返回最新映射。验证改名及合并后刷新列表与人物归属相符。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/stores/project/characters.ts#L222"
+              ><code>src/stores/project/characters.ts:222</code></a
+            >
+            <a class="ref" href="../../src/stores/project/characters.ts#L236"
+              ><code>src/stores/project/characters.ts:236</code></a
+            >
+            <a class="ref" href="../../backend/app/domain.py#L1923"
+              ><code>backend/app/domain.py:1923</code></a
+            >
+          </div>
+        </article>
+
+        <article id="WEB-16" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#WEB-16">WEB-16</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>项目和分镜删除失败后界面仍隐藏记录</h3>
+          <p>
+            项目和子项目在 DELETE
+            返回前已从列表移除，失败路径无回滚。分镜删除也是先移除、不等待响应。暂时断网后编辑器与服务端不一致，用户可能误判私有记录已经删除。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            等待服务端确认或失败时回滚并恢复当前选择。验证删除请求失败后对象仍可见且可再次执行。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/stores/project/workspace.ts#L210"
+              ><code>src/stores/project/workspace.ts:210</code></a
+            >
+            <a class="ref" href="../../src/stores/project/workspace.ts#L280"
+              ><code>src/stores/project/workspace.ts:280</code></a
+            >
+            <a class="ref" href="../../src/stores/project/lines.ts#L82"
+              ><code>src/stores/project/lines.ts:82</code></a
+            >
+          </div>
+        </article>
+
+        <article id="WEB-17" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#WEB-17">WEB-17</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>工作区批量轮询缺少单次请求时限</h3>
+          <p>
+            状态接口与终态观察上报均由全局 tick
+            串行等待，只使用在任务取消时才可能触发的批次信号。连接悬挂时，工单的观察截止时间只在
+            await 返回后才检查。同标签页其他批次、后注册工单都停在这一次查询后。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            对每次状态请求和回执分别设置请求时限，回执异步限流，使一个悬挂响应不影响新观察者。用悬挂状态/回执的模拟请求验证其余工单继续推进。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/utils/generationPoller.ts#L77"
+              ><code>src/utils/generationPoller.ts:77</code></a
+            >
+            <a class="ref" href="../../src/utils/generationPoller.ts#L93"
+              ><code>src/utils/generationPoller.ts:93</code></a
+            >
+            <a class="ref" href="../../src/utils/generationPoller.ts#L158"
+              ><code>src/utils/generationPoller.ts:158</code></a
+            >
+            <a class="ref" href="../../src/utils/generationPoller.ts#L202"
+              ><code>src/utils/generationPoller.ts:202</code></a
+            >
+          </div>
+        </article>
+
+        <article id="WEB-18" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#WEB-18">WEB-18</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>ASS 审核播放与导出使用不同的镜头起点</h3>
+          <p>
+            预览时间轴按配音或视频素材时长顺序累加，导出以每条 ASS 分镜的 start_time
+            切镜。素材时长与歌词分段不等时，用户预览的画面与歌曲对齐点逐镜偏移，导出的切镜时刻与审核不同。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 对带音轨的 ASS
+            使用与导出相同的镜头起点和尾段规则。用素材时长不等于歌词间距的用例比对两个时间轴。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../src/stores/project.ts#L129"
+              ><code>src/stores/project.ts:129</code></a
+            >
+            <a class="ref" href="../../src/components/PlayerPanel.vue#L103"
+              ><code>src/components/PlayerPanel.vue:103</code></a
+            >
+            <a class="ref" href="../../backend/app/mv_export.py#L84"
+              ><code>backend/app/mv_export.py:84</code></a
+            >
+          </div>
+        </article>
+        <article id="WEB-19" data-priority="P2" data-mode="本地模拟">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#WEB-19">WEB-19</a
+            ><span class="mode">本地模拟</span>
+          </header>
+          <h3>恢复原视频的浏览器验收在文案断言处提前失败</h3>
+          <p>
+            本地组件显示“正在查询原视频工单”，本地用例仍期待“正在自动核对并恢复原视频”和“不会重复扣费”。第一个断言就失败，随后检查没有产生新生成请求的断言未能执行。远程验收源码也匹配旧文案。
+          </p>
+          <p class="evidence">
+            <strong>验证记录</strong> Chromium
+            模拟用例在第一个文本断言处超时，实际文本与组件源码一致。
+          </p>
+          <p class="fix">
+            <strong>修复与验证</strong>
+            先单独断言未创建第二个工单，再独立验证核对状态及用户提示。按产品要求统一显示文本，并覆盖刷新前后仍观察原工单。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../e2e/user/video-reconciliation.spec.ts#L30"
+              ><code>e2e/user/video-reconciliation.spec.ts:30</code></a
+            >
+            <a class="ref" href="../../e2e/user/video-reconciliation.spec.ts#L32"
+              ><code>e2e/user/video-reconciliation.spec.ts:32</code></a
+            >
+            <a class="ref" href="../../src/components/VideoGenerationStatus.vue#L11"
+              ><code>src/components/VideoGenerationStatus.vue:11</code></a
+            >
+            <a class="ref" href="../../src/stores/project/media.ts#L83"
+              ><code>src/stores/project/media.ts:83</code></a
+            >
+            <a class="ref" href="../../e2e/admin/video-reconciliation-remote.spec.ts#L29"
+              ><code>e2e/admin/video-reconciliation-remote.spec.ts:29</code></a
+            >
+          </div>
+        </article>
+        <article id="WEB-20" data-priority="P2" data-mode="本地模拟">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#WEB-20">WEB-20</a
+            ><span class="mode">本地模拟</span>
+          </header>
+          <h3>五个人物头像验收用例共用已过时的请求字段断言</h3>
+          <p>
+            五个模拟用例要求请求体始终显式带 resolution=1K。当前人物调用省略该可选字段，后端模式默认
+            1K，带参考图的部分 Seedream 配置另有 2K
+            规则。五个场景因此提早结束，遮蔽各自后续的恢复、入库和展示检查。
+          </p>
+          <p class="evidence">
+            <strong>验证记录</strong> Chromium
+            的五份失败记录均显示同一个字段缺失。未调用实际图片模型。
+          </p>
+          <p class="fix">
+            <strong>修复与验证</strong> 区分浏览器的线格式与后端最终生效规格。让 E2E
+            检查当前序列化契约，后端覆盖默认档位与模型分支，再跑完五条用户旅程。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../e2e/user/digital-human-headshot.spec.ts#L281"
+              ><code>e2e/user/digital-human-headshot.spec.ts:281</code></a
+            >
+            <a class="ref" href="../../src/stores/project/characters.ts#L105"
+              ><code>src/stores/project/characters.ts:105</code></a
+            >
+            <a class="ref" href="../../src/api/imageGen.ts#L44"
+              ><code>src/api/imageGen.ts:44</code></a
+            >
+            <a class="ref" href="../../backend/app/schemas.py#L233"
+              ><code>backend/app/schemas.py:233</code></a
+            >
+            <a class="ref" href="../../backend/app/generation_preferences.py#L46"
+              ><code>backend/app/generation_preferences.py:46</code></a
+            >
+          </div>
+        </article>
+      </section>
+      <section class="group" id="ops" aria-labelledby="h-ops">
+        <h2 id="h-ops">部署、备份与依赖<span class="counts">14 项 · 7 项 P1</span></h2>
+        <article id="OPS-01" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#OPS-01">OPS-01</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>发布预检接受与环境不匹配的模型平台地址</h3>
+          <p>
+            两套服务器均使用 production 加固配置。准备脚本会按 tier
+            改写平台地址，但直接发布和应用启动只核对渠道与模型后缀，没有核对最终
+            URL。缺配置时服务默认使用测试平台，配置错误时请求及平台 Key 会被送到错误的目的地。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 将 tier 显式传入 API/Worker，启动时精确校验运营域名、HTTPS
+            平台 origin 与对应的媒体前缀。对矩阵中的两种错配均断言启动失败。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/app/config.py#L128"
+              ><code>backend/app/config.py:128</code></a
+            >
+            <a class="ref" href="../../scripts/configure-single-platform.py#L46"
+              ><code>scripts/configure-single-platform.py:46</code></a
+            >
+            <a class="ref" href="../../backend/app/config.py#L234"
+              ><code>backend/app/config.py:234</code></a
+            >
+            <a class="ref" href="../../scripts/deploy.sh#L61"><code>scripts/deploy.sh:61</code></a>
+          </div>
+        </article>
+
+        <article id="OPS-02" data-priority="P1" data-mode="本地模拟">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#OPS-02">OPS-02</a
+            ><span class="mode">本地模拟</span>
+          </header>
+          <h3>数据库密码的 URL 转义会中止迁移并进入错误日志</h3>
+          <p>
+            含 URL 保留字符的数据库密码会被编码成带 % 的 DSN，再交给启用插值的 Alembic
+            ConfigParser。用虚构凭据在本机验证得到 ValueError，异常文本内含完整编码后的
+            DSN。绿实例迁移失败时部署脚本还会输出其日志。
+          </p>
+          <p class="evidence">
+            <strong>验证记录</strong> 向 Alembic Config.set_main_option
+            传递虚构的已编码连接串即可观察到异常，验证没有访问实际数据库。
+          </p>
+          <p class="fix">
+            <strong>修复与验证</strong> 用 SQLAlchemy URL 对象直接建引擎，或在写 Alembic INI
+            时正确处理百分号。同时屏蔽所有 DSN 日志。用虚构特殊字符密码覆盖启动和报错两条路径。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/migrations/env.py#L14"
+              ><code>backend/migrations/env.py:14</code></a
+            >
+            <a class="ref" href="../../backend/app/config.py#L106"
+              ><code>backend/app/config.py:106</code></a
+            >
+            <a class="ref" href="../../scripts/deploy.sh#L112"
+              ><code>scripts/deploy.sh:112</code></a
+            >
+          </div>
+        </article>
+
+        <article id="OPS-03" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#OPS-03">OPS-03</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>保留的批量生图脚本绕过工单与费用归因</h3>
+          <p>
+            该可执行脚本在提供供应商密钥后直连旧图片渠道。批量 POST 不带三项 Agent 标识、不建 MV
+            工单或用量账本，还把输出写入前端 public 目录。此项影响手工运行该脚本的环境。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 退役脚本或改为带完整批次归因的受理 API，通过 TOS
+            归档。以模拟传输验证请求和账本来源。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../scripts/generate-digital-humans.mjs#L36"
+              ><code>scripts/generate-digital-humans.mjs:36</code></a
+            >
+            <a class="ref" href="../../scripts/generate-digital-humans.mjs#L45"
+              ><code>scripts/generate-digital-humans.mjs:45</code></a
+            >
+            <a class="ref" href="../../scripts/generate-digital-humans.mjs#L81"
+              ><code>scripts/generate-digital-humans.mjs:81</code></a
+            >
+          </div>
+        </article>
+
+        <article id="OPS-04" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#OPS-04">OPS-04</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>数据库原地恢复可以留下部分清空、部分重建的库</h3>
+          <p>
+            恢复脚本直接对目标库执行 pg_restore --clean。执行前不比对配套
+            SHA-256，也没有单事务。某条
+            DDL、数据导入或磁盘写入失败时，先前已经提交的删除和恢复操作会留下混合状态。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            先校验摘要并恢复到独立新库，核对迁移及业务完整性后再切换。必须原地执行时启用单事务和遇错停止。只在一次性库验证中断能保留原数据。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../scripts/restore-postgres.sh#L6"
+              ><code>scripts/restore-postgres.sh:6</code></a
+            >
+            <a class="ref" href="../../scripts/backup-postgres.sh#L17"
+              ><code>scripts/backup-postgres.sh:17</code></a
+            >
+          </div>
+        </article>
+
+        <article id="OPS-05" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#OPS-05">OPS-05</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>共用媒体桶的备份按文档示例配置会上传失败</h3>
+          <p>
+            按默认值仅设置 Bucket 时，cron 将前缀写为 mv-agent/database。准备脚本通常会创建 SSE-C
+            密钥，而上传器有密钥时只接受两个按环境划分的备份子目录。结果是本地 dump
+            成功、异地步骤退出失败。显式配置合规子目录的环境不受此项影响。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 安装定时任务时按明确 tier
+            生成合规子目录或要求显式填写，并在安装前验证。监控最近一次成功异地副本的时间。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../scripts/install-maintenance-cron.sh#L13"
+              ><code>scripts/install-maintenance-cron.sh:13</code></a
+            >
+            <a class="ref" href="../../scripts/sync-backup-to-tos.sh#L20"
+              ><code>scripts/sync-backup-to-tos.sh:20</code></a
+            >
+            <a class="ref" href="../../backend/app/backup_archive.py#L56"
+              ><code>backend/app/backup_archive.py:56</code></a
+            >
+            <a class="ref" href="../../scripts/configure-single-platform.py#L86"
+              ><code>scripts/configure-single-platform.py:86</code></a
+            >
+          </div>
+        </article>
+
+        <article id="OPS-06" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#OPS-06">OPS-06</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>绿实例验证失败时新前端已对用户提供服务</h3>
+          <p>
+            发布脚本先替换前端，再创建、迁移和验证
+            green。后端启动失败会退出，但前端不会回退。若新版页面依赖新增
+            API，旧后端将拒绝请求，部署标记仍为旧版本。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            预验证前后端组合后成对切换，或在验证失败时自动恢复上一版前端。以绿实例不可用测试切换后的页面和版本标记。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../scripts/deploy.sh#L81"><code>scripts/deploy.sh:81</code></a>
+            <a class="ref" href="../../scripts/deploy.sh#L101"
+              ><code>scripts/deploy.sh:101</code></a
+            >
+            <a class="ref" href="../../scripts/deploy.sh#L110"
+              ><code>scripts/deploy.sh:110</code></a
+            >
+          </div>
+        </article>
+
+        <article id="OPS-07" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#OPS-07">OPS-07</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>失败的发布会覆盖原回滚指针</h3>
+          <p>
+            发布开头就用当前版本重写 .previous-version。假设 B 已上线、A 可回退，下一次发布 C
+            在拉取或预检时失败，默认回滚将指向 B 自身。发布间也没有排他锁保护版本和切流状态。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 只在切换成功后原子写入版本对，并以部署锁串行化操作。用 A→B
+            成功、C 预检失败的情形验证仍能回退 A。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../scripts/deploy.sh#L11"><code>scripts/deploy.sh:11</code></a>
+            <a class="ref" href="../../scripts/deploy.sh#L159"
+              ><code>scripts/deploy.sh:159</code></a
+            >
+            <a class="ref" href="../../scripts/rollback.sh#L4"
+              ><code>scripts/rollback.sh:4</code></a
+            >
+          </div>
+        </article>
+
+        <article id="OPS-08" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#OPS-08">OPS-08</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>备份验证任务会清理其他同时启动的验证库</h3>
+          <p>
+            临时库名仅精确到秒，清理钩子先于建库登记。同一秒启动的第二个进程若因重名建库失败，退出清理仍会尝试删除第一个验证库。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            使用随机唯一库名，只在成功建库后注册清理。并行验证两个备份时确认临时库各自独立。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../scripts/verify-backup.sh#L12"
+              ><code>scripts/verify-backup.sh:12</code></a
+            >
+            <a class="ref" href="../../scripts/verify-backup.sh#L13"
+              ><code>scripts/verify-backup.sh:13</code></a
+            >
+            <a class="ref" href="../../scripts/verify-backup.sh#L14"
+              ><code>scripts/verify-backup.sh:14</code></a
+            >
+          </div>
+        </article>
+
+        <article id="OPS-09" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#OPS-09">OPS-09</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>镜像扫描报错或发现严重问题仍可通过安全 CI</h3>
+          <p>
+            镜像检查步骤设置 continue-on-error，且未配置根据 CVE
+            退出失败。该作业本身也没有构建/加载本次提交的目标镜像。即使其他检查通过，CI
+            也无法证明发布的镜像通过 Critical 门禁。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            明确扫描本次提交构建的镜像并传递扫描结果，让扫描失败与超阈值都阻断作业，区分工具故障与没有发现。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../.github/workflows/ci.yml#L63"
+              ><code>.github/workflows/ci.yml:63</code></a
+            >
+          </div>
+        </article>
+
+        <article id="OPS-10" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#OPS-10">OPS-10</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>新部署会默认授权固定用户名使用 Agent 费用归因</h3>
+          <p>
+            平台配置准备脚本在没有显式名单时对测试和正式 tier 都写入
+            dev01。运行时按用户名授权。若该环境的同名普通用户没有获得运维授权，其请求仍可以被标记为
+            Agent 测试并进入相应的费用分类。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            以显式环境授权名单为准，缺省为空。验证没有授权时同名普通用户仍无法声明测试来源。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../scripts/configure-single-platform.py#L88"
+              ><code>scripts/configure-single-platform.py:88</code></a
+            >
+            <a class="ref" href="../../backend/app/auth.py#L147"
+              ><code>backend/app/auth.py:147</code></a
+            >
+          </div>
+        </article>
+
+        <article id="OPS-11" data-priority="P1" data-mode="版本与公告">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#OPS-11">OPS-11</a
+            ><span class="mode">版本与公告</span>
+          </header>
+          <h3>锁定版 Pillow 的 EXIF 内存问题可达图片上传路径</h3>
+          <p>
+            主后端镜像安装 Pillow 12.3.0，上传缩略图使用 Image.open 与
+            ImageOps.exif_transpose，处理用户图片的代码路径与维护者公告相符。处理受影响的图片元数据时，过量内存分配可能终止
+            API 进程。主后端和独立服务的版本约束均排除了该公告的修复版本。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 放宽约束并在兼容性验证后升级到包含修复的版本（该项修复自
+            13.0.0 起）。用正常样本回归上传、旋转、缩略图和 Worker 归档，在隔离解码进程限制资源。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/requirements.lock#L81"
+              ><code>backend/requirements.lock:81</code></a
+            >
+            <a class="ref" href="../../backend/requirements.txt#L15"
+              ><code>backend/requirements.txt:15</code></a
+            >
+            <a class="ref" href="../../backend/app/storage.py#L198"
+              ><code>backend/app/storage.py:198</code></a
+            >
+            <a class="ref" href="../../backend/app/main.py#L496"
+              ><code>backend/app/main.py:496</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/requirements.txt#L9"
+              ><code>model-service/public-api/requirements.txt:9</code></a
+            >
+          </div>
+          <p class="sources">
+            <a
+              href="https://github.com/python-pillow/Pillow/security/advisories/GHSA-wqgw-9xfh-qf2g"
+              >Pillow 维护者公告</a
+            >
+            · <a href="https://pypi.org/pypi/pillow/12.3.0/json">12.3.0 对应的 PyPI 公告记录</a>
+          </p>
+        </article>
+
+        <article id="OPS-12" data-priority="P1" data-mode="版本与公告">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#OPS-12">OPS-12</a
+            ><span class="mode">版本与公告</span>
+          </header>
+          <h3>后端的 TLS 信任库仍包含已被移除的根证书</h3>
+          <p>
+            镜像锁定 certifi 2026.7.22。使用该默认 CA 集的 HTTPS 客户端仍信任上游因中间 CA
+            密钥泄露而移除的证书链。对能够影响网络路径的第三方，平台及存储调用存在机密性和完整性风险。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 更新 certifi 到 2026.10.19
+            或更高的已修复版本，重建镜像并验证供应商和 TOS 的 TLS 连接。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/requirements.lock#L27"
+              ><code>backend/requirements.lock:27</code></a
+            >
+            <a class="ref" href="../../backend/Dockerfile#L14"
+              ><code>backend/Dockerfile:14</code></a
+            >
+            <a class="ref" href="../../backend/app/all_in_one.py#L152"
+              ><code>backend/app/all_in_one.py:152</code></a
+            >
+          </div>
+          <p class="sources">
+            <a href="https://pypi.org/pypi/certifi/2026.7.22/json">certifi 锁定版本与公告</a> ·
+            <a href="https://github.com/advisories/GHSA-6q48-6c7w-9gw2">受影响的证书链与修复版本</a>
+          </p>
+        </article>
+
+        <article id="OPS-13" data-priority="P2" data-mode="版本与公告">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#OPS-13">OPS-13</a
+            ><span class="mode">版本与公告</span>
+          </header>
+          <h3>后端追踪组件命中解析器公告</h3>
+          <p>
+            锁文件中的 opentelemetry-api 1.45.1
+            命中维护者公告。风险要求应用从可保留特定内容的不可信载体提取追踪上下文。此次未确认 MV
+            有可达的相关入口。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 升级到 1.45.2
+            或更高修复版。如启用自定义追踪中间件，确认入口类型和长度约束。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../backend/requirements.lock#L79"
+              ><code>backend/requirements.lock:79</code></a
+            >
+          </div>
+          <p class="sources">
+            <a
+              href="https://github.com/open-telemetry/opentelemetry-python/security/advisories/GHSA-mf5v-w3w3-f6cg"
+              >OpenTelemetry 维护者公告</a
+            >
+          </p>
+        </article>
+
+        <article id="OPS-14" data-priority="P2" data-mode="版本与公告">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#OPS-14">OPS-14</a
+            ><span class="mode">版本与公告</span>
+          </header>
+          <h3>三个前端的开发服务器依赖均命中 Vite 公告</h3>
+          <p>
+            主前端锁定 Vite 8.2.0，两个门户锁定 8.3.0。三份完整 npm 审计均把 Vite 列为
+            High，具体影响随操作系统、开发服务器是否对外开放及中间件配置而异。主项目另有 glob 和
+            minimatch 公告沿开发工具依赖传播。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 更新三个项目的 Vite
+            锁版本并复查全部公告，再更新主项目受影响的 glob 和 minimatch
+            依赖链。分别运行构建、开发服务器和完整依赖审计。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../package-lock.json#L4006"
+              ><code>package-lock.json:4006</code></a
+            >
+            <a class="ref" href="../../package-lock.json#L3097"
+              ><code>package-lock.json:3097</code></a
+            >
+            <a class="ref" href="../../model-service/admin-web/package-lock.json#L1136"
+              ><code>model-service/admin-web/package-lock.json:1136</code></a
+            >
+            <a class="ref" href="../../model-service/user-web/package-lock.json#L1136"
+              ><code>model-service/user-web/package-lock.json:1136</code></a
+            >
+          </div>
+          <p class="sources">
+            <a href="https://github.com/advisories/GHSA-rq7h-c2jc-7f22">Vite 的文件访问范围公告</a>
+            ·
+            <a href="https://github.com/advisories/GHSA-587h-7wmj-h5pm"
+              >launch-editor 的平台条件与版本</a
+            >
+            · <a href="https://github.com/advisories/GHSA-3g3m-2fjr-6pw4">glob 公告</a> ·
+            <a href="https://github.com/advisories/GHSA-g3hv-75wg-m249">minimatch 公告</a>
+          </p>
+        </article>
+      </section>
+      <section class="group" id="gateway" aria-labelledby="h-gateway">
+        <h2 id="h-gateway">独立模型服务与门户<span class="counts">12 项 · 3 项 P1</span></h2>
+        <article id="GW-01" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#GW-01">GW-01</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>已受理的 Chat 在取得执行租约前可能永久排队</h3>
+          <p>
+            公开接口先提交 queued 工单及预占积分，随后另开事务检查容量、进入
+            submitting。两步间进程退出时，Worker 明确排除 queued
+            Chat，租约回收也只扫活动状态。同幂等键重试返回已受理冲突。 配置 Responses
+            原生文本路由时，另一个入口也只入队，未交给执行器。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            在一次受理事务中建立可恢复状态和有期限的执行权。用模拟进程中断断言未提交的原工单能安全终结且释放预占。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../model-service/public-api/gateway/main.py#L262"
+              ><code>model-service/public-api/gateway/main.py:262</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/main.py#L267"
+              ><code>model-service/public-api/gateway/main.py:267</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/queue.py#L70"
+              ><code>model-service/public-api/gateway/queue.py:70</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/queue.py#L81"
+              ><code>model-service/public-api/gateway/queue.py:81</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/main.py#L413"
+              ><code>model-service/public-api/gateway/main.py:413</code></a
+            >
+            <a class="ref" href="../../model-service/scripts/import-overseas.py#L17"
+              ><code>model-service/scripts/import-overseas.py:17</code></a
+            >
+          </div>
+        </article>
+
+        <article id="GW-02" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#GW-02">GW-02</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>撤销 Key 或满额队列可阻断其他客户的工单</h3>
+          <p>
+            领取只检查最早 100 个工单。已撤销或删除 Key 的工单无法通过
+            capacity，隔离函数只处理模型/路由删除，不会移走这些工单。它们占满窗口后，即使其他账号仍有容量也领不到后续任务。被禁用
+            Key 的预占也可一直保留。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            明确撤销后已受理工单的结算/取消策略，把永久不可执行项移出队列。按可调度分组选取并限制单客户占位。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../model-service/public-api/gateway/queue.py#L29"
+              ><code>model-service/public-api/gateway/queue.py:29</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/queue.py#L51"
+              ><code>model-service/public-api/gateway/queue.py:51</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/queue.py#L83"
+              ><code>model-service/public-api/gateway/queue.py:83</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/portal.py#L207"
+              ><code>model-service/public-api/gateway/portal.py:207</code></a
+            >
+          </div>
+        </article>
+
+        <article id="GW-03" data-priority="P1" data-mode="源码审查">
+          <header>
+            <span class="tag p1">P1</span><a class="item-id" href="#GW-03">GW-03</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>同步图片的归档故障没有可用的恢复入口</h3>
+          <p>
+            同步图片可只有成功响应而没有渠道任务号。Worker 先保存响应，再归档。TOS
+            故障耗尽重试后状态变为 recoverable。管理恢复只接受有 provider_id 的记录，用户侧又将
+            recoverable 映射为 running。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 允许用已持久化、可核验的同步成功响应重做归档。在 TOS
+            故障恢复后断言不再提交生成、交付原图且结算一次。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../model-service/public-api/gateway/queue.py#L180"
+              ><code>model-service/public-api/gateway/queue.py:180</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/queue.py#L260"
+              ><code>model-service/public-api/gateway/queue.py:260</code></a
+            >
+            <a class="ref" href="../../model-service/admin-api/control/main.py#L222"
+              ><code>model-service/admin-api/control/main.py:222</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/status.py#L9"
+              ><code>model-service/public-api/gateway/status.py:9</code></a
+            >
+          </div>
+        </article>
+
+        <article id="GW-04" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#GW-04">GW-04</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>队列、工单心跳与积分结算争用一把全库锁</h3>
+          <p>
+            领取、进度和心跳及计费写入使用同一 PostgreSQL advisory
+            lock。一次领取在锁内逐候选执行多个计数查询，月度巡检也在锁内遍历所有付费
+            Key。队列拥堵时其他客户提交、结算和续租都需等待。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            按账户和资源池拆锁，对待领工单使用行锁。将计数预聚合、月度重置分批提交。验证单客户积压时其他客户的提交与续租延迟。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../model-service/public-api/gateway/credits.py#L26"
+              ><code>model-service/public-api/gateway/credits.py:26</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/queue.py#L54"
+              ><code>model-service/public-api/gateway/queue.py:54</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/queue.py#L68"
+              ><code>model-service/public-api/gateway/queue.py:68</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/queue.py#L113"
+              ><code>model-service/public-api/gateway/queue.py:113</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/queue.py#L286"
+              ><code>model-service/public-api/gateway/queue.py:286</code></a
+            >
+          </div>
+        </article>
+
+        <article id="GW-05" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#GW-05">GW-05</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>默认门户部署将多个用户的登录尝试计入同一限流桶</h3>
+          <p>
+            随仓库部署的 user-web 反代未产生可信的客户端地址链，默认 Uvicorn
+            使用代理对端地址。门户把这一地址上的所有登录尝试都计数，成功登录也占一次。同一代理后的用户累计达到阈值就会一起收到
+            429。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            从受信网关获得真实来源，按账号和来源分别限流。用两名用户经同一代理正常登录验证互不消耗对方窗口。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../model-service/user-web/nginx.conf#L6"
+              ><code>model-service/user-web/nginx.conf:6</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/Dockerfile#L11"
+              ><code>model-service/public-api/Dockerfile:11</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/portal.py#L60"
+              ><code>model-service/public-api/gateway/portal.py:60</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/portal.py#L81"
+              ><code>model-service/public-api/gateway/portal.py:81</code></a
+            >
+          </div>
+        </article>
+
+        <article id="GW-06" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#GW-06">GW-06</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>网关在鉴权前整包复制每个请求体</h3>
+          <p>
+            默认单请求允许 32 MiB。中间件先积累 bytearray，再转成
+            bytes。这两份数据至少在转换期间并存，下游解析还需要额外内存。公开 API 容器默认内存 768
+            MiB，并发时即使每个请求都未超单体限制也可能耗尽内存。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            在边界按流计数，避免保留两份完整副本。媒体使用限额临时文件。测量多连接下的 RSS
+            和被拒请求的读取量。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../model-service/public-api/gateway/main.py#L38"
+              ><code>model-service/public-api/gateway/main.py:38</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/main.py#L44"
+              ><code>model-service/public-api/gateway/main.py:44</code></a
+            >
+            <a class="ref" href="../../model-service/docker-compose.yml#L10"
+              ><code>model-service/docker-compose.yml:10</code></a
+            >
+          </div>
+        </article>
+
+        <article id="GW-07" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#GW-07">GW-07</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>网关截取视频封面无超时且取消不回收子进程</h3>
+          <p>
+            封面提取无限等待 FFmpeg 的
+            communicate，任务另有独立心跳。媒体解析卡住后任务可持续占执行槽。协程取消时没有终止并等待进程。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            复用有超时的媒体子进程管理，在超时及取消时终止并回收。用延迟工具替身验证 Worker 槽释放。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../model-service/public-api/gateway/media.py#L139"
+              ><code>model-service/public-api/gateway/media.py:139</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/media.py#L151"
+              ><code>model-service/public-api/gateway/media.py:151</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/queue.py#L136"
+              ><code>model-service/public-api/gateway/queue.py:136</code></a
+            >
+          </div>
+        </article>
+
+        <article id="GW-08" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#GW-08">GW-08</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>Worker 就绪检查只验证进程存在</h3>
+          <p>
+            部署脚本依赖 Compose --wait，而独立服务 Worker 的探针仅检查 PID
+            和命令行。队列循环被数据库锁阻塞或所有执行槽卡住时仍会健康，发布继续报成功。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            为调度循环记录最近成功巡检及心跳，在不调用模型的条件下进行就绪检查。对数据库故障及无任务空闲分别测试。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../model-service/docker-compose.yml#L33"
+              ><code>model-service/docker-compose.yml:33</code></a
+            >
+            <a class="ref" href="../../model-service/scripts/deploy.sh#L30"
+              ><code>model-service/scripts/deploy.sh:30</code></a
+            >
+          </div>
+        </article>
+
+        <article id="GW-09" data-priority="P2" data-mode="版本与公告">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#GW-09">GW-09</a
+            ><span class="mode">版本与公告</span>
+          </header>
+          <h3>两个独立前端锁定同一项 High 依赖公告</h3>
+          <p>
+            两份运行依赖锁均含 source-map-js 1.2.1。npm 官方审计对两个包均报同一 High
+            公告。处理不受信 source map
+            时影响可用性。本次未建立该代码在已部署静态页面对用户输入可达的证据。根项目审计无法覆盖嵌套锁文件。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 将两份锁文件更新到 1.2.2 或更高修复版，并在 CI
+            对三份锁文件分别执行公告检查。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../model-service/admin-web/package-lock.json#L1090"
+              ><code>model-service/admin-web/package-lock.json:1090</code></a
+            >
+            <a class="ref" href="../../model-service/user-web/package-lock.json#L1090"
+              ><code>model-service/user-web/package-lock.json:1090</code></a
+            >
+            <a class="ref" href="../../.github/workflows/ci.yml#L62"
+              ><code>.github/workflows/ci.yml:62</code></a
+            >
+          </div>
+          <p class="sources">
+            <a href="https://github.com/7rulnik/source-map-js/releases/tag/v1.2.2"
+              >source-map-js 维护者修复版本</a
+            >
+            · <a href="https://github.com/advisories/GHSA-68fv-2mgg-jv7q">GHSA-68fv-2mgg-jv7q</a>
+          </p>
+        </article>
+
+        <article id="GW-10" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#GW-10">GW-10</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>独立服务的镜像构建不能从提交重现依赖集合</h3>
+          <p>
+            两个 Python 服务基于浮动的 python:3.12-slim 标签，pip
+            解析范围依赖。相同提交在不同时间重建可能得到不同的镜像基础层和库，使测试签收和紧急回滚难以对应到原来的运行环境。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 固定多架构镜像
+            digest，分别锁定运行依赖。在受控更新时重建并扫描两个镜像。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../model-service/public-api/Dockerfile#L1"
+              ><code>model-service/public-api/Dockerfile:1</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/Dockerfile#L6"
+              ><code>model-service/public-api/Dockerfile:6</code></a
+            >
+            <a class="ref" href="../../model-service/admin-api/Dockerfile#L1"
+              ><code>model-service/admin-api/Dockerfile:1</code></a
+            >
+            <a class="ref" href="../../model-service/admin-api/requirements.txt#L1"
+              ><code>model-service/admin-api/requirements.txt:1</code></a
+            >
+          </div>
+        </article>
+
+        <article id="GW-11" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#GW-11">GW-11</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>网关资产提交中断后占用执行容量</h3>
+          <p>
+            资产登记会写入 submitting 状态，但不设
+            lease_until。若进程在向渠道请求后、状态落库前退出，过期扫描不会选中 NULL
+            租约。相同请求键会一直冲突。容量统计把该资产计入活动工单。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong>
+            为提交记录设置租约，失租后转人工核对。隔离非生成资产的容量及计费口径。验证已有资产提交不会被再次发送。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../model-service/public-api/gateway/auxiliary.py#L70"
+              ><code>model-service/public-api/gateway/auxiliary.py:70</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/queue.py#L53"
+              ><code>model-service/public-api/gateway/queue.py:53</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/queue.py#L70"
+              ><code>model-service/public-api/gateway/queue.py:70</code></a
+            >
+          </div>
+        </article>
+
+        <article id="GW-12" data-priority="P2" data-mode="源码审查">
+          <header>
+            <span class="tag p2">P2</span><a class="item-id" href="#GW-12">GW-12</a
+            ><span class="mode">源码审查</span>
+          </header>
+          <h3>独立服务的普通 Key 可以声明 Agent 费用来源</h3>
+          <p>
+            网关只在 require_agent 为真时强制携带归因，但当普通 Key 自愿提交完整三头时也会写作
+            agent_test。绑定门户用户的 Key 同样可到达此路径。影响后台业务/测试分类，不代表免计积分。
+          </p>
+
+          <p class="fix">
+            <strong>修复与验证</strong> 将允许标记 Agent 的资格与请求头完整性独立校验，仅接受授权
+            Key 或账户的测试来源。对普通门户 Key 增加负向断言。
+          </p>
+          <div class="refs" aria-label="代码位置">
+            <a class="ref" href="../../model-service/public-api/gateway/security.py#L48"
+              ><code>model-service/public-api/gateway/security.py:48</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/security.py#L56"
+              ><code>model-service/public-api/gateway/security.py:56</code></a
+            >
+            <a class="ref" href="../../model-service/public-api/gateway/main.py#L97"
+              ><code>model-service/public-api/gateway/main.py:97</code></a
+            >
+          </div>
+        </article>
+      </section>
+    </main>
+    <script>
+      ;(() => {
+        const term = document.getElementById('term')
+        const priority = document.getElementById('priority')
+        const mode = document.getElementById('mode')
+        const groups = [...document.querySelectorAll('.group')]
+        const items = [...document.querySelectorAll('article')]
+        const searchable = new Map(items.map((item) => [item, item.textContent.toLowerCase()]))
+        function filter() {
+          let shown = 0
+          const q = term.value.trim().toLowerCase()
+          for (const item of items) {
+            const visible =
+              (!priority.value || priority.value === item.dataset.priority) &&
+              (!mode.value || mode.value === item.dataset.mode) &&
+              searchable.get(item).includes(q)
+            item.hidden = !visible
+            if (visible) shown++
+          }
+          for (const group of groups) group.hidden = !group.querySelector('article:not([hidden])')
+          document.getElementById('count').textContent =
+            '显示 ' + shown + ' / ' + items.length + ' 项'
+        }
+        function reset() {
+          term.value = priority.value = mode.value = ''
+          filter()
+        }
+        term.addEventListener('input', filter)
+        priority.addEventListener('change', filter)
+        mode.addEventListener('change', filter)
+        document.getElementById('reset').addEventListener('click', reset)
+        document.querySelectorAll('.jump, nav a').forEach((link) =>
+          link.addEventListener('click', () => {
+            const target = document.getElementById(link.hash.slice(1))
+            if (target && target.closest('[hidden]')) reset()
+          }),
+        )
+      })()
+    </script>
+  </body>
+</html>

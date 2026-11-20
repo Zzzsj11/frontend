@@ -10,6 +10,9 @@ from test_service import body
 
 
 async def user_key(api, ctl, name="alice", monthly=20):
+    # This in-memory portal fixture represents a regular account, independent of the admin test key.
+    for header in ("X-Agent-Name", "X-Agent-Run-Id", "X-Test-Run-Id"):
+        api.headers.pop(header, None)
     name += "@star-net.cn"
     result = await ctl.post("/admin/users", json={"username": name, "initial_password": "test-password-123", "monthly_points": monthly})
     assert result.status_code == 201, result.text

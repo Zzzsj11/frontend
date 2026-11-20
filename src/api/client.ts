@@ -3,7 +3,16 @@ import { isPollingHeaders, recordApiTiming } from '../perf'
 import { agentTestHeaders } from './agentTestContext'
 
 let accessToken = ''
-let refreshPromise: Promise<boolean> | null = null
+let sessionController = new AbortController()
+export const currentSession = () => sessionController.signal
+const replaceSession = () => {
+  sessionController.abort()
+  sessionController = new AbortController()
+}
+const checkSession = (session: AbortSignal) => {
+  if (session.aborted) throw new DOMException('工作区会话已切换', 'AbortError')
+}
+let refreshInFlight: { session: AbortSignal; promise: Promise<boolean> } | null = null
 /** 用户主动退出登录后置位：在途请求/轮询撞上 401 时静默失败，不再弹“登录已过期”或强制跳转 */
 const logoutKey = 'mv:logout-pending'
 export const logoutPending = () => localStorage.getItem(logoutKey) === '1'
@@ -41,30 +50,37 @@ export const setAccessToken = (value: string) => {
 }
 /** 重置会话辅助状态（测试清理 / 登录页兜底）：清 token、退出标志与进行中的刷新 */
 export function resetAuthState() {
+  replaceSession()
   accessToken = ''
   intentionalLogout = false
-  refreshPromise = null
+  refreshInFlight = null
 }
 const refreshAccess = async () => {
+  const session = currentSession()
   if (intentionalLogout || logoutPending()) return false
-  if (!refreshPromise)
-    refreshPromise = fetch('/api/auth/refresh', {
-      method: 'POST',
-      credentials: 'include',
-      headers: agentTestHeaders(),
-      signal: AbortSignal.timeout(15000),
+  if (refreshInFlight?.session === session) return refreshInFlight.promise
+  const promise = fetch('/api/auth/refresh', {
+    method: 'POST',
+    credentials: 'include',
+    headers: agentTestHeaders(),
+    signal: AbortSignal.any([session, AbortSignal.timeout(15000)]),
+  })
+    .then(async (response) => {
+      if (!response.ok) return false
+      const { accessToken: token } = (await response.json()) as { accessToken: string }
+      if (session.aborted || intentionalLogout || logoutPending()) return false
+      setAccessToken(token)
+      return true
     })
-      .then(async (response) => {
-        if (!response.ok) return false
-        const { accessToken: token } = (await response.json()) as { accessToken: string }
-        if (intentionalLogout || logoutPending()) return false
-        setAccessToken(token)
-        return true
-      })
-      .finally(() => {
-        refreshPromise = null
-      })
-  return refreshPromise
+    .catch((error) => {
+      if (session.aborted) return false
+      throw error
+    })
+    .finally(() => {
+      if (refreshInFlight?.session === session) refreshInFlight = null
+    })
+  refreshInFlight = { session, promise }
+  return promise
 }
 /** token 彻底失效时清空本地状态并跳转登录页 */
 const forceLogout = () => {
@@ -81,6 +97,8 @@ export async function apiRequest<T>(
   silentStatuses: readonly number[] = [],
 ): Promise<T> {
   if (logoutPending()) throw new ApiError('工作区已锁定')
+  const session = currentSession()
+  const signal = init.signal ? AbortSignal.any([session, init.signal]) : session
   const headers = new Headers(init.headers)
   for (const [name, value] of Object.entries(agentTestHeaders())) headers.set(name, value)
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
@@ -91,19 +109,22 @@ export async function apiRequest<T>(
   const t0 = tracked ? performance.now() : 0
   let response: Response | undefined
   let retried = false
-  const request = () => fetch(`/api${path}`, { ...init, headers, credentials: 'include' })
+  const request = () => {
+    checkSession(session)
+    return fetch(`/api${path}`, { ...init, signal, headers, credentials: 'include' })
+  }
   try {
     response = await request()
   } catch (error) {
     // 主动取消：立即抛回原错误（轮询方归一为 PollingCancelledError），不吃重试预算、不弹错误
-    if (isAbortError(error, init.signal ?? undefined)) throw error
+    if (session.aborted || isAbortError(error, init.signal ?? undefined)) throw error
     // Generation jobs are polled for several minutes. A single transient proxy or
     // network interruption must not discard an otherwise successful result.
     if ((init.method ?? 'GET').toUpperCase() === 'GET') {
       for (const delayMs of NETWORK_RETRY_DELAYS_MS) {
-        await wait(delayMs, init.signal ?? undefined)
+        await wait(delayMs, signal)
         // 重试等待期间被取消：不再补发请求，按取消处理
-        if (init.signal?.aborted) throw abortError()
+        if (signal.aborted) throw abortError()
         try {
           response = await request()
           retried = true
@@ -123,8 +144,8 @@ export async function apiRequest<T>(
   const safeToReplay = ['GET', 'HEAD', 'OPTIONS'].includes((init.method ?? 'GET').toUpperCase())
   if ((response.status === 502 || response.status === 503) && safeToReplay) {
     for (const delayMs of GATEWAY_RETRY_DELAYS_MS) {
-      await wait(delayMs, init.signal ?? undefined)
-      if (init.signal?.aborted) throw abortError()
+      await wait(delayMs, signal)
+      if (signal.aborted) throw abortError()
       try {
         const retriedResponse = await request()
         response = retriedResponse
@@ -137,16 +158,21 @@ export async function apiRequest<T>(
     }
   }
   // 请求完成后才被取消：不走 401 刷新/错误上报，直接按取消抛出（结果反正会被调用方丢弃）
-  if (init.signal?.aborted) throw abortError()
+  if (signal.aborted) throw abortError()
+  checkSession(session)
   if (response.status === 401 && retry && !path.startsWith('/auth/')) {
-    if (!intentionalLogout && (await refreshAccess()))
+    if (!intentionalLogout && (await refreshAccess())) {
+      checkSession(session)
       return apiRequest<T>(path, init, false, silentStatuses)
+    }
+    checkSession(session)
     if (intentionalLogout) throw new ApiError('已退出登录', response.status)
     forceLogout()
     throw reportApiError(new ApiError('登录已过期，请重新登录', response.status))
   }
   const t1 = tracked ? performance.now() : 0
   const body = await response.json().catch(() => ({}))
+  checkSession(session)
   if (tracked) {
     recordApiTiming({
       path,
@@ -167,6 +193,12 @@ export async function apiRequest<T>(
       response.status,
       body.errorCode,
     )
+    const retryAfter = response.headers.get('Retry-After')
+    if (retryAfter) {
+      const seconds = Number(retryAfter)
+      const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - Date.now()
+      if (Number.isFinite(ms)) error.retryAfterMs = Math.max(0, ms)
+    }
     const transientPollingError =
       isPollingHeaders(headers) &&
       (response.status === 408 || response.status === 429 || response.status >= 500)
@@ -184,6 +216,8 @@ export async function openApiStream(
   extraHeaders: Record<string, string> = {},
 ): Promise<Response> {
   if (logoutPending()) throw new ApiError('工作区已锁定')
+  const session = currentSession()
+  signal = signal ? AbortSignal.any([session, signal]) : session
   const headers = new Headers(extraHeaders)
   for (const [name, value] of Object.entries(agentTestHeaders())) headers.set(name, value)
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
@@ -209,15 +243,20 @@ export async function openApiStream(
       retried: false,
     })
   }
+  checkSession(session)
   if (response.status === 401 && retry) {
-    if (!intentionalLogout && (await refreshAccess()))
+    if (!intentionalLogout && (await refreshAccess())) {
+      checkSession(session)
       return openApiStream(path, signal, false, extraHeaders)
+    }
+    checkSession(session)
     if (intentionalLogout) throw new ApiError('已退出登录', response.status)
     forceLogout()
     throw reportApiError(new ApiError('登录已过期，请重新登录', response.status))
   }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
+    checkSession(session)
     throw reportApiError(
       new ApiError(
         body.detail ||
@@ -256,6 +295,7 @@ export async function loginRequest(username: string, password: string) {
   const body = await response.json().catch(() => ({}))
   if (!response.ok)
     throw reportApiError(new ApiError(body.detail || '登录失败', response.status, body.errorCode))
+  replaceSession()
   setAccessToken(body.accessToken)
   intentionalLogout = false // 重新登录成功后，恢复正常的 401 会话处理
   return body as { accessToken: string; user: AuthUser }
@@ -265,13 +305,14 @@ export async function restoreSession(): Promise<AuthUser | null> {
   return apiRequest<AuthUser>('/auth/me')
 }
 export async function logoutRequest() {
+  replaceSession()
   intentionalLogout = true
   localStorage.setItem(logoutKey, '1')
   const token = accessToken
   setAccessToken('')
   try {
     // 已发出的刷新可能轮换 Cookie，等它结束后再撤销当前凭证。
-    await refreshPromise?.catch(() => false)
+    await refreshInFlight?.promise.catch(() => false)
     const response = await fetch('/api/auth/logout', {
       method: 'POST',
       credentials: 'include',

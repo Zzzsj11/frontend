@@ -71,11 +71,17 @@ class TaskUpdate(BaseModel):
     storyboard_config: dict | None = None
 
 
+class AudioTrackUpdate(BaseModel):
+    audioTrackVisible: bool
+    audioOffsetSeconds: float = Field(ge=-3600, le=3600, allow_inf_nan=False)
+
+
 class StyleCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
 
 class DigitalHumanCreate(BaseModel):
+    source_job_id: str | None = Field(default=None, min_length=1, max_length=80)
     name: str = Field(min_length=1, max_length=120)
     style_id: str | None = None
     description: str = Field(default="", max_length=10_000)

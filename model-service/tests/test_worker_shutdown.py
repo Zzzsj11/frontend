@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 
-async def test_worker_stops_claiming_and_drains(service, monkeypatch):
+async def test_worker_stops_claiming_and_drains(service, monkeypatch, tmp_path):
     from gateway import channel_balances, queue
 
     stop = asyncio.Event()
@@ -18,6 +18,7 @@ async def test_worker_stops_claiming_and_drains(service, monkeypatch):
             balance_stopped.set()
 
     async def claim(worker):
+        assert (tmp_path / "worker-ready").is_file()
         await asyncio.sleep(0)
         stop.set()
         return "fixture"
@@ -31,6 +32,7 @@ async def test_worker_stops_claiming_and_drains(service, monkeypatch):
     monkeypatch.setattr(channel_balances, "loop", balance)
     await queue.main(stop=stop, drain_seconds=1)
     assert finished.is_set() and balance_stopped.is_set()
+    assert not (tmp_path / "worker-ready").exists()
     assert queue.claim.await_count == 1
 
 
@@ -62,3 +64,31 @@ async def test_interrupted_submission_is_not_retried(service, monkeypatch):
         job = await db.get(Job, jid)
         assert job.status == "manual_review" and job.worker_id is None
     assert await queue.claim("new-worker") is None
+
+
+async def test_idle_and_database_failure_readiness(service, monkeypatch, tmp_path):
+    from contextlib import asynccontextmanager
+
+    from gateway import channel_balances, queue
+
+    ready = tmp_path / "worker-ready"
+    stop = asyncio.Event()
+
+    async def idle_claim(worker):
+        assert ready.exists()
+        stop.set()
+
+    @asynccontextmanager
+    async def offline():
+        raise ConnectionError("database unavailable")
+        yield
+
+    monkeypatch.setattr(channel_balances, "loop", asyncio.Event().wait)
+    monkeypatch.setattr(queue, "claim", idle_claim)
+    await queue.main(stop)
+    assert not ready.exists()
+    ready.touch()
+    monkeypatch.setattr(queue, "Session", offline)
+    with pytest.raises(ConnectionError, match="database unavailable"):
+        await queue.main(asyncio.Event())
+    assert not ready.exists()

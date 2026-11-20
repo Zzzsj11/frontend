@@ -18,7 +18,13 @@ PUBLIC_PREFIXES = (
 def for_service(name, values):
     env = {k: v for k, v in values.items() if k in SYSTEM_KEYS}
     if name in {"public", "worker"}:
-        env.update({k: v for k, v in values.items() if k == "DATABASE_URL" or k.startswith(PUBLIC_PREFIXES)})
+        env.update(
+            {
+                k: v
+                for k, v in values.items()
+                if k in {"DATABASE_URL", "AGENT_ATTRIBUTION_CLIENT_IDS", "PORTAL_TRUSTED_PROXY_HOST"} or k.startswith(PUBLIC_PREFIXES)
+            }
+        )
     elif name == "admin":
         env.update(
             {k: v for k, v in values.items() if k == "DATABASE_URL" or k in {"ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_JWT_SECRET"}}

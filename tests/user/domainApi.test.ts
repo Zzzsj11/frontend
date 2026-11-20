@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createStoryboardLine, dataUrlToBlob, uploadDataUrl } from '../../src/api/domain'
+import {
+  createStoryboardLine,
+  dataUrlToBlob,
+  fetchSongProjects,
+  uploadDataUrl,
+} from '../../src/api/domain'
 
 describe('digital human reference upload', () => {
   afterEach(() => vi.restoreAllMocks())
@@ -57,5 +62,40 @@ describe('digital human reference upload', () => {
     expect(line.scene).toEqual({ status: 'none', imageUrl: undefined, originalImageUrl: undefined })
     expect(line.shot).toMatchObject({ status: 'none', assets: [] })
     expect(line.voice).toEqual({ status: 'none' })
+  })
+})
+
+describe('project sidebar pagination', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  const projects = Array.from({ length: 203 }, (_, id) => ({
+    id: String(id),
+    name: String(id),
+    tasks: [],
+  }))
+  const page = (items: typeof projects) =>
+    new Response(JSON.stringify(items), { headers: { 'Content-Type': 'application/json' } })
+
+  it('advances by returned rows and deduplicates overlapping pages', async () => {
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(page(projects.slice(0, 100)))
+      .mockResolvedValueOnce(page(projects.slice(99, 199)))
+      .mockResolvedValueOnce(page(projects.slice(199)))
+    expect(await fetchSongProjects()).toEqual(projects)
+    expect(fetch.mock.calls.map(([path]) => path)).toEqual([
+      '/api/projects',
+      '/api/projects?offset=100',
+      '/api/projects?offset=200',
+    ])
+  })
+
+  it('stops when a legacy backend ignores the offset', async () => {
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(page(projects))
+      .mockResolvedValueOnce(page(projects))
+    expect(await fetchSongProjects()).toEqual(projects)
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 })

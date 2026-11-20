@@ -10,6 +10,7 @@ import asyncio
 import json
 from dataclasses import replace
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -402,12 +403,13 @@ def test_portrait_prompt_preview_matches_generation_snapshot(client, monkeypatch
 
     captured = []
 
-    async def create_job(kind, request, runner, **kwargs):
+    async def enqueue_job(_db, kind, request, **kwargs):
         assert kind == "image"
         captured.append(request)
         return SimpleNamespace(public=lambda: {"id": "job-headshot-test", "status": "queued"})
 
-    monkeypatch.setattr(main.jobs, "create", create_job)
+    monkeypatch.setattr(main.jobs, "enqueue", enqueue_job)
+    monkeypatch.setattr(main.jobs, "dispatch", AsyncMock())
     portrait = {"description": f"  {description}  ", "style": "古风分类不得入画"}
     preview = client.post("/api/generations/images/portrait-prompt", json=portrait)
     assert preview.status_code == 200
@@ -440,7 +442,7 @@ def test_portrait_prompt_empty_description_and_create_validation(client, monkeyp
     async def unexpected_job(*args, **kwargs):
         pytest.fail("预览与无效请求不得创建生成工单")
 
-    monkeypatch.setattr(main.jobs, "create", unexpected_job)
+    monkeypatch.setattr(main.jobs, "enqueue", unexpected_job)
     empty = client.post("/api/generations/images/portrait-prompt", json={})
     category_only = client.post("/api/generations/images/portrait-prompt", json={"description": "  ", "style": "古风分类不得入画"})
     assert empty.status_code == category_only.status_code == 200
@@ -497,11 +499,12 @@ def test_portrait_default_model_is_persisted_without_overriding_explicit_models(
 
     captured = []
 
-    async def create_job(kind, request, runner, **kwargs):
+    async def enqueue_job(_db, kind, request, **kwargs):
         captured.append(request)
         return SimpleNamespace(public=lambda: {"id": "job-portrait-model-test", "status": "queued"})
 
-    monkeypatch.setattr(main.jobs, "create", create_job)
+    monkeypatch.setattr(main.jobs, "enqueue", enqueue_job)
+    monkeypatch.setattr(main.jobs, "dispatch", AsyncMock())
     response = client.post("/api/generations/images", json=payload)
     assert response.status_code == 202
     assert captured[0]["model"] == expected_model

@@ -8,6 +8,8 @@ import math
 import re
 from pathlib import Path
 
+from .ass_storyboard import decode_ass
+
 
 async def process(args: list[str], folder: Path, progress=None, duration: float = 1, timeout: int = 7200) -> None:
     # stderr 落盘，避免管道堵塞；取消、超时必须结束子进程，不能留下占用 CPU 的孤儿。
@@ -92,7 +94,7 @@ async def render(folder: Path, snapshot: dict, progress) -> dict:
     duration = audio_duration + offset
     if not 0 < duration <= 3600:
         raise ValueError("合成时长需在 1 小时以内，且音频偏移不能超出歌曲")
-    (folder / "subtitles.ass").write_text(normalize_ass((folder / "source.ass").read_text(encoding="utf-8-sig"), offset), encoding="utf-8")
+    (folder / "subtitles.ass").write_text(normalize_ass(decode_ass((folder / "source.ass").read_bytes())[0], offset), encoding="utf-8")
     clips = [v for v in snapshot["clips"] if v["start"] < duration]
     infos = []
     for i in range(len(clips)):
@@ -156,6 +158,8 @@ async def render(folder: Path, snapshot: dict, progress) -> dict:
         "-nostats",
         "final.mp4",
     ]
+    if snapshot.get("maxOutputBytes"):
+        args[-1:-1] = ["-fs", str(snapshot["maxOutputBytes"])]
     await process(args, folder, progress, duration)
     return {"width": width, "height": height, "fps": fps, "duration": duration}
 

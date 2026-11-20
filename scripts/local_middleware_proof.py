@@ -119,6 +119,182 @@ async def proof():
             job = await db.get(GenerationJobModel, "local-proof-job")
             job.status, job.deleted_at = "queued", utcnow()
         assert await _claim(("general_outline",), (), "must-not-claim-deleted") is None
+        # Saturate one model pool ahead of another; a lost Redis key cannot erase PG occupancy.
+        async with session_factory.begin() as db:
+            for index in range(103):
+                db.add(
+                    GenerationJobModel(
+                        id=f"local-pool-{index:03d}",
+                        user_id="local-proof-user",
+                        kind="pool-proof",
+                        request={
+                            "_executionPool": "slow" if index < 102 else "fast",
+                            "_executionConcurrency": 1,
+                        },
+                    )
+                )
+        first = await _claim(("pool-proof",), (), "local-first")
+        assert (
+            first
+            and first.database_pool_reserved
+            and first.request["_executionPool"] == "slow"
+        )
+        await redis.delete("execution-pool:slow")
+        remaining = await asyncio.gather(
+            *(_claim(("pool-proof",), (), f"local-other-{i}") for i in range(10))
+        )
+        second = [item for item in remaining if item]
+        assert len(second) == 1 and second[0].request["_executionPool"] == "fast"
+        assert not await _claim(("pool-proof",), (), "local-extra")
+        from app.config import settings
+        from app.text_admission import (
+            _acquire_text_slot,
+            _release_text_slot,
+            _renew_text_slot,
+        )
+
+        reserved = [
+            await _acquire_text_slot()
+            for _ in range(settings.text_generation_concurrency)
+        ]
+        assert all(reserved) and not await _acquire_text_slot()
+        assert await _renew_text_slot(reserved[0])
+        await _release_text_slot(reserved[0])
+        assert not await _renew_text_slot(reserved[0]) and await _acquire_text_slot()
+        print(
+            "PASS: durable cross-worker media and text slots, saturated-pool bypass and owner fencing"
+        )
+        # Exercise real admission entry points; dispatch is replaced at the model boundary.
+        from dataclasses import replace
+        from unittest.mock import AsyncMock, patch
+
+        from app import domain, main
+        from app.agent_attribution import attribution_context
+        from app.jobs import jobs
+        from app.models import (
+            DailyUsageQuotaModel,
+            ProjectModel,
+            ProjectTaskModel,
+            StoryboardLineModel,
+        )
+        from app.schemas import ImageGenerationCreate, StoryboardLineGenerate
+        from fastapi import HTTPException
+
+        owner_id = "local-admission-user"
+        async with session_factory.begin() as db:
+            db.add(
+                UserModel(
+                    id=owner_id,
+                    username=owner_id,
+                    password_hash="fixture",
+                    daily_chat_limit=2,
+                )
+            )
+            await db.flush()
+            db.add(ProjectModel(id="proof-project", name="fixture", user_id=owner_id))
+            await db.flush()
+            db.add(
+                ProjectTaskModel(
+                    id="proof-storyboard",
+                    title="fixture",
+                    project_id="proof-project",
+                    storyboard_type="general",
+                )
+            )
+            await db.flush()
+            for n in range(3):
+                db.add(
+                    StoryboardLineModel(
+                        id=f"proof-line-{n}",
+                        project_task_id="proof-storyboard",
+                        sort_order=n,
+                        planned_duration=5,
+                    )
+                )
+
+        async def submit(kind):
+            async with session_factory() as db:
+                user = await db.get(UserModel, owner_id)
+                try:
+                    if kind == "image":
+                        await main.create_image_generation(
+                            ImageGenerationCreate(
+                                model="nano-banana-2.1-all-in-one", prompt="synthetic"
+                            ),
+                            user,
+                            db,
+                        )
+                    else:
+                        await domain.generate_one_storyboard_line(
+                            "proof-storyboard",
+                            "proof-line-0",
+                            StoryboardLineGenerate(),
+                            user,
+                            db,
+                        )
+                    return 202
+                except HTTPException as exc:
+                    return exc.status_code
+
+        with (
+            attribution_context("agent_test", "code-agent", "local-admission-proof"),
+            patch.object(jobs, "dispatch", AsyncMock()) as dispatch,
+            patch.object(
+                main,
+                "settings",
+                replace(
+                    main.settings,
+                    image_generation_concurrency=1,
+                    all_in_one_api_key="fixture-only",
+                ),
+            ),
+            patch.object(
+                domain,
+                "settings",
+                replace(domain.settings, job_execution_mode="worker"),
+            ),
+        ):
+            assert sorted(await asyncio.gather(submit("image"), submit("image"))) == [
+                202,
+                429,
+            ]
+            assert sorted(await asyncio.gather(submit("line"), submit("line"))) == [
+                202,
+                409,
+            ]
+            async with session_factory() as db:
+                try:
+                    await domain._submit_storyboard_lines(
+                        db,
+                        "proof-storyboard",
+                        ["proof-line-1", "proof-line-2"],
+                        True,
+                        await db.get(UserModel, owner_id),
+                        batch=True,
+                    )
+                except HTTPException as exc:
+                    assert exc.status_code == 429
+                else:
+                    raise AssertionError("quota failure expected")
+            assert dispatch.await_count == 2
+        async with session_factory() as db:
+            quotas = dict(
+                (
+                    await db.execute(
+                        select(
+                            DailyUsageQuotaModel.category,
+                            DailyUsageQuotaModel.usage_count,
+                        ).where(DailyUsageQuotaModel.user_id == owner_id)
+                    )
+                ).all()
+            )
+            assert quotas == {"image": 1, "chat": 1}
+            assert (
+                await db.get(StoryboardLineModel, "proof-line-1")
+            ).generation_status == "pending"
+        print(
+            "PASS: atomic image and storyboard admission; partial batch quota failure rolls back"
+        )
         # Separate Redis client connections execute the actual atomic Lua gate.
         tokens = await asyncio.gather(
             *(acquire_execution_lease("local-proof-pool", 3, 60) for _ in range(20))

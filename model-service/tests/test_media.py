@@ -170,3 +170,25 @@ def test_canonical_identity_reference_never_becomes_kling_first_frame():
     req = VideoCreate(model="kling-v3", prompt="test", images=["https://example.com/identity.jpg"])
     with pytest.raises(HTTPException):
         video_payload(SimpleNamespace(protocol="kling", provider_model="kling-v3"), req)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_media_tool_reaps_stalled_child(tmp_path, cancel):
+    import asyncio
+    import os
+
+    from gateway.media import run_media_tool
+
+    pidfile = tmp_path / "pid"
+    program = "import os,sys,time; from pathlib import Path; Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(60)"
+    task = asyncio.create_task(run_media_tool(sys.executable, "-c", program, str(pidfile), timeout=2 if not cancel else 60))
+    async with asyncio.timeout(5):
+        while not pidfile.exists() or not pidfile.read_text():
+            await asyncio.sleep(0.01)
+    if cancel:
+        task.cancel()
+    with pytest.raises(asyncio.CancelledError if cancel else TimeoutError):
+        await task
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pidfile.read_text()), 0)

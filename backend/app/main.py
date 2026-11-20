@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import hashlib
 import json
 import logging
@@ -17,8 +19,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from PIL import UnidentifiedImageError
 from pydantic import BaseModel
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .admin import public_router as model_options_router
@@ -32,10 +35,12 @@ from .auth import (
     hash_password,
     issue_tokens,
     login,
+    password_work,
     refresh_cookie_value,
     revoke_all_refresh_tokens,
     revoke_refresh,
     rotate_refresh,
+    stream_session_active,
     user_public,
     verify_password,
 )
@@ -46,7 +51,7 @@ from .creative import router as creative_router
 from .database import close_database, database_ok, database_session, init_database
 from .domain import owned_line, owned_project, owned_task, project_audio_json, uid, visible_humans
 from .domain import router as domain_router
-from .error_logging import record_api_error, request_payload
+from .error_logging import expire_client_errors, record_api_error, request_payload
 from .generation_preferences import router as generation_preferences_router
 from .h3_prompt_compiler import compile_h3_prompt
 from .image_download import router as image_download_router
@@ -60,6 +65,7 @@ from .models import (
     GenerationJobModel,
     ProjectAudioAssetModel,
     ProjectCastModel,
+    ProjectModel,
     ProjectTaskModel,
     SongEmotionProfileModel,
     StoryboardLineModel,
@@ -69,8 +75,8 @@ from .models import (
 from .mv_export import router as mv_export_router
 from .prompts import get_prompt
 from .providers import ProviderError, generate_image, generate_video, kling_image_inputs, resume_generation
-from .redis_store import clear_login_attempts, close_redis, login_attempt_count, record_login_failure, redis_ok
-from .request_logging import api_request_log_middleware
+from .redis_store import close_redis, redis_ok, release_login_attempt, reserve_login_attempt
+from .request_logging import RequestLogMiddleware
 from .schemas import (
     ChatMessageCreate,
     ChatSessionCreate,
@@ -85,9 +91,10 @@ from .schemas import (
     VideoGenerationCreate,
 )
 from .seed import recover_stale_storyboard_generation, seed_system_data
-from .storage import get_storage, import_remote, make_image_thumbnail, safe_key
+from .storage import MAX_IMAGE_BYTES, get_storage, image_thumbnail, import_remote, is_platform_storage_host, is_user_owned_tos_url, put_image_with_thumbnail, safe_key
 from .task_video_model import lock_video_task
 from .task_video_model import router as task_video_model_router
+from .upload_validation import ALLOWED_UPLOAD_TYPES
 from .usage_quota import consume_daily_quota
 from .video_prompt_policy import append_shot_quality_requirements, compile_general_random_provider_prompt, compile_identity_safe_video_prompt
 
@@ -131,22 +138,6 @@ async def probe_audio_duration(content: bytes) -> float:
         return duration
 
 
-ALLOWED_UPLOAD_TYPES: dict[str, set[str]] = {
-    ".jpg": {"image/jpeg"},
-    ".jpeg": {"image/jpeg"},
-    ".png": {"image/png"},
-    ".webp": {"image/webp"},
-    ".gif": {"image/gif"},
-    ".mp4": {"video/mp4"},
-    ".mov": {"video/quicktime"},
-    ".webm": {"video/webm"},
-    ".mp3": {"audio/mpeg", "audio/mp3"},
-    ".wav": {"audio/wav", "audio/x-wav", "audio/vnd.wave"},
-    ".m4a": {"audio/mp4", "audio/x-m4a"},
-    ".ogg": {"audio/ogg", "video/ogg"},
-}
-
-
 def validate_media_upload(file: UploadFile) -> None:
     filename = file.filename or ""
     suffix = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
@@ -160,6 +151,7 @@ async def stale_generation_reaper() -> None:
     while True:
         await asyncio.sleep(60)
         try:
+            await expire_client_errors()
             await recover_stale_storyboard_generation()
             expired = await jobs.expire_overdue_video_jobs()
             if expired:
@@ -198,7 +190,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="MV Agent API", version="0.3.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 # 测试流量耗时采集：仅带 X-Test-Run-Id 头或 API_REQUEST_LOG_ALL=true 时入库
-app.middleware("http")(api_request_log_middleware)
+app.add_middleware(RequestLogMiddleware)
 app.middleware("http")(agent_attribution_middleware)
 
 
@@ -226,7 +218,9 @@ app.include_router(generation_preferences_router)
 async def http_error_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
     detail = str(exc.detail)
     error_code = await record_api_error(request, status_code=exc.status_code, error_type=type(exc).__name__, message=detail)
-    return JSONResponse(status_code=exc.status_code, content={"detail": detail, "errorCode": error_code}, headers=exc.headers)
+    return JSONResponse(
+        status_code=exc.status_code, content={"detail": detail, "errorCode": error_code}, headers=exc.headers, background=getattr(request.state, "client_error_write", None)
+    )
 
 
 @app.exception_handler(RequestValidationError)
@@ -254,13 +248,13 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
         return f"{field}：{messages.get(kind, '格式或取值不正确')}"
 
     message = "；".join(translated(item) for item in exc.errors())
-    error_code = await record_api_error(request, status_code=422, error_type=type(exc).__name__, message=message, exc=exc, payload=await request_payload(request))
-    return JSONResponse(status_code=422, content={"detail": message, "errorCode": error_code})
+    error_code = await record_api_error(request, status_code=422, error_type=type(exc).__name__, message=message, payload=await request_payload(request))
+    return JSONResponse(status_code=422, content={"detail": message, "errorCode": error_code}, background=getattr(request.state, "client_error_write", None))
 
 
 @app.exception_handler(Exception)
 async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
-    error_code = await record_api_error(request, status_code=500, error_type=type(exc).__name__, message=str(exc), exc=exc)
+    error_code = await record_api_error(request, status_code=500, error_type=type(exc).__name__, message=type(exc).__name__, exc=exc)
     return JSONResponse(status_code=500, content={"detail": "服务器内部错误", "errorCode": error_code})
 
 
@@ -418,25 +412,21 @@ async def auth_login(payload: LoginCreate, request: Request, response: Response,
         hashlib.sha256(f"username\0{username}".encode()).hexdigest(),
     )
     try:
-        attempts = max(await asyncio.gather(*(login_attempt_count(identity) for identity in identities)))
+        reservation = await reserve_login_attempt(identities, settings.login_rate_limit_attempts, settings.login_rate_limit_window_seconds)
     except Exception:
         logger.exception("登录限流存储不可用")
         raise HTTPException(503, "登录服务暂不可用，请稍后重试", headers={"Retry-After": "5"}) from None
-    if attempts >= settings.login_rate_limit_attempts:
+    if reservation is None:
         raise HTTPException(
             429,
             "登录尝试过于频繁，请稍后再试",
             headers={"Retry-After": str(settings.login_rate_limit_window_seconds)},
         )
-    user = await login(payload.username, payload.password)
+    user = await login(payload.username, payload.password, db)
     if not user:
-        try:
-            await asyncio.gather(*(record_login_failure(identity, settings.login_rate_limit_window_seconds) for identity in identities))
-        except Exception:
-            logger.exception("记录登录失败次数异常")
         raise HTTPException(401, "用户名或密码错误")
     try:
-        await asyncio.gather(*(clear_login_attempts(identity) for identity in identities))
+        await release_login_attempt(identities, reservation)
     except Exception:
         logger.exception("清理登录限流计数失败")
     return await issue_tokens(user, request, response, db)
@@ -471,15 +461,15 @@ async def change_password(
     user: CurrentUser,
     db: AsyncSession = Depends(database_session),
 ) -> dict:
-    if not verify_password(user.password_hash, payload.current_password):
+    await db.refresh(user, with_for_update=True)
+    if not await password_work(verify_password, user.password_hash, payload.current_password):
         raise HTTPException(422, "当前密码错误")
     if payload.current_password == payload.new_password:
         raise HTTPException(422, "新密码不能与当前密码相同")
-    user.password_hash = hash_password(payload.new_password)
+    user.password_hash = await password_work(hash_password, payload.new_password)
     user.must_change_password = False
     user.auth_version += 1
     await revoke_all_refresh_tokens(user.id, db)
-    await db.commit()
     tokens = await issue_tokens(user, request, response, db)
     return {"ok": True, **tokens}
 
@@ -487,14 +477,15 @@ async def change_password(
 @app.post("/api/uploads")
 async def upload(user: CurrentUser, file: UploadFile = File(...), category: str = "uploads") -> dict:
     validate_media_upload(file)
-    content = await file.read(100 * 1024 * 1024 + 1)
-    if len(content) > 100 * 1024 * 1024:
-        raise HTTPException(413, "文件不能超过 100MB")
+    limit = MAX_IMAGE_BYTES if (file.content_type or "").startswith("image/") else 100 * 1024**2
+    content = await file.read(limit + 1)
+    if len(content) > limit:
+        raise HTTPException(413, f"文件不能超过 {limit // 1024**2}MB")
     key = safe_key(f"users/{user.id}/{category}", file.filename or "upload.bin")
     if (file.content_type or "").startswith("image/"):
         try:
-            thumbnail = make_image_thumbnail(content)
-        except (UnidentifiedImageError, OSError) as exc:
+            thumbnail = await image_thumbnail(content, file.content_type)
+        except (UnidentifiedImageError, OSError, ValueError) as exc:
             raise HTTPException(422, "图片文件无法解析") from exc
         storage = get_storage()
         url = await storage.put_bytes(key, content, file.content_type)
@@ -509,9 +500,13 @@ async def upload(user: CurrentUser, file: UploadFile = File(...), category: str 
 
 
 @app.post("/api/uploads/import")
-async def remote_import(payload: RemoteImportCreate, user: CurrentUser) -> dict:
+async def remote_import(payload: RemoteImportCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
+    async def authorize(url: str):
+        await validate_platform_references(db, user.id, [url])
+
+    await authorize(payload.url)
     try:
-        url = await import_remote(payload.url, f"users/{user.id}/{payload.category}", payload.filename)
+        url = await import_remote(payload.url, f"users/{user.id}/{payload.category}", payload.filename, validate_media=True, authorize_source=authorize)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return {"url": url}
@@ -601,6 +596,7 @@ async def create_ass_storyboard(
             audio_file.content_type,
         )
         now = utcnow()
+        await db.scalar(select(ProjectModel.id).where(ProjectModel.id == project_id).with_for_update())
         existing_audio = list(
             (
                 await db.execute(
@@ -754,6 +750,43 @@ async def _check_concurrency(db: AsyncSession, user_id: str, kind: str, limit: i
         raise HTTPException(429, f"同时进行的{label}生成已达上限（{limit}个），请等待部分任务完成后再提交")
 
 
+async def validate_platform_references(db: AsyncSession, user_id: str, urls: list[str]) -> None:
+    try:
+        private = {url for url in urls if is_platform_storage_host(url) and not is_user_owned_tos_url(url, user_id)}
+    except ValueError as exc:
+        raise HTTPException(422, "参考素材地址无效") from exc
+    if not private:
+        return
+    rows = (
+        await db.execute(
+            select(DigitalHumanModel.avatar_url, DigitalHumanModel.avatar_thumbnail_url).where(
+                DigitalHumanModel.scope == "system",
+                DigitalHumanModel.deleted_at.is_(None),
+                DigitalHumanModel.status == "active",
+                or_(DigitalHumanModel.avatar_url.in_(private), DigitalHumanModel.avatar_thumbnail_url.in_(private)),
+            )
+        )
+    ).all()
+    if private.difference(url for row in rows for url in row):
+        raise HTTPException(422, "平台参考素材必须属于当前用户或系统人物")
+
+
+async def store_inline_reference(reference: str, user_id: str) -> str:
+    if not reference.startswith("data:"):
+        return reference
+    try:
+        header, data = reference.split(",", 1)
+        mime_type = header.removeprefix("data:").removesuffix(";base64")
+        if header != f"data:{mime_type};base64" or mime_type not in {"image/png", "image/jpeg", "image/webp"} or len(data) > 4 * (MAX_IMAGE_BYTES // 3 + 1):
+            raise ValueError("不支持的内联图片")
+        content = base64.b64decode(data, validate=True)
+        key = safe_key(f"users/{user_id}/references", "image." + mime_type.split("/")[-1])
+        url, _ = await put_image_with_thumbnail(key, content, mime_type)
+        return url
+    except (ValueError, binascii.Error) as exc:
+        raise HTTPException(422, "内联参考图片无法解析") from exc
+
+
 async def _portrait_prompt(description: str, style: str) -> str:
     """数字人定妆照提示词：模板在提示词注册中心（portrait.digital_human_ref），描述/风格的条件拼接逻辑留在代码。"""
     parts = []
@@ -795,18 +828,23 @@ async def create_image_generation(payload: ImageGenerationCreate, user: CurrentU
         images=payload.images,
         quality=payload.quality,
     )
+    await validate_platform_references(db, user.id, payload.images)
+    payload.images = [await store_inline_reference(reference, user.id) for reference in payload.images]
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
+    await db.execute(select(UserModel.id).where(UserModel.id == user.id).with_for_update())
     await _check_concurrency(db, user.id, "image", settings.image_generation_concurrency)
-    await consume_daily_quota(db, user_id=user.id, category="image")
-    job = await jobs.create(
+    await consume_daily_quota(db, user_id=user.id, category="image", commit=False)
+    job = await jobs.enqueue(
+        db,
         "image",
         generation_request_snapshot(payload, model, provider),
-        lambda item: generate_image(payload, item),
         user_id=user.id,
         project_id=project_id,
         project_task_id=task_id,
         storyboard_line_id=line_id,
     )
+    await db.commit()
+    await jobs.dispatch(job, lambda item: generate_image(payload, item))
     # 响应携带最终生效的 prompt（portrait 模式由后端拼装），供前端落库 avatarPrompt
     return {**job.public(), "prompt": payload.prompt}
 
@@ -868,7 +906,7 @@ async def create_video_generation(payload: VideoGenerationCreate, user: CurrentU
     return job.public()
 
 
-async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserModel, db: AsyncSession) -> Job:
+async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserModel, db: AsyncSession, *, catalogs: dict | None = None) -> Job:
     from .generation_preferences import apply_media_preference
 
     original_input = payload.model_dump(mode="json", exclude={"request_id"})
@@ -898,7 +936,7 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
             return reused
     if payload.model:
         await require_active_model(db, payload.model, "video")
-    await apply_media_preference(db, user.id, "video", payload)
+    await apply_media_preference(db, user.id, "video", payload, catalogs=catalogs)
     model, provider = await require_active_model(db, payload.model or settings.video_model, "video")
     if task_id:
         await lock_video_task(db, task_id)
@@ -918,6 +956,7 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
         and original_input.get("model") != line_model
     ):
         raise HTTPException(409, "该分镜的视频模型已更新，请刷新页面后再生成")
+    await validate_platform_references(db, user.id, [*payload.image_urls, *payload.video_urls, *payload.audio_urls])
     identity_indices = await _identity_reference_indices(db, payload.image_urls, user_id=user.id)
     if provider.code == "all-in-one" and model.provider_model_id == "seedance-2.0":
         if "person_asset_mode" not in payload.model_fields_set and identity_indices:
@@ -1053,7 +1092,30 @@ async def create_video_generations_batch(
 ) -> dict:
     """一次受理最多200个视频工单；每个工单仍独立持久化、计费、重试和回填素材。"""
     # Replays do not consume quota, reserve funds or dispatch the original job again.
-    pending = [(item, await _enqueue_video_generation(item, user, db)) for item in payload.items]
+    from .generation_preferences import fetch_channels, visible_model
+
+    preference = (user.generation_preferences or {}).get("video") or {}
+    specified = [item for item in payload.items if (preference.get("channel") if preference else item.channel)]
+    catalogs = {}
+    if specified:
+        request_key = GenerationJobModel.request["request_id"].as_string()
+        known = set(
+            (
+                await db.execute(
+                    select(GenerationJobModel.storyboard_line_id, request_key).where(
+                        GenerationJobModel.user_id == user.id,
+                        GenerationJobModel.deleted_at.is_(None),
+                        GenerationJobModel.kind == "video",
+                        request_key.in_([item.request_id for item in specified if item.request_id]),
+                    )
+                )
+            ).all()
+        )
+        codes = {preference.get("model") or item.model or settings.video_model for item in specified if (item.storyboard_line_id, item.request_id) not in known}
+        for code in sorted(codes):
+            model = await visible_model(db, code)
+            catalogs[model.provider_model_id] = await fetch_channels(model.provider_model_id, user.id)
+    pending = [(item, await _enqueue_video_generation(item, user, db, catalogs=catalogs)) for item in payload.items]
     new_items = [item for item, job in pending if not getattr(job, "reused", False)]
     try:
         estimate = await ensure_video_batch_balance(new_items) if new_items else {}
@@ -1132,24 +1194,38 @@ async def acknowledge_generation_results(payload: GenerationObservedRequest, use
 async def list_active_task_generations(task_id: str, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> list[dict]:
     """任务下仍在排队/执行中的媒体生成任务（页面刷新后前端据此恢复等待态）"""
     await owned_task(db, user.id, task_id)
+    ranked = (
+        select(
+            GenerationJobModel.id,
+            func.row_number()
+            .over(partition_by=(GenerationJobModel.storyboard_line_id, GenerationJobModel.kind), order_by=(GenerationJobModel.created_at.desc(), GenerationJobModel.id.desc()))
+            .label("rank"),
+        )
+        .where(GenerationJobModel.project_task_id == task_id, GenerationJobModel.user_id == user.id, GenerationJobModel.deleted_at.is_(None))
+        .subquery()
+    )
     rows = (
-        (
-            await db.execute(
-                select(GenerationJobModel)
-                .where(
-                    GenerationJobModel.project_task_id == task_id,
-                    GenerationJobModel.user_id == user.id,
-                    GenerationJobModel.deleted_at.is_(None),
+        await db.scalars(
+            select(GenerationJobModel)
+            .join(ranked, ranked.c.id == GenerationJobModel.id)
+            .where(ranked.c.rank == 1)
+            .options(
+                load_only(
+                    GenerationJobModel.id,
+                    GenerationJobModel.kind,
+                    GenerationJobModel.storyboard_line_id,
+                    GenerationJobModel.progress,
+                    GenerationJobModel.phase,
+                    GenerationJobModel.status,
+                    GenerationJobModel.provider,
+                    GenerationJobModel.provider_task_id,
+                    GenerationJobModel.created_at,
+                    GenerationJobModel.provider_submitted_at,
+                    GenerationJobModel.error,
                 )
-                .order_by(GenerationJobModel.created_at.desc())
             )
         )
-        .scalars()
-        .all()
-    )
-    latest = {}
-    for row in rows:
-        latest.setdefault((row.storyboard_line_id, row.kind), row)
+    ).all()
     return [
         {
             "id": row.id,
@@ -1161,19 +1237,20 @@ async def list_active_task_generations(task_id: str, user: CurrentUser, db: Asyn
             "createdAt": row.created_at.isoformat(),
             "providerSubmittedAt": row.provider_submitted_at.isoformat() if row.provider_submitted_at else None,
         }
-        for row in latest.values()
+        for row in rows
         if row.status in {"queued", "running"} or needs_provider_reconciliation(row)
     ]
 
 
 @app.get("/api/generations/{job_id}/events")
-async def generation_events(job_id: str, request: Request, user: CurrentUser) -> StreamingResponse:
+async def generation_events(job_id: str, request: Request, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> StreamingResponse:
+    await db.close()
     if not await jobs.get(job_id, user.id):
         raise HTTPException(404, "生成任务不存在")
 
     async def stream():
         last = None
-        while not await request.is_disconnected():
+        while not await request.is_disconnected() and await stream_session_active(request, user.id):
             job = await jobs.get(job_id, user.id)
             if not job:
                 return
@@ -1217,6 +1294,8 @@ async def post_chat_message(session_id: str, payload: ChatMessageCreate, user: C
     session = await chat_or_404(user.id, session_id)
     try:
         last_seq = await chat_manager.post(session, payload.text.strip())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
     return {"ok": True, "lastSeq": last_seq}
@@ -1237,13 +1316,14 @@ async def delete_chat(session_id: str, user: CurrentUser) -> dict:
 
 
 @app.get("/api/chat/{session_id}/events")
-async def chat_events(session_id: str, request: Request, user: CurrentUser, after: int = 0) -> StreamingResponse:
+async def chat_events(session_id: str, request: Request, user: CurrentUser, after: int = 0, db: AsyncSession = Depends(database_session)) -> StreamingResponse:
+    await db.close()
     session = await chat_or_404(user.id, session_id)
 
     async def stream():
         cursor = after
         yield sse({"type": "hello", "session": session.summary()})
-        while not await request.is_disconnected():
+        while not await request.is_disconnected() and await stream_session_active(request, user.id):
             fresh = await chat_manager.events_after(user.id, session_id, cursor)
             if fresh:
                 for event in fresh:

@@ -16,6 +16,8 @@ services:
       - ./.deployment:/run/deployment:ro
     environment:
       APP_ENV: production
+      DEPLOYMENT_TIER: ${DEPLOYMENT_TIER:-}
+      TLS_DOMAIN: ${TLS_DOMAIN:-}
       JWT_SECRET: ''
       DATABASE_URL: ''
       POSTGRES_HOST: postgres
@@ -35,6 +37,8 @@ services:
       - runtime_secrets
     environment:
       APP_ENV: production
+      DEPLOYMENT_TIER: ${DEPLOYMENT_TIER:-}
+      TLS_DOMAIN: ${TLS_DOMAIN:-}
       JWT_SECRET: ''
       DATABASE_URL: ''
       POSTGRES_HOST: postgres
@@ -53,6 +57,8 @@ services:
       - runtime_secrets
     environment:
       APP_ENV: production
+      DEPLOYMENT_TIER: ${DEPLOYMENT_TIER:-}
+      TLS_DOMAIN: ${TLS_DOMAIN:-}
       JWT_SECRET: ''
       DATABASE_URL: ''
       POSTGRES_HOST: postgres
@@ -71,6 +77,8 @@ services:
       - runtime_secrets
     environment:
       APP_ENV: production
+      DEPLOYMENT_TIER: ${DEPLOYMENT_TIER:-}
+      TLS_DOMAIN: ${TLS_DOMAIN:-}
       JWT_SECRET: ''
       DATABASE_URL: ''
       POSTGRES_HOST: postgres
@@ -89,6 +97,8 @@ services:
       - runtime_secrets
     environment:
       APP_ENV: production
+      DEPLOYMENT_TIER: ${DEPLOYMENT_TIER:-}
+      TLS_DOMAIN: ${TLS_DOMAIN:-}
       JWT_SECRET: ''
       DATABASE_URL: ''
       POSTGRES_HOST: postgres
@@ -107,6 +117,8 @@ services:
       - runtime_secrets
     environment:
       APP_ENV: production
+      DEPLOYMENT_TIER: ${DEPLOYMENT_TIER:-}
+      TLS_DOMAIN: ${TLS_DOMAIN:-}
       JWT_SECRET: ''
       DATABASE_URL: ''
       POSTGRES_HOST: postgres

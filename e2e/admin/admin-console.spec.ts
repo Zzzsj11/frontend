@@ -156,14 +156,18 @@ test('content administrator only sees and operates content configuration', async
     await expect(page).toHaveURL(/\/projects/)
     await page.locator('.user-trigger').click()
     await expect(page.getByRole('menuitem', { name: '管理后台' })).toBeVisible()
-    await page.getByRole('menuitem', { name: '管理后台' }).click()
-    await expect(page).toHaveURL(/\/admin/)
-    await expect(page.getByRole('heading', { name: '歌曲情感库' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '通用分类' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '歌曲情感库' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '仪表盘' })).toHaveCount(0)
-    await expect(page.getByRole('button', { name: '用户' })).toHaveCount(0)
-    await expect(page.getByRole('button', { name: '新增歌曲' })).toBeVisible()
+    const [adminPage] = await Promise.all([
+      page.context().waitForEvent('page'),
+      page.getByRole('menuitem', { name: '管理后台' }).click(),
+    ])
+    await expect(page).toHaveURL(/\/projects/)
+    await expect(adminPage).toHaveURL(/\/admin/)
+    await expect(adminPage.getByRole('heading', { name: '歌曲情感库' })).toBeVisible()
+    await expect(adminPage.getByRole('button', { name: '通用分类' })).toBeVisible()
+    await expect(adminPage.getByRole('button', { name: '歌曲情感库' })).toBeVisible()
+    await expect(adminPage.getByRole('button', { name: '仪表盘' })).toHaveCount(0)
+    await expect(adminPage.getByRole('button', { name: '用户' })).toHaveCount(0)
+    await expect(adminPage.getByRole('button', { name: '新增歌曲' })).toBeVisible()
     const assLogin = await request.post('/api/auth/login', {
       data: { username: assUsername, password: assChangedPassword },
     })

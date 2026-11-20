@@ -4,12 +4,10 @@ import asyncio
 import mimetypes
 import time
 import uuid
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
-from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +17,7 @@ from .auth import CurrentUser
 from .config import settings
 from .database import database_session, session_factory
 from .jobs import Job, jobs
-from .models import PromptOptimizationTaskModel
+from .models import PromptOptimizationTaskModel, UserModel
 from .prompt_optimizer import MEDIA_LIMITS, PROVIDERS, RATIOS, call_gemini, create_minimax, provider_status, query_minimax
 from .storage import get_storage, is_user_owned_tos_url, put_image_with_thumbnail, safe_key
 from .token_usage import add_llm_call_log, add_token_usage
@@ -41,6 +39,7 @@ class CreativeMediaIn(BaseModel):
 
 
 class CreativeOptimizeIn(BaseModel):
+    request_id: str | None = Field(default=None, min_length=1, max_length=128)
     provider: str
     prompt: str = Field(min_length=1, max_length=7000)
     duration: int = Field(default=8, ge=1, le=30)
@@ -93,16 +92,18 @@ async def creative_upload(file: UploadFile, user: CurrentUser):
     }
     if suffix not in allowed[kind]:
         raise HTTPException(422, "文件扩展名与支持的媒体类型不匹配")
-    if kind == "image":
-        try:
-            with Image.open(BytesIO(content)) as image:
-                image.verify()
-        except (UnidentifiedImageError, OSError) as exc:
-            raise HTTPException(422, "图片文件无法解析") from exc
     key = safe_key(f"users/{user.id}/creative/{kind}", file.filename or f"reference-{kind}")
     if kind == "image":
-        url, thumbnail_url = await put_image_with_thumbnail(key, content, mime_type)
+        try:
+            url, thumbnail_url = await put_image_with_thumbnail(key, content, mime_type)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
     else:
+        from .upload_validation import ALLOWED_UPLOAD_TYPES, validate_av_content
+
+        if mime_type not in ALLOWED_UPLOAD_TYPES.get(suffix, set()):
+            raise HTTPException(422, "文件格式与声明不符")
+        await validate_av_content(file.filename or "", mime_type, content)
         url = await get_storage().put_bytes(key, content, mime_type)
         thumbnail_url = None
     return {"kind": kind, "url": url, "thumbnailUrl": thumbnail_url, "name": file.filename or "", "mimeType": mime_type, "size": len(content), "role": "reference"}
@@ -112,9 +113,6 @@ async def creative_upload(file: UploadFile, user: CurrentUser):
 async def create_optimization(payload: CreativeOptimizeIn, user: CurrentUser, db: AsyncSession = Db):
     if payload.provider not in PROVIDERS or payload.ratio not in RATIOS:
         raise HTTPException(422, "不支持的提示词优化参数")
-    status = provider_status()[payload.provider]
-    if not status["configured"]:
-        raise HTTPException(503, f"{payload.provider} 提示词优化密钥未配置")
     media = [item.model_dump(by_alias=True) for item in payload.media]
     counts = {kind: sum(item["kind"] == kind for item in media) for kind in MEDIA_LIMITS}
     if any(counts[kind] > limit for kind, limit in MEDIA_LIMITS.items()):
@@ -123,10 +121,28 @@ async def create_optimization(payload: CreativeOptimizeIn, user: CurrentUser, db
         raise HTTPException(422, "MiniMax 优化至少需要一个参考素材")
     if any(not is_user_owned_tos_url(item["url"], user.id) for item in media):
         raise HTTPException(422, "参考素材必须先通过当前账号上传到 TOS")
-    await consume_daily_quota(db, user_id=user.id, category="chat")
+    task_id = f"prompt-opt-{uuid.uuid4().hex}"
+    if payload.request_id:
+        task_id = "prompt-opt-" + uuid.uuid5(uuid.NAMESPACE_URL, f"mv:creative:{user.id}:{payload.request_id}").hex
+        await db.scalar(select(UserModel.id).where(UserModel.id == user.id).with_for_update())
+        previous = await db.get(PromptOptimizationTaskModel, task_id)
+        if previous:
+            if previous.deleted_at or (previous.provider, previous.input_prompt, previous.duration, previous.ratio, previous.input_media) != (
+                payload.provider,
+                payload.prompt,
+                payload.duration,
+                payload.ratio,
+                media,
+            ):
+                raise HTTPException(409, "优化请求标识与已有工单不匹配")
+            return task_json(previous)
+    status = provider_status()[payload.provider]
+    if not status["configured"]:
+        raise HTTPException(503, f"{payload.provider} 提示词优化密钥未配置")
+    await consume_daily_quota(db, user_id=user.id, category="chat", commit=False)
     origin, agent_name, agent_run_id = current_agent_attribution()
     item = PromptOptimizationTaskModel(
-        id=f"prompt-opt-{uuid.uuid4().hex}",
+        id=task_id,
         user_id=user.id,
         provider=payload.provider,
         model=status["model"],

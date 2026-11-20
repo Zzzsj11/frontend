@@ -3,13 +3,15 @@
 import json
 import os
 import uuid
+from datetime import timedelta
 
 import httpx
 from fastapi import HTTPException
 from sqlalchemy import select
 
 from .channels import config, unwrap
-from .db import Job, Session
+from .credits import lock
+from .db import Job, Session, now
 from .security import attribution, digest, owner
 
 
@@ -51,6 +53,7 @@ async def assets(channel, path, payload, request, client):
     await _validate_public_url(payload["url"])
     sig = digest(json.dumps(payload, sort_keys=True))
     async with Session.begin() as db:
+        await lock(db, "asset:" + client.id + ":" + uid + ":" + idem)
         old = await db.scalar(select(Job).where(Job.client_id == client.id, Job.user_id == uid, Job.idempotency_key == idem))
         if old:
             if old.request_hash != sig:
@@ -68,6 +71,7 @@ async def assets(channel, path, payload, request, client):
             protocol="asset",
             payload=payload,
             status="submitting",
+            lease_until=now() + timedelta(seconds=120),
             request_hash=sig,
             idempotency_key=idem,
             **attrs,

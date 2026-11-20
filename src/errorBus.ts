@@ -46,6 +46,7 @@ export function classifyErrorMessage(message: string): { category: ErrorCategory
 }
 
 export class ApiError extends Error {
+  retryAfterMs?: number
   status?: number
   errorCode?: string
   constructor(message: string, status?: number, errorCode?: string) {

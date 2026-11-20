@@ -39,6 +39,7 @@ export const uploadCreativeMedia = (file: File) => {
 }
 
 export const optimizeCreativePrompt = (input: {
+  request_id?: string
   provider: CreativeProvider
   prompt: string
   duration: number

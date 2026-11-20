@@ -19,6 +19,8 @@ from .auth import CurrentUser
 from .database import session_factory
 from .domain import Db, _set_export_progress, export_progress_locks, material_export_public, owned_task
 from .error_logging import redact_error_text
+from .export_space import ExportSpace
+from .export_state import locked_export
 from .jobs import Job, jobs
 from .models import MaterialExportModel, ProjectAudioAssetModel, ProjectTaskModel, ShotAssetModel, StoryboardLineModel, UserModel, utcnow
 from .mv_render import render, verify
@@ -168,6 +170,7 @@ async def run_video_export(export_id: str, job: Job) -> dict:
         await progress(1, "准备合成素材")
         with tempfile.TemporaryDirectory(prefix="mv-final-") as temporary:
             folder = Path(temporary)
+            space = ExportSpace(folder)
             if shutil.disk_usage(folder).free < 2 * 1024**3:
                 raise ValueError("服务器临时空间不足，请稍后重试")
             sources = [("source.ass", snapshot["assUrl"]), ("audio.mp3", snapshot["audioUrl"])] + [(f"clip{i}.mp4", v["url"]) for i, v in enumerate(snapshot["clips"])]
@@ -178,6 +181,7 @@ async def run_video_export(export_id: str, job: Job) -> dict:
             async def download(i: int, filename: str, url: str):
                 async def update_download(current, total):
                     nonlocal last_update
+                    space.download(i, current, total)
                     received[i], totals[i] = current, total or 0
                     async with lock:
                         now = time.monotonic()
@@ -213,13 +217,15 @@ async def run_video_export(export_id: str, job: Job) -> dict:
 
             async def render_progress(fraction, seconds):
                 nonlocal last_percent
+                output = folder / "final.mp4"
+                space.output_limit(output.stat().st_size if output.exists() else 0)
                 percent = 28 + int(57 * fraction)
                 if percent > last_percent:
                     last_percent = percent
                     await progress(percent, f"合成画面与字幕 · 已处理 {int(seconds)} 秒")
 
             await progress(26, "读取媒体信息与字幕")
-            metadata = await render(folder, snapshot, render_progress)
+            metadata = await render(folder, {**snapshot, "maxOutputBytes": space.output_limit()}, render_progress)
             await progress(85, "校验成片音视频")
 
             async def verify_progress(fraction, _seconds):
@@ -260,7 +266,11 @@ async def run_video_export(export_id: str, job: Job) -> dict:
             for name, filename in [("coverUrl", "cover.jpg"), ("thumbnailUrl", "thumbnail.jpg")]:
                 metadata[name] = await storage.put_file(safe_key(f"users/{job.user_id}/images/export-covers", filename), folder / filename, "image/jpeg")
         async with session_factory() as db:
-            export = await db.get(MaterialExportModel, export_id)
+            export = await locked_export(db, job, export_id)
+            if not export or export.status not in {"running", "queued", "ready"}:
+                raise RuntimeError("导出任务已结束")
+            if export.status == "ready":
+                return {"exportId": export.id, "archiveUrl": export.archive_url, "archiveSize": export.archive_size}
             export.status, export.progress, export.stage = "ready", 100, "合并导出完成"
             export.archive_url, export.archive_size, export.result_metadata = url, size, metadata
             export.error, export.finished_at = None, utcnow()
@@ -271,8 +281,8 @@ async def run_video_export(export_id: str, job: Job) -> dict:
             exc = exc.exceptions[0]
         message = redact_error_text(str(exc)) if isinstance(exc, ValueError) else "合成服务暂时不可用，请重试；重复失败请联系管理员"
         async with session_factory() as db:
-            export = await db.get(MaterialExportModel, export_id)
-            if export:
+            export = await locked_export(db, job, export_id)
+            if export and export.deleted_at is None and export.status in {"queued", "running"}:
                 export.status, export.stage, export.error, export.finished_at = "failed", "合并导出失败", message, utcnow()
                 await db.commit()
         raise

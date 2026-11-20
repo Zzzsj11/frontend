@@ -28,7 +28,7 @@ async def test_sync_image_recovery_never_resubmits(service, monkeypatch):
     from gateway import queue
     from gateway.db import Model, Session
 
-    api, _, _, _ = service
+    api, ctl, _, _ = service
     async with Session.begin() as db:
         db.add(
             Model(
@@ -63,7 +63,7 @@ async def test_sync_image_recovery_never_resubmits(service, monkeypatch):
     async with Session() as db:
         job = await db.get(queue.Job, jid)
         assert job.status == "recoverable" and job.usage["output_tokens"] == 12
-    await queue.update(jid, status="queued")
+    assert (await ctl.request("POST", f"/admin/jobs/{jid}/recover")).status_code == 200
 
     async def archived(*args):
         return {"media": [{"url": "https://example.com/stored.png"}]}

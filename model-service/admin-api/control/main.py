@@ -219,7 +219,16 @@ async def recover(jid: str, actor=Depends(admin)):
         j = await db.get(Job, jid, with_for_update=True)
         if not j or j.deleted_at:
             raise HTTPException(404)
-        if j.status != "recoverable" or not j.provider_id:
+        saved = j.provider_response or {}
+        saved_image = (
+            j.kind == "image"
+            and bool(saved)
+            and (
+                j.protocol == "image-sync"
+                or (j.protocol == "toapis-image" and saved.get("status") == "completed" and isinstance(saved.get("data"), list))
+            )
+        )
+        if j.status != "recoverable" or not (j.provider_id or saved_image):
             raise HTTPException(409, "Only existing provider tasks can resume; this operation never submits generation")
         j.status, j.error = "queued", None
         audit(db, actor, "job.recover", jid, {"provider_id": j.provider_id})

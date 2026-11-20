@@ -218,3 +218,25 @@ describe('AdminVideoBillingPanel', () => {
     wrapper.unmount()
   })
 })
+
+it('keeps the newer billing filter when an earlier response arrives last', async () => {
+  let finish!: (data: typeof response) => void
+  apiRequest.mockReset()
+  apiRequest.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+  )
+  apiRequest.mockResolvedValue({ ...response, items: [response.items[1]] })
+  const wrapper = mount(AdminVideoBillingPanel)
+  const select = wrapper.findComponent(BaseSelect)
+  select.vm.$emit('update:modelValue', 'failed')
+  select.vm.$emit('change', new Event('change'))
+  await flushPromises()
+  finish({ ...response, items: [response.items[0]] })
+  await flushPromises()
+  expect(wrapper.get('tbody').text()).toContain('子项目B')
+  expect(wrapper.get('tbody').text()).not.toContain('子项目A')
+  wrapper.unmount()
+})

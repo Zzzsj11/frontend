@@ -521,7 +521,7 @@ async def test_batch_snapshot_protection_uses_only_bulk_queries(billing_db, monk
     monkeypatch.setattr(db, "execute", execute)
     monkeypatch.setattr(db, "get", get)
     result = await reconcile_video_billing(db)
-    assert execute.await_count == 4  # jobs, usages, records, all rules (including deleted)
+    assert execute.await_count == 5  # SQLite writer reservation, then jobs, usages, records and rules (including deleted)
     get.assert_not_awaited()
     assert result["processed"] == result["priced"] == 3
     assert result["failed"] == 2

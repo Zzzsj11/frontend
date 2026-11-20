@@ -148,6 +148,7 @@ def test_production_config_cleanup_preserves_platform_and_storage_secrets(monkey
     configure = script["main"]
     monkeypatch.setitem(configure.__globals__, "ROOT", tmp_path)
     monkeypatch.setenv("DEPLOY_ENV", "production")
+    monkeypatch.setenv("DEPLOYMENT_TIER", "test")
     monkeypatch.setenv("MAINTENANCE_DATA_DIR", str(tmp_path / "maintenance"))
     backend = tmp_path / "backend"
     backend.mkdir()

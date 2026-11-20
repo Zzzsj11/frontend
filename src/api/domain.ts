@@ -33,7 +33,22 @@ import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL } from '../generationModels'
 
 /** GET /api/songs — 歌曲项目列表（侧边栏目录，一个目录处理一首歌曲） */
 export async function fetchSongProjects(): Promise<SongProject[]> {
-  return apiRequest<SongProject[]>('/projects')
+  const projects: SongProject[] = []
+  const seen = new Set<string>()
+  let offset = 0
+  for (;;) {
+    const path = offset ? `/projects?offset=${offset}` : '/projects'
+    const page = await apiRequest<SongProject[]>(path)
+    const before = projects.length
+    for (const project of page) {
+      if (!seen.has(project.id)) {
+        seen.add(project.id)
+        projects.push(project)
+      }
+    }
+    if (page.length < 100 || projects.length === before) return projects
+    offset += page.length
+  }
 }
 
 /** GET /api/songs/{id}/script — 载入某首歌曲的分镜脚本与角色阵容。
@@ -278,6 +293,7 @@ export const updateSongTask = (id: string, title: string) =>
   apiRequest(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) })
 export const deleteSongTask = (id: string) => apiRequest(`/tasks/${id}`, { method: 'DELETE' })
 export const createDigitalHuman = (input: {
+  sourceJobId?: string
   name: string
   styleId?: string
   description: string
@@ -290,6 +306,7 @@ export const createDigitalHuman = (input: {
     method: 'POST',
     body: JSON.stringify({
       name: input.name,
+      source_job_id: input.sourceJobId,
       style_id: input.styleId,
       description: input.description,
       avatar_url: input.avatar,
@@ -312,6 +329,11 @@ export const fetchDigitalHumanStyles = () =>
 export const createDigitalHumanStyle = (name: string) =>
   apiRequest<{ id: string; name: string }>('/digital-human-styles', {
     method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+export const renameDigitalHumanStyle = (id: string, name: string) =>
+  apiRequest<{ id: string; name: string }>(`/digital-human-styles/${id}`, {
+    method: 'PATCH',
     body: JSON.stringify({ name }),
   })
 export const deleteDigitalHumanStyle = (id: string) =>
@@ -457,6 +479,15 @@ export const updateTaskCast = (taskId: string, ids: string[]) =>
   apiRequest(`/tasks/${taskId}/cast`, {
     method: 'PUT',
     body: JSON.stringify({ digital_human_ids: ids }),
+  })
+export const saveAudioTrack = (
+  id: string,
+  audioTrackVisible: boolean,
+  audioOffsetSeconds: number,
+) =>
+  apiRequest(`/tasks/${id}/audio-track`, {
+    method: 'PATCH',
+    body: JSON.stringify({ audioTrackVisible, audioOffsetSeconds }),
   })
 export const updateTask = (taskId: string, input: Record<string, unknown>) =>
   apiRequest(`/tasks/${taskId}`, { method: 'PATCH', body: JSON.stringify(input) })

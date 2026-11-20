@@ -94,7 +94,13 @@ onBeforeUnmount(() => {
             <strong>{{ userName }}</strong
             ><span>@{{ auth.user?.username }}</span>
           </div>
-          <RouterLink v-if="hasAdminAccess" role="menuitem" to="/admin" @click="menuOpen = false"
+          <RouterLink
+            v-if="hasAdminAccess"
+            role="menuitem"
+            to="/admin"
+            target="_blank"
+            rel="noopener"
+            @click="menuOpen = false"
             >管理后台</RouterLink
           >
           <RouterLink role="menuitem" to="/account/password" @click="menuOpen = false"

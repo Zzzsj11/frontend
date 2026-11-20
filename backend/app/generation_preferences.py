@@ -38,7 +38,7 @@ async def snapshot_text_selection(db: AsyncSession, user_id: str, kind: str) -> 
     return {"model": model, "channel": None}
 
 
-async def apply_media_preference(db: AsyncSession, user_id: str, modality: str, payload) -> None:
+async def apply_media_preference(db: AsyncSession, user_id: str, modality: str, payload, *, catalogs: dict | None = None) -> None:
     selection = await read_selection(db, user_id, modality)
     if selection:
         payload.model = selection["model"]
@@ -49,7 +49,12 @@ async def apply_media_preference(db: AsyncSession, user_id: str, modality: str, 
             payload.resolution = "2K"
     if payload.channel:
         model = await visible_model(db, payload.model)
-        catalog = await fetch_channels(model.provider_model_id, user_id)
+        if catalogs is None:
+            catalog = await fetch_channels(model.provider_model_id, user_id)
+        elif model.provider_model_id in catalogs:
+            catalog = catalogs[model.provider_model_id]
+        else:
+            raise HTTPException(409, "生成偏好已改变，请重试")
         channel = next((item for item in catalog["channels"] if item.get("channel") == payload.channel and item.get("available") is True), None)
         if channel is None:
             raise HTTPException(422, "所选渠道不可用，请重新选择")

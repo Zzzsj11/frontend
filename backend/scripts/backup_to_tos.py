@@ -19,7 +19,7 @@ from app.config import settings  # noqa: E402
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--bucket", required=True)
-parser.add_argument("--prefix", default="mv-agent/database")
+parser.add_argument("--prefix", default="")
 parser.add_argument("--name", required=True)
 parser.add_argument("--sha256", required=True)
 args = parser.parse_args()
@@ -40,7 +40,13 @@ try:
         path = Path(directory) / args.name
         with path.open("wb") as output:
             shutil.copyfileobj(sys.stdin.buffer, output, 1024 * 1024)
-        print(json.dumps(archive_backup(client, args.bucket, args.prefix, path, args.sha256, encryption_key=os.getenv("BACKUP_TOS_ENCRYPTION_KEY", ""))))
+        print(
+            json.dumps(
+                archive_backup(
+                    client, args.bucket, args.prefix, path, args.sha256, encryption_key=os.getenv("BACKUP_TOS_ENCRYPTION_KEY", ""), tier=os.getenv("DEPLOYMENT_TIER", "")
+                )
+            )
+        )
 except Exception as exc:
     # SDK 错误对象可能包含请求信息；备份日志不输出原始异常和凭据。
     print(f"backup upload failed: {type(exc).__name__}; status={getattr(exc, 'status_code', 'n/a')}", file=sys.stderr)

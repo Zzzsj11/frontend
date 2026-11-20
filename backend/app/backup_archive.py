@@ -41,9 +41,14 @@ def backup_encryption(key: str) -> dict:
     return {"ssec_algorithm": "AES256", "ssec_key": key, "ssec_key_md5": base64.b64encode(hashlib.md5(raw, usedforsecurity=False).digest()).decode()}
 
 
-def archive_backup(client, bucket: str, prefix: str, path: Path, expected_sha256: str, *, encryption_key: str = "") -> dict:
+def archive_backup(client, bucket: str, prefix: str, path: Path, expected_sha256: str, *, encryption_key: str = "", tier: str = "") -> dict:
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", bucket):
         raise ValueError("备份 Bucket 名称无效")
+    if tier and tier not in {"test", "production"}:
+        raise ValueError("备份环境无效")
+    prefix = prefix.strip("/") or (f"mv/{tier}/backups/database" if tier else "mv-agent/database")
+    if tier and (encryption_key or prefix.startswith(("mv/test/backups/", "mv/production/backups/"))) and not prefix.startswith(f"mv/{tier}/backups/"):
+        raise ValueError("备份目录与部署环境不匹配")
     if any(part in {".", ".."} for part in prefix.split("/")):
         raise ValueError("备份目录无效")
     with path.open("rb") as source:

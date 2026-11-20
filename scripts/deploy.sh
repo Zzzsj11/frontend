@@ -1,18 +1,50 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"; cd "$root"
-version="${1:?usage: scripts/deploy.sh VERSION}"; env_name="${DEPLOY_ENV:-production}"
+mkdir -p .deployment
+exec 9>.deployment/deploy.lock
+# The shell holds fd 9 until exit. Children lock the same open file description
+# on both Linux and macOS, including hosts without a flock executable.
+python3 - <<'LOCK'
+import fcntl
+try:
+    fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    raise SystemExit("another deployment is in progress")
+LOCK
+version="${1:?usage: scripts/deploy.sh VERSION}"
+release_pair="$(python3 - <<'STATE'
+import json
+from pathlib import Path
+
+def legacy(name):
+    path = Path(name)
+    return path.read_text().strip() if path.is_file() else ""
+
+record = Path(".deployment/info.json")
+if record.is_file():
+    state = json.loads(record.read_text())
+    # Older records predate the previous field. Only that legacy format
+    # needs the old rollback marker, even when an explicit new pointer is empty.
+    current = state.get("version") or (legacy(".deployed-version") if "previous" not in state else "")
+    previous = state["previous"] if "previous" in state else legacy(".previous-version")
+else:
+    current, previous = legacy(".deployed-version"), legacy(".previous-version")
+print(f"{current}|{previous or ''}")
+STATE
+)"
+IFS='|' read -r current previous <<< "$release_pair"
+if [[ "$version" == "--previous" ]]; then
+  version="$previous"
+  test -n "$version" || { echo "no rollback version" >&2; exit 1; }
+fi
+if [[ "$current" != "$version" ]]; then previous="$current"; fi
+env_name="${DEPLOY_ENV:-production}"
 env_file=".env.${env_name}"; test -f "$env_file" || { echo "missing $env_file"; exit 1; }
 if [[ "$env_name" == "production" ]]; then
   "$root/scripts/validate-secret-layout.sh"
   # Compose 文件型 secrets 保留宿主属主；应用 UID 必须能读取 0600 密钥。
   chown 10001:10001 "$root/backend/.runtime_secrets.env"
-fi
-previous="$(cat .deployed-version 2>/dev/null || true)"
-printf '%s\n' "$previous" > .previous-version
-mkdir -p .deployment
-if [[ ! -f .deployment/info.json ]]; then
-  printf '{"version":null,"deployedAt":null}\n' > .deployment/info.json
 fi
 # 复用上次成功部署的非敏感 TLS 配置，普通发布/回滚不应意外退回 HTTP。
 if [[ -f .deployment/tls.env ]]; then
@@ -77,12 +109,6 @@ done
 "${compose[@]}" exec -T postgres pg_isready -U "${POSTGRES_USER:-mvagent}" -d "${POSTGRES_DB:-mvagent}" >/dev/null
 "${compose[@]}" exec -T redis redis-cli ping | grep -qx PONG
 
-# 先更新 frontend：新的 nginx（运行时解析 backend 上游）就绪后，后续 backend 切换才不会 502
-"${compose[@]}" up -d --no-deps frontend
-if [[ "${DEPLOY_TLS:-0}" == "1" ]]; then
-  "${compose[@]}" exec -T frontend nginx -s reload
-fi
-
 # green 以唯一容器名接入同一网络；健康后显式切换 Nginx，再重建 backend。
 source "$root/scripts/switch-backend.sh"
 green="mv-backend-green-$(date +%s)-$$"
@@ -114,14 +140,17 @@ if [[ "$green_ok" != "1" ]]; then
   exit 1
 fi
 # 切流失败时保留 green，避免响应丢失或 reload 状态不确定后误删上游。
-green_serving=1
-switch_backend "$green"
+existing_frontend="$("${compose[@]}" ps --status running -q frontend)"
+if [[ -n "$existing_frontend" ]]; then
+  green_serving=1
+  switch_backend "$green"
+fi
 # 强制重建正式 backend：版本号不变的 Secret 轮换也必须让进程重新读取挂载文件；
 # 旧容器停起期间流量由 green 承载。
 "${compose[@]}" up -d --no-deps --force-recreate backend
-for _ in {1..30}; do curl -fsS http://127.0.0.1:8000/api/health >/dev/null && break; sleep 2; done
-curl -fsS http://127.0.0.1:8000/api/health >/dev/null
-switch_backend backend
+for _ in {1..30}; do curl -fsS --max-time 10 http://127.0.0.1:8000/api/health >/dev/null && break; sleep 2; done
+curl -fsS --max-time 10 http://127.0.0.1:8000/api/health >/dev/null
+if [[ -n "$existing_frontend" ]]; then switch_backend backend; fi
 green_serving=0
 # SIGTERM 给已经连到 green 的请求保留与正式 API 相同的排空窗口。
 docker stop --time 60 "$green" >/dev/null
@@ -151,14 +180,33 @@ fi
 
 # 兜底其余服务（postgres/redis 配置漂移等），无变化时为空操作
 "${compose[@]}" up -d --remove-orphans
+probe=(curl -fsS --connect-timeout 3 --max-time 10 --retry 5 --retry-delay 1 --retry-connrefused)
 if [[ "${DEPLOY_TLS:-0}" == "1" ]]; then
-  curl -fsS --resolve "$TLS_DOMAIN:443:127.0.0.1" "https://$TLS_DOMAIN/api/health" >/dev/null
+  "${compose[@]}" exec -T frontend nginx -t
+  "${compose[@]}" exec -T frontend nginx -s reload
+  frontend_origin="https://$TLS_DOMAIN"
+  probe+=(--resolve "$TLS_DOMAIN:443:127.0.0.1")
+else
+  binding="$("${compose[@]}" port frontend 80 | head -1)"
+  frontend_port="${binding##*:}"
+  [[ "$frontend_port" =~ ^[0-9]+$ ]] || { echo "frontend has no published HTTP port" >&2; exit 1; }
+  frontend_origin="http://127.0.0.1:$frontend_port"
+fi
+for path in / /api/health; do
+  status="$("${probe[@]}" -o /dev/null -w '%{http_code}' "$frontend_origin$path")"
+  [[ "$status" == "200" ]] || { echo "frontend readiness failed: $path HTTP $status" >&2; exit 1; }
+done
+if [[ "$env_name" == "production" ]]; then ./scripts/retire-legacy-service-cron.sh; fi
+if [[ "${DEPLOY_TLS:-0}" == "1" ]]; then
   (umask 077; printf 'DEPLOY_TLS=1\nTLS_DOMAIN=%s\nTLS_CERT_DIR=%s\n' "$TLS_DOMAIN" "$source_tls_dir" > .deployment/tls.env.tmp)
   mv .deployment/tls.env.tmp .deployment/tls.env
 fi
-printf '%s\n' "$version" > .deployed-version
 deployed_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-printf '{"version":"%s","deployedAt":"%s"}\n' "$version" "$deployed_at" > .deployment/info.json.tmp
+python3 - "$version" "$deployed_at" "$previous" > .deployment/info.json.tmp <<'PYINFO'
+import json, sys
+print(json.dumps(dict(zip(("version", "deployedAt", "previous"), sys.argv[1:]))))
+PYINFO
 mv .deployment/info.json.tmp .deployment/info.json
-if [[ "$env_name" == "production" ]]; then ./scripts/retire-legacy-service-cron.sh; fi
+printf '%s\n' "$previous" > .previous-version.tmp && mv .previous-version.tmp .previous-version
+printf '%s\n' "$version" > .deployed-version.tmp && mv .deployed-version.tmp .deployed-version
 echo "deployed $version ($env_name); previous=$previous"

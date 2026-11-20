@@ -35,7 +35,7 @@ const afterBrowserLayout = () =>
 const addSingleVideo = async () => {
   addingSingleVideo.value = true
   try {
-    store.addLine()
+    await store.addLine()
     await nextTick()
     // nextTick 只保证 DOM 已更新；再等两帧让浏览器完成 content-visibility 行的高度计算。
     await afterBrowserLayout()
@@ -432,7 +432,11 @@ const confirmBatchGenerate = async () => {
     </div>
 
     <footer class="editor-footer">
-      <button class="btn-add" @click="addSingleVideo">
+      <button
+        class="btn-add"
+        :disabled="!store.activeTaskId || addingSingleVideo"
+        @click="addSingleVideo"
+      >
         <AppIcon name="plus" :size="14" />
         单个视频
       </button>

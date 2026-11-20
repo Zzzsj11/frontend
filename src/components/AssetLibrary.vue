@@ -59,12 +59,12 @@ const startRenameStyle = (s: string) => {
   styleEditValue.value = s
 }
 
-const confirmRenameStyle = () => {
+const confirmRenameStyle = async () => {
   const oldName = styleEditingName.value
   if (!oldName) return
   styleEditingName.value = null
   const newName = styleEditValue.value.trim()
-  if (newName && newName !== oldName && store.renameDhStyle(oldName, newName)) {
+  if (newName && newName !== oldName && (await store.renameDhStyle(oldName, newName))) {
     if (activeStyle.value === oldName) activeStyle.value = newName
   }
 }
@@ -396,7 +396,12 @@ const removeDh = async () => {
         <span v-for="dh in store.castHumans" :key="dh.id" class="cast-chip">
           <CharacterPortrait :src="dh.avatar" :alt="dh.name" />
           {{ dh.name }}
-          <button class="cast-remove" title="移出阵容" @click="store.toggleCast(dh.id)">
+          <button
+            class="cast-remove"
+            title="移出阵容"
+            :disabled="store.castSaving"
+            @click="store.toggleCast(dh.id)"
+          >
             <AppIcon name="close" :size="10" />
           </button>
         </span>
@@ -477,6 +482,7 @@ const removeDh = async () => {
             <button
               class="dh-action"
               :class="store.castIds.includes(dh.id) ? 'danger' : 'primary'"
+              :disabled="store.castSaving"
               @click.stop="store.toggleCast(dh.id)"
             >
               <AppIcon :name="store.castIds.includes(dh.id) ? 'close' : 'plus'" :size="13" />
@@ -568,6 +574,7 @@ const removeDh = async () => {
         <button
           class="edit-cast"
           :class="{ in: store.castIds.includes(editing.id) }"
+          :disabled="store.castSaving"
           @click="store.toggleCast(editing.id)"
         >
           <AppIcon :name="store.castIds.includes(editing.id) ? 'check' : 'users'" :size="13" />

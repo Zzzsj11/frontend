@@ -49,3 +49,33 @@ async def test_first_login_password_gate_and_session_revocation(service):
     assert (
         await api.get("/v1/models", headers={"Authorization": "Bearer " + key["api_key"], "X-User-Id": created.json()["id"]})
     ).status_code == 200
+
+
+async def test_portal_failure_windows_and_trusted_source(service, monkeypatch):
+    from gateway.db import Audit, Session
+    from sqlalchemy import func, select
+
+    api, ctl, _, _ = service
+    monkeypatch.setenv("PORTAL_TRUSTED_PROXY_HOST", "127.0.0.1")
+    first, second = "first@star-net.cn", "second@star-net.cn"
+    for name in [first, second]:
+        assert (await ctl.post("/admin/users", json={"username": name, "initial_password": "Initial123"})).status_code == 201
+    # One remaining attempt for the first account behind a shared ingress.
+    async with Session.begin() as db:
+        for idx in range(19):
+            db.add(Audit(id=f"sample-{idx}", actor=first, action="portal.login.failed", target="192.0.2.1", detail={}))
+    for name in (first, second):
+        response = await api.post("/portal/login", json={"username": name, "password": "Initial123"}, headers={"X-Real-IP": "192.0.2.1"})
+        assert response.status_code == 200
+    async with Session() as db:
+        assert await db.scalar(select(func.count()).select_from(Audit).where(Audit.action == "portal.login.failed")) == 19
+    bad = {"username": first, "password": "Wrong123"}
+    assert (await api.post("/portal/login", json=bad, headers={"X-Real-IP": "192.0.2.2"})).status_code == 401
+    assert (await api.post("/portal/login", json=bad)).status_code == 429
+    monkeypatch.setenv("PORTAL_TRUSTED_PROXY_HOST", "192.0.2.10")
+    assert (await api.post("/portal/login", json={**bad, "username": second}, headers={"X-Real-IP": "192.0.2.2"})).status_code == 401
+    async with Session() as db:
+        assert (await db.scalars(select(Audit.target).where(Audit.actor == first, Audit.action == "portal.login.failed"))).all().count(
+            "192.0.2.2"
+        ) == 1
+        assert await db.scalar(select(Audit.target).where(Audit.actor == second, Audit.action == "portal.login.failed")) == "127.0.0.1"

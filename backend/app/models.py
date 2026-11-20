@@ -239,6 +239,14 @@ class GenerationJobModel(LifecycleMixin, Base):
     reconciliation_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
+class TextExecutionSlotModel(LifecycleMixin, Base):
+    __tablename__ = "text_execution_slots"
+
+    slot: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    owner: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class WorkerInstanceModel(LifecycleMixin, Base):
     """单机 Worker 进程注册表；用于 drain、租约归属和发布排障。"""
 
@@ -259,6 +267,15 @@ class WorkerInstanceModel(LifecycleMixin, Base):
 
 class SceneAssetModel(LifecycleMixin, Base):
     __tablename__ = "scene_assets"
+    __table_args__ = (
+        Index(
+            "uq_scene_current_active",
+            "storyboard_line_id",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL AND is_current"),
+            sqlite_where=text("deleted_at IS NULL AND is_current"),
+        ),
+    )
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     storyboard_line_id: Mapped[str] = mapped_column(ForeignKey("storyboard_lines.id"), index=True)
     generation_job_id: Mapped[str | None] = mapped_column(ForeignKey("generation_jobs.id"), nullable=True, index=True)

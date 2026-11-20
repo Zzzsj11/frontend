@@ -112,7 +112,19 @@ export const storyboardActions = {
 
   /** 一次性将整批提示词工单交给服务端，浏览器只负责等待持久化工单落定。 */
   async _generateStoryboardBatch(taskId: string, lineIds: string[], force = false) {
-    const uniqueIds = [...new Set(lineIds)].slice(0, 100)
+    const allIds = [...new Set(lineIds)]
+    if (allIds.length > 100) {
+      const batchWatcher = registerTaskWatcher(taskId)
+      try {
+        for (let start = 0; start < allIds.length && !batchWatcher.signal.aborted; start += 100) {
+          await this._generateStoryboardBatch(taskId, allIds.slice(start, start + 100), force)
+        }
+      } finally {
+        batchWatcher.abort()
+      }
+      return
+    }
+    const uniqueIds = allIds
     if (!uniqueIds.length) return
     const watcher = registerTaskWatcher(taskId)
     for (const line of this.lines) {

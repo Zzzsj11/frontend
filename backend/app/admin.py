@@ -95,7 +95,7 @@ from .runninghub import upload_media as rh_upload_media
 from .server_monitoring import monitoring_summary
 from .storage import get_storage, import_remote, is_user_owned_tos_url, put_image_with_thumbnail, safe_key
 from .storyboard_options import OPTION_KINDS, load_general_storyboard_options
-from .token_usage import add_llm_call_log, add_token_usage, normalize_usage
+from .token_usage import add_llm_call_log, add_token_usage
 from .video_billing import run_video_billing_reconciliation, video_discount_label, video_discount_rate
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -573,6 +573,12 @@ async def sync_generation_job(job_id: str, request: Request, user: CurrentUser, 
         await audit(db, request, user, "job.sync", "generation_job", job_id, after=result)
         await db.commit()
         return result
+    if (settings.job_execution_mode == "worker" or model.worker_id) and model.status in {"queued", "running"}:
+        # Only the worker pool claims live and expired leases; the API never borrows its worker_id.
+        from .redis_store import notify_worker
+
+        await notify_worker(model.kind)
+        return {"providerStatus": None, "action": "skipped", "detail": "原工单由 Worker 领取或恢复"}
     if job_manager.is_active(job_id):
         return {"providerStatus": None, "action": "skipped", "detail": "任务正在本机执行中，无需同步"}
     try:
@@ -609,28 +615,9 @@ async def sync_generation_job(job_id: str, request: Request, user: CurrentUser, 
             await db.refresh(model)
             model.result = {**(model.result or {}), "usage": reported}
             model.request = {**(model.request or {}), "_providerTerminalResponse": data}
-            usage_record = await db.scalar(select(TokenUsageModel).where(TokenUsageModel.generation_job_id == model.id).order_by(TokenUsageModel.created_at.desc()).limit(1))
-            normalized = normalize_usage(reported)
-            if usage_record:
-                usage_record.raw_usage = normalized["raw"]
-                usage_record.input_tokens = normalized["inputTokens"]
-                usage_record.output_tokens = normalized["outputTokens"]
-                usage_record.cached_input_tokens = normalized["cachedInputTokens"]
-                usage_record.total_tokens = normalized["totalTokens"]
-            else:
-                add_token_usage(
-                    db,
-                    operation=f"generation_{model.kind}",
-                    provider="all-in-one",
-                    model=str((model.request or {}).get("model") or ""),
-                    usage=reported,
-                    user_id=model.user_id,
-                    project_id=model.project_id,
-                    project_task_id=model.project_task_id,
-                    storyboard_line_id=model.storyboard_line_id,
-                    generation_job_id=model.id,
-                    request_id=model.provider_task_id,
-                )
+            from .jobs import record_media_usage
+
+            await record_media_usage(db, model, reported, model.provider_task_id, f"generation_{model.kind}", "all-in-one", str((model.request or {}).get("model") or ""))
             await db.flush()
             await reconcile_video_job(db, model)
             action = "billing_refreshed"
