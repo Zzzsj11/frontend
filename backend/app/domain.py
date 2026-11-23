@@ -2137,7 +2137,7 @@ async def _sync_human_asset_avatar(human: DigitalHumanModel) -> None:
 @router.post("/digital-humans", status_code=201)
 async def create_human(payload: DigitalHumanCreate, user: CurrentUser, db: AsyncSession = Db) -> dict:
     if not is_user_owned_tos_url(payload.avatar_url, user.id) or (payload.avatar_thumbnail_url and not is_user_owned_tos_url(payload.avatar_thumbnail_url, user.id)):
-        raise HTTPException(422, "角色图片必须先上传到当前用户的 TOS 目录")
+        raise HTTPException(422, "角色图片必须先上传到当前用户的素材目录")
     human_id = uid("dh")
     if payload.source_job_id:
         job = await db.scalar(
@@ -2188,7 +2188,7 @@ async def update_human(human_id: str, payload: DigitalHumanUpdate, user: Current
             raise HTTPException(422, "角色分类不可用")
     for key, value in payload.model_dump(exclude_unset=True).items():
         if key in {"avatar_url", "avatar_thumbnail_url"} and value and not is_user_owned_tos_url(str(value), user.id):
-            raise HTTPException(422, "角色图片必须存储在当前用户的 TOS 目录")
+            raise HTTPException(422, "角色图片必须存储在当前用户的素材目录")
         setattr(item, key, value)
     # 换图后旧资产链接失效，必须重新注册。
     if "avatar_url" in payload.model_dump(exclude_unset=True):
@@ -3042,7 +3042,7 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
                                     client=download_client,
                                 )
                                 break
-                            except (httpx.TimeoutException, httpx.NetworkError):
+                            except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
                                 target.unlink(missing_ok=True)
                                 in_flight.pop(position, None)
                                 if attempt == 2:
@@ -3095,7 +3095,7 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
                             )
                     bundle.writestr("prompts.md", "\n".join(markdown).encode("utf-8"), compress_type=zipfile.ZIP_DEFLATED)
                 archive_size = archive_path.stat().st_size
-                await _set_export_progress(export_id, job, 85, "正在上传压缩包到 TOS", archive_size=archive_size)
+                await _set_export_progress(export_id, job, 85, "正在上传压缩包", archive_size=archive_size)
                 # 上传 85–99%：TOS data_transfer_listener 在 worker 线程回报字节数，主协程轮询折算进度
                 upload_state = {"consumed": 0}
 
@@ -3120,7 +3120,7 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
                             export_id,
                             job,
                             progress,
-                            "正在上传压缩包到 TOS",
+                            "正在上传压缩包",
                             archive_size=archive_size,
                         )
                 archive_url = await upload_task

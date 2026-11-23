@@ -9,7 +9,7 @@ import argparse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXACT_SECRET_NAMES = {"JWT_SECRET", "POSTGRES_PASSWORD", "TOS_ACCESS_KEY_ID", "TOS_SECRET_ACCESS_KEY"}
+EXACT_SECRET_NAMES = {"JWT_SECRET", "POSTGRES_PASSWORD", "OSS_ACCESS_KEY_ID", "OSS_ACCESS_KEY_SECRET", "TOS_ACCESS_KEY_ID", "TOS_SECRET_ACCESS_KEY"}
 
 
 def sensitive(name: str) -> bool:

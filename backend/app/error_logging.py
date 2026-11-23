@@ -32,6 +32,7 @@ SENSITIVE_KEYS = {
     "secret",
     "signature",
     "x-tos-signature",
+    "x-oss-signature",
 }
 # 键名比较前去掉下划线并小写，使 accessToken / access_token 等写法都能命中
 _SENSITIVE_NORMALIZED = {key.replace("_", "") for key in SENSITIVE_KEYS}
@@ -39,7 +40,7 @@ _SECRET_TEXT_PATTERNS = (
     re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+"),
     re.compile(r"(?i)\b(sk[_-])[A-Za-z0-9_-]{12,}"),
     re.compile(r"\b(ms_|yh-)[A-Za-z0-9_-]{12,}"),
-    re.compile(r"(?i)([?&](?:signature|x-tos-signature|token|access_token|api_key)=)[^&\s]+"),
+    re.compile(r"(?i)([?&](?:signature|x-tos-signature|x-oss-signature|token|access_token|api_key)=)[^&\s]+"),
 )
 
 

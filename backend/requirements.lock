@@ -8,6 +8,12 @@ aiosqlite==0.22.1
     # via -r backend/requirements.txt
 alembic==1.20.0
     # via -r backend/requirements.txt
+aliyun-python-sdk-core==2.16.1
+    # via
+    #   aliyun-python-sdk-kms
+    #   oss2
+aliyun-python-sdk-kms==2.16.5
+    # via oss2
 annotated-doc==0.0.5
     # via fastapi
 annotated-types==0.8.0
@@ -30,13 +36,19 @@ certifi==2026.10.19
     #   httpx
     #   requests
 cffi==2.1.1
-    # via argon2-cffi-bindings
+    # via
+    #   argon2-cffi-bindings
+    #   cryptography
 charset-normalizer==3.5.2
     # via requests
 click==8.5.0
     # via uvicorn
 crcmod==1.7
-    # via tos
+    # via
+    #   oss2
+    #   tos
+cryptography==50.0.2
+    # via aliyun-python-sdk-core
 deprecated==1.3.1
     # via tos
 distro==1.9.0
@@ -68,6 +80,8 @@ imageio-ffmpeg==0.6.0
     # via -r backend/requirements.txt
 jiter==0.17.0
     # via openai
+jmespath==1.1.0
+    # via aliyun-python-sdk-core
 mako==1.4.3
     # via alembic
 markupsafe==3.0.4
@@ -78,10 +92,14 @@ openpyxl==3.1.5
     # via -r backend/requirements.txt
 opentelemetry-api==1.45.2
     # via fastapi
+oss2==2.19.1
+    # via -r backend/requirements.txt
 pillow==13.0.0
     # via -r backend/requirements.txt
 pycparser==3.11
     # via cffi
+pycryptodome==4.6.0
+    # via oss2
 pydantic==2.14.1
     # via
     #   fastapi
@@ -101,9 +119,13 @@ pyyaml==6.0.3
 redis==6.4.0
     # via -r backend/requirements.txt
 requests==2.34.2
-    # via tos
+    # via
+    #   oss2
+    #   tos
 six==1.17.0
-    # via tos
+    # via
+    #   oss2
+    #   tos
 sniffio==1.3.1
     # via openai
 sqlalchemy[asyncio]==2.1.4

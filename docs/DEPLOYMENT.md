@@ -571,3 +571,10 @@ certbot certonly --manual --preferred-challenges http --non-interactive --agree-
 新服务器先启动 PostgreSQL/Redis，用版本化镜像执行 Alembic，再由受控运维流程显式建立管理员、密码哈希及超级管理员角色关联。应用初始化仅补齐系统配置、只读人物和权限定义，不创建账号，不按 `admin` 用户名授予权限。测试环境旧 `admin` 已按用户授权永久删除，仅保留 `dev01` 超级管理员；已删除自动建号函数、启动调用、开关和一次性默认建号脚本。
 
 首次证书可在80端口临时提供 `.deployment/acme` webroot，执行 certbot `certonly --webroot`。正式 nginx 以只读卷持续提供同一 challenge 目录。续期定时器和部署钩子与正式环境相同，证书独立签发、续期，不共享私钥。
+
+
+### OSS 媒体存储与素材导出
+
+新上传、模型素材归档、缩略图与导出包使用 `STORAGE_BACKEND=oss`。两个环境分别在 runtime secret 中设置对应环境的 `OSS_BUCKET`、`OSS_REGION`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET` 与 `OSS_PREFIX`。独立桶的前缀为 `mv/<tier>/media`；与 all-in-one 共桶且使用个人平台 Key 时，追加 `/users/<平台归属段>`。从该环境 Key 的认证接口 `/v1/account/credits` 读取绑定账号，经平台的 `user_path_segment` 取得归属段。MV 自身的 `users/<MV user_id>/...` 作为下一级隔离目录。保留 TOS 凭据供历史原图下载签名和备份使用。OSS 使用同地域内网传输，浏览器和模型引用使用稳定 HTTPS 公网对象地址，桶需支持已有媒体交付所需的公开读。测试与正式必须分开验收。
+
+素材 ZIP 的 `EXPORT_PER_USER_CONCURRENCY`、`EXPORT_CONCURRENCY` 和 Compose 的 `EXPORT_WORKER_CONCURRENCY` 分别控制用户在途、进程执行和 Worker 领取数量，发布值均为 20。单包下载设为 2，分片上传设为 1，成片渲染仍由独立执行池限流。回滚至仅支持 TOS 的旧镜像前，同时恢复旧环境配置；已发放的 OSS 公网 URL 保持有效。

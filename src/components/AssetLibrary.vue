@@ -358,8 +358,7 @@ const removeDh = async () => {
       </div>
       <div class="gen-actions">
         <span class="upload-tip"
-          >参考图会先存入
-          TOS，再生成一张白T灰底的正面大头照（1024×1536）；未上传时按身份特征生成</span
+          >参考图会先存入素材库，再生成一张白T灰底的正面大头照（1024×1536）；未上传时按身份特征生成</span
         >
         <button
           v-if="upAvatar || upAvatarError"

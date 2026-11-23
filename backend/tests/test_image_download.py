@@ -47,7 +47,7 @@ async def test_tos_download_uses_short_lived_signed_response_override(monkeypatc
     tos = object.__new__(storage.TosStorage)
     presign = Mock(return_value=SimpleNamespace(signed_url="https://signed.example/image"))
     tos.client = SimpleNamespace(pre_signed_url=presign)
-    monkeypatch.setattr(image_download, "get_storage", lambda: tos)
+    monkeypatch.setattr(image_download, "TosStorage", lambda: tos)
     result = await image_download.sign_download_url("https://preview-media.tos-cn-beijing.volces.com/users/me/a.jpg", "人物/原图")
     assert result == "https://signed.example/image"
     assert presign.call_args.kwargs["expires"] == 300

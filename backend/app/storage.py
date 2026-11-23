@@ -17,6 +17,7 @@ from anyio import CapacityLimiter, to_thread
 from PIL import Image, ImageOps
 
 from .config import settings
+from .oss_storage import OssStorage, internal_read_url, is_oss_host
 
 _IMAGE_WORKERS = CapacityLimiter(2)
 MAX_IMAGE_BYTES = 32 * 1024**2
@@ -56,18 +57,18 @@ def is_platform_storage_host(url: str) -> bool:
     for bucket in (settings.tos_reference_bucket, settings.tos_video_bucket):
         if bucket and endpoint:
             allowed.add(f"{bucket}.{endpoint}")
-    return host in allowed
+    return host in allowed or is_oss_host(url)
 
 
 def is_tos_url(url: str) -> bool:
-    return urlparse(url).scheme == "https" and is_platform_storage_host(url)
+    return urlparse(url).scheme == "https" and is_platform_storage_host(url) and not is_oss_host(url)
 
 
 def is_user_owned_tos_url(url: str, user_id: str) -> bool:
     """Accept only TOS objects stored below the authenticated user's prefix."""
     try:
         parsed = urlparse(url)
-        if not is_tos_url(url) or parsed.username or parsed.password or parsed.port not in (None, 443):
+        if parsed.scheme != "https" or not (is_tos_url(url) or is_oss_host(url)) or parsed.username or parsed.password or parsed.port not in (None, 443):
             return False
     except ValueError:
         return False
@@ -82,6 +83,8 @@ def is_user_owned_tos_url(url: str, user_id: str) -> bool:
         return False
     if "\\" in path or any(part in {".", ".."} for part in path.split("/")):
         return False
+    if is_oss_host(url):
+        return path.startswith(f"/{settings.oss_prefix}/users/{user_id}/")
     prefixes = {"", "mv-agent/references", "mv-agent/generated-videos", settings.tos_reference_prefix.strip("/"), settings.tos_video_prefix.strip("/")}
     return any(path.startswith(f"/{prefix + '/' if prefix else ''}users/{user_id}/") for prefix in prefixes)
 
@@ -177,8 +180,10 @@ class TosStorage:
 
 
 def get_storage() -> Storage:
+    if settings.storage_backend == "oss":
+        return OssStorage()
     if settings.storage_backend != "tos":
-        raise RuntimeError("持久媒体仅支持 TOS，请设置 STORAGE_BACKEND=tos")
+        raise RuntimeError("不支持的媒体存储类型")
     required = (
         settings.tos_endpoint,
         settings.tos_region,
@@ -298,12 +303,19 @@ def _pinned_request(url: str, address: str) -> tuple[httpx.URL, dict]:
     }
 
 
+async def _download_request(url: str):
+    internal = internal_read_url(url)
+    if internal:
+        # Unsigned GET of the same public object, using only the configured bucket endpoint.
+        return httpx.URL(internal), {}
+    return _pinned_request(url, await _validate_public_url(url))
+
+
 async def download_public_url(url: str, max_bytes: int = 500 * 1024 * 1024) -> tuple[str, bytes, str]:
     current = url
     async with httpx.AsyncClient(timeout=180, follow_redirects=False, trust_env=False) as client:
         for _ in range(4):
-            address = await _validate_public_url(current)
-            target, options = _pinned_request(current, address)
+            target, options = await _download_request(current)
             async with client.stream("GET", target, **options) as response:
                 if response.is_redirect:
                     location = response.headers.get("location")
@@ -340,8 +352,7 @@ async def download_public_url_to_path(
     active_client = client or httpx.AsyncClient(timeout=180, follow_redirects=False, trust_env=False)
     try:
         for _ in range(4):
-            address = await _validate_public_url(current)
-            pinned_url, options = _pinned_request(current, address)
+            pinned_url, options = await _download_request(current)
             async with active_client.stream("GET", pinned_url, **options) as response:
                 if response.is_redirect:
                     location = response.headers.get("location")

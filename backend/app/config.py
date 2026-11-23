@@ -137,8 +137,8 @@ class Settings:
         60,
         min(3600, int(os.getenv("STORYBOARD_LINE_TIMEOUT_SECONDS", str(STORYBOARD_LINE_TIMEOUT_SECONDS)))),
     )
-    export_concurrency: int = max(1, min(8, int(os.getenv("EXPORT_CONCURRENCY", "4"))))
-    export_per_user_concurrency: int = max(1, min(4, int(os.getenv("EXPORT_PER_USER_CONCURRENCY", "2"))))
+    export_concurrency: int = max(1, min(20, int(os.getenv("EXPORT_CONCURRENCY", "20"))))
+    export_per_user_concurrency: int = max(1, min(20, int(os.getenv("EXPORT_PER_USER_CONCURRENCY", "20"))))
     # 单个素材导出任务最多同时拉取 20 个源文件；下载过程按 1 MiB 分块落盘，不整文件驻留内存。
     export_download_concurrency: int = max(1, min(20, int(os.getenv("EXPORT_DOWNLOAD_CONCURRENCY", "20"))))
     export_upload_concurrency: int = max(1, min(8, int(os.getenv("EXPORT_UPLOAD_CONCURRENCY", "4"))))
@@ -192,6 +192,11 @@ class Settings:
     # 供应商公布上限为 60 次/分钟；应用只使用 45 次，给人工排查和供应商口径偏差留余量。
     business_api_rate_limit_per_minute: int = max(1, min(55, int(os.getenv("BUSINESS_API_RATE_LIMIT_PER_MINUTE", "45"))))
     storage_backend: str = os.getenv("STORAGE_BACKEND", "tos").lower()
+    oss_region: str = os.getenv("OSS_REGION", "cn-shenzhen")
+    oss_bucket: str = os.getenv("OSS_BUCKET", "")
+    oss_access_key_id: str = os.getenv("OSS_ACCESS_KEY_ID", "")
+    oss_access_key_secret: str = os.getenv("OSS_ACCESS_KEY_SECRET", "")
+    oss_prefix: str = os.getenv("OSS_PREFIX", f"mv/{os.getenv('DEPLOYMENT_TIER') or 'test'}/media").strip("/")
     tos_endpoint: str = os.getenv("TOS_ENDPOINT", "")
     tos_region: str = os.getenv("TOS_REGION", "")
     tos_access_key: str = os.getenv("TOS_ACCESS_KEY_ID", "")
@@ -243,6 +248,11 @@ def validate_runtime_security() -> None:
         domain, platform = domains[tier]
         if os.environ.get("TLS_DOMAIN") != domain or settings.all_in_one_base_url != f"https://{platform}" or settings.llm_base_url != f"https://{platform}/v1":
             raise RuntimeError("应用域名或平台 HTTPS 地址与 DEPLOYMENT_TIER 不匹配")
+        if settings.storage_backend == "oss" and (
+            not re.fullmatch(rf"mv/{tier}/media(?:/users/u-[a-f0-9]{{32}})?", settings.oss_prefix)
+            or not all((settings.oss_bucket, settings.oss_access_key_id, settings.oss_access_key_secret))
+        ):
+            raise RuntimeError("OSS 写入配置或环境目录无效")
         if (settings.tos_reference_prefix, settings.tos_video_prefix) != (f"mv/{tier}/references", f"mv/{tier}/videos"):
             raise RuntimeError("媒体存储目录与 DEPLOYMENT_TIER 不匹配")
         if not settings.refresh_cookie_secure:

@@ -2,7 +2,7 @@
 
 开始工作前依次阅读 `README.md`、`docs/ARCHITECTURE.md`、`docs/LOCAL-DEVELOPMENT.md` 和与任务相关的专题文档。
 
-强制约束：所有新增业务表包含 `created_at`、`updated_at`、`deleted_at`；所有删除均为软删除；用户私有数据必须按 `user_id` 隔离；系统人物只读；媒体原文件和缩略图均进入 TOS；任何模型调用必须记录用量；数据库修改只能通过 Alembic。
+强制约束：所有新增业务表包含 `created_at`、`updated_at`、`deleted_at`；所有删除均为软删除；用户私有数据必须按 `user_id` 隔离；系统人物只读；新增媒体原文件、缩略图和导出包均进入同环境阿里云 OSS，历史 TOS 地址保留读取；任何模型调用必须记录用量；数据库修改只能通过 Alembic。
 
 最高准则——Agent 生成归因：任何 Code Agent、自动化 Agent、E2E 或开发验收在本地、测试或生产环境触发真实模型调用（尤其图片/视频生成）时，必须为全部请求携带 `X-Agent-Name: code-agent` 与本次运行唯一的 `X-Agent-Run-Id`；同时保留 `X-Test-Run-Id`。缺少 Agent 标识不得执行真实生成。后端必须将来源固化到生成工单和费用对账，管理后台必须能区分“正常业务”与“Agent 开发测试”、按来源筛选并展示 Agent 名称和批次。禁止通过伪造普通业务流量规避测试成本归因。
 
