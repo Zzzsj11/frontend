@@ -5,6 +5,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from scripts.mock_video_acceptance import QPS as QPS
 from scripts.mock_video_acceptance import SECONDS, pct
 
 

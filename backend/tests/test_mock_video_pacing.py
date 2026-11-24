@@ -9,9 +9,10 @@ from scripts.mock_video_window import summarize
 
 
 def test_dispatch_misses_are_counted_once():
-    assert shard.skip_reason(0.051, 96) == "scheduler_late"
-    assert shard.skip_reason(0.050, 96) == "pending_limit"
-    assert shard.skip_reason(0.050, 95) is None
+    budget = shard.WirePacer(4, 60).credit
+    assert shard.skip_reason(budget + 0.001, 96, budget) == "scheduler_late"
+    assert shard.skip_reason(budget, 96, budget) == "pending_limit"
+    assert shard.skip_reason(0.082, 95, budget) is None
 
 
 async def test_queued_connections_cannot_burst_or_send_after_window(monkeypatch):
@@ -86,3 +87,41 @@ def test_current_window_reports_100_qps_without_relabelling_old_shards(tmp_path)
     paths[0].write_text(json.dumps(old))
     with pytest.raises(ValueError, match="mismatched target QPS"):
         summarize(paths)
+
+
+async def test_status_request_carries_batch_task_and_gateway_correlation():
+    import httpx
+
+    from scripts.mock_video_acceptance import trace_hooks
+
+    rows = []
+
+    def respond(req):
+        assert req.headers["X-Agent-Name"] == "code-agent"
+        assert req.headers["X-Test-Run-Id"] == "batch"
+        assert req.headers["X-Agent-Run-Id"] == "batch-job-123"
+        return httpx.Response(200, headers={"X-Request-Id": "rid"})
+
+    async with httpx.AsyncClient(event_hooks=trace_hooks("batch", rows.append), transport=httpx.MockTransport(respond)) as client:
+        await client.get("https://example.invalid/v1/jobs/job-123")
+    assert rows == [("batch-job-123", 200, "rid")]
+
+
+def test_production_full_run_requires_matching_environment_and_isolation(monkeypatch):
+    from scripts import mock_video_acceptance as proof
+
+    host = "https://mg.epaipix.com"
+    monkeypatch.setattr(proof, "HOST", host)
+    monkeypatch.setattr(proof, "TIER", "production")
+    monkeypatch.setattr(proof, "settings", SimpleNamespace(all_in_one_base_url=host, all_in_one_system_key=False))
+    monkeypatch.setenv("TLS_DOMAIN", "mv.epaipix.com")
+    monkeypatch.setenv("DEPLOYMENT_TIER", "production")
+    monkeypatch.setenv("MV_EXPECTED_ISOLATION", "isolated")
+    monkeypatch.delenv("MV_PROOF_ROUTE_VERIFIED", raising=False)
+    with pytest.raises(ValueError, match="isolation"):
+        proof.check_target()
+    monkeypatch.setenv("MV_PROOF_ROUTE_VERIFIED", "isolated")
+    proof.check_target()
+    monkeypatch.setenv("TLS_DOMAIN", "mv-test.epaipix.com")
+    with pytest.raises(ValueError, match="must match"):
+        proof.check_target()

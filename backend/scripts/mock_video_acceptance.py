@@ -21,10 +21,37 @@ from app.database import session_factory
 from app.jobs import jobs, record_media_usage
 from app.models import GenerationJobModel, utcnow
 
-HOST = "https://mg-test.epaipix.com"
+TIER = os.getenv("MV_PROOF_ENV", "test")
+HOST = {"test": "https://mg-test.epaipix.com", "production": "https://mg.epaipix.com"}.get(TIER)
 MODELS = {"seedance-2.0": (1000, 5), "wan3.0-video": (1000, 5), "veo-3.1-fast": (500, 8)}
 QPS, SECONDS = 100, 60
 clock = time.monotonic
+
+
+def check_target():
+    domain = {"test": "mv-test.epaipix.com", "production": "mv.epaipix.com"}.get(TIER)
+    if not domain or (os.getenv("DEPLOYMENT_TIER"), os.getenv("TLS_DOMAIN"), settings.all_in_one_base_url) != (TIER, domain, HOST):
+        raise ValueError("MV tier, domain and gateway must match")
+    if settings.all_in_one_system_key:
+        raise ValueError("requires a personal key")
+    if TIER == "production":
+        marker = os.getenv("MV_EXPECTED_ISOLATION")
+        if not marker or marker != os.getenv("MV_PROOF_ROUTE_VERIFIED"):
+            raise ValueError("requires the verified production isolation route")
+
+
+def trace_hooks(run, record):
+    async def attach(request):
+        job = request.url.path.rsplit("/", 1)[-1]
+        request.headers.setdefault("X-Agent-Name", "code-agent")
+        request.headers.setdefault("X-Agent-Run-Id", f"{run}-{job}")
+        request.headers["X-Test-Run-Id"] = run
+
+    async def capture(response):
+        request = response.request
+        record((request.headers["X-Agent-Run-Id"], response.status_code, response.headers.get("X-Request-Id")))
+
+    return {"request": [attach], "response": [capture]}
 
 
 def check(row, model, jid=None, *, states=("running",)):
@@ -32,7 +59,12 @@ def check(row, model, jid=None, *, states=("running",)):
         raise ValueError("missing mock=true; stop")
     if row.get("model") != model or row.get("status") not in states:
         raise ValueError(f"unexpected model/status: {row.get('model')}/{row.get('status')}")
-    if not row.get("id") or (jid is not None and row["id"] != jid) or row.get("provider_task_id") is not None:
+    if (
+        not re.fullmatch(r"job-[0-9a-f]{32}", str(row.get("id", "")))
+        or (jid is not None and row["id"] != jid)
+        or "provider_task_id" not in row
+        or row["provider_task_id"] is not None
+    ):
         raise ValueError("unexpected task identity")
     bill = row["billing"]
     if any(Decimal(str(bill[field])) != 0 for field in ("points", "reserved_points")):
@@ -123,11 +155,21 @@ async def proof(api, probe_api, run, out, sleep=asyncio.sleep):
                 try:
                     resp = await all_in_one.submit_media(client, "videos?mock=true", body, {**all_in_one.headers(), **headers})
                 except httpx.TransportError:
-                    if attempt == 2:
+                    lookup = await client.get("/v1/jobs/lookup", params={"idempotency_key": logical}, headers=headers)
+                    if lookup.status_code == 200:
+                        resp = lookup
+                    elif lookup.status_code == 404 and attempt < 2:
+                        await sleep(1 + attempt)
+                        continue
+                    else:
                         raise
-                    await sleep(1 + attempt)
-                    continue
-                if resp.status_code == 202:
+                if (
+                    TIER == "production"
+                    and resp.request.method == "POST"
+                    and (resp.headers.get("X-MV-Isolated") != os.environ["MV_EXPECTED_ISOLATION"] or resp.headers.get("X-Generation-Ingress") != "v1")
+                ):
+                    raise RuntimeError("production submission did not return the isolated generation ingress headers")
+                if resp.status_code == 202 or (resp.request.method == "GET" and resp.status_code == 200):
                     row = resp.json()
                     check(row, model)
                     jid = row["id"]
@@ -176,7 +218,7 @@ async def proof(api, probe_api, run, out, sleep=asyncio.sleep):
             raise RuntimeError("the Key cannot see all three models")
         # Omit the required prompt: even older gateways cannot accept this request.
         invalid = await api.post(
-            "/v1/videos",
+            "/v1/videos?mock=true",
             json={"model": "seedance-2.0", "mock": "invalid"},
             headers={
                 "X-Agent-Name": "code-agent",
@@ -185,6 +227,8 @@ async def proof(api, probe_api, run, out, sleep=asyncio.sleep):
                 "Idempotency-Key": run + "-schema",
             },
         )
+        if TIER == "production" and (invalid.headers.get("X-MV-Isolated") != os.environ["MV_EXPECTED_ISOLATION"] or invalid.headers.get("X-Generation-Ingress") != "v1"):
+            raise RuntimeError("production mock validation did not reach the isolated generation ingress")
         if invalid.status_code != 422 or not any(e.get("loc") == ["body", "mock"] for e in invalid.json().get("detail", []) if isinstance(e, dict)):
             raise RuntimeError("gateway did not validate mock as a typed field; stopped before creating jobs")
         # These three jobs are included in the target counts.
@@ -302,8 +346,7 @@ async def drain(run):
 
 
 async def main():
-    if settings.all_in_one_base_url != HOST or os.getenv("DEPLOYMENT_TIER") != "test" or os.getenv("TLS_DOMAIN") != "mv-test.epaipix.com" or settings.all_in_one_system_key:
-        raise SystemExit("requires MV staging and its personal test Key")
+    check_target()
     drain_run = os.getenv("MV_DRAIN_RUN")
     if drain_run and not re.fullmatch(r"mv-[0-9a-f]{32}", drain_run):
         raise ValueError("invalid run id")
@@ -315,19 +358,26 @@ async def main():
     out = Path(os.environ.get("MV_EVIDENCE_DIR", "/tmp")) / run
     out.mkdir(mode=0o700, exist_ok=bool(drain_run))
     print("Evidence directory:", out, flush=True)
-    async with httpx.AsyncClient(
-        base_url=HOST, headers=all_in_one.headers(), timeout=10, follow_redirects=False, limits=httpx.Limits(max_connections=320, max_keepalive_connections=256)
-    ) as client:
-        token = all_in_one._poll_client.set(client)
-        try:
-            if drain_run:
-                print(json.dumps({"run": run, "terminal_succeeded": await drain(run)}), flush=True)
-            else:
-                await proof(client, client, run, out)
-                if not json.loads((out / "summary.json").read_text())["passed"]:
-                    raise SystemExit(1)
-        finally:
-            all_in_one._poll_client.reset(token)
+    with (out / "request-ids.jsonl").open("a", encoding="utf-8") as trace:
+        hooks = trace_hooks(run, lambda row: print(json.dumps(row), file=trace))
+        async with httpx.AsyncClient(
+            base_url=HOST,
+            headers=all_in_one.headers(),
+            event_hooks=hooks,
+            timeout=10,
+            follow_redirects=False,
+            limits=httpx.Limits(max_connections=320, max_keepalive_connections=256),
+        ) as client:
+            token = all_in_one._poll_client.set(client)
+            try:
+                if drain_run:
+                    print(json.dumps({"run": run, "terminal_succeeded": await drain(run)}), flush=True)
+                else:
+                    await proof(client, client, run, out)
+                    if not json.loads((out / "summary.json").read_text())["passed"]:
+                        raise SystemExit(1)
+            finally:
+                all_in_one._poll_client.reset(token)
 
 
 if __name__ == "__main__":

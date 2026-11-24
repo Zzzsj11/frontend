@@ -3,7 +3,6 @@
 import argparse
 import asyncio
 import json
-import os
 import time
 from collections import Counter
 from contextlib import AsyncExitStack
@@ -14,12 +13,10 @@ import httpx
 from sqlalchemy import select
 
 from app import all_in_one
-from app.config import settings
 from app.database import session_factory
 from app.models import GenerationJobModel
-from scripts.mock_video_acceptance import HOST, QPS, SECONDS, check
+from scripts.mock_video_acceptance import QPS, SECONDS, check, check_target, trace_hooks
 
-MAX_DISPATCH_LAG = 0.050
 MAX_PENDING = 96
 
 
@@ -60,9 +57,9 @@ class WirePacer:
             self.next_send = now + self.min_gap
 
 
-def skip_reason(lag, pending):
+def skip_reason(lag, pending, recovery_budget):
     # A missed slot has exactly one cause; a late dispatcher takes precedence.
-    if lag > MAX_DISPATCH_LAG:
+    if lag > recovery_budget:
         return "scheduler_late"
     if pending >= MAX_PENDING:
         return "pending_limit"
@@ -70,8 +67,7 @@ def skip_reason(lag, pending):
 
 
 async def measure(run, start, shard, count, path):
-    if settings.all_in_one_base_url != HOST or os.getenv("DEPLOYMENT_TIER") != "test" or os.getenv("TLS_DOMAIN") != "mv-test.epaipix.com":
-        raise RuntimeError("requires MV staging")
+    check_target()
     async with session_factory() as db:
         jobs = (
             await db.execute(
@@ -123,11 +119,14 @@ async def measure_window(run, start, shard, count, path, jobs):
     # Lease a single-connection client before entering HTTPX. Concurrent
     # requests cannot queue behind a paced request on the same HTTP/1 socket.
     limits = httpx.Limits(max_connections=1, max_keepalive_connections=1, keepalive_expiry=SECONDS + 5)
+    request_ids = []
+    hooks = trace_hooks(run, request_ids.append)
+    hooks["request"].append(instrument)
     async with AsyncExitStack() as stack:
         available = asyncio.Queue()
         tls = httpx.create_ssl_context()
         for _ in range(32):
-            client = httpx.AsyncClient(timeout=5, verify=tls, event_hooks={"request": [instrument]}, limits=limits)
+            client = httpx.AsyncClient(timeout=5, verify=tls, event_hooks=hooks, limits=limits)
             available.put_nowait(await stack.enter_async_context(client))
 
         async def query(jid):
@@ -174,7 +173,7 @@ async def measure_window(run, start, shard, count, path, jobs):
                 bucket = scheduling[i // QPS]
                 bucket["max_dispatch_lag_ms"] = max(bucket["max_dispatch_lag_ms"], round(lag * 1000, 3))
                 bucket["peak_pending"] = max(bucket["peak_pending"], len(pending))
-                reason = skip_reason(lag, len(pending))
+                reason = skip_reason(lag, len(pending), pacer.credit)
                 if reason:
                     errors[reason] += 1
                     bucket[reason] += 1
@@ -207,6 +206,7 @@ async def measure_window(run, start, shard, count, path, jobs):
                         shard_count=count,
                         target_qps=QPS,
                         scheduling=scheduling,
+                        request_ids=request_ids,
                         run=run,
                         start=start,
                         errors=errors,
