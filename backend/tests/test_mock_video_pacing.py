@@ -9,10 +9,11 @@ from scripts.mock_video_window import summarize
 
 
 def test_dispatch_misses_are_counted_once():
-    budget = shard.WirePacer(4, 60).credit
-    assert shard.skip_reason(budget + 0.001, 96, budget) == "scheduler_late"
-    assert shard.skip_reason(budget, 96, budget) == "pending_limit"
-    assert shard.skip_reason(0.082, 95, budget) is None
+    assert shard.skip_reason(60, 60, 96) == "window_closed"
+    assert shard.skip_reason(50.3, 60, 96) == "pending_limit"
+    # A delayed timer still has a chance to send within the open window. The
+    # socket pacer enforces its original due time, burst limit and hard cutoff.
+    assert shard.skip_reason(50.3, 60, 95) is None
 
 
 async def test_queued_connections_cannot_burst_or_send_after_window(monkeypatch):

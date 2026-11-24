@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import gc
 import json
 import time
 from collections import Counter
@@ -57,10 +58,9 @@ class WirePacer:
             self.next_send = now + self.min_gap
 
 
-def skip_reason(lag, pending, recovery_budget):
-    # A missed slot has exactly one cause; a late dispatcher takes precedence.
-    if lag > recovery_budget:
-        return "scheduler_late"
+def skip_reason(now, end, pending):
+    if now >= end:
+        return "window_closed"
     if pending >= MAX_PENDING:
         return "pending_limit"
     return None
@@ -169,11 +169,12 @@ async def measure_window(run, start, shard, count, path, jobs):
             final_slot = range(shard, QPS * SECONDS, count)[-1]
 
             def dispatch(i, due):
-                lag = time.monotonic() - due
+                now = time.monotonic()
+                lag = now - due
                 bucket = scheduling[i // QPS]
                 bucket["max_dispatch_lag_ms"] = max(bucket["max_dispatch_lag_ms"], round(lag * 1000, 3))
                 bucket["peak_pending"] = max(bucket["peak_pending"], len(pending))
-                reason = skip_reason(lag, len(pending), pacer.credit)
+                reason = skip_reason(now, pacer.end, len(pending))
                 if reason:
                     errors[reason] += 1
                     bucket[reason] += 1
@@ -187,11 +188,19 @@ async def measure_window(run, start, shard, count, path, jobs):
             # Register independent absolute deadlines. When the event loop is late,
             # one missed timer cannot delay scheduling all the following slots.
             loop_first = loop.time() + first - time.monotonic()
+            # These short-lived proof processes each load the full MV app. Collect
+            # before the shared start so a full-heap scan does not stall every
+            # shard mid-window. Refcount reclamation continues during the bound.
+            gc.collect()
+            gc_enabled = gc.isenabled()
             timers = [loop.call_at(loop_first + i / QPS, dispatch, i, first + i / QPS) for i in range(shard, QPS * SECONDS, count)]
             try:
+                gc.disable()
                 await dispatched.wait()
                 await asyncio.gather(*pending)
             finally:
+                if gc_enabled:
+                    gc.enable()
                 for timer in timers:
                     timer.cancel()
                 for task in pending:
