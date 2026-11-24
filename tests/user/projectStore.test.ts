@@ -1,3 +1,4 @@
+import { imageRecoveryActions } from '../../src/utils/imageGenerationRecovery'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAuthStore } from '../../src/stores/auth'
@@ -159,7 +160,10 @@ describe('project user journey state', () => {
     )
 
     // 场景图失败：行内留下 failed 状态与失败原因（Promise 正常 resolve，不向外抛错）
-    await store.generateSceneFor(line.id)
+    const first = store.generateSceneFor(line.id)
+    await vi.waitFor(() => expect(imageRecoveryActions.get('image-job-1')?.label).toBe('重新生成'))
+    imageRecoveryActions.get('image-job-1')?.dismiss?.()
+    await first
     expect(line.scene.status).toBe('failed')
     expect(line.scene.error).toContain('图片供应商超时')
 

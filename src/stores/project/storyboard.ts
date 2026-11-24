@@ -1,3 +1,4 @@
+import { isObservingImage, waitForRecoverableImage } from '../../utils/imageGenerationRecovery'
 import type { ScriptLine } from '../../types'
 import * as api from '../../api/domain'
 import { ApiError } from '../../errorBus'
@@ -236,6 +237,7 @@ export const storyboardActions = {
     for (const job of jobs) {
       if (
         !job.storyboardLineId ||
+        (job.kind === 'image' && isObservingImage(job.id)) ||
         (job.kind === 'storyboard_line' && resumedGenerationJobs.has(job.id))
       )
         continue
@@ -304,23 +306,31 @@ export const storyboardActions = {
     let failed: string | undefined
     try {
       try {
-        await api.waitGenerationJob(
-          jobId,
-          watcher.signal,
-          kind === 'video' ? 7_500_000 : 660_000,
-          (snapshot) => {
-            const current = currentLine()
-            if (kind === 'video' && current?.shot.generationJobId === jobId) {
-              current.shot.status = 'generating'
-              if (snapshot.created_at)
-                current.shot.generationSubmittedAt = new Date(
-                  snapshot.created_at * 1000,
-                ).toISOString()
-              current.shot.generationPhase =
-                snapshot.phase || (snapshot.status === 'queued' ? 'queued' : 'provider_running')
-            }
-          },
-        )
+        if (kind === 'image') {
+          await waitForRecoverableImage(jobId, (snapshot) => snapshot.result, {
+            signal: watcher.signal,
+            target: initial?.scenePrompt
+              ? `场景图 · ${initial.scenePrompt.slice(0, 40)}`
+              : '场景图',
+          })
+        } else
+          await api.waitGenerationJob(
+            jobId,
+            watcher.signal,
+            kind === 'video' ? 7_500_000 : 660_000,
+            (snapshot) => {
+              const current = currentLine()
+              if (kind === 'video' && current?.shot.generationJobId === jobId) {
+                current.shot.status = 'generating'
+                if (snapshot.created_at)
+                  current.shot.generationSubmittedAt = new Date(
+                    snapshot.created_at * 1000,
+                  ).toISOString()
+                current.shot.generationPhase =
+                  snapshot.phase || (snapshot.status === 'queued' ? 'queued' : 'provider_running')
+              }
+            },
+          )
       } catch (error) {
         if (watcher.signal.aborted || error instanceof PollingCancelledError) return
         if (error instanceof GenerationReconciliationRequired) {

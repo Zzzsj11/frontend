@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 import random
 import re
@@ -129,7 +128,21 @@ async def submit_media(client: httpx.AsyncClient, endpoint: str, payload: dict, 
             await asyncio.sleep(delay + random.uniform(0, 0.25))
     if before_send:
         await before_send()
-    return await client.post(url, headers=request_headers, json=payload)
+    try:
+        response = await client.post(url, headers=request_headers, json=payload)
+    except httpx.RequestError:
+        if endpoint == "images":
+            found = await _lookup_submission(client, request_headers, payload["model"])
+            if found is not None:
+                return found
+        raise
+    if endpoint == "images" and response.status_code >= 500 and not response.headers.get("x-job-id"):
+        safe_rejection = response.headers.get("x-platform-job-created") == "false" and response.headers.get("x-generation-submitted") == "false"
+        if not safe_rejection:
+            found = await _lookup_submission(client, request_headers, payload["model"])
+            if found is not None:
+                return found
+    return response
 
 
 async def _lookup_submission(client, request_headers, model):
@@ -222,10 +235,10 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
         if request.n != 1:
             raise ProviderError("all in one 每次生成一张图片")
         if request.images:
-            payload["image"] = request.images
+            payload["images"] = request.images
         from .image_model_policy import image_ratio
 
-        payload.update(size=image_ratio(request.size, model), resolution=request.resolution, quality="auto", output_format="png", n=request.n)
+        payload.update(size=image_ratio(request.size, model), resolution=request.resolution, quality="auto", n=request.n)
     else:
         mode = snapshot.get("_h3Mode") or request.h3_mode
         modes = {"first_last": "first_last", "first_frame": "first_frame", "reference": "reference", "text": "text"}
@@ -249,19 +262,25 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
             raise ProviderError("人物资产模式仅支持 SD2.0")
         payload["person_asset_mode"] = True
         payload["person_reference_indices"] = request.person_reference_indices
+    recover_image = job.kind == "image" and bool(job.idempotency_key)
     job.idempotency_key = f"{job.id}:{job.kind}"
     request_headers = headers(user_id=job.user_id, idempotency_key=job.idempotency_key)
     await jobs.record_provider_request(job, payload)
     try:
-        endpoint = "videos"
-        if job.kind == "image":
-            endpoint = "images/edits" if request.images else "images/generations"
+        endpoint = "images" if job.kind == "image" else "videos"
         shared = _poll_client.get() if job.kind == "video" else None
-        async with nullcontext(shared) if shared is not None else httpx.AsyncClient(timeout=600 if job.kind == "image" else 60) as client:
-            response = await submit_media(client, endpoint, payload, request_headers, before_send=lambda: jobs.mark_provider_submitting(job))
+        async with nullcontext(shared) if shared is not None else httpx.AsyncClient(timeout=60) as client:
+            response = await _lookup_submission(client, request_headers, model) if recover_image else None
+            if response is None:
+                response = await submit_media(client, endpoint, payload, request_headers, before_send=lambda: jobs.mark_provider_submitting(job))
             # Do not resubmit a potentially accepted request on a 5xx or transport failure.
             if response.status_code >= 500:
-                error_body = response.json()
+                try:
+                    error_body = response.json()
+                except ValueError:
+                    error_body = {}
+                if not isinstance(error_body, dict):
+                    error_body = {}
                 detail = error_body.get("error") or error_body.get("detail") or {}
                 task_id = response.headers.get("x-job-id") or (detail.get("job_id") if isinstance(detail, dict) else None)
                 if task_id:
@@ -269,39 +288,18 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
                     return await resume(job)
                 if response.headers.get("x-platform-job-created") == "false" and response.headers.get("x-generation-submitted") == "false":
                     await jobs.record_provider_response(job, "rejected_before_acceptance", {"httpStatus": response.status_code, "body": error_body, "generationSubmitted": False})
-                    raise ProviderRejectedError("平台当前无可用渠道，本次未创建平台任务、未提交视频生成；请稍后重试")
+                    media_name = "图片" if job.kind == "image" else "视频"
+                    raise ProviderRejectedError(f"平台当前无可用渠道，本次未创建平台任务、未提交{media_name}生成；请稍后重试")
                 error = ProviderSubmissionUncertainError("all in one 服务异常，提交结果不确定；请核查原任务")
                 error.provider = PROVIDER
                 error.request_id = response.headers.get("x-request-id")
                 raise error
             _raise_for_status(response)
             body = response.json()
-            if job.kind == "image":
-                from .image_failover import record_outcome
-                from .storage import import_remote_image, put_image_with_thumbnail, safe_key
-
-                task_id = response.headers.get("x-job-id")
-                if task_id:
-                    await jobs.set_provider_task(job, PROVIDER, task_id, idempotency_key=job.idempotency_key)
-                request_id = response.headers.get("x-request-id") or body.get("id")
-                usage = {**(body.get("usage") or {}), "platformBilling": body.get("billing")}
-                await jobs.record_provider_response(job, "submission", {"requestId": request_id, "jobId": task_id, "usage": usage})
-                item = next(iter(body.get("data") or []), {})
-                owner = f"users/{job.user_id}/generated/images"
-                try:
-                    if item.get("url"):
-                        original, thumbnail = await import_remote_image(item["url"], owner)
-                    elif item.get("b64_json"):
-                        original, thumbnail = await put_image_with_thumbnail(safe_key(owner, f"{job.id}.png"), base64.b64decode(item["b64_json"], validate=True), "image/png")
-                    else:
-                        raise ProviderSubmissionUncertainError("图片响应缺少 URL 或 Base64 数据，请核查原请求")
-                except Exception as exc:
-                    error = ProviderSubmissionUncertainError("平台图片已返回，归档未完成，请核查原任务")
-                    error.requires_reconciliation = True
-                    error.usage, error.provider, error.request_id = usage, PROVIDER, task_id or request_id
-                    raise error from exc
-                await record_outcome(job, succeeded=True)
-                return {"provider": PROVIDER, "providerTaskId": task_id or request_id, "model": request.model, "urls": [original], "thumbnailUrls": [thumbnail], "usage": usage}
+            task_id = body.get("id") if isinstance(body, dict) else None
+            if not task_id:
+                raise ProviderSubmissionUncertainError("all in one 受理响应缺少平台任务 ID，请核查原请求")
+            await jobs.set_provider_task(job, PROVIDER, task_id, idempotency_key=job.idempotency_key)
             await jobs.record_provider_response(job, "submission", body)
     except ProviderError as exc:
         if getattr(exc, "submission_certain", False) and not _content_rejection(exc):
@@ -314,10 +312,6 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
         error = ProviderSubmissionUncertainError("all in one 提交结果不确定，请核查原任务")
         error.provider = PROVIDER
         raise error from exc
-    task_id = body.get("id")
-    if not task_id:
-        raise ProviderSubmissionUncertainError("all in one 受理响应缺少平台任务 ID，请核查原请求")
-    await jobs.set_provider_task(job, PROVIDER, task_id, idempotency_key=job.idempotency_key)
     return await resume(job)
 
 
@@ -335,12 +329,14 @@ async def resume(job: Any) -> dict[str, Any]:
         try:
             data = await query_task(job.kind, job.provider_task_id, user_id=job.user_id)
             consecutive_errors = 0
-        except Exception:
+        except Exception as exc:
             job.phase = "reconciling"
             await jobs.update_progress(job, job.progress)
             consecutive_errors += 1
             if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS and job.kind != "video":
-                raise
+                error = ProviderError("平台状态暂不可查，请核查原任务")
+                error.requires_reconciliation = True
+                raise error from exc
             await asyncio.sleep(POLL_INTERVAL_SECONDS * random.uniform(0.9, 1.1))
             continue
         job.phase = {
@@ -387,7 +383,8 @@ async def resume(job: Any) -> dict[str, Any]:
             error.request_id = job.provider_task_id
             raise error
         await asyncio.sleep(POLL_INTERVAL_SECONDS * random.uniform(0.9, 1.1))
-    error = ProviderError("all in one 生成等待超过2小时，请核查原任务；未重新提交")
+    duration = "10分钟" if job.kind == "image" else "2小时"
+    error = ProviderError(f"all in one 生成等待超过{duration}，请核查原任务；未重新提交")
     error.requires_reconciliation = True
     raise error
 

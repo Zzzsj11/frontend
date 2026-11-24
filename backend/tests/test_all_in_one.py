@@ -87,8 +87,6 @@ async def test_create_maps_payload_and_durable_identity(configured, monkeypatch,
         import json
 
         captured.append((request, json.loads(request.content)))
-        if kind == "image":
-            return httpx.Response(200, json={"data": [{"url": "https://media.example/output.png"}]})
         return httpx.Response(202, json={"id": "upstream-job", "status": "queued"})
 
     original = httpx.AsyncClient
@@ -113,29 +111,23 @@ async def test_create_maps_payload_and_durable_identity(configured, monkeypatch,
         if kind == "image"
         else VideoGenerationCreate(model="minimax-h3-all-in-one", prompt="cup", image_urls=["https://media.example/input.png"], resolution="720p", duration=5)
     )
-    monkeypatch.setattr("app.storage.import_remote_image", AsyncMock(return_value=("original", "thumbnail")))
-    monkeypatch.setattr("app.image_failover.record_outcome", AsyncMock())
     result = await aio.generate(request, job)
-    if kind == "image":
-        assert result["urls"] == ["original"]
-    else:
-        assert result == {"done": True}
+    assert result == {"done": True}
     req, body = captured[0]
     assert req.headers["Idempotency-Key"] == f"local-job:{kind}"
     assert req.headers["X-Agent-Run-Id"] == req.headers["X-Test-Run-Id"] == "test-run"
     assert "X-User-Id" not in req.headers
     assert body.get("channel") == selected_channel
     assert ("channel" in body) == (selected_channel is not None)
-    assert body["image" if kind == "image" else "images"] == ["https://media.example/input.png"] * (15 if kind == "image" else 1)
+    assert body["images"] == ["https://media.example/input.png"] * (15 if kind == "image" else 1)
     assert "realPersonMode" not in body
     if kind == "video":
         assert body["resolution"] == "768P"
     provider_request.assert_awaited_once_with(job, body)
     if kind == "image":
         assert body["size"] == "9:21" and body["resolution"] == "1K"
-        assert req.url.path == "/v1/images/edits"
-        persist.assert_not_awaited()
-        return
+        assert req.url.path == "/v1/images"
+        assert "output_format" not in body
     provider_response.assert_awaited_once_with(job, "submission", {"id": "upstream-job", "status": "queued"})
     persist.assert_awaited_once()
 
@@ -155,7 +147,7 @@ async def test_uncertain_submission_is_never_reposted(configured, monkeypatch):
     job = Job(id="test-uncertain", kind="image", user_id="owner", request={"_providerModelId": "gpt-image-2"})
     with pytest.raises(ProviderSubmissionUncertainError):
         await aio.generate(ImageGenerationCreate(model="gpt-image-2-all-in-one", prompt="cup"), job)
-    assert len(calls) == 1
+    assert [(call.method, call.url.path) for call in calls] == [("POST", "/v1/images"), ("GET", "/v1/jobs/lookup")]
     assert job.idempotency_key == "test-uncertain:image"
 
 
@@ -226,7 +218,7 @@ async def test_known_job_on_5xx_restores_without_posting_again(configured, monke
 
     def handle(request):
         calls.append(request)
-        return httpx.Response(500, headers={"X-Job-Id": "durable-job"}, json={"error": {"job_id": "durable-job"}})
+        return httpx.Response(500, headers={"X-Job-Id": "durable-job"}, text="Gateway error")
 
     monkeypatch.setattr(aio.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handle), **kw))
     monkeypatch.setattr(jobs, "mark_provider_submitting", AsyncMock())
@@ -346,29 +338,48 @@ async def test_platform_proven_preacceptance_503_is_safe_rejection(configured, c
 
 
 @pytest.mark.asyncio
-async def test_sync_image_archive_failure_keeps_original_charge_and_id(configured, monkeypatch):
+@pytest.mark.parametrize("recover_existing", [False, True])
+async def test_async_image_resume_preserves_charge_on_archive_failure(configured, monkeypatch, recover_existing):
     billing = {"status": "settled", "points": "2.50"}
-    body = {"data": [{"url": "https://example.test/image.png"}], "billing": billing, "usage": {"total_tokens": 7}}
-    response = httpx.Response(200, json=body, headers={"x-job-id": "upstream-image", "x-request-id": "original-request"})
+    body = {
+        "status": "succeeded",
+        "result": {"media": [{"url": "https://example.test/image.png"}]},
+        "billing": billing,
+        "usage": {"total_tokens": 7},
+    }
+    calls = []
+
+    def handle(request):
+        calls.append(request)
+        if request.method == "POST":
+            assert not recover_existing
+            assert b'"images"' not in request.content
+            raise httpx.ReadTimeout("response lost", request=request)
+        if request.url.path == "/v1/jobs/lookup":
+            assert request.url.params["idempotency_key"] == "uncertain-archive:image"
+            return httpx.Response(200, json={"id": "upstream-image", "model": "gpt-image-2"})
+        assert request.url.path == "/v1/jobs/upstream-image"
+        return httpx.Response(200, json=body)
+
+    async def persist(job, provider, task_id, **kwargs):
+        job.provider_task_id = task_id
+
     original = httpx.AsyncClient
-    post = []
-
-    def submit(request):
-        post.append(request)
-        return response
-
-    monkeypatch.setattr(aio.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(submit), **kw))
-    for name in ("mark_provider_submitting", "record_provider_request", "record_provider_response", "set_provider_task"):
+    monkeypatch.setattr(aio.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handle), **kw))
+    for name in ("mark_provider_submitting", "record_provider_request", "record_provider_response", "update_progress"):
         monkeypatch.setattr(jobs, name, AsyncMock())
+    monkeypatch.setattr(jobs, "set_provider_task", persist)
+    monkeypatch.setattr("app.image_failover.record_outcome", AsyncMock())
     monkeypatch.setattr("app.storage.import_remote_image", AsyncMock(side_effect=RuntimeError("mocked archive offline")))
     job = Job(id="uncertain-archive", kind="image", user_id="owner", request={"_providerModelId": "gpt-image-2"})
-    with pytest.raises(ProviderSubmissionUncertainError) as raised:
+    if recover_existing:
+        job.idempotency_key = "uncertain-archive:image"
+    with pytest.raises(RuntimeError, match="mocked archive offline") as raised:
         await aio.generate(ImageGenerationCreate(model="gpt-image-2-all-in-one", prompt="test"), job)
     error = raised.value
     assert (error.requires_reconciliation, error.provider, error.request_id) == (True, "all-in-one", "upstream-image")
     assert error.usage == {"total_tokens": 7, "platformBilling": billing}
-    assert len(post) == 1
-    jobs.record_provider_response.assert_awaited_once_with(job, "submission", {"jobId": "upstream-image", "requestId": "original-request", "usage": error.usage})
+    assert [call.method for call in calls] == (["GET", "GET"] if recover_existing else ["POST", "GET", "GET"])
 
 
 @pytest.mark.asyncio

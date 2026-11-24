@@ -1,3 +1,4 @@
+import { imageRecoveryActions } from '../../src/utils/imageGenerationRecovery'
 import { describe, expect, it, vi } from 'vitest'
 import { generateScene, generateShotVideo } from '../../src/api/mediaGen'
 import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL } from '../../src/generationModels'
@@ -166,6 +167,52 @@ describe('media generation API client', () => {
         jsonResponse({ id: 'job-failed', status: 'failed', progress: 5, error: 'provider denied' }),
       )
 
-    await expect(generateScene('test')).rejects.toThrow('provider denied')
+    const pending = expect(generateScene('test')).rejects.toThrow('provider denied')
+    await vi.waitFor(() => expect(imageRecoveryActions.get('job-failed')?.label).toBe('重新生成'))
+    imageRecoveryActions.get('job-failed')?.dismiss?.()
+    await pending
   })
+})
+
+it('refreshes an overdue image using the original job ID', async () => {
+  const { waitForRecoverableImage } = await import('../../src/utils/imageGenerationRecovery')
+  const fetchMock = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(jsonResponse([{ id: 'slow-image', status: 'running' }]))
+    .mockResolvedValueOnce(
+      jsonResponse([{ id: 'slow-image', status: 'succeeded', result: { urls: ['/done.png'] } }]),
+    )
+  const pending = waitForRecoverableImage('slow-image', (job) => job.result, { timeoutMs: 1 })
+  await vi.waitFor(() => expect(imageRecoveryActions.get('slow-image')?.label).toBe('刷新状态'))
+  imageRecoveryActions.get('slow-image')?.run()
+  await expect(pending).resolves.toEqual({ urls: ['/done.png'] })
+  expect(
+    fetchMock.mock.calls.slice(0, 2).map(([, request]) => JSON.parse(String(request?.body))),
+  ).toEqual([{ ids: ['slow-image'] }, { ids: ['slow-image'] }])
+})
+
+it('creates a second image job only after an explicit retry of a confirmed failure', async () => {
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, request) => {
+    if (String(url).endsWith('/generations/observed')) return jsonResponse({ ok: true })
+    if (String(url).endsWith('/generations/images'))
+      return jsonResponse({
+        id: submissions().length === 1 ? 'first-image' : 'second-image',
+        status: 'queued',
+      })
+    const id = JSON.parse(String(request?.body)).ids[0]
+    return jsonResponse([
+      id === 'first-image'
+        ? { id, status: 'failed', error: '平台明确拒绝' }
+        : { id, status: 'succeeded', result: { urls: ['/done.png'] } },
+    ])
+  })
+  const submissions = () =>
+    fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/generations/images'))
+  const pending = generateScene('retryable prompt')
+  await vi.waitFor(() => expect(imageRecoveryActions.get('first-image')?.label).toBe('重新生成'))
+  expect(submissions()).toHaveLength(1)
+  imageRecoveryActions.get('first-image')?.run()
+  await expect(pending).resolves.toMatchObject({ imageUrl: '/done.png' })
+  expect(submissions()).toHaveLength(2)
+  expect(submissions()[1][1]?.body).toBe(submissions()[0][1]?.body)
 })

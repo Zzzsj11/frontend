@@ -65,6 +65,7 @@ async function mockApp(page: Page) {
     apiCalls: [] as string[],
     jobs: [] as Job[],
     generationStatus: 'succeeded' as Job['status'],
+    manualReview: false,
     createGate: null as Promise<void> | null,
     patchGate: null as Promise<void> | null,
     failAvatarPatch: false,
@@ -173,6 +174,7 @@ async function mockApp(page: Page) {
             thumbnailUrls: [`${MEDIA}/${id}-thumbnail.svg`],
           },
           ...(state.generationStatus === 'failed' ? { error: '模拟生成失败，请重试' } : {}),
+          ...(state.manualReview ? { phase: 'manual_review' } : {}),
         })
         return json({ id, status: 'queued', progress: 0, prompt: PROMPT }, 202)
       }
@@ -182,6 +184,12 @@ async function mockApp(page: Page) {
         expect(headers['x-polling']).toBe('1')
         expect(ids.every((id) => state.jobs.some((job) => job.id === id))).toBe(true)
         return json(state.jobs.filter((job) => ids.includes(job.id)))
+      }
+      if (method === 'POST' && path.endsWith('/check-image')) {
+        const job = state.jobs.find((item) => path === `/api/generations/${item.id}/check-image`)
+        expect(job).toBeDefined()
+        Object.assign(job!, { status: 'succeeded', phase: 'succeeded' })
+        return json(job)
       }
       if (method === 'POST' && path === '/api/generations/observed') return json({ ok: true })
       if (method === 'POST' && path === '/api/generations/images/portrait-prompt')
@@ -560,6 +568,10 @@ test('生成失败保留名称、分类、身份特征和参考预览，可原�
   await fillUpload(library, '失败重试人物', '银发、椭圆脸')
   const preview = await library.getByAltText('头像预览').getAttribute('src')
   await library.getByRole('button', { name: '添加到资产库' }).click()
+  await page
+    .getByRole('complementary', { name: '图片生成状态' })
+    .getByRole('button', { name: '取消' })
+    .click()
   await expect(library.getByRole('alert')).toHaveText('模拟生成失败，请重试')
   await expect(library.getByPlaceholder('人物名称（必填）')).toHaveValue('失败重试人物')
   await expect(library.getByPlaceholder('风格分类（必填）')).toHaveValue(STYLE)
@@ -584,4 +596,20 @@ test('生成失败保留名称、分类、身份特征和参考预览，可原�
   expect(mock.creates).toHaveLength(1)
   await expect(library.locator('.cast-label')).toHaveText('当前阵容（0）：')
   await expect(page.getByRole('alertdialog')).toHaveCount(0)
+})
+
+test('图片结果待核对时查原任务，恢复同一张大头照', async ({ page }) => {
+  const mock = await mockApp(page)
+  mock.generationStatus = 'failed'
+  mock.manualReview = true
+  await login(page, mock.runId)
+  const library = await openLibrary(page)
+  await fillUpload(library, '恢复原图', '青年，黑发')
+  await library.getByRole('button', { name: '添加到资产库' }).click()
+  const status = page.getByRole('complementary', { name: '图片生成状态' })
+  await expect(status.getByRole('button', { name: '重新生成' })).toHaveCount(0)
+  await status.getByRole('button', { name: '查询原任务' }).click()
+  await expect(cardNamed(library, '恢复原图')).toBeVisible()
+  expect(mock.generations).toHaveLength(1)
+  expect(mock.creates[0]).toMatchObject({ source_job_id: mock.jobs[0]!.id })
 })

@@ -4,6 +4,7 @@ import { isH3VideoModel } from '../generationModels'
 import { DEFAULT_H3_MODE } from '../mediaConstraints'
 import { ApiError } from '../errorBus'
 import { apiRequest } from './client'
+import { runImageGeneration, waitForRecoverableImage } from '../utils/imageGenerationRecovery'
 import { watchGenerationJob, type GenerationJobSnapshot } from '../utils/generationPoller'
 
 interface GenerationJob<T = Record<string, unknown>> {
@@ -51,24 +52,36 @@ export async function generateScene(
   resolution: NonNullable<ShotGenOptions['imageResolution']> = '1K',
   signal?: AbortSignal,
 ): Promise<{ imageUrl: string; thumbnailUrl?: string }> {
-  const job = await request<GenerationJob>('/generations/images', {
-    method: 'POST',
-    body: JSON.stringify({
-      prompt,
-      size: ratio,
-      resolution,
-      n: 1,
-      model,
-      purpose: 'scene',
-      project_task_id: projectTaskId,
-      storyboard_line_id: storyboardLineId,
-    }),
-  })
-  const result = await waitForJob<{ urls: string[]; thumbnailUrls?: string[] }>(job.id, 660_000, {
-    signal,
-  })
-  if (!result.urls?.[0]) throw new Error('场景生成成功但没有图片')
-  return { imageUrl: result.urls[0], thumbnailUrl: result.thumbnailUrls?.[0] }
+  const target = prompt ? `场景图 · ${prompt.slice(0, 40)}` : '场景图'
+  return runImageGeneration(
+    () =>
+      request<GenerationJob>('/generations/images', {
+        method: 'POST',
+        body: JSON.stringify({
+          prompt,
+          size: ratio,
+          resolution,
+          n: 1,
+          model,
+          purpose: 'scene',
+          project_task_id: projectTaskId,
+          storyboard_line_id: storyboardLineId,
+        }),
+      }),
+    (job) =>
+      waitForRecoverableImage(
+        job.id,
+        (snapshot) => {
+          const result = snapshot.result as
+            { urls?: string[]; thumbnailUrls?: string[] } | undefined
+          const imageUrl = result?.urls?.[0]
+          if (!imageUrl) throw new Error('场景生成成功但没有图片')
+          return { imageUrl, thumbnailUrl: result.thumbnailUrls?.[0] }
+        },
+        { signal, target },
+      ),
+    { signal, target },
+  )
 }
 
 export async function generateShotVideo(

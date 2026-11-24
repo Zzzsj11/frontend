@@ -472,7 +472,7 @@ class ProviderPollScheduler:
                     now = time.monotonic()
                     for job_id, entry in list(self._entries.items()):
                         if now >= entry.deadline:
-                            self._finish_error(job_id, ProviderError(entry.timeout_error))
+                            self._finish_observation_error(entry, entry.timeout_error)
                     batch = self._take_batch()
                     if batch:
                         results = await asyncio.gather(*(self._query_one(client, entry) for entry in batch), return_exceptions=True)
@@ -506,7 +506,7 @@ class ProviderPollScheduler:
         except Exception as exc:
             entry.consecutive_errors += 1
             if entry.consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS:
-                self._finish_error(job_id, ProviderError(f"查询生成状态连续失败：{str(exc)[:500]}"))
+                self._finish_observation_error(entry, f"查询生成状态连续失败：{str(exc)[:500]}")
             else:
                 self._queue.append(job_id)
             return
@@ -521,6 +521,12 @@ class ProviderPollScheduler:
             self._finish_error(job_id, _task_failure(data, status))
             return
         self._queue.append(job_id)
+
+    def _finish_observation_error(self, entry: _ScheduledPoll, message: str) -> None:
+        error = ProviderError(message)
+        if entry.job.kind == "image" and entry.job.provider_task_id:
+            error.requires_reconciliation = True
+        self._finish_error(entry.job.id, error)
 
     def _finish_result(self, job_id: str, data: dict[str, Any]) -> None:
         entry = self._entries.pop(job_id, None)
@@ -1920,6 +1926,36 @@ async def query_provider_task(kind: str, task_id: str, provider: str | None = No
         raise ProviderError(f"不支持的任务类型：{kind}")
     async with httpx.AsyncClient(timeout=60) as client:
         return await _query_task(client, url, headers)
+
+
+async def check_existing_image(job: Job) -> dict[str, Any]:
+    """Check a submitted image exactly once, then deliver only confirmed results."""
+    validate_media_job_source(job)
+    try:
+        data = await query_provider_task("image", job.provider_task_id or "", job.provider)
+    except Exception as exc:
+        error = ProviderError("平台状态暂不可查，请核查原任务")
+        error.requires_reconciliation = True
+        raise error from exc
+    status = str(data.get("status") or "").upper()
+    if status in {"SUCCESS", "SUCCEEDED", "COMPLETED"}:
+        await jobs.record_provider_response(job, "terminal", data)
+        try:
+            return await store_provider_result(job, data)
+        except Exception as exc:
+            exc.requires_reconciliation = True
+            exc.provider, exc.request_id = job.provider, job.provider_task_id
+            exc.usage = data.get("usage") or {}
+            raise
+    if status in {"FAILED", "CANCELLED", "CANCELED"} or "FAIL" in status:
+        await jobs.record_provider_response(job, "terminal", data)
+        error = _task_failure(data, status)
+        error.provider, error.request_id = job.provider, job.provider_task_id
+        error.usage = data.get("usage") or {}
+        raise error
+    error = ProviderError("原图片任务尚未返回结果，请稍后查询原任务")
+    error.requires_reconciliation = True
+    raise error
 
 
 async def store_provider_result(job: Job, data: dict[str, Any]) -> dict[str, Any]:

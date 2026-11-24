@@ -4,6 +4,7 @@ import {
   isTopModal,
   isStackedModal,
   registerModal,
+  setModalPanel,
   unregisterModal,
 } from '../../composables/useModalStack'
 import AppIcon from '../AppIcon.vue'
@@ -96,6 +97,7 @@ watch(
   },
   { immediate: true },
 )
+watch(panel, (element) => setModalPanel(modalId, element))
 onBeforeUnmount(() => {
   unregisterModal(modalId)
   window.removeEventListener('keydown', onKeydown)

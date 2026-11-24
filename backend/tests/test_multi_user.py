@@ -690,3 +690,59 @@ def test_storyboard_line_generation_per_user_concurrency_limit(client, monkeypat
     blocked = client.post(f"/api/tasks/{task_id}/storyboard-lines/{line_id}/generate", headers=headers, json={})
     assert blocked.status_code == 429
     assert "上限" in blocked.json()["detail"]
+
+
+def test_only_owner_can_check_original_image_and_lookup_never_creates_a_job(client, monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    import httpx
+
+    from app import all_in_one
+    from app.database import session_factory
+    from app.jobs import jobs
+    from app.models import GenerationJobModel
+    from app.providers import check_existing_image
+
+    owner, headers = create_and_login_user(client, "image-check-owner")
+    _, outsider = create_and_login_user(client, "image-check-outsider")
+    job_id = "original-image-check"
+    key = f"{job_id}:image"
+
+    async def insert():
+        async with session_factory() as db:
+            db.add(
+                GenerationJobModel(
+                    id=job_id,
+                    kind="image",
+                    status="failed",
+                    phase="manual_review",
+                    user_id=owner,
+                    provider="all-in-one",
+                    idempotency_key=key,
+                    request={"model": "gpt-image-2-all-in-one", "_provider": "all-in-one"},
+                )
+            )
+            await db.commit()
+
+    asyncio.run(insert())
+    dispatch = AsyncMock()
+    lookup = AsyncMock(side_effect=[None, httpx.Response(200, json={"id": "original-platform-image"})])
+    monkeypatch.setattr(jobs, "dispatch", dispatch)
+    monkeypatch.setattr(all_in_one, "_lookup_submission", lookup)
+    endpoint = f"/api/generations/{job_id}/check-image"
+
+    assert client.post(endpoint, headers=outsider).status_code == 404
+    lookup.assert_not_called()
+    assert client.post(endpoint, headers=headers).json()["phase"] == "manual_review"
+    dispatch.assert_not_called()
+    found = client.post(endpoint, headers=headers)
+    assert found.status_code == 200
+    assert found.json()["id"] == job_id
+    assert found.json()["provider_task_id"] == "original-platform-image"
+    assert lookup.await_args.args[1]["Idempotency-Key"] == key
+    dispatched, runner = dispatch.await_args.args
+    assert dispatched.id == job_id
+    assert runner is check_existing_image
+    assert client.post(endpoint, headers=headers).json()["status"] == "queued"
+    dispatch.assert_awaited_once()

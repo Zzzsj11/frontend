@@ -71,6 +71,8 @@ export const mediaActions = {
         still.scene.status = 'failed'
         still.scene.error = reported.message
       }
+    } finally {
+      watcher?.abort()
     }
   },
 

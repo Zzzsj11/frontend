@@ -5,6 +5,7 @@ import ScriptEditor from './components/ScriptEditor.vue'
 import PlayerPanel from './components/PlayerPanel.vue'
 import TimelinePanel from './components/TimelinePanel.vue'
 import AssetLibrary from './components/AssetLibrary.vue'
+import ImageRecoveryActions from './components/ImageRecoveryActions.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 
 const DEFAULT_SIDEBAR_WIDTH = 232
@@ -69,6 +70,7 @@ onBeforeUnmount(stopSidebarResize)
     <TimelinePanel class="area-timeline" />
     <AssetLibrary />
     <ConfirmDialog />
+    <ImageRecoveryActions />
   </div>
 </template>
 

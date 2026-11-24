@@ -43,7 +43,12 @@ def _timestamp(value: datetime | float) -> float:
 
 
 def needs_provider_reconciliation(job) -> bool:
-    return job.phase in {"manual_review", "auto_reconciling"} or (job.status == "failed" and bool(job.provider_task_id) and "核查原任务" in (job.error or ""))
+    if job.phase in {"manual_review", "auto_reconciling"}:
+        return True
+    if job.status != "failed" or not job.provider_task_id:
+        return False
+    error = job.error or ""
+    return "核查原任务" in error or (job.kind == "image" and ("生成超过10分钟" in error or error.startswith("查询生成状态连续失败")))
 
 
 def automatic_reconciliation(job) -> bool:
@@ -387,8 +392,9 @@ class JobManager:
         except ExecutionStoreUnavailable as exc:
             job.status, job.phase, job.error = "failed", "failed", str(exc)
         except asyncio.CancelledError:
-            if job.kind == "video" and (job.provider_task_id or job.phase == "submitting_provider"):
-                job.status, job.phase, job.error = "failed", "manual_review", "视频执行中断，请核查原任务"
+            if job.kind in {"image", "video"} and (job.provider_task_id or job.phase == "submitting_provider"):
+                media_name = "图片" if job.kind == "image" else "视频"
+                job.status, job.phase, job.error = "failed", "manual_review", f"{media_name}执行中断，请核查原任务"
             else:
                 job.status, job.phase = "cancelled", "cancelled"
             raise

@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Annotated, Literal
 
+import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -832,6 +833,20 @@ async def create_image_generation(payload: ImageGenerationCreate, user: CurrentU
     payload.images = [await store_inline_reference(reference, user.id) for reference in payload.images]
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
     await db.execute(select(UserModel.id).where(UserModel.id == user.id).with_for_update())
+    if line_id and payload.purpose == "scene":
+        existing = await db.scalar(
+            select(GenerationJobModel)
+            .where(
+                GenerationJobModel.user_id == user.id,
+                GenerationJobModel.storyboard_line_id == line_id,
+                GenerationJobModel.kind == "image",
+                GenerationJobModel.deleted_at.is_(None),
+            )
+            .order_by(GenerationJobModel.created_at.desc())
+            .limit(1)
+        )
+        if existing and (existing.status in {"queued", "running"} or needs_provider_reconciliation(existing)):
+            return jobs._from_model(existing).public()
     await _check_concurrency(db, user.id, "image", settings.image_generation_concurrency)
     await consume_daily_quota(db, user_id=user.id, category="image", commit=False)
     job = await jobs.enqueue(
@@ -1142,6 +1157,56 @@ async def get_generation(job_id: str, user: CurrentUser) -> dict:
     if not job:
         raise HTTPException(404, "生成任务不存在")
     return job.public()
+
+
+@app.post("/api/generations/{job_id}/check-image")
+async def check_image_generation(job_id: str, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
+    """Resume a known supplier task without submitting or consuming quota."""
+    from . import all_in_one
+    from .agent_attribution import attribution_context
+    from .providers import check_existing_image
+
+    owned = select(GenerationJobModel).where(
+        GenerationJobModel.id == job_id,
+        GenerationJobModel.user_id == user.id,
+        GenerationJobModel.kind == "image",
+        GenerationJobModel.deleted_at.is_(None),
+    )
+    row = await db.scalar(owned)
+    if row is None:
+        raise HTTPException(404, "图片生成任务不存在")
+    job = jobs._from_model(row)
+    if job.status != "failed" or not needs_provider_reconciliation(job):
+        return job.public()
+    task_id = job.provider_task_id
+    provider = job.provider or (job.request or {}).get("_provider")
+    if not task_id and provider == all_in_one.PROVIDER and job.idempotency_key:
+        async with httpx.AsyncClient(timeout=8) as client:
+            request = job.request or {}
+            model = request.get("_providerModelId") or all_in_one.upstream_model(request.get("model", ""))
+
+            with attribution_context(row.generation_origin or "business", row.agent_name or "", row.agent_run_id or ""):
+                headers = all_in_one.headers(user_id=job.user_id, idempotency_key=job.idempotency_key)
+                found = await all_in_one._lookup_submission(client, headers, model)
+            task_id = found.json()["id"] if found is not None else None
+    if not task_id:
+        return job.public()
+
+    row = await db.scalar(owned.with_for_update().execution_options(populate_existing=True))
+    if row is None:
+        raise HTTPException(404, "图片生成任务不存在")
+    if row.status != "failed" or not needs_provider_reconciliation(row):
+        return jobs._from_model(row).public()
+    row.provider = provider
+    row.provider_task_id = task_id
+    row.status, row.phase, row.error = "queued", "queued", None
+    row.request = {**(row.request or {}), "_checkOriginalImage": True}
+    row.finished_at = None
+    row.worker_id = row.heartbeat_at = row.lease_expires_at = None
+    recovered = jobs._from_model(row)
+    await db.commit()
+    await jobs.dispatch(recovered, check_existing_image)
+    return recovered.public()
 
 
 @app.post("/api/generations/status")

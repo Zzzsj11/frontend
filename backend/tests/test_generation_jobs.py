@@ -1085,7 +1085,7 @@ async def test_worker_requeues_replayable_storyboard_job_with_bounded_attempts(c
     from app.worker import _recover_stale
 
     stale = datetime.now(timezone.utc) - timedelta(minutes=10)
-    _insert_job("job-ass-replay", kind="ass_outline", status="running", updated_at=stale)
+    await asyncio.to_thread(_insert_job, "job-ass-replay", kind="ass_outline", status="running", updated_at=stale)
 
     resumed, failed = await _recover_stale(("ass_outline",), ())
 

@@ -1,7 +1,8 @@
 /** 图片生成由 Python 后端代理，第三方密钥不会再暴露到浏览器。 */
 
 import { apiRequest } from './client'
-import { watchGenerationJob, type GenerationJobSnapshot } from '../utils/generationPoller'
+import type { GenerationJobSnapshot } from '../utils/generationPoller'
+import { runImageGeneration, waitForRecoverableImage } from '../utils/imageGenerationRecovery'
 
 export interface ImageTaskOptions {
   /** WIDTHxHEIGHT；后端转换为 ToAPIs 支持的画幅比例。 */
@@ -58,6 +59,7 @@ export interface WaitForImageOptions {
   intervalMs?: number
   timeoutMs?: number
   signal?: AbortSignal
+  target?: string
 }
 
 // 后端在供应商受理满10分钟时判失败；前端多留一分钟给最后一次状态轮询和结果解析，
@@ -71,27 +73,25 @@ export async function waitForImageAsset(
     intervalMs: _intervalMs = 3000,
     timeoutMs = DEFAULT_IMAGE_WAIT_TIMEOUT_MS,
     signal,
+    target = '数字人大头照',
   }: WaitForImageOptions = {},
 ): Promise<{ url: string; thumbnailUrl?: string }> {
   void _intervalMs // 周期由统一调度器管理，保留参数仅为兼容旧调用签名
-  return watchGenerationJob<{ url: string; thumbnailUrl?: string }>(taskId, {
-    signal,
-    timeoutMs,
-    failureMessage: '图片生成失败',
-    timeoutMessage: '图片生成超时，请稍后重试',
-    select: (snapshot: GenerationJobSnapshot) => {
+  return waitForRecoverableImage(
+    taskId,
+    (snapshot: GenerationJobSnapshot) => {
       const result = snapshot.result as { urls?: string[]; thumbnailUrls?: string[] } | undefined
       const url = result?.urls?.[0]
       if (!url) throw new Error('任务成功但未返回图片地址')
       return { url, thumbnailUrl: result?.thumbnailUrls?.[0] }
     },
-  })
+    { signal, timeoutMs, target },
+  )
 }
 
 /** 一步到位：发起任务并轮询取回图片地址 */
 export async function generateImage(prompt: string, options?: ImageTaskOptions): Promise<string> {
-  const task = await createImageTask(prompt, options)
-  return (await waitForImageAsset(task.id)).url
+  return (await generateImageAsset(prompt, options)).url
 }
 
 export async function generateImageAsset(
@@ -99,10 +99,17 @@ export async function generateImageAsset(
   options?: ImageTaskOptions,
   onTaskCreated?: (taskId: string) => void,
 ): Promise<{ url: string; thumbnailUrl?: string; prompt?: string }> {
-  const task = await createImageTask(prompt, options)
-  onTaskCreated?.(task.id)
-  const asset = await waitForImageAsset(task.id)
-  return { ...asset, prompt: task.prompt }
+  const description = options?.portrait?.description || prompt
+  const target = description ? `数字人大头照 · ${description.slice(0, 40)}` : '数字人大头照'
+  return runImageGeneration(
+    async () => {
+      const task = await createImageTask(prompt, options)
+      onTaskCreated?.(task.id)
+      return task
+    },
+    async (task) => ({ ...(await waitForImageAsset(task.id, { target })), prompt: task.prompt }),
+    { target },
+  )
 }
 
 /** 按后端注册中心模板拼装定妆照提示词（不调模型；草稿恢复与重生兜底用） */

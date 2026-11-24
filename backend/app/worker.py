@@ -19,7 +19,7 @@ from .database import close_database, init_database, session_factory
 from .domain import _run_material_export, run_storyboard_job
 from .jobs import Job, durable_pool_available, jobs
 from .models import GenerationJobModel, ProjectTaskModel, WorkerInstanceModel, utcnow
-from .providers import ProviderError, generate_image, generate_video, resume_generation, validate_media_job_source
+from .providers import ProviderError, check_existing_image, generate_image, generate_video, resume_generation, validate_media_job_source
 from .redis_store import ExecutionStoreUnavailable, acquire_execution_lease, close_redis, release_execution_lease, wait_for_worker_wakeup
 from .schemas import ImageGenerationCreate, VideoGenerationCreate
 
@@ -332,6 +332,8 @@ def _runner(job: Job):
     request = dict(job.request or {})
     public_request = {key: value for key, value in request.items() if not key.startswith("_")}
     if job.provider_task_id:
+        if job.kind == "image" and request.get("_checkOriginalImage"):
+            return check_existing_image
         return resume_generation
     if job.kind == "image":
         payload = ImageGenerationCreate.model_validate(public_request)
