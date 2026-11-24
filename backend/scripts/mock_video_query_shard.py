@@ -6,6 +6,7 @@ import json
 import os
 import time
 from collections import Counter
+from contextlib import AsyncExitStack
 from contextvars import ContextVar
 from pathlib import Path
 
@@ -119,16 +120,31 @@ async def measure_window(run, start, shard, count, path, jobs):
 
     first = time.monotonic() + start - time.time()
     pacer = WirePacer(count, first + SECONDS)
-    limits = httpx.Limits(max_connections=32, max_keepalive_connections=32, keepalive_expiry=SECONDS + 5)
-    async with httpx.AsyncClient(timeout=5, event_hooks={"request": [instrument]}, limits=limits) as client:
-        token = all_in_one._poll_client.set(client)
+    # Lease a single-connection client before entering HTTPX. Concurrent
+    # requests cannot queue behind a paced request on the same HTTP/1 socket.
+    limits = httpx.Limits(max_connections=1, max_keepalive_connections=1, keepalive_expiry=SECONDS + 5)
+    async with AsyncExitStack() as stack:
+        available = asyncio.Queue()
+        tls = httpx.create_ssl_context()
+        for _ in range(32):
+            client = httpx.AsyncClient(timeout=5, verify=tls, event_hooks={"request": [instrument]}, limits=limits)
+            available.put_nowait(await stack.enter_async_context(client))
+
+        async def query(jid):
+            client = await available.get()
+            token = all_in_one._poll_client.set(client)
+            try:
+                return await all_in_one.query_task("video", jid)
+            finally:
+                all_in_one._poll_client.reset(token)
+                available.put_nowait(client)
 
         async def read(i, due):
             scheduled.set(due)
             jid, req = jobs[i % len(jobs)]
             offsets.append(round((time.monotonic() - first) * 1000, 2))
             try:
-                row = await all_in_one.query_task("video", jid)
+                row = await query(jid)
                 check({**row, "status": row["status"].lower()}, req["model"], jid)
                 samples.append(round((time.monotonic() - due) * 1000, 3))
                 ids.add(jid)
@@ -141,7 +157,10 @@ async def measure_window(run, start, shard, count, path, jobs):
                 errors[str(status or type(exc).__name__)] += 1
 
         try:
-            await asyncio.gather(*(all_in_one.query_task("video", j) for j, _ in jobs[shard * 12 : shard * 12 + 12]))
+            for batch in range(4):
+                warm = [(shard * 32 + batch * 8 + n) % len(jobs) for n in range(8)]
+                await asyncio.gather(*(query(jobs[n][0]) for n in warm))
+                await asyncio.sleep(0.08)
             wire_offsets.clear()
             if time.monotonic() >= first:
                 raise RuntimeError("missed coordinated start")
@@ -181,7 +200,6 @@ async def measure_window(run, start, shard, count, path, jobs):
                 if pending:
                     await asyncio.gather(*pending, return_exceptions=True)
         finally:
-            all_in_one._poll_client.reset(token)
             path.write_text(
                 json.dumps(
                     dict(
