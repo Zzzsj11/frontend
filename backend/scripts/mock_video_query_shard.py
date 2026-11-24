@@ -6,7 +6,6 @@ import json
 import os
 import time
 from collections import Counter
-from contextlib import AsyncExitStack
 from contextvars import ContextVar
 from pathlib import Path
 
@@ -19,9 +18,6 @@ from app.database import session_factory
 from app.models import GenerationJobModel
 from scripts.mock_video_acceptance import HOST, QPS, SECONDS, check
 
-DISPATCH_LEAD = 0.080
-CLIENT_LANES = 4
-CONNECTIONS_PER_LANE = 16
 MAX_DISPATCH_LAG = 0.050
 MAX_PENDING = 96
 
@@ -34,27 +30,33 @@ class WirePacer:
     def __init__(self, shard_count, end):
         # Each shard owns every Nth nominal slot. Allow a bounded catch-up
         # margin after jitter without draining a queue of prepared connections at once.
-        self.interval = shard_count / QPS
-        self.recovery_interval = self.interval * 0.96
-        self.min_gap = self.interval * 0.75
+        interval = shard_count / QPS
+        self.recovery_interval = 0.99 * interval
+        self.credit = 5 * self.recovery_interval
+        self.min_gap = interval / 8
+        self.virtual_time = 0.0
         self.next_send = 0.0
         self.end = end
         self.lock = asyncio.Lock()
 
     async def wait(self, due):
+        # A later request whose connection is ready first must not hold the
+        # shard lock while an earlier slot is still waiting to send.
+        now = time.monotonic()
+        if now < due:
+            await asyncio.sleep(due - now)
         async with self.lock:
-            target = max(due, self.next_send)
+            target = max(due, self.next_send, self.virtual_time - self.credit)
             if target >= self.end:
                 raise WindowClosed
             now = time.monotonic()
             while now < target:
-                await asyncio.sleep(max(target - now, 0.0005))
+                await asyncio.sleep(max(target - now, 0.001))
                 now = time.monotonic()
             if now >= self.end:
                 raise WindowClosed
-            # Retain the absolute phase across small timer overshoots; a long
-            # stall can earn at most a quarter-slot of timer credit.
-            self.next_send = max(target + self.recovery_interval, now + self.min_gap)
+            self.virtual_time = max(now, self.virtual_time) + self.recovery_interval
+            self.next_send = now + self.min_gap
 
 
 def skip_reason(lag, pending):
@@ -117,23 +119,16 @@ async def measure_window(run, start, shard, count, path, jobs):
 
     first = time.monotonic() + start - time.time()
     pacer = WirePacer(count, first + SECONDS)
-    async with AsyncExitStack() as stack:
-        limits = httpx.Limits(max_connections=CONNECTIONS_PER_LANE, max_keepalive_connections=CONNECTIONS_PER_LANE, keepalive_expiry=SECONDS + 5)
-        clients = [await stack.enter_async_context(httpx.AsyncClient(timeout=5, event_hooks={"request": [instrument]}, limits=limits)) for _ in range(CLIENT_LANES)]
-
-        async def query(jid, ordinal):
-            token = all_in_one._poll_client.set(clients[ordinal % CLIENT_LANES])
-            try:
-                return await all_in_one.query_task("video", jid)
-            finally:
-                all_in_one._poll_client.reset(token)
+    limits = httpx.Limits(max_connections=32, max_keepalive_connections=32, keepalive_expiry=SECONDS + 5)
+    async with httpx.AsyncClient(timeout=5, event_hooks={"request": [instrument]}, limits=limits) as client:
+        token = all_in_one._poll_client.set(client)
 
         async def read(i, due):
             scheduled.set(due)
             jid, req = jobs[i % len(jobs)]
             offsets.append(round((time.monotonic() - first) * 1000, 2))
             try:
-                row = await query(jid, i // count)
+                row = await all_in_one.query_task("video", jid)
                 check({**row, "status": row["status"].lower()}, req["model"], jid)
                 samples.append(round((time.monotonic() - due) * 1000, 3))
                 ids.add(jid)
@@ -146,14 +141,16 @@ async def measure_window(run, start, shard, count, path, jobs):
                 errors[str(status or type(exc).__name__)] += 1
 
         try:
-            await asyncio.gather(*(query(j, k) for k, (j, _) in enumerate(jobs[shard * 16 : shard * 16 + 16])))
+            await asyncio.gather(*(all_in_one.query_task("video", j) for j, _ in jobs[shard * 12 : shard * 12 + 12]))
             wire_offsets.clear()
             if time.monotonic() >= first:
                 raise RuntimeError("missed coordinated start")
             pending = set()
-            for i in range(shard, QPS * SECONDS, count):
-                due = first + i / QPS
-                await asyncio.sleep(max(0, due - DISPATCH_LEAD - time.monotonic()))
+            loop = asyncio.get_running_loop()
+            dispatched = asyncio.Event()
+            final_slot = range(shard, QPS * SECONDS, count)[-1]
+
+            def dispatch(i, due):
                 lag = time.monotonic() - due
                 bucket = scheduling[i // QPS]
                 bucket["max_dispatch_lag_ms"] = max(bucket["max_dispatch_lag_ms"], round(lag * 1000, 3))
@@ -162,12 +159,29 @@ async def measure_window(run, start, shard, count, path, jobs):
                 if reason:
                     errors[reason] += 1
                     bucket[reason] += 1
-                    continue
-                task = asyncio.create_task(read(i, due))
-                pending.add(task)
-                task.add_done_callback(pending.discard)
-            await asyncio.gather(*pending)
+                else:
+                    task = asyncio.create_task(read(i, due))
+                    pending.add(task)
+                    task.add_done_callback(pending.discard)
+                if i == final_slot:
+                    dispatched.set()
+
+            # Register independent absolute deadlines. When the event loop is late,
+            # one missed timer cannot delay scheduling all the following slots.
+            loop_first = loop.time() + first - time.monotonic()
+            timers = [loop.call_at(loop_first + i / QPS, dispatch, i, first + i / QPS) for i in range(shard, QPS * SECONDS, count)]
+            try:
+                await dispatched.wait()
+                await asyncio.gather(*pending)
+            finally:
+                for timer in timers:
+                    timer.cancel()
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
         finally:
+            all_in_one._poll_client.reset(token)
             path.write_text(
                 json.dumps(
                     dict(

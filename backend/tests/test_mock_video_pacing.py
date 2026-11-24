@@ -17,7 +17,7 @@ def test_dispatch_misses_are_counted_once():
 async def test_queued_connections_cannot_burst_or_send_after_window(monkeypatch):
     # All three connections become ready 30 ms late at the same time.
     now = 10.030
-    end = now + 0.012
+    end = now + 0.0015
     pacer = shard.WirePacer(4, end)
 
     async def sleep(delay):
@@ -36,6 +36,25 @@ async def test_queued_connections_cannot_burst_or_send_after_window(monkeypatch)
     assert results[:2] == [None, None]
     assert isinstance(results[2], shard.WindowClosed)
     assert released[1] - released[0] == pytest.approx(pacer.min_gap)
+
+
+async def test_recovery_credit_bounds_aggregate_burst(monkeypatch):
+    now = 20.0
+    pacer = shard.WirePacer(4, now + 2)
+    releases = []
+
+    async def sleep(delay):
+        nonlocal now
+        now += delay
+
+    monkeypatch.setattr(shard, "time", SimpleNamespace(monotonic=lambda: now))
+    monkeypatch.setattr(shard, "asyncio", SimpleNamespace(sleep=sleep))
+    for _ in range(140):
+        await pacer.wait(19)
+        releases.append(now)
+    # Six immediate credits per shard, then one permit per recovery interval.
+    for i, sent in enumerate(releases[6:], 6):
+        assert sent >= 20 + (i - 5) * pacer.recovery_interval - 1e-9
 
 
 def test_aggregate_timing_uses_half_open_windows_and_reads_legacy_shards(tmp_path):
