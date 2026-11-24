@@ -438,23 +438,28 @@ test('remote API contract, authorization, isolation and soft-delete journey', as
       await json(await user.delete(`/api/digital-human-styles/${styleId}`))
       styleId = ''
       await json(await user.delete(`/api/projects/${projectId}`))
-      expect((await user.get(`/api/tasks/${taskId}`)).status()).toBe(404)
+      const missingPath = `/api/tasks/${taskId}`
+      const missing = await json<{ errorCode: string }>(await user.get(missingPath), 404)
+      expect(missing.errorCode).toMatch(/^ERR-[A-F0-9]+$/)
+      // Client errors are sampled per user and route. Verify this test user's
+      // own error once its asynchronous log write becomes visible.
+      let errorLogId = ''
+      await expect(async () => {
+        const errors = await json<{ items: { id: string; path: string; errorCode: string }[] }>(
+          await admin.get('/api/admin/api-errors?limit=100'),
+        )
+        const row = errors.items.find(
+          (item) => item.errorCode === missing.errorCode && item.path === missingPath,
+        )
+        errorLogId = row?.id || ''
+        expect(errorLogId).toBeTruthy()
+      }).toPass({ timeout: 10_000 })
+      await json(await admin.delete(`/api/admin/api-errors/${errorLogId}`))
       projectId = ''
       await json(await user.post('/api/auth/logout'))
     } finally {
       await user.dispose()
     }
-
-    const errorResponse = await admin.get(`/api/tasks/remote-e2e-missing-${runId}`)
-    expect(errorResponse.status()).toBe(404)
-    const errors = await json<{ items: { id: string; path: string }[] }>(
-      await admin.get('/api/admin/api-errors?limit=100'),
-    )
-    const createdError = errors.items.find((item) =>
-      item.path.includes(`remote-e2e-missing-${runId}`),
-    )
-    expect(createdError).toBeTruthy()
-    await json(await admin.delete(`/api/admin/api-errors/${createdError.id}`))
   } finally {
     if (testUserId) {
       const deletion = await admin.delete(`/api/admin/users/${testUserId}`)
