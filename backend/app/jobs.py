@@ -78,6 +78,7 @@ class Job:
     execution_lease: tuple[str, str] | None = None
     database_pool_reserved: bool = False
     attempt: int = 1
+    video_metadata_probed: bool = False
 
     def public(self) -> dict[str, Any]:
         return {
@@ -503,10 +504,11 @@ class JobManager:
                 requested,
                 request.get("_capabilities") if isinstance(request.get("_capabilities"), dict) else None,
             )
-            try:
-                job.result.update(await probe_video_url(str(job.result["videoUrl"])))
-            except Exception:
-                logger.exception("video metadata probe failed: job_id=%s", job.id)
+            if not job.video_metadata_probed:
+                try:
+                    job.result.update(await probe_video_url(str(job.result["videoUrl"])))
+                except Exception:
+                    logger.exception("video metadata probe failed: job_id=%s", job.id)
         async with session_factory() as session:
             model = await session.get(GenerationJobModel, job.id, with_for_update=True)
             if job.worker_id and (not model or model.worker_id != job.worker_id):

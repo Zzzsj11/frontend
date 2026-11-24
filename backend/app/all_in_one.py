@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import base64
+import logging
 import re
+import tempfile
 import uuid
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -15,6 +18,7 @@ from .config import settings
 
 PROVIDER = "all-in-one"
 SUFFIX = "-all-in-one"
+logger = logging.getLogger(__name__)
 
 
 def upstream_model(model: str) -> str:
@@ -74,8 +78,8 @@ async def query_task(kind: str, task_id: str, *, user_id: str | None = None) -> 
 
 
 async def store_result(job: Any, body: dict[str, Any]) -> dict[str, Any]:
-    from .providers import ProviderError, _video_first_frame
-    from .storage import import_remote, import_remote_image
+    from .providers import ProviderError
+    from .storage import import_remote_image
 
     data = normalized_task(body)
     urls = data["resultUrls"]
@@ -86,17 +90,42 @@ async def store_result(job: Any, body: dict[str, Any]) -> dict[str, Any]:
     if job.kind == "image":
         stored = [await import_remote_image(url, owner + "/images") for url in urls]
         return {**common, "urls": [p[0] for p in stored], "thumbnailUrls": [p[1] for p in stored], "sourceUrls": urls}
-    url = await import_remote(urls[0], owner + "/videos", filename=f"{job.id}.mp4")
-    cover, thumbnail = await _video_first_frame(url, job.id, job.user_id)
+    archived = await _archive_video(job, urls[0], owner)
     return {
         **common,
-        "videoUrl": url,
-        "coverUrl": cover,
-        "coverThumbnailUrl": thumbnail,
+        **archived,
         "sourceUrl": urls[0],
         "duration": (job.request or {}).get("duration"),
         "ratio": (job.request or {}).get("ratio"),
     }
+
+
+async def _archive_video(job: Any, source_url: str, owner: str) -> dict[str, Any]:
+    from .providers import extract_video_cover
+    from .storage import download_public_url_to_path, get_storage, image_thumbnail
+    from .video_metadata import probe_video_file, video_result_slots
+
+    async with video_result_slots:
+        with tempfile.TemporaryDirectory(prefix="mv-video-archive-") as directory:
+            video_path = Path(directory) / "source.mp4"
+            cover_path = Path(directory) / "cover.jpg"
+            _, content_type, size = await download_public_url_to_path(source_url, video_path)
+            await extract_video_cover(video_path, cover_path)
+            thumbnail = await image_thumbnail(cover_path, "image/jpeg")
+            try:
+                metadata = await probe_video_file(video_path)
+            except Exception:
+                logger.exception("video metadata probe failed: job_id=%s", job.id)
+                metadata = {"fileSize": size}
+
+            # Job-scoped keys let recovery finish a partial upload at the same destinations.
+            storage = get_storage()
+            video_url = await storage.put_file(f"{owner}/videos/{job.id}.mp4", video_path, content_type)
+            cover_url = await storage.put_file(f"{owner}/covers/{job.id}.jpg", cover_path, "image/jpeg")
+            thumbnail_url = await storage.put_bytes(f"{owner}/covers/{job.id}-thumbnail.jpg", thumbnail, "image/jpeg")
+
+    job.video_metadata_probed = True
+    return {**metadata, "videoUrl": video_url, "coverUrl": cover_url, "coverThumbnailUrl": thumbnail_url}
 
 
 async def generate(request: Any, job: Any) -> dict[str, Any]:

@@ -1962,32 +1962,36 @@ async def _video_first_frame(video_url: str, task_id: str, user_id: str | None) 
             await download_public_url_to_path(video_url, video_path)
         except (httpx.HTTPError, ValueError) as exc:
             raise ProviderError(f"下载视频以提取首帧失败：{exc}") from exc
-        from imageio_ffmpeg import get_ffmpeg_exe
-
-        process = await asyncio.create_subprocess_exec(
-            get_ffmpeg_exe(),
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-ss",
-            "0",
-            "-protocol_whitelist",
-            "file,pipe",
-            "-i",
-            str(video_path),
-            "-frames:v",
-            "1",
-            "-q:v",
-            "2",
-            str(cover_path),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await _communicate_bounded(process)
-        if process.returncode or not cover_path.is_file():
-            raise ProviderError(f"提取视频首帧失败：{stderr.decode(errors='replace')[:300]}")
+        await extract_video_cover(video_path, cover_path)
         return await put_image_with_thumbnail(safe_key(f"users/{user_id}/generated/covers", f"{task_id}.jpg"), cover_path.read_bytes(), "image/jpeg")
+
+
+async def extract_video_cover(video_path: Path, cover_path: Path) -> None:
+    from imageio_ffmpeg import get_ffmpeg_exe
+
+    process = await asyncio.create_subprocess_exec(
+        get_ffmpeg_exe(),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        "0",
+        "-protocol_whitelist",
+        "file,pipe",
+        "-i",
+        str(video_path),
+        "-frames:v",
+        "1",
+        "-q:v",
+        "2",
+        str(cover_path),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await _communicate_bounded(process)
+    if process.returncode or not cover_path.is_file():
+        raise ProviderError(f"提取视频首帧失败：{stderr.decode(errors='replace')[:300]}")
 
 
 async def _communicate_bounded(process, timeout_seconds: float = 60):
