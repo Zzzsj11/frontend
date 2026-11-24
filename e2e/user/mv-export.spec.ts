@@ -38,6 +38,9 @@ test('MV export shows progress, survives reload, retries and keeps ZIP separate'
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname
     if (!path.startsWith('/api/')) return route.continue()
+    if (path === '/api/material-exports/zip-1/download') {
+      return route.fulfill({ json: { url: 'https://storage.example/opaque.zip' } })
+    }
     if (path.endsWith('/video-exports')) {
       posts += 1
       return route.fulfill({ json: item, status: 202 })
@@ -101,7 +104,22 @@ test('MV export shows progress, survives reload, retries and keeps ZIP separate'
     'value',
     '42',
   )
-  await expect(page.getByRole('link', { name: '下载素材' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '下载素材' })).toBeVisible()
+  const filename = '流行歌曲-爱情消极-失恋.zip'
+  await page.route('https://storage.example/opaque.zip', (route) =>
+    route.fulfill({
+      headers: {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename=materials.zip; filename*=UTF-8''${encodeURIComponent(filename)}`,
+      },
+      body: Buffer.from('504b0506' + '00'.repeat(18), 'hex'),
+    }),
+  )
+  const received = page.waitForEvent('download')
+  await page.getByRole('button', { name: '下载素材' }).click()
+  const download = await received
+  expect(download.suggestedFilename()).toBe(filename)
+  expect(await download.failure()).toBeNull()
   item = {
     ...item,
     status: 'failed',
@@ -121,7 +139,7 @@ test('MV export shows progress, survives reload, retries and keeps ZIP separate'
   }
   await page.getByRole('button', { name: '合并并导出重试' }).click()
   await expect(page.getByRole('link', { name: '下载成片' })).toHaveAttribute('href', '/final.mp4')
-  await expect(page.getByRole('link', { name: '下载素材' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '下载素材' })).toBeVisible()
   await expect(page.getByRole('progressbar', { name: '合并并导出完成百分比' })).toHaveCount(0, {
     timeout: 8000,
   })

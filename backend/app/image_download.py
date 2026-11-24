@@ -28,6 +28,11 @@ async def sign_download_url(src: str, name: str) -> str:
     suffix = extension.group(1).lower() if extension else "png"
     filename = re.sub(r'[\\/:*?"<>|\r\n]', "_", name)[:120] + "." + suffix
     disposition = f"attachment; filename=\"image.{suffix}\"; filename*=UTF-8''{quote(filename, safe='')}"
+    return await sign_attachment_url(src, disposition)
+
+
+async def sign_attachment_url(src: str, disposition: str) -> str:
+    parsed = urlparse(src)
     if is_oss_host(src):
         if not internal_read_url(src):
             raise HTTPException(422, "不属于当前环境的素材目录")

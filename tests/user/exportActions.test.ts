@@ -63,7 +63,7 @@ describe('export progress dismissal', () => {
     expect(restored.find('progress').exists()).toBe(true)
     restored.unmount()
   })
-  it('automatically hides completion after five seconds while keeping the download link', async () => {
+  it('automatically hides completion after five seconds while keeping the download button', async () => {
     vi.useFakeTimers()
     const store = useProjectStore()
     store.activeTaskId = 'complete-task'
@@ -83,7 +83,7 @@ describe('export progress dismissal', () => {
       vi.advanceTimersByTime(5000)
       await wrapper.vm.$nextTick()
       expect(wrapper.find('progress').exists()).toBe(false)
-      expect(wrapper.get('a').attributes('href')).toBe('/materials.zip')
+      expect(wrapper.findAll('button').some((button) => button.text() === '下载素材')).toBe(true)
       const show = wrapper.findAll('button').find((button) => button.text() === '查看进度')!
       await show.trigger('click')
       expect(wrapper.find('progress').exists()).toBe(true)

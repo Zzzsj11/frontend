@@ -1,12 +1,25 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import { materialDownload } from '../api/domain'
+import { reportApiError } from '../errorBus'
 import AppIcon from './AppIcon.vue'
 import { useProjectStore } from '../stores/project'
 import type { MaterialExport } from '../types'
 
 const store = useProjectStore()
 const auth = useAuthStore()
+const downloadMaterials = async (id: string) => {
+  try {
+    const { url } = await materialDownload(id)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = ''
+    link.click()
+  } catch (error) {
+    reportApiError(error, '下载素材失败')
+  }
+}
 const hidden = ref<Record<string, boolean>>({})
 const deadlines = ref<Record<string, number>>({})
 const now = ref(Date.now())
@@ -116,14 +129,25 @@ const stageIndex = (item: MaterialExport) =>
                   : label(kind)
           }}
         </button>
+        <button
+          v-if="
+            kind === 'materials' && latest(kind)?.status === 'ready' && latest(kind)?.archiveUrl
+          "
+          class="btn-outline"
+          @click="downloadMaterials(latest(kind)!.id)"
+        >
+          下载素材
+        </button>
         <a
-          v-if="latest(kind)?.status === 'ready' && latest(kind)?.archiveUrl"
+          v-else-if="
+            kind === 'video' && latest(kind)?.status === 'ready' && latest(kind)?.archiveUrl
+          "
           class="btn-outline"
           :href="latest(kind)!.archiveUrl"
           download
           target="_blank"
           rel="noopener"
-          >{{ kind === 'video' ? '下载成片' : '下载素材' }}</a
+          >下载成片</a
         >
         <button
           v-if="latest(kind) && !visible(kind)"

@@ -277,6 +277,7 @@ def test_complete_api_user_journey(client, monkeypatch, tmp_path) -> None:
     export_status = client.get(f"/api/material-exports/{exported.json()['id']}").json()
     assert export_status["progress"] == 100
     assert export_status["stage"] == "导出完成"
+    assert export_status["metadata"]["downloadFilename"] == "系统人物 020.zip"
     assert export_status["totalAssets"] == 2
     assert client.get(f"/api/tasks/{storyboard.json()['taskId']}/material-exports").json()[0]["id"] == exported.json()["id"]
     archive = next(value for key, value in storage.objects.items() if key.endswith(".zip"))

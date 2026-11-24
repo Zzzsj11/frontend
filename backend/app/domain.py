@@ -9,7 +9,7 @@ import uuid
 import zipfile
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -30,8 +30,10 @@ from .export_space import ExportSpace
 from .export_state import locked_export
 from .generation_constraints import OUTLINE_STALE_SECONDS
 from .generation_timing import generation_elapsed_seconds
+from .image_download import sign_attachment_url
 from .image_model_policy import validate_image_selection
 from .jobs import Job, jobs
+from .material_filename import material_filename
 from .media_constraints import normalize_video_duration
 from .models import (
     AdminOperationLogModel,
@@ -3202,7 +3204,7 @@ async def create_material_export(task_id: str, user: CurrentUser, db: AsyncSessi
         )
         .values(deleted_at=now)
     )
-    export = MaterialExportModel(id=uid("export"), user_id=user.id, project_task_id=task.id)
+    export = MaterialExportModel(id=uid("export"), user_id=user.id, project_task_id=task.id, result_metadata={"downloadFilename": await material_filename(db, task, user.id)})
     db.add(export)
     await db.flush()
     export_id = export.id
@@ -3244,6 +3246,23 @@ async def get_material_export(export_id: str, user: CurrentUser, db: AsyncSessio
     if not item or item.deleted_at is not None or item.user_id != user.id:
         raise HTTPException(404, "导出任务不存在")
     return material_export_public(item)
+
+
+@router.get("/material-exports/{export_id}/download")
+async def material_download(export_id: str, user: CurrentUser, db: AsyncSession = Db) -> dict:
+    export = await db.get(MaterialExportModel, export_id)
+    if not export or export.user_id != user.id or export.deleted_at is not None or export.export_kind != "materials":
+        raise HTTPException(404, "素材导出不存在")
+    if export.status != "ready" or not export.archive_url:
+        raise HTTPException(409, "素材包尚未就绪")
+    if not is_user_owned_tos_url(export.archive_url, user.id):
+        raise HTTPException(422, "无法识别素材包存储地址")
+    filename = (export.result_metadata or {}).get("downloadFilename")
+    if not filename:
+        task = await owned_task(db, user.id, export.project_task_id)
+        filename = await material_filename(db, task, user.id)
+    disposition = "attachment; filename=materials.zip; filename*=UTF-8''" + quote(filename, safe="")
+    return {"url": await sign_attachment_url(export.archive_url, disposition)}
 
 
 @router.get("/material-exports/{export_id}/events")
