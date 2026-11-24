@@ -292,7 +292,7 @@ async def test_running_worker_recovers_newly_expired_job_after_transient_claim_f
             raise ConnectionError("temporary database failure")
         return await claim(*args)
 
-    async def wakeup(_timeout):
+    async def wakeup(_timeout, _queues):
         nonlocal expired
         if not expired:
             expired = True

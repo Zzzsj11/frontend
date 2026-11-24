@@ -1122,11 +1122,16 @@ async def create_video_generations_batch(
     except ValueError as exc:
         raise HTTPException(402, str(exc)) from exc
     await db.commit()
+    from .worker_queues import queue_for
+
+    notified = set()
     dispatched = set()
     for request, job in pending:
         if not getattr(job, "reused", False) and job.id not in dispatched:
             dispatched.add(job.id)
-            await jobs.dispatch(job, lambda item, payload=request: generate_video(payload, item))
+            queue = queue_for(job.kind, job.request)
+            await jobs.dispatch(job, lambda item, payload=request: generate_video(payload, item), wake=queue not in notified)
+            notified.add(queue)
     jobs_output = [job.public() for _, job in pending]
     return {"count": len(jobs_output), "jobs": jobs_output, **estimate}
 

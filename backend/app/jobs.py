@@ -145,6 +145,29 @@ async def record_media_usage(session: AsyncSession, model: GenerationJobModel, u
             record.raw_usage = normalized["raw"]
 
 
+def video_occupied():
+    from sqlalchemy import or_
+
+    terminal = GenerationJobModel.request["_providerTerminalResponse"]["status"].as_string()
+    return func.coalesce(func.upper(terminal), "").not_in(("SUCCEEDED", "FAILED", "CANCELLED")) & or_(
+        (GenerationJobModel.status == "running") & (GenerationJobModel.phase != "storing_media"),
+        GenerationJobModel.phase.in_(("manual_review", "auto_reconciling")),
+        (GenerationJobModel.status == "failed") & GenerationJobModel.provider_task_id.is_not(None) & GenerationJobModel.error.contains("核查原任务"),
+        (GenerationJobModel.status == "queued") & (GenerationJobModel.provider_task_id.is_not(None) | GenerationJobModel.idempotency_key.is_not(None)),
+    )
+
+
+async def video_capacity(db, job_id, pool, limit):
+    from .worker_queues import VIDEO_POOLS, pool_column
+
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("mv:video:capacity", 0))))
+    base = select(func.count()).select_from(GenerationJobModel).where(GenerationJobModel.kind == "video", GenerationJobModel.id != job_id, video_occupied())
+    if await db.scalar(base) >= settings.video_total_slots:
+        return False
+    quota = settings.video_model_slots if pool in VIDEO_POOLS.values() else limit
+    return not pool or await db.scalar(base.where(pool_column() == pool)) < quota
+
+
 async def durable_pool_available(db: AsyncSession, pool: str, limit: int, job_id: str) -> bool:
     """Serialize capacity check and the queued→running transition in the same PostgreSQL transaction."""
     locked = await db.scalar(select(func.pg_try_advisory_xact_lock(func.hashtextextended("mv:execution:" + pool, 0))))
@@ -176,6 +199,11 @@ class JobManager:
         request = job.request or {}
         pool = str(request.get("_executionPool") or "").strip()
         raw_limit = request.get("_executionConcurrency")
+        if job.kind == "video" and settings.database_url.startswith("postgresql"):
+            from .worker_queues import VIDEO_POOLS, pool_name
+
+            pool = pool_name(request) or "video:legacy"
+            raw_limit = settings.video_model_slots if pool in VIDEO_POOLS.values() else (raw_limit or settings.video_total_slots)
         if pool and raw_limit is not None:
             limit = max(1, min(1000, int(raw_limit)))
             configured = self._model_execution_slots.get(pool)
@@ -256,11 +284,14 @@ class JobManager:
         await session.flush()
         return job
 
-    async def dispatch(self, job: Job, runner: JobRunner) -> None:
+    async def dispatch(self, job: Job, runner: JobRunner, *, wake: bool = True) -> None:
         """Dispatch only after the transaction that created the job has committed."""
         await cache_job(job.id, job.public())
         if settings.job_execution_mode == "worker":
-            await notify_worker(job.kind)
+            from .worker_queues import queue_for
+
+            if wake:
+                await notify_worker(queue_for(job.kind, job.request))
         else:
             asyncio.create_task(self._run(job, runner))
 
@@ -355,7 +386,10 @@ class JobManager:
         except ExecutionStoreUnavailable as exc:
             job.status, job.phase, job.error = "failed", "failed", str(exc)
         except asyncio.CancelledError:
-            job.status, job.phase = "cancelled", "cancelled"
+            if job.kind == "video" and (job.provider_task_id or job.phase == "submitting_provider"):
+                job.status, job.phase, job.error = "failed", "manual_review", "视频执行中断，请核查原任务"
+            else:
+                job.status, job.phase = "cancelled", "cancelled"
             raise
         finally:
             if lease_heartbeat:
@@ -380,7 +414,12 @@ class JobManager:
         request = job.request or {}
         pool = str(request.get("_executionPool") or "").strip()
         raw_limit = request.get("_executionConcurrency")
-        if not pool or raw_limit is None:
+        if job.kind == "video" and settings.database_url.startswith("postgresql"):
+            from .worker_queues import pool_name
+
+            pool = pool_name(request)
+            raw_limit = raw_limit or settings.video_total_slots
+        elif not pool or raw_limit is None:
             return None, None
         limit = max(1, min(1000, int(raw_limit)))
         ttl = max(60, settings.worker_stale_seconds)
@@ -388,7 +427,8 @@ class JobManager:
         while True:
             if settings.database_url.startswith("postgresql"):
                 async with session_factory() as db:
-                    if await durable_pool_available(db, pool, limit, job.id):
+                    capacity = video_capacity(db, job.id, pool, limit) if job.kind == "video" else durable_pool_available(db, pool, limit, job.id)
+                    if await capacity:
                         row = await db.get(GenerationJobModel, job.id, with_for_update=True)
                         if not row or row.status not in {"queued", "running"}:
                             raise JobExpiredError("工单已终止")
@@ -676,7 +716,7 @@ class JobManager:
                 if time.time() - _timestamp(model.created_at) < video_job_timeout_seconds(model.provider, model.request):
                     continue
                 model.status = "failed"
-                model.phase = "failed"
+                model.phase = "manual_review" if model.phase == "submitting_provider" else "failed"
                 model.error = (
                     "视频生成超过2小时，已判定失败，请核查原任务"
                     if video_job_timeout_seconds(model.provider, model.request) > VIDEO_JOB_TIMEOUT_SECONDS

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import random
 import re
 import uuid
+from contextlib import asynccontextmanager, nullcontext
+from contextvars import ContextVar
 from typing import Any
 
 import httpx
@@ -64,13 +68,88 @@ def normalized_task(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_poll_client: ContextVar[httpx.AsyncClient | None] = ContextVar("platform_poll_client", default=None)
+
+
+class VideoTraffic:
+    def __init__(self):
+        self.submit_lock = asyncio.Lock()
+        self.next_submit = 0.0
+        self.submitting = asyncio.Semaphore(16)
+        self.archiving = asyncio.Semaphore(8)
+
+    @asynccontextmanager
+    async def submit(self):
+        async with self.submitting:
+            async with self.submit_lock:
+                loop = asyncio.get_running_loop()
+                await asyncio.sleep(max(0, self.next_submit - loop.time()))
+                self.next_submit = loop.time() + 1 / settings.video_create_qps
+            yield
+
+
+_video_traffic: ContextVar[VideoTraffic | None] = ContextVar("video_traffic", default=None)
+
+
+async def submit_media(client: httpx.AsyncClient, endpoint: str, payload: dict, request_headers: dict, *, before_send=None):
+    url = settings.all_in_one_base_url.rstrip("/") + "/v1/" + endpoint
+    traffic = _video_traffic.get()
+    if traffic and endpoint == "videos":
+        for attempt in range(3):
+            async with traffic.submit():
+                if before_send:
+                    await before_send()
+                try:
+                    response = await client.post(url, headers=request_headers, json=payload)
+                except httpx.RequestError:
+                    found = await _lookup_submission(client, request_headers, payload["model"])
+                    if found is not None:
+                        return found
+                    raise
+            safe_rejection = response.headers.get("x-platform-job-created") == "false" and response.headers.get("x-generation-submitted") == "false"
+            full = response.status_code == 429 and "Shared generation pool is full" in response.text
+            if not (safe_rejection or full):
+                if response.status_code >= 500 and not response.headers.get("x-job-id"):
+                    found = await _lookup_submission(client, request_headers, payload["model"])
+                    if found is not None:
+                        return found
+                return response
+            if attempt == 2:
+                return response
+            try:
+                delay = float(response.headers.get("retry-after", 2**attempt))
+            except ValueError:
+                return response
+            if not 0 <= delay <= 60:
+                return response
+            await asyncio.sleep(delay + random.uniform(0, 0.25))
+    if before_send:
+        await before_send()
+    return await client.post(url, headers=request_headers, json=payload)
+
+
+async def _lookup_submission(client, request_headers, model):
+    try:
+        found = await client.get(settings.all_in_one_base_url + "/v1/jobs/lookup", params={"idempotency_key": request_headers["Idempotency-Key"]}, headers=request_headers)
+        if found.status_code == 200 and found.json().get("model") == model and found.json().get("id"):
+            return found
+    except (httpx.HTTPError, ValueError):
+        pass
+    return None
+
+
 async def query_task(kind: str, task_id: str, *, user_id: str | None = None) -> dict[str, Any]:
     from .providers import _raise_for_status
 
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.get(settings.all_in_one_base_url.rstrip("/") + f"/v1/jobs/{task_id}", headers=headers(user_id=user_id))
-        _raise_for_status(response)
-        return normalized_task(response.json())
+    url = settings.all_in_one_base_url.rstrip("/") + f"/v1/jobs/{task_id}"
+    client = _poll_client.get()
+    if client is None:
+        async with httpx.AsyncClient(timeout=60) as temporary:
+            response = await temporary.get(url, headers=headers(user_id=user_id))
+    else:
+        response = await client.get(url, headers=headers(user_id=user_id))
+    _raise_for_status(response)
+    return normalized_task(response.json())
 
 
 async def store_result(job: Any, body: dict[str, Any]) -> dict[str, Any]:
@@ -144,13 +223,13 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
     job.idempotency_key = f"{job.id}:{job.kind}"
     request_headers = headers(user_id=job.user_id, idempotency_key=job.idempotency_key)
     await jobs.record_provider_request(job, payload)
-    await jobs.mark_provider_submitting(job)
     try:
         endpoint = "videos"
         if job.kind == "image":
             endpoint = "images/edits" if request.images else "images/generations"
-        async with httpx.AsyncClient(timeout=600 if job.kind == "image" else 60) as client:
-            response = await client.post(settings.all_in_one_base_url.rstrip("/") + "/v1/" + endpoint, headers=request_headers, json=payload)
+        shared = _poll_client.get() if job.kind == "video" else None
+        async with nullcontext(shared) if shared is not None else httpx.AsyncClient(timeout=600 if job.kind == "image" else 60) as client:
+            response = await submit_media(client, endpoint, payload, request_headers, before_send=lambda: jobs.mark_provider_submitting(job))
             # Do not resubmit a potentially accepted request on a 5xx or transport failure.
             if response.status_code >= 500:
                 error_body = response.json()
@@ -233,7 +312,7 @@ async def resume(job: Any) -> dict[str, Any]:
             consecutive_errors += 1
             if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS and job.kind != "video":
                 raise
-            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+            await asyncio.sleep(POLL_INTERVAL_SECONDS * random.uniform(0.9, 1.1))
             continue
         job.phase = {
             "QUEUED": "platform_queued",
@@ -253,6 +332,12 @@ async def resume(job: Any) -> dict[str, Any]:
 
             await record_outcome(job, succeeded=True)
             try:
+                traffic = _video_traffic.get()
+                if traffic and job.kind == "video":
+                    job.phase = "storing_media"
+                    await jobs.update_progress(job, job.progress)
+                    async with traffic.archiving:
+                        return await store_result(job, data)
                 return await store_result(job, data)
             except Exception as exc:
                 # 上游已交付并可能扣费，归档失败不能抹掉供应商用量。
@@ -272,7 +357,7 @@ async def resume(job: Any) -> dict[str, Any]:
             error.provider = PROVIDER
             error.request_id = job.provider_task_id
             raise error
-        await asyncio.sleep(POLL_INTERVAL_SECONDS)
+        await asyncio.sleep(POLL_INTERVAL_SECONDS * random.uniform(0.9, 1.1))
     error = ProviderError("all in one 生成等待超过2小时，请核查原任务；未重新提交")
     error.requires_reconciliation = True
     raise error

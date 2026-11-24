@@ -13,10 +13,14 @@ env_file=".env.${DEPLOY_ENV:-production}"
 export RELEASE_VERSION="${RELEASE_VERSION:-$(cat .deployed-version 2>/dev/null || true)}"
 compose=(docker compose --env-file "$env_file" -f docker-compose.yml -f "docker-compose.${DEPLOY_ENV:-production}.yml")
 
+workers=(worker-chat worker-storyboard worker-image worker-media worker-export)
+if [[ -f .deployment/info.json ]] && python3 -c 'import json,sys; sys.exit(not json.load(open(".deployment/info.json")).get("splitVideoWorkers", False))'; then
+  workers+=(worker-wan worker-seedance)
+fi
 services=(postgres redis backend frontend)
 execution_mode="$("${compose[@]}" config --format json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["backend"]["environment"].get("JOB_EXECUTION_MODE", "inline"))' 2>/dev/null || true)"
 if [[ "$execution_mode" == "worker" ]]; then
-  services+=(worker-chat worker-storyboard worker-image worker-media worker-export)
+  services+=("${workers[@]}")
 elif [[ "$execution_mode" != "inline" ]]; then
   fail 'cannot determine worker execution mode'
 fi
@@ -35,7 +39,7 @@ for service in "${services[@]}"; do
 done
 
 if grep -Eq '^JOB_EXECUTION_MODE=worker$' "$env_file"; then
-  for service in worker-image worker-media worker-export worker-chat worker-storyboard; do
+  for service in "${workers[@]}"; do
     container_id="$("${compose[@]}" ps -q "$service")"
     status="$(docker inspect --format '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$container_id" 2>/dev/null || true)"
     [[ "$status" == 'running/healthy' ]] && pass "container $service: healthy" || fail "container $service: $status"

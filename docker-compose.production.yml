@@ -30,7 +30,7 @@ services:
         limits:
           cpus: '1.00'
           memory: 2G
-  worker-media:
+  worker-media: &video-worker
     image: ${REGISTRY:?set REGISTRY}/mv-agent-backend:${RELEASE_VERSION:?set RELEASE_VERSION}
     build: !reset null
     secrets:
@@ -50,6 +50,8 @@ services:
         limits:
           cpus: '1.50'
           memory: 2G
+  worker-wan: *video-worker
+  worker-seedance: *video-worker
   worker-image:
     image: ${REGISTRY:?set REGISTRY}/mv-agent-backend:${RELEASE_VERSION:?set RELEASE_VERSION}
     build: !reset null

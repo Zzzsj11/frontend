@@ -369,3 +369,24 @@ async def test_sync_image_archive_failure_keeps_original_charge_and_id(configure
     assert error.usage == {"total_tokens": 7, "platformBilling": billing}
     assert len(post) == 1
     jobs.record_provider_response.assert_awaited_once_with(job, "submission", {"jobId": "upstream-image", "requestId": "original-request", "usage": error.usage})
+
+
+@pytest.mark.asyncio
+async def test_video_submit_recovers_an_ambiguous_response_by_original_key(configured):
+    calls = []
+
+    def handle(request):
+        calls.append(request)
+        if request.method == "POST":
+            return httpx.Response(503, json={"detail": "ingress busy"})
+        return httpx.Response(200, json={"id": "found-task", "model": "seedance-2.0"})
+
+    token = aio._video_traffic.set(aio.VideoTraffic())
+    try:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            result = await aio.submit_media(client, "videos", {"model": "seedance-2.0"}, {"Idempotency-Key": "one-attempt"})
+        assert result.json()["id"] == "found-task"
+        assert [r.method for r in calls] == ["POST", "GET"]
+        assert calls[1].url.params["idempotency_key"] == "one-attempt"
+    finally:
+        aio._video_traffic.reset(token)

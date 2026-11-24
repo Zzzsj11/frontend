@@ -221,3 +221,9 @@ X-Test-Run-Id: mv-regression-20261117-a81f6d
 用量与文本调用日志直接保存来源、Agent 名称和批次；Worker 从持久工单恢复上下文。升级时能关联工单的历史日志按工单回填；无工单的历史调用来源不可推断，标为 `legacy_unknown`，不冒充普通业务。授权只能验证账号有测试资格，不能从没有来源头的普通交互中自动识别自动化客户端。
 
 刷新凭证按 family 轮换：旧凭证超过 5 秒缓冲窗口后被重用，会撤销该 family 的全部刷新凭证并提高账号访问凭证版本，已有 access token 随即失效；短窗口重复请求只拒绝，避免将多个页签的并发刷新立即判作盗用。测试不得输出原始凭证。
+
+### 测试服视频并发联调
+
+在已部署相同版本的 MV 测试机运行 `scripts/test-video-mock-capacity.sh`。该入口使用测试机的个人平台 Key，创建和查询经过 MV 的 all in one 适配器。专用工单类型 `mock_video_acceptance` 将平台验收的 2500 个占位与业务视频 2000 个槽位隔离，每笔受理写入 MV 工单及 Agent 用量记录。每个请求同时指定 URL 和请求体的 mock 开关。测试进程核对零积分、无供应商任务 ID 和空媒体终态。
+
+默认目标为 Seedance 1000、WAN 1000、Veo 500。控制进程将工单提交后，由测试机上的四个 Worker 容器用同一个 Key 从 MV 数据库读取工单，执行 60 秒的同步错峰查询。计时包含进程等待和解析，汇总脚本另外记录 HTTP 请求头发出的时间。报告位于测试机 `.deployment/mock-video/`，包含去凭证的工单清单、各分片和汇总结果。指定 `MV_DIAGNOSTIC_VEO_SLOTS` 可以复测被其他业务占用后的可用容量，小于 500 的诊断始终返回未通过。如进程中断，可在相同版本 backend 容器用 `MV_DRAIN_RUN=<本轮 ID> python -m scripts.mock_video_acceptance` 恢复终态核对。业务 Worker 的 2000 槽跨副本领取、边界和 Redis 唤醒另由 `make test-middleware` 使用隔离 PostgreSQL/Redis 验证。

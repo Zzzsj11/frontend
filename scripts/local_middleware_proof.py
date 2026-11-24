@@ -35,7 +35,7 @@ async def proof():
         redis,
         release_execution_lease,
     )
-    from app.worker import _claim, _recover_stale
+    from app.worker import _claim, _claim_batch, _recover_stale
     from sqlalchemy import select
 
     try:
@@ -146,6 +146,48 @@ async def proof():
         second = [item for item in remaining if item]
         assert len(second) == 1 and second[0].request["_executionPool"] == "fast"
         assert not await _claim(("pool-proof",), (), "local-extra")
+        from app.redis_store import notify_worker, wait_for_worker_wakeup
+        from app.worker_queues import VIDEO_POOLS
+
+        await asyncio.gather(*(notify_worker("video:wan") for _ in range(20)))
+        assert await redis.llen("worker:ready:video:wan") == 1
+        await wait_for_worker_wakeup(1, ("video:wan",))
+        assert not await redis.exists("worker:ready:video:wan:first")
+
+        async with session_factory.begin() as db:
+            db.add_all(
+                [
+                    GenerationJobModel(
+                        id=f"video-pressure-{queue}-{i}",
+                        kind="video",
+                        request={"_executionPool": pool, "_executionConcurrency": 1},
+                        generation_origin="agent_test",
+                        agent_name="code-agent",
+                        agent_run_id="local-proof-video",
+                    )
+                    for queue, pool in VIDEO_POOLS.items()
+                    for i in range(1001)
+                ]
+            )
+
+        async def fill(queue, replica):
+            count = 0
+            while batch := await _claim_batch(("video",), (), replica, queue, 32):
+                assert all(
+                    job.request["_executionPool"] == VIDEO_POOLS[queue] for job in batch
+                )
+                count += len(batch)
+            return count
+
+        claims = await asyncio.gather(
+            *(fill(q, f"proof-{q}-{r}") for q in VIDEO_POOLS for r in range(2))
+        )
+        assert sum(claims[:2]) == sum(claims[2:]) == 1000, claims
+        async with session_factory.begin() as db:
+            db.add(
+                GenerationJobModel(id="video-other-pressure", kind="video", request={})
+            )
+        assert not await _claim_batch(("video",), (), "overflow", "video:other", 1)
         from app.config import settings
         from app.text_admission import (
             _acquire_text_slot,

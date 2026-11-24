@@ -172,7 +172,7 @@ async def test_admin_sync_never_reuses_another_workers_id(client, monkeypatch):
     response = client.post(f"/api/admin/jobs/{row.id}/sync")
     assert response.status_code == 200 and response.json()["action"] == "skipped"
     query.assert_not_awaited()
-    redis_store.notify_worker.assert_awaited_once_with("video")
+    redis_store.notify_worker.assert_awaited_once_with("video:seedance")
     async with session_factory() as db:
         assert (await db.get(GenerationJobModel, row.id)).worker_id == "first-worker"
 
