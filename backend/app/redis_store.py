@@ -146,41 +146,49 @@ async def cache_job(job_id: str, snapshot: dict[str, Any]) -> None:
         return
 
 
+# A single pending token per queue. Redis' own clock bounds trailing debounce across API replicas.
+_WAKE_QUEUE = """
+local now = redis.call('TIME')
+local ms = tonumber(now[1])*1000 + math.floor(tonumber(now[2])/1000)
+if redis.call('SET', KEYS[2], ms, 'NX', 'PX', 1000) then
+    redis.call('DEL', KEYS[1])
+    redis.call('LPUSH', KEYS[1], '1')
+    redis.call('EXPIRE', KEYS[1], 60)
+end
+redis.call('SET', KEYS[3], ms, 'PX', 1000)
+"""
+_WAKE_DELAY = """
+local now = redis.call('TIME')
+local ms = tonumber(now[1])*1000 + math.floor(tonumber(now[2])/1000)
+local first = tonumber(redis.call('GET', KEYS[1]))
+if not first then return 0 end
+local last = tonumber(redis.call('GET', KEYS[2])) or ms
+local delay = math.min(first + 500, last + 100) - ms
+if delay <= 0 then redis.call('DEL', KEYS[1], KEYS[2]) end
+return delay
+"""
+
+
 async def notify_worker(kind: str) -> None:
-    """Best-effort wakeup only; PostgreSQL remains the durable queue."""
+    key = "worker:ready:" + kind
     try:
-        await redis.publish("worker:wakeup", kind)
+        await redis.eval(_WAKE_QUEUE, 3, key, key + ":first", key + ":last")
     except Exception:
-        # A temporary Redis outage must not lose a database-backed job.
         return
 
 
-async def wait_for_worker_wakeup(timeout_seconds: float) -> None:
-    """Wait for a best-effort wakeup, falling back to the caller's poll timeout."""
-    pubsub = redis.pubsub()
+async def wait_for_worker_wakeup(timeout_seconds: float, queues: tuple[str, ...] = ("video:other",)) -> None:
+    deadline = time.monotonic() + timeout_seconds
     try:
-        await pubsub.subscribe("worker:wakeup")
-        # ``get_message(ignore_subscribe_messages=True)`` may consume the
-        # subscription acknowledgement and return immediately instead of
-        # waiting for ``timeout``.  Workers then spin on an empty queue and can
-        # consume an entire CPU core.  ``listen`` blocks for the next Pub/Sub
-        # event; the timeout preserves PostgreSQL polling as the durable
-        # fallback when no notification arrives.
-        async with asyncio.timeout(max(0.0, timeout_seconds)):
-            async for message in pubsub.listen():
-                if message.get("type") == "message":
-                    return
+        async with asyncio.timeout(timeout_seconds):
+            item = await redis.blpop(["worker:ready:" + queue for queue in queues], timeout=0)
+            key = item[0]
+            while (delay := await redis.eval(_WAKE_DELAY, 2, key + ":first", key + ":last")) > 0:
+                await asyncio.sleep(delay / 1000)
     except TimeoutError:
         return
     except Exception:
-        # Redis 不可达时仍保持数据库轮询间隔，避免空转抢占 CPU。
-        await asyncio.sleep(max(0.05, min(5.0, timeout_seconds)))
-        return
-    finally:
-        try:
-            await pubsub.aclose()
-        except Exception:
-            pass
+        await asyncio.sleep(max(0, deadline - time.monotonic()))
 
 
 _ACQUIRE_POOL_LEASE = """

@@ -162,7 +162,13 @@ if [[ "$execution_mode" == "worker" ]]; then
 # 单机逐类排空：旧进程先收到 SIGTERM、停止领取并在各自 stop_grace_period 内完成
 # 在途任务，再启动同类新进程。供应商不支持创建幂等键时，不让新旧版本并行提交
 # 比缩短发布耗时更重要；该类排空期间新任务继续安全留在 PostgreSQL 队列。
-for worker in worker-chat worker-storyboard worker-image worker-media worker-export; do
+workers=(worker-chat worker-storyboard worker-image worker-media worker-export)
+if [[ "${RUN_MIGRATIONS:-1}" == "0" ]]; then
+  "${compose[@]}" stop worker-wan worker-seedance
+else
+  workers+=(worker-wan worker-seedance)
+fi
+for worker in "${workers[@]}"; do
   "${compose[@]}" up -d --no-deps --force-recreate "$worker"
   for _ in {1..60}; do
     status="$("${compose[@]}" ps --format json "$worker" 2>/dev/null | grep -o '"Health":"[^"]*"' | head -1 || true)"
@@ -174,12 +180,16 @@ done
 
 else
   # 显式服务名会越过 profiles；inline 模式必须停止遗留 Worker。
-  "${compose[@]}" stop worker-chat worker-storyboard worker-image worker-media worker-export
+  "${compose[@]}" stop worker-chat worker-storyboard worker-image worker-media worker-wan worker-seedance worker-export
   export COMPOSE_PROFILES=""
 fi
 
 # 兜底其余服务（postgres/redis 配置漂移等），无变化时为空操作
-"${compose[@]}" up -d --remove-orphans
+if [[ "${RUN_MIGRATIONS:-1}" == "0" ]]; then
+  "${compose[@]}" up -d --remove-orphans postgres redis backend frontend
+else
+  "${compose[@]}" up -d --remove-orphans
+fi
 probe=(curl -fsS --connect-timeout 3 --max-time 10 --retry 5 --retry-delay 1 --retry-connrefused)
 if [[ "${DEPLOY_TLS:-0}" == "1" ]]; then
   "${compose[@]}" exec -T frontend nginx -t
@@ -202,9 +212,9 @@ if [[ "${DEPLOY_TLS:-0}" == "1" ]]; then
   mv .deployment/tls.env.tmp .deployment/tls.env
 fi
 deployed_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-python3 - "$version" "$deployed_at" "$previous" > .deployment/info.json.tmp <<'PYINFO'
+python3 - "$version" "$deployed_at" "$previous" "${RUN_MIGRATIONS:-1}" > .deployment/info.json.tmp <<'PYINFO'
 import json, sys
-print(json.dumps(dict(zip(("version", "deployedAt", "previous"), sys.argv[1:]))))
+print(json.dumps(dict(version=sys.argv[1], deployedAt=sys.argv[2], previous=sys.argv[3], splitVideoWorkers=sys.argv[4] != "0")))
 PYINFO
 mv .deployment/info.json.tmp .deployment/info.json
 printf '%s\n' "$previous" > .previous-version.tmp && mv .previous-version.tmp .previous-version

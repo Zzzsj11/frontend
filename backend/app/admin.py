@@ -576,8 +576,9 @@ async def sync_generation_job(job_id: str, request: Request, user: CurrentUser, 
     if (settings.job_execution_mode == "worker" or model.worker_id) and model.status in {"queued", "running"}:
         # Only the worker pool claims live and expired leases; the API never borrows its worker_id.
         from .redis_store import notify_worker
+        from .worker_queues import queue_for
 
-        await notify_worker(model.kind)
+        await notify_worker(queue_for(model.kind, model.request))
         return {"providerStatus": None, "action": "skipped", "detail": "原工单由 Worker 领取或恢复"}
     if job_manager.is_active(job_id):
         return {"providerStatus": None, "action": "skipped", "detail": "任务正在本机执行中，无需同步"}
