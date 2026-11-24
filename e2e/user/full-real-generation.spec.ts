@@ -33,6 +33,7 @@ if (smokeMode && !process.env.PLAYWRIGHT_BASE_URL && !process.env.REMOTE_API_BAS
   )
 }
 const assExpectedLines = Number(process.env.REAL_E2E_ASS_EXPECTED_LINES || '3')
+const resumeGeneralProject = process.env.REAL_E2E_RESUME_GENERAL_PROJECT
 const resumeAssProject = process.env.REAL_E2E_RESUME_ASS_PROJECT
 const resumeAssTaskTitle = process.env.REAL_E2E_RESUME_ASS_TASK_TITLE
 let shot = exportOnly ? 21 : generalOnly ? 12 : 0
@@ -97,13 +98,13 @@ async function generateAllMedia(page: Page, count: number, prefix: string) {
   })
   await capture(page, `${prefix}-all-videos-complete`)
 
-  await page.locator('.line-wrapper').first().click()
+  await page.locator('.line-wrapper .shot-thumb').first().click()
   const reopenedEditor = page.locator('.modal').filter({ hasText: '编辑视频内容' })
   if (await reopenedEditor.isVisible()) await reopenedEditor.getByTitle('关闭').click()
   await expect(page.locator('.player-panel video')).toBeVisible()
   await capture(page, `${prefix}-video-player-ready`)
   await page.getByRole('button', { name: '导出素材', exact: true }).click()
-  await expect(page.getByRole('button', { name: '素材已导出' })).toBeVisible({
+  await expect(page.getByRole('button', { name: '下载素材', exact: true })).toBeVisible({
     timeout: 5 * 60_000,
   })
   await capture(page, `${prefix}-material-export-complete`)
@@ -121,18 +122,31 @@ test('ASS and general storyboard complete real frontend journeys through generat
   await page.getByRole('button', { name: '登录' }).click()
   await expect(page.getByRole('heading', { name: '视频编辑器' })).toBeVisible()
   if (exportOnly) {
-    const task = page.getByRole('button', { name: /通用 MV 视频 ·/ }).last()
-    await task.click()
-    await expect(page.locator('.line-wrapper a.download-btn')).toHaveCount(2, {
+    if (resumeGeneralProject) {
+      const folder = page.getByRole('button', { name: resumeGeneralProject, exact: true })
+      if ((await folder.getAttribute('aria-expanded')) !== 'true') await folder.click()
+      await page
+        .locator('.song-group')
+        .filter({ has: folder })
+        .locator('.task-main')
+        .first()
+        .click()
+    } else {
+      await page
+        .getByRole('button', { name: /通用 MV 视频 ·/ })
+        .last()
+        .click()
+    }
+    await expect(page.locator('.line-wrapper a.download-btn')).toHaveCount(smokeMode ? 1 : 2, {
       timeout: 30_000,
     })
-    await page.locator('.line-wrapper').first().click()
+    await page.locator('.line-wrapper .shot-thumb').first().click()
     const editor = page.locator('.modal').filter({ hasText: '编辑视频内容' })
     if (await editor.isVisible()) await editor.getByTitle('关闭').click()
     await expect(page.locator('.player-panel video')).toBeVisible()
     await capture(page, 'general-video-player-ready')
     await page.getByRole('button', { name: '导出素材', exact: true }).click()
-    await expect(page.getByRole('button', { name: '素材已导出' })).toBeVisible({
+    await expect(page.getByRole('button', { name: '下载素材', exact: true })).toBeVisible({
       timeout: 5 * 60_000,
     })
     await capture(page, 'general-material-export-complete')
@@ -175,7 +189,8 @@ test('ASS and general storyboard complete real frontend journeys through generat
     return
   }
 
-  await createProject(page, `通用 MV 视频全链路真实验收${projectSuffix}`)
+  if (resumeGeneralProject) await page.getByText(resumeGeneralProject, { exact: true }).click()
+  else await createProject(page, `通用 MV 视频全链路真实验收${projectSuffix}`)
   await page
     .locator('.script-editor .header-actions')
     .getByRole('button', { name: '定制通用分镜', exact: true })
@@ -188,7 +203,7 @@ test('ASS and general storyboard complete real frontend journeys through generat
   await selectDropdown(general.getByLabel('画幅'), '9:16')
   if (smokeMode) {
     await general.getByLabel('图片模型').click()
-    await page.getByRole('option', { name: 'Nano Banana 2.1', exact: true }).click()
+    await page.getByRole('button', { name: 'Nano Banana 2.1', exact: true }).click()
   }
   await general.getByLabel('额外要求（可选）').fill('同一秋夜城市街区，从孤独到相遇，电影写实')
   await capture(page, 'general-parameters-and-cast-selected')
