@@ -5,7 +5,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from scripts.mock_video_acceptance import QPS, SECONDS, pct
+from scripts.mock_video_acceptance import SECONDS, pct
 
 
 def summarize(paths):
@@ -14,6 +14,10 @@ def summarize(paths):
         raise ValueError("incomplete or mismatched window")
     if any(r.get("shard_count", len(rows)) != len(rows) for r in rows):
         raise ValueError("missing query shard")
+    # Older evidence predates target_qps and was recorded at 500 QPS.
+    targets = {r.get("target_qps", 500) for r in rows}
+    if len(targets) != 1:
+        raise ValueError("mismatched target QPS")
     errors = Counter()
     for row in rows:
         errors.update(row["errors"])
@@ -34,7 +38,7 @@ def summarize(paths):
     return dict(
         run_id=rows[0]["run"],
         start_epoch=rows[0]["start"],
-        target_qps=QPS,
+        target_qps=targets.pop(),
         window_s=SECONDS,
         wire_rolling_peaks=peaks,
         sent_in_window=len(wire) - outside,

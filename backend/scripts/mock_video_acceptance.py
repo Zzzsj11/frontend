@@ -23,7 +23,7 @@ from app.models import GenerationJobModel, utcnow
 
 HOST = "https://mg-test.epaipix.com"
 MODELS = {"seedance-2.0": (1000, 5), "wan3.0-video": (1000, 5), "veo-3.1-fast": (500, 8)}
-QPS, SECONDS = 500, 60
+QPS, SECONDS = 100, 60
 clock = time.monotonic
 
 
@@ -234,7 +234,9 @@ async def proof(api, probe_api, run, out, sleep=asyncio.sleep):
             report["query"] = await measure_single(ordered, ids, read, sleep)
         query = report["query"]
         failed_window = (
-            query["sent"] != QPS * SECONDS
+            query["target_qps"] != QPS
+            or query["window_s"] != SECONDS
+            or query["sent"] != QPS * SECONDS
             or query["valid_200"] != query["sent"]
             or query["distinct_running_ids"] != len(ids)
             or query["errors"]
@@ -243,7 +245,7 @@ async def proof(api, probe_api, run, out, sleep=asyncio.sleep):
         )
         print(json.dumps(query), flush=True)
         if failed_window:
-            raise ValueError("500 QPS acceptance failed")
+            raise ValueError(f"{QPS} QPS acceptance failed")
         report["passed"] = len(ids) == 2500
         report["diagnostic_only"] = len(ids) != 2500
     except Exception as exc:

@@ -1,4 +1,4 @@
-"""One evenly interleaved shard of the staging 500 QPS measurement."""
+"""One evenly interleaved shard of the staging query measurement."""
 
 import argparse
 import asyncio
@@ -205,6 +205,7 @@ async def measure_window(run, start, shard, count, path, jobs):
                     dict(
                         shard=shard,
                         shard_count=count,
+                        target_qps=QPS,
                         scheduling=scheduling,
                         run=run,
                         start=start,
