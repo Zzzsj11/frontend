@@ -6,6 +6,7 @@ import json
 import os
 import time
 from collections import Counter
+from contextlib import AsyncExitStack
 from contextvars import ContextVar
 from pathlib import Path
 
@@ -16,7 +17,53 @@ from app import all_in_one
 from app.config import settings
 from app.database import session_factory
 from app.models import GenerationJobModel
-from scripts.mock_video_acceptance import HOST, check
+from scripts.mock_video_acceptance import HOST, QPS, SECONDS, check
+
+DISPATCH_LEAD = 0.080
+CLIENT_LANES = 4
+CONNECTIONS_PER_LANE = 16
+MAX_DISPATCH_LAG = 0.050
+MAX_PENDING = 96
+
+
+class WindowClosed(Exception):
+    """No new request may start sending headers at or after the deadline."""
+
+
+class WirePacer:
+    def __init__(self, shard_count, end):
+        # Each shard owns every Nth nominal slot. Allow a bounded catch-up
+        # margin after jitter without draining a queue of prepared connections at once.
+        self.interval = shard_count / QPS
+        self.recovery_interval = self.interval * 0.96
+        self.min_gap = self.interval * 0.75
+        self.next_send = 0.0
+        self.end = end
+        self.lock = asyncio.Lock()
+
+    async def wait(self, due):
+        async with self.lock:
+            target = max(due, self.next_send)
+            if target >= self.end:
+                raise WindowClosed
+            now = time.monotonic()
+            while now < target:
+                await asyncio.sleep(max(target - now, 0.0005))
+                now = time.monotonic()
+            if now >= self.end:
+                raise WindowClosed
+            # Retain the absolute phase across small timer overshoots; a long
+            # stall can earn at most a quarter-slot of timer credit.
+            self.next_send = max(target + self.recovery_interval, now + self.min_gap)
+
+
+def skip_reason(lag, pending):
+    # A missed slot has exactly one cause; a late dispatcher takes precedence.
+    if lag > MAX_DISPATCH_LAG:
+        return "scheduler_late"
+    if pending >= MAX_PENDING:
+        return "pending_limit"
+    return None
 
 
 async def measure(run, start, shard, count, path):
@@ -30,75 +77,103 @@ async def measure(run, start, shard, count, path):
                 .order_by(GenerationJobModel.id)
             )
         ).all()
+    await measure_window(run, start, shard, count, path, jobs)
+
+
+async def measure_window(run, start, shard, count, path, jobs):
+    if not 0 <= shard < count or not jobs:
+        raise ValueError("invalid shard or empty job list")
     samples = []
     errors = Counter()
     ids = set()
     offsets = []
     wire_offsets = []
-    gate = asyncio.Semaphore(24)
 
     scheduled = ContextVar("scheduled", default=None)
     pre_send = []
     headers_wait = []
+    scheduling = [{"scheduler_late": 0, "pending_limit": 0, "window_closed": 0, "peak_pending": 0, "max_dispatch_lag_ms": 0.0} for _ in range(SECONDS)]
 
     async def instrument(request):
         sent = None
 
         async def trace(event, info):
             nonlocal sent
-            if scheduled.get() is None:
+            due = scheduled.get()
+            if due is None:
+                return
+            if event.endswith("send_request_headers.started"):
+                await pacer.wait(due)
                 return
             now = time.monotonic()
             if event.endswith("send_request_headers.complete"):
                 sent = now
-                wire_offsets.append(round((now - first) * 1000, 2))
-                pre_send.append(round((now - scheduled.get()) * 1000, 3))
+                wire_offsets.append((now - first) * 1000)
+                pre_send.append(round((now - due) * 1000, 3))
             elif event.endswith("receive_response_headers.complete") and sent is not None:
                 headers_wait.append(round((now - sent) * 1000, 3))
 
         request.extensions["trace"] = trace
 
     first = time.monotonic() + start - time.time()
-    async with httpx.AsyncClient(timeout=5, event_hooks={"request": [instrument]}, limits=httpx.Limits(max_connections=24, max_keepalive_connections=24)) as client:
-        token = all_in_one._poll_client.set(client)
+    pacer = WirePacer(count, first + SECONDS)
+    async with AsyncExitStack() as stack:
+        limits = httpx.Limits(max_connections=CONNECTIONS_PER_LANE, max_keepalive_connections=CONNECTIONS_PER_LANE, keepalive_expiry=SECONDS + 5)
+        clients = [await stack.enter_async_context(httpx.AsyncClient(timeout=5, event_hooks={"request": [instrument]}, limits=limits)) for _ in range(CLIENT_LANES)]
+
+        async def query(jid, ordinal):
+            token = all_in_one._poll_client.set(clients[ordinal % CLIENT_LANES])
+            try:
+                return await all_in_one.query_task("video", jid)
+            finally:
+                all_in_one._poll_client.reset(token)
 
         async def read(i, due):
             scheduled.set(due)
             jid, req = jobs[i % len(jobs)]
             offsets.append(round((time.monotonic() - first) * 1000, 2))
             try:
-                async with gate:
-                    row = await all_in_one.query_task("video", jid)
+                row = await query(jid, i // count)
                 check({**row, "status": row["status"].lower()}, req["model"], jid)
                 samples.append(round((time.monotonic() - due) * 1000, 3))
                 ids.add(jid)
+            except WindowClosed:
+                errors["window_closed"] += 1
+                scheduling[i // QPS]["window_closed"] += 1
             except Exception as exc:
                 cause = getattr(exc, "__cause__", None)
                 status = getattr(getattr(cause, "response", None), "status_code", None)
                 errors[str(status or type(exc).__name__)] += 1
 
         try:
-            await asyncio.gather(*(all_in_one.query_task("video", j) for j, _ in jobs[shard * 12 : shard * 12 + 12]))
+            await asyncio.gather(*(query(j, k) for k, (j, _) in enumerate(jobs[shard * 16 : shard * 16 + 16])))
             wire_offsets.clear()
             if time.monotonic() >= first:
                 raise RuntimeError("missed coordinated start")
             pending = set()
-            for i in range(shard, 30000, count):
-                due = first + i / 500
-                await asyncio.sleep(max(0, due - time.monotonic()))
-                if time.monotonic() - due > 0.05 or len(pending) >= 96:
-                    errors["schedule overrun"] += 1
+            for i in range(shard, QPS * SECONDS, count):
+                due = first + i / QPS
+                await asyncio.sleep(max(0, due - DISPATCH_LEAD - time.monotonic()))
+                lag = time.monotonic() - due
+                bucket = scheduling[i // QPS]
+                bucket["max_dispatch_lag_ms"] = max(bucket["max_dispatch_lag_ms"], round(lag * 1000, 3))
+                bucket["peak_pending"] = max(bucket["peak_pending"], len(pending))
+                reason = skip_reason(lag, len(pending))
+                if reason:
+                    errors[reason] += 1
+                    bucket[reason] += 1
                     continue
                 task = asyncio.create_task(read(i, due))
                 pending.add(task)
                 task.add_done_callback(pending.discard)
             await asyncio.gather(*pending)
         finally:
-            all_in_one._poll_client.reset(token)
             path.write_text(
                 json.dumps(
                     dict(
                         shard=shard,
+                        shard_count=count,
+                        scheduling=scheduling,
                         run=run,
                         start=start,
                         errors=errors,

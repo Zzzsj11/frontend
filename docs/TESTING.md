@@ -227,3 +227,7 @@ X-Test-Run-Id: mv-regression-20261117-a81f6d
 在已部署相同版本的 MV 测试机运行 `scripts/test-video-mock-capacity.sh`。该入口使用测试机的个人平台 Key，创建和查询经过 MV 的 all in one 适配器。专用工单类型 `mock_video_acceptance` 将平台验收的 2500 个占位与业务视频 2000 个槽位隔离，每笔受理写入 MV 工单及 Agent 用量记录。每个请求同时指定 URL 和请求体的 mock 开关。测试进程核对零积分、无供应商任务 ID 和空媒体终态。
 
 默认目标为 Seedance 1000、WAN 1000、Veo 500。控制进程将工单提交后，由测试机上的四个 Worker 容器用同一个 Key 从 MV 数据库读取工单，执行 60 秒的同步错峰查询。计时包含进程等待和解析，汇总脚本另外记录 HTTP 请求头发出的时间。报告位于测试机 `.deployment/mock-video/`，包含去凭证的工单清单、各分片和汇总结果。指定 `MV_DIAGNOSTIC_VEO_SLOTS` 可以复测被其他业务占用后的可用容量，小于 500 的诊断始终返回未通过。如进程中断，可在相同版本 backend 容器用 `MV_DRAIN_RUN=<本轮 ID> python -m scripts.mock_video_acceptance` 恢复终态核对。业务 Worker 的 2000 槽跨副本领取、边界和 Redis 唤醒另由 `make test-middleware` 使用隔离 PostgreSQL/Redis 验证。
+
+四个查询分片按同一个 UTC 起点每 2 毫秒轮到一个分片，同一分片的计划间隔为 8 毫秒。分片可提前 80 毫秒准备连接，在发送 HTTP 请求头之前按计划放行。遇到积压时，每个分片限制相邻放行的最短间隔，防止同时释放等待的请求。每个分片使用四组持久 HTTP 连接，每组最多 16 条，共用同一个发包节流器，每个计划查询仍只调用一次原查询适配器。60 秒窗口采用左闭右开区间，发出时间以请求头发送完成为准；跨窗发送会使验收失败。
+
+分片 JSON 的 `scheduling` 按计划秒记录调度迟到超过 50 毫秒（`scheduler_late`）、待处理查询达到 96 个（`pending_limit`）、等到窗口结束仍无法发送（`window_closed`），以及派发时观测到的待处理峰值和最大迟到毫秒数。漏发只计一次，同时迟到和队列满时归入迟到。汇总的 `wire_rolling_peaks` 显示四个分片合计滚动 100 毫秒和 1 秒的实际发送峰值，`sent_in_window` 为窗口内发送数。429 和状态解析错误独立计数。

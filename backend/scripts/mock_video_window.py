@@ -5,26 +5,39 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from scripts.mock_video_acceptance import pct
+from scripts.mock_video_acceptance import QPS, SECONDS, pct
 
 
 def summarize(paths):
     rows = [json.loads(p.read_text()) for p in paths]
     if len({(r["run"], r["start"]) for r in rows}) != 1 or {r["shard"] for r in rows} != set(range(len(rows))):
         raise ValueError("incomplete or mismatched window")
+    if any(r.get("shard_count", len(rows)) != len(rows) for r in rows):
+        raise ValueError("missing query shard")
     errors = Counter()
     for row in rows:
         errors.update(row["errors"])
     wire = sorted(t for r in rows for t in r["wire_offsets"])
     elapsed = wire[-1] - wire[0] if len(wire) > 1 else 0
-    if wire and (wire[0] < -1 or wire[-1] >= 60050):
-        errors["wire send outside 60s window"] += 1
+    outside = sum(t < 0 or t >= SECONDS * 1000 for t in wire)
+    if outside:
+        errors["wire send outside 60s window"] = outside
+    peaks = {}
+    for interval in (100, 1000):
+        left = peak = 0
+        for right, offset in enumerate(wire):
+            while wire[left] <= offset - interval:
+                left += 1
+            peak = max(peak, right - left + 1)
+        peaks[f"{interval}ms"] = peak
     latencies = [v for r in rows for v in r["samples"]]
     return dict(
         run_id=rows[0]["run"],
         start_epoch=rows[0]["start"],
-        target_qps=500,
-        window_s=60,
+        target_qps=QPS,
+        window_s=SECONDS,
+        wire_rolling_peaks=peaks,
+        sent_in_window=len(wire) - outside,
         sent=len(wire),
         valid_200=len(latencies),
         errors=errors,
