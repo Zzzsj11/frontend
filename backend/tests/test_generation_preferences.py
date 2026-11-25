@@ -131,3 +131,29 @@ def test_admin_comparison_validates_channels_before_calling_models(client, monke
     assert compare.call_args.kwargs["channels"] == {model: "toapis"}
     _, user = create_and_login_user(client, "comparison-channel-user")
     assert client.get(f"/api/admin/chat-comparison/models/{model}/channels", headers=user).status_code == 403
+
+
+def test_explicit_video_route_is_validated_without_changing_saved_automatic_preference(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    import pytest
+    from fastapi import HTTPException
+
+    from app import generation_preferences as preferences
+    from app.schemas import VideoGenerationCreate
+
+    chosen = {"model": "wan3.0-video-all-in-one", "channel": None}
+    monkeypatch.setattr(preferences, "read_selection", AsyncMock(return_value=chosen))
+    monkeypatch.setattr(preferences, "visible_model", AsyncMock(return_value=SimpleNamespace(provider_model_id="wan3.0-video")))
+    channels = AsyncMock(return_value={"channels": [{"channel": "runninghub", "available": True}]})
+    monkeypatch.setattr(preferences, "fetch_channels", channels)
+    video = VideoGenerationCreate(prompt="fixture", model=chosen["model"], channel="runninghub", require_requested_route=True)
+    asyncio.run(preferences.apply_media_preference(None, "user", "video", video))
+    assert video.channel == "runninghub" and chosen["channel"] is None
+    chosen["channel"] = "different"
+    with pytest.raises(HTTPException) as caught:
+        asyncio.run(preferences.apply_media_preference(None, "user", "video", video))
+    assert caught.value.status_code == 409
+    channels.assert_awaited_once()

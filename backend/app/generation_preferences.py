@@ -40,7 +40,12 @@ async def snapshot_text_selection(db: AsyncSession, user_id: str, kind: str) -> 
 
 async def apply_media_preference(db: AsyncSession, user_id: str, modality: str, payload, *, catalogs: dict | None = None) -> None:
     selection = await read_selection(db, user_id, modality)
-    if selection:
+    if getattr(payload, "require_requested_route", False):
+        if not payload.model or not payload.channel:
+            raise HTTPException(422, "指定路由需要同时提供模型与渠道")
+        if selection and (selection.get("model") != payload.model or selection.get("channel") not in (None, payload.channel)):
+            raise HTTPException(409, "账户偏好与指定的模型或渠道不符")
+    elif selection:
         payload.model = selection["model"]
         payload.channel = selection.get("channel")
     if modality == "image" and payload.images and "resolution" not in payload.model_fields_set:

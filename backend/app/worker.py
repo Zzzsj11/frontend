@@ -434,7 +434,7 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
                 return
             now = utcnow()
             instance.last_heartbeat_at = now
-            instance.active_job_count = len(active)
+            instance.active_job_count = len(owned)
             if status:
                 instance.status = status
                 if status == "draining" and not instance.draining_at:
@@ -472,6 +472,18 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
     queues = (queue,) if queue else tuple(q for k in kinds for q in (VIDEO_QUEUES if k == "video" else (k,)))
     local_ready = asyncio.Event()
 
+    def release_submission():
+        task = asyncio.current_task()
+        if task in active:
+            active.discard(task)
+            local_ready.set()
+
+    # Waiting jobs still count against the durable model quota and are renewed in
+    # batches. An additional per-process bound also covers unpooled/legacy jobs.
+    waiting_limit = max(concurrency, settings.video_total_slots if "video" in kinds else 500)
+    polling = all_in_one.PlatformPolling(release_submission, 30 if "video" in kinds else 10)
+    polling_token = all_in_one._worker_polling.set(polling)
+
     def completed(task):
         active.discard(task)
         local_ready.set()
@@ -492,13 +504,13 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
     try:
         while not stop.is_set():
             local_ready.clear()
-            if len(active) < concurrency:
+            if len(active) < concurrency and len(owned) < waiting_limit:
                 try:
                     if concurrency == 1:
                         job = await _claim(kinds, providers, worker_id, queue)
                         batch = [job] if job else []
                     else:
-                        batch = await _claim_batch(kinds, providers, worker_id, queue, concurrency - len(active))
+                        batch = await _claim_batch(kinds, providers, worker_id, queue, min(concurrency - len(active), waiting_limit - len(owned)))
                 except Exception:
                     logger.exception("领取工单失败，将重试")
                     await asyncio.sleep(max(0.05, min(5.0, settings.worker_poll_seconds)))
@@ -517,7 +529,7 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
                     continue
             timeout = settings.worker_poll_seconds + random.uniform(1, 10)
             waiting = {asyncio.create_task(stop.wait()), asyncio.create_task(local_ready.wait())}
-            if len(active) < concurrency:
+            if len(active) < concurrency and len(owned) < waiting_limit:
                 waiting.add(asyncio.create_task(wait_for_worker_wakeup(timeout, queues)))
             _, pending = await asyncio.wait(waiting, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
             for item in pending:
@@ -530,14 +542,15 @@ async def serve(kinds: tuple[str, ...], providers: tuple[str, ...], concurrency:
             billing_task.cancel()
             await asyncio.gather(billing_task, return_exceptions=True)
         await update_instance("draining")
-        if active:
-            await asyncio.gather(*active, return_exceptions=True)
+        if owned:
+            await asyncio.gather(*list(owned.values()), return_exceptions=True)
         lease_task.cancel()
         await asyncio.gather(lease_task, return_exceptions=True)
         await update_instance("drained")
         instance_heartbeat_task.cancel()
         await asyncio.gather(instance_heartbeat_task, return_exceptions=True)
         await close_redis()
+        all_in_one._worker_polling.reset(polling_token)
         all_in_one._video_traffic.reset(traffic_token)
         all_in_one._poll_client.reset(client_token)
         await poll_client.aclose()

@@ -925,6 +925,8 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
     from .generation_preferences import apply_media_preference
 
     original_input = payload.model_dump(mode="json", exclude={"request_id"})
+    if not payload.require_requested_route:
+        original_input.pop("require_requested_route", None)
     await db.scalar(select(UserModel).where(UserModel.id == user.id).with_for_update().execution_options(populate_existing=True))
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
     # 重放原请求不读取新偏好，也不要求原模型/渠道仍可用于新生成。
@@ -980,6 +982,8 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
     elif payload.person_asset_mode:
         raise HTTPException(422, "人物资产模式仅支持 all in one SD2.0")
     submission_input = payload.model_dump(mode="json", exclude={"request_id"})
+    if not payload.require_requested_route:
+        submission_input.pop("require_requested_route", None)
     submission_input["model"] = model.code
     if line_id:
         candidates = (
@@ -1216,7 +1220,21 @@ async def get_generation_status_batch(payload: GenerationStatusBatchRequest, use
     rows = (
         (
             await db.execute(
-                select(GenerationJobModel).where(
+                select(GenerationJobModel)
+                .options(
+                    load_only(
+                        GenerationJobModel.id,
+                        GenerationJobModel.kind,
+                        GenerationJobModel.status,
+                        GenerationJobModel.progress,
+                        GenerationJobModel.result,
+                        GenerationJobModel.error,
+                        GenerationJobModel.phase,
+                        GenerationJobModel.provider,
+                        GenerationJobModel.provider_task_id,
+                    )
+                )
+                .where(
                     GenerationJobModel.id.in_(job_ids),
                     GenerationJobModel.user_id == user.id,
                     GenerationJobModel.deleted_at.is_(None),

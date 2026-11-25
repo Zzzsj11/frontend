@@ -7,6 +7,7 @@ import logging
 import random
 import re
 import tempfile
+import time
 import uuid
 from contextlib import asynccontextmanager, nullcontext
 from contextvars import ContextVar
@@ -72,6 +73,22 @@ def normalized_task(body: dict[str, Any]) -> dict[str, Any]:
 
 
 _poll_client: ContextVar[httpx.AsyncClient | None] = ContextVar("platform_poll_client", default=None)
+
+
+class PlatformPolling:
+    """Accepted jobs keep their database reservation while submit slots become available."""
+
+    def __init__(self, on_accepted, query_budget):
+        self.on_accepted = on_accepted
+        self.query_budget = query_budget
+        self.requests = asyncio.Semaphore(32)
+        self.waiting = 0
+
+    def delay(self):
+        return max(8, self.waiting / self.query_budget) * random.uniform(0.9, 1.1)
+
+
+_worker_polling: ContextVar[PlatformPolling | None] = ContextVar("worker_platform_polling", default=None)
 
 
 class VideoTraffic:
@@ -179,13 +196,31 @@ async def store_result(job: Any, body: dict[str, Any]) -> dict[str, Any]:
         raise ProviderError("all in one 任务成功但未返回 result.media[].url")
     owner = f"users/{job.user_id}/generated"
     common = {"provider": PROVIDER, "providerTaskId": job.provider_task_id, "model": (job.request or {}).get("model"), "usage": data["usage"]}
+    from .platform_archive import copy_platform_archive
+
+    started = time.monotonic()
+    copied = await copy_platform_archive(job, body, owner)
+    if copied:
+        archived_result = {**common, **copied, "archiveMethod": "oss_copy", "archiveMs": round((time.monotonic() - started) * 1000)}
+        if job.kind == "video":
+            archived_result.update(duration=(job.request or {}).get("duration"), ratio=(job.request or {}).get("ratio"))
+        return archived_result
     if job.kind == "image":
         stored = [await import_remote_image(url, owner + "/images") for url in urls]
-        return {**common, "urls": [p[0] for p in stored], "thumbnailUrls": [p[1] for p in stored], "sourceUrls": urls}
+        return {
+            **common,
+            "urls": [p[0] for p in stored],
+            "thumbnailUrls": [p[1] for p in stored],
+            "sourceUrls": urls,
+            "archiveMethod": "import",
+            "archiveMs": round((time.monotonic() - started) * 1000),
+        }
     archived = await _archive_video(job, urls[0], owner)
     return {
         **common,
         **archived,
+        "archiveMethod": "import",
+        "archiveMs": round((time.monotonic() - started) * 1000),
         "sourceUrl": urls[0],
         "duration": (job.request or {}).get("duration"),
         "ratio": (job.request or {}).get("ratio"),
@@ -268,7 +303,7 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
     await jobs.record_provider_request(job, payload)
     try:
         endpoint = "images" if job.kind == "image" else "videos"
-        shared = _poll_client.get() if job.kind == "video" else None
+        shared = _poll_client.get()
         async with nullcontext(shared) if shared is not None else httpx.AsyncClient(timeout=60) as client:
             response = await _lookup_submission(client, request_headers, model) if recover_image else None
             if response is None:
@@ -316,6 +351,18 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
 
 
 async def resume(job: Any) -> dict[str, Any]:
+    scheduler = _worker_polling.get()
+    if scheduler is None or not job.worker_id or not job.provider_task_id:
+        return await _poll_until_complete(job, None)
+    scheduler.on_accepted()
+    scheduler.waiting += 1
+    try:
+        return await _poll_until_complete(job, scheduler)
+    finally:
+        scheduler.waiting -= 1
+
+
+async def _poll_until_complete(job: Any, scheduler: PlatformPolling | None) -> dict[str, Any]:
     import asyncio
     import time
 
@@ -327,19 +374,21 @@ async def resume(job: Any) -> dict[str, Any]:
     consecutive_errors = 0
     while time.monotonic() < deadline:
         try:
-            data = await query_task(job.kind, job.provider_task_id, user_id=job.user_id)
+            async with scheduler.requests if scheduler else nullcontext():
+                data = await query_task(job.kind, job.provider_task_id, user_id=job.user_id)
             consecutive_errors = 0
         except Exception as exc:
-            job.phase = "reconciling"
-            await jobs.update_progress(job, job.progress)
+            if scheduler is None or job.phase != "reconciling":
+                job.phase = "reconciling"
+                await jobs.update_progress(job, job.progress)
             consecutive_errors += 1
             if consecutive_errors >= POLL_MAX_CONSECUTIVE_ERRORS and job.kind != "video":
                 error = ProviderError("平台状态暂不可查，请核查原任务")
                 error.requires_reconciliation = True
                 raise error from exc
-            await asyncio.sleep(POLL_INTERVAL_SECONDS * random.uniform(0.9, 1.1))
+            await asyncio.sleep(scheduler.delay() if scheduler else POLL_INTERVAL_SECONDS * random.uniform(0.9, 1.1))
             continue
-        job.phase = {
+        new_phase = {
             "QUEUED": "platform_queued",
             "PENDING": "platform_queued",
             "RUNNING": "provider_running",
@@ -349,8 +398,10 @@ async def resume(job: Any) -> dict[str, Any]:
         }.get(data["status"], "reconciling")
         review = data.get("asset_review") or {}
         if review.get("status") == "reviewing":
-            job.phase = "reviewing_assets"
-        await jobs.update_progress(job, job.progress)
+            new_phase = "reviewing_assets"
+        if scheduler is None or job.phase != new_phase:
+            job.phase = new_phase
+            await jobs.update_progress(job, job.progress)
         if data["status"] == "SUCCEEDED":
             await jobs.record_provider_response(job, "terminal", data)
             from .image_failover import record_outcome
@@ -382,7 +433,7 @@ async def resume(job: Any) -> dict[str, Any]:
             error.provider = PROVIDER
             error.request_id = job.provider_task_id
             raise error
-        await asyncio.sleep(POLL_INTERVAL_SECONDS * random.uniform(0.9, 1.1))
+        await asyncio.sleep(scheduler.delay() if scheduler else POLL_INTERVAL_SECONDS * random.uniform(0.9, 1.1))
     duration = "10分钟" if job.kind == "image" else "2小时"
     error = ProviderError(f"all in one 生成等待超过{duration}，请核查原任务；未重新提交")
     error.requires_reconciliation = True

@@ -1690,7 +1690,27 @@ def _is_deadlock_error(exc: BaseException) -> bool:
     return "DeadlockDetectedError" in type(exc).__name__ or "deadlock detected" in str(exc).lower()
 
 
+_pending_status_refreshes: dict[tuple[asyncio.AbstractEventLoop, str], asyncio.Task] = {}
+
+
 async def _refresh_storyboard_status_for_task(task_id: str) -> None:
+    # Only coalesce callers whose line transactions committed before this read.
+    key = (asyncio.get_running_loop(), task_id)
+    task = _pending_status_refreshes.get(key)
+    if task is None:
+
+        async def refresh():
+            try:
+                await asyncio.sleep(0.025)
+            finally:
+                _pending_status_refreshes.pop(key, None)
+            await _read_storyboard_status_for_task(task_id)
+
+        task = _pending_status_refreshes[key] = asyncio.create_task(refresh())
+    await asyncio.shield(task)
+
+
+async def _read_storyboard_status_for_task(task_id: str) -> None:
     """Aggregate project status in a standalone transaction with bounded deadlock retries.
 
     Keeping this transaction separate is important: prompt persistence inserts usage rows
@@ -2534,16 +2554,16 @@ async def _refresh_storyboard_status(db: AsyncSession, task: ProjectTaskModel, *
     # 多条提示词可同时完成；仅串行化最终状态汇总，避免旧快照晚提交把 ready 覆盖回 generating。
     if lock_task:
         await db.execute(select(ProjectTaskModel.id).where(ProjectTaskModel.id == task.id).with_for_update())
-    statuses = list(
-        (await db.execute(select(StoryboardLineModel.generation_status).where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None))))
+    statuses = set(
+        (await db.execute(select(StoryboardLineModel.generation_status).distinct().where(StoryboardLineModel.project_task_id == task.id, StoryboardLineModel.deleted_at.is_(None))))
         .scalars()
         .all()
     )
-    if statuses and all(value == "succeeded" for value in statuses):
+    if statuses == {"succeeded"}:
         task.status = "ready"
-    elif any(value == "succeeded" for value in statuses) and any(value == "failed" for value in statuses):
+    elif {"succeeded", "failed"} <= statuses:
         task.status = "partial"
-    elif statuses and all(value == "failed" for value in statuses):
+    elif statuses == {"failed"}:
         task.status = "failed"
     else:
         task.status = "generating"

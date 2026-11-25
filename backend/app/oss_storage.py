@@ -37,6 +37,11 @@ class OssStorage:
         self.bucket = oss2.Bucket(auth, endpoint + "-internal.aliyuncs.com", settings.oss_bucket, region=settings.oss_region)
         self.public_bucket = oss2.Bucket(auth, endpoint + ".aliyuncs.com", settings.oss_bucket, region=settings.oss_region)
 
+    async def copy_object(self, source_key: str, key: str) -> str:
+        object_key = f"{settings.oss_prefix}/{key}"
+        await asyncio.to_thread(self.bucket.copy_object, settings.oss_bucket, source_key, object_key)
+        return f"https://{public_host()}/{quote(object_key, safe='/')}"
+
     async def put_bytes(self, key: str, content: bytes, content_type: str | None = None) -> str:
         object_key = f"{settings.oss_prefix}/{key}"
         await asyncio.to_thread(self.bucket.put_object, object_key, content, headers={"Content-Type": content_type or "application/octet-stream"})

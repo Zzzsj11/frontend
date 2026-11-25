@@ -247,6 +247,7 @@ class ImageGenerationCreate(BaseModel):
 
 
 class VideoGenerationCreate(BaseModel):
+    require_requested_route: bool = False
     person_asset_mode: StrictBool = False
     person_reference_indices: list[StrictInt] = Field(default_factory=list, max_length=9)
     channel: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
