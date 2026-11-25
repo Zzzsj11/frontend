@@ -18,9 +18,26 @@ const assFile =
 mkdirSync(output, { recursive: true })
 
 test('deployed frontend login, project and storyboard configuration journey', async ({ page }) => {
-  await page.route('**/api/**', (route) =>
-    route.continue({ headers: { ...route.request().headers(), ...agentTestHeaders(runId) } }),
-  )
+  // Model pickers normally save account-wide preferences. Exercise their UI in
+  // this browser without overwriting the account used for remote acceptance.
+  const selections: Record<string, { model: string; channel: string | null }> = {}
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const headers = { ...request.headers(), ...agentTestHeaders(runId) }
+    const path = new URL(request.url()).pathname
+    if (path === '/api/generation-preferences' && request.method() === 'GET') {
+      const response = await route.fetch({ headers })
+      if (!response.ok()) return route.fulfill({ response })
+      Object.assign(selections, { ...(await response.json()), ...selections })
+      return route.fulfill({ response, json: selections })
+    }
+    const selection = path.match(/^\/api\/generation-preferences\/(text|image|video)$/)
+    if (selection && request.method() === 'PUT') {
+      selections[selection[1]] = request.postDataJSON()
+      return route.fulfill({ json: selections })
+    }
+    return route.continue({ headers })
+  })
   let accessToken = ''
   let projectId = ''
   const projectName = `REMOTE-UI ${runId}`
@@ -66,8 +83,12 @@ test('deployed frontend login, project and storyboard configuration journey', as
     await expect(songCode).toHaveValue('10012204')
     await expect(assDialog.getByText(/可不选/)).toBeVisible()
     await expect(assDialog.getByLabel('画幅')).toHaveAttribute('data-value', '16:9')
-    await expect(assDialog.getByLabel('清晰度').first()).toHaveAttribute('data-value', '480p')
     await expect(assDialog.getByLabel('视频模型')).toBeEnabled()
+    await selectDropdown(assDialog.getByLabel('视频模型'), 'SD2.0')
+    const videoResolution = assDialog.getByLabel('清晰度').first()
+    await videoResolution.click()
+    await page.getByRole('option', { name: /480p/i }).click()
+    await expect(videoResolution).toHaveAttribute('data-value', '480p')
     await assDialog.getByLabel('视频模型').click()
     await expect(page.locator('[data-model-option]')).toHaveCount(12)
     await expect(
