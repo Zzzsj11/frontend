@@ -44,7 +44,7 @@ make docker-build
 
 ## 数字人资产补注册已退役
 
-所有环境均禁止配置或恢复 `ensure_asset_avatars.py`、`sync-digital-human-assets.sh` 的 cron、launchd 或其他周期任务。人物参考直接使用 TOS 原图。发布脚本会移除遗留调度。详见 [数字人资产链路](ASSET-AVATAR.md#5)。
+所有环境均禁止配置或恢复 `ensure_asset_avatars.py`、`sync-digital-human-assets.sh` 的 cron、launchd 或其他周期任务。人物参考使用 OSS 或历史 TOS 原图。发布脚本会移除遗留调度。详见 [数字人资产链路](ASSET-AVATAR.md#5-英和资产补注册退役2026-10-15)。
 
 ## 测试先行与环境隔离
 

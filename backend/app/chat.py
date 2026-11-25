@@ -12,11 +12,10 @@ from sqlalchemy.orm import selectinload
 from .config import settings
 from .database import session_factory
 from .error_logging import redact_error_text
+from .generation_context import AsyncOpenAI
 from .jobs import Job, jobs
 from .llm_failover import choose_model, record_failure, record_success
 from .llm_policy import LlmContentPolicyError, check_provider_text, completion_options
-from .model_gateway import AsyncOpenAI
-from .model_gateway import enabled as gateway_enabled
 from .models import ChatMessageModel, ChatSessionModel, utcnow
 from .redis_store import append_chat_event, chat_events_after, redis
 from .token_usage import add_token_usage
@@ -172,7 +171,7 @@ class ChatManager:
         model_used = settings.llm_model
         provider_started = provider_completed = False
         try:
-            if not settings.llm_api_key and not gateway_enabled():
+            if not settings.llm_api_key:
                 raise RuntimeError("LLM_API_KEY 未配置")
             chunks: list[str] = []
             if settings.llm_api_mode == "anthropic":
@@ -218,7 +217,7 @@ class ChatManager:
                     model=model, **options, messages=[{"role": "system", "content": session.system_prompt}, *session.messages], stream=True, stream_options={"include_usage": True}
                 )
                 if settings.llm_model.endswith("-all-in-one"):
-                    from .model_gateway import current_job_id
+                    from .generation_context import current_job_id
                     from .text_admission import text_slot
                     from .text_recovery import create_stream, platform_job_id
 

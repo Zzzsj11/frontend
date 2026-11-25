@@ -2970,7 +2970,7 @@ async def test_worker_quarantines_unsupported_media_without_replay(client, statu
     ("snapshot", "status", "message"),
     [
         ({"_provider": "retired-provider"}, 422, "不受支持"),
-        ({"_provider": "yinghe", "_modelGateway": True}, 502, "MODEL_GATEWAY_URL"),
+        ({"_provider": "yinghe", "_modelGateway": True}, 502, "历史模型网关已退役"),
     ],
 )
 def test_admin_sync_rejects_unavailable_source_before_query(client, monkeypatch, snapshot, status, message):

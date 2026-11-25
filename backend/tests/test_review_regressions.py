@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import select
 
-from app import all_in_one, chat, config, creative, llm_failover, model_gateway, optimizer_media, prompt_optimizer
+from app import all_in_one, chat, config, creative, generation_context, llm_failover, optimizer_media, prompt_optimizer
 from app.database import session_factory
 from app.jobs import jobs
 from app.models import ChatMessageModel, GenerationJobModel, LlmCallLogModel, PromptOptimizationTaskModel, TokenUsageModel
@@ -54,7 +54,7 @@ def client_factory(create):
 def test_optimizer_replay_freezes_input_and_reuses_accepted_request(client, monkeypatch):
     platform_settings(monkeypatch)
     user_id = client.get("/api/auth/me").json()["id"]
-    monkeypatch.setattr(model_gateway, "current_owner", lambda: user_id)
+    monkeypatch.setattr(generation_context, "current_owner", lambda: user_id)
     keys, payloads = [], []
     accepted = response()
 
@@ -75,7 +75,7 @@ def test_optimizer_replay_freezes_input_and_reuses_accepted_request(client, monk
         async with session_factory() as db:
             job = await jobs.enqueue(db, "prompt_optimization", {}, user_id=user_id)
             await db.commit()
-        monkeypatch.setattr(model_gateway, "current_job_id", lambda: job.id)
+        monkeypatch.setattr(generation_context, "current_job_id", lambda: job.id)
         args = dict(prompt="original intent", duration=5, ratio="16:9", media=[], agent_name="code-agent", agent_run_id="synthetic-replay")
         with pytest.raises(prompt_optimizer.OptimizationCallError):
             await prompt_optimizer._call_platform(**args)
@@ -156,7 +156,7 @@ def test_optimizer_busy_response_preserves_failure_usage_and_audit(client, monke
             replay = jobs._from_model(job)
         # 模拟失败记录已提交、工单终态尚未提交时进程中断，再次领取同一工单。
         with pytest.raises(prompt_optimizer.OptimizationCallError) as caught:
-            await model_gateway.run_with_context(replay, creative.run_prompt_optimization_job)
+            await generation_context.run_with_context(replay, creative.run_prompt_optimization_job)
         assert caught.value.usage_recorded
         assert create.await_count == 1
         async with session_factory() as db:

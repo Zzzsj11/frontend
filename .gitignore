@@ -70,3 +70,6 @@ test-artifacts/load-monitor/
 /.codex-build/
 /.codex-finalizer/
 /output/
+
+# Retired service may leave private local runtime files.
+/model-service/

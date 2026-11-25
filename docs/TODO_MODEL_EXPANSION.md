@@ -4,10 +4,9 @@
 
 ## 退役边界与迁移要求
 
-PPIO 与 BFL（Black Forest Labs，历史 FLUX 3）已从 MV 与 model-service 移除支持，适配器、余额查询、模型 seed 和人物 PPIO 专属字段不再属于活动能力，不列入后续接入或补测计划。
+PPIO 与 BFL（Black Forest Labs，历史 FLUX 3）已从 MV 移除支持，适配器、余额查询、模型 seed 和人物 PPIO 专属字段不再属于活动能力，不列入后续接入或补测计划。
 
 - MV 历史 Alembic 文件保留，避免迁移断链；通过新增前向迁移软删除存量 provider/model/pricing 行，并移除人物专属字段。
-- model-service 同样需要前向迁移退役旧渠道及关联模型、费率配置行；不能仅删除 seed 后假定旧数据库已清理。
 - 上线前须分别确认两侧迁移落库；本说明不代表已经执行。历史财务工单、费用、用量与媒体保留，不通过退役清理删除或重写。
 
 ## 已完成（勿重复）
@@ -17,7 +16,7 @@ PPIO 与 BFL（Black Forest Labs，历史 FLUX 3）已从 MV 与 model-service �
 - H3 已进入项目视频生成主流程，UI 支持 T2VA、I2VA、FL2VA、Ref2VA（当前产品明确不开放 L2VA）；Ref2VA 产品上限为 6 图、1 视频、3 音频，视觉素材必需，音频不能单独提交。
 - H3 保留 RunningHub 工作流模型（前端标注并发上限 2），并新增 MiniMax-H3 直连模型（前端显示 H3）；直连协议使用 `/video/generation/tasks`、稳定 `Idempotency-Key`、`task_id` 和 `task.content.url`，768P/2K 分别由产品侧 480p/720p 与 1080p 映射。
 - 人物入库时注册英合虚拟人物资产，英合 Seedance 生成时使用 `asset_avatar_url`；TOS 原图与缩略图保持不变。
-- MV 余额端点查询英和商户/子账号 Key；批量生成按模型 `billing` 决定是否估价和校验余额，不使用其他渠道余额兜底。独立 model-service 的余额采集范围见其 `docs/CHANNEL-BALANCES.md`，不等同于 MV 生成预检范围。
+- MV 余额端点查询英和商户/子账号 Key；批量生成按模型 `billing` 决定是否估价和校验余额，不使用其他渠道余额兜底。
 - 模型能力同时下发 `billing`、`resolutionLabels` 与 `providerResolutionMap`。RunningHub 明确为暂不计费且不检查英和余额；英和 H3 的内部兼容档位 `720p/1080p` 分别映射供应商 `768P/2K`，RunningHub 映射为工作流 MP 档位。
 - 视频完成后通过 ffprobe 固化实际宽高、FPS、编码、真实时长和文件大小；请求档位、供应商档位、实际文件规格分开保存和展示。
 

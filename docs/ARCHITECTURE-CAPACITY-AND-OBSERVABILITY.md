@@ -1,27 +1,27 @@
 # 单机架构容量、全链路旅程与可观测性基线
 
-更新时间：2026-08-20。测试环境：`120.24.38.200`，4 vCPU、30 GiB RAM、4 GiB swap，系统盘 40 GiB，Docker 数据盘 196 GiB。
+历史容量基线采集于 2026-08-20，当时的机器配置为 4 vCPU、30 GiB RAM、4 GiB swap，系统盘 40 GiB，Docker 数据盘 196 GiB。当前测试与正式环境的入口见[部署手册](DEPLOYMENT.md#环境对应与发布顺序强制)。
 
 ## 数据流与故障边界
 
 1. 用户经 Nginx/Vue 调用 FastAPI；API 只做鉴权、配额、校验和持久化提交。
 2. PostgreSQL 的 `generation_jobs` 是任务真相源。Redis 只负责唤醒、进度缓存和事件加速；Redis 故障不会丢任务。
 3. Storyboard、Chat、Media、Export worker 使用数据库抢占与心跳，分别隔离 LLM、模型调用和 FFmpeg 长任务。
-4. 模型输入、输出原文件与缩略图进入 TOS；数据库保存 URL、状态、请求快照和模型用量。
+4. 新增媒体输入、输出原文件与缩略图进入同环境 OSS；数据库保存 URL、状态、请求快照和模型用量。
 5. 前端通过轮询/SSE 读取持久状态。worker 或 API 重启后，未完成工单可以最多重放 3 次。
 
 ### 覆盖全部组件的验收旅程
 
-使用 dev01 登录 → 创建项目 → 上传 ASS → 匹配歌曲情感库 → 选择系统/私有人物 → 提交 ASS 大纲 → 重试一个场景段 → 逐镜头生成提示词 → 同时提交图片、Seedance 与 H3 视频 → 发起通用 Chat → 导出成片 → 管理后台查看模型用量、队列、资源与告警。该旅程依次触发 Nginx、前端、API、PostgreSQL、Redis、四类 worker、Chat/Image/Video provider、TOS、FFmpeg、SSE/轮询和监控采集。
+使用 dev01 登录 → 创建项目 → 上传 ASS → 匹配歌曲情感库 → 选择系统/私有人物 → 提交 ASS 大纲 → 重试一个场景段 → 逐镜头生成提示词 → 同时提交图片、Seedance 与 H3 视频 → 发起通用 Chat → 导出成片 → 管理后台查看模型用量、队列、资源与告警。该旅程依次触发 Nginx、前端、API、PostgreSQL、Redis、分池 Worker、Chat/Image/Video provider、OSS、FFmpeg、SSE/轮询和监控采集。
 
-边界注入：前端重复提交（本地业务工单去重）、Redis 中断（数据库轮询兜底）、provider 429/超时、worker 被杀（租约到期后恢复）、TOS 上传失败（任务失败且保留输入）、Export 与视频同时运行（CPU/iowait 监测）、系统盘/数据盘接近阈值、网络出站接近月配额、数据库连接耗尽。gpt-image-2 与 Seedance 创建请求发送由本地工单 ID 派生的稳定 `Idempotency-Key`：已经取得 taskId 的任务只续轮询；`submitting_provider` 阶段崩溃且没有 taskId 的任务使用原键安全重放。未声明幂等能力的其他供应商仍停止自动重放并进入人工核对。
+边界注入：前端重复提交（本地业务工单去重）、Redis 中断（数据库轮询兜底）、provider 429/超时、worker 被杀（租约到期后恢复）、OSS 上传失败（任务失败且保留输入）、Export 与视频同时运行（CPU/iowait 监测）、系统盘/数据盘接近阈值、网络出站接近月配额、数据库连接耗尽。all in one 图片与视频创建请求发送由本地工单 ID 派生的稳定 `Idempotency-Key`：已经取得 taskId 的任务只续轮询；`submitting_provider` 阶段崩溃且没有 taskId 的任务使用原键安全重放。未声明幂等能力的其他供应商仍停止自动重放并进入人工核对。
 
 ## 容量口径与实测
 
 “可提交量”由 PostgreSQL 队列容量决定；“执行并发”由 worker 和 provider 槽决定。不能把排队任务数当作同时调用数，也不能把 Docker memory limit 当作已占用内存。性能统一使用三个口径：
 
 - `queue_wait_seconds = started_at - created_at`：包含 worker 抢占和 H3 等模型子池等待。
-- `execution_seconds = finished_at - started_at`：模型调用、结果处理、TOS 持久化和数据库落库。
+- `execution_seconds = finished_at - started_at`：模型调用、结果处理、对象存储归档和数据库落库。
 - `end_to_end_seconds = first_result_observed_at - created_at`：浏览器收到终态后回传确认，因此还包含轮询间隔与网络往返。
 
 管理后台同时显示每类任务三项 P95 和“确认覆盖率”。历史任务没有浏览器确认时间时不伪造端到端耗时，而是降低确认覆盖率；容量判断要求覆盖率足够且样本不少于 30。

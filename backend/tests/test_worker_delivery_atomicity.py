@@ -65,7 +65,6 @@ async def test_chat_failure_sets_job_terminal_and_records_one_usage(client, monk
     from app.models import ChatSessionModel, UserModel
 
     monkeypatch.setattr(chat, "settings", replace(chat.settings, llm_api_key=""))
-    monkeypatch.setattr(chat, "gateway_enabled", lambda: False)
     async with session_factory.begin() as db:
         owner = await db.scalar(select(UserModel.id).where(UserModel.username == "admin"))
         session = ChatSessionModel(id="terminal-chat", user_id=owner, system_prompt="test", status="running")

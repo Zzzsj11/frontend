@@ -6,6 +6,8 @@
 
 维护入口：[`AGENTS.md`](AGENTS.md)（Code Agent 约定）、[`ARCHITECTURE.md`](docs/ARCHITECTURE.md)、[`LOCAL-DEVELOPMENT.md`](docs/LOCAL-DEVELOPMENT.md)、[`TESTING.md`](docs/TESTING.md)、[`DEPLOYMENT.md`](docs/DEPLOYMENT.md)、[`ROLLBACK.md`](docs/ROLLBACK.md)、[`BACKUP-RESTORE.md`](docs/BACKUP-RESTORE.md) 和 [`SECURITY.md`](docs/SECURITY.md)。专题文档（`docs/`）：前端规范 `FRONTEND-GUIDELINES.md`、性能观测 `PERFORMANCE-MONITORING.md`、数字人资产链路 `ASSET-AVATAR.md`、歌曲分类数据 `SONG-CATEGORIES.md`、模型接入现状与剩余债务 `TODO_MODEL_EXPANSION.md`。
 
+MV 的图片恢复与素材下载接口见[技术架构](docs/ARCHITECTURE.md#图片工单与素材下载接口)。
+
 ## 核心能力
 
 - ASS 分镜：解析 ASS 时间轴和歌词，通过文件名中的歌曲编号匹配歌曲情感配置。
@@ -52,12 +54,13 @@ flowchart LR
     API --> REDIS["Redis 7"]
     API --> LLM["OpenAI-compatible LLM"]
     API --> IMG["图片生成服务"]
-    API --> VIDEO["Seedance 视频生成服务"]
-    API --> TOS["Volcengine TOS"]
+    API --> VIDEO["all in one 视频生成服务"]
+    API --> OSS["阿里云 OSS"]
+    API -.-> TOS["历史媒体与备份 TOS"]
     LLM --> API
     IMG --> API
     VIDEO --> API
-    TOS -->|"稳定 HTTPS 媒体地址"| FE
+    OSS -->|"稳定 HTTPS 媒体地址"| FE
 ```
 
 ### 前端
@@ -78,7 +81,7 @@ flowchart LR
 - Redis：生成任务热状态、SSE 事件和跨进程发布订阅
 - httpx：模型、媒体供应商和远程资源访问
 - PyJWT + Argon2：Access/Refresh Token 与密码哈希
-- Volcengine TOS Python SDK：TOS 对象存储访问
+- 阿里云 OSS：新业务媒体与导出存储；TOS SDK 支持历史媒体。
 - pytest：API、多用户隔离、存储、提示词质量和完整用户旅程测试
 
 ### 数据与安全
@@ -89,7 +92,7 @@ PostgreSQL 是持久化事实来源，主要保存用户、刷新令牌、项目
 - 删除接口只写入 `deleted_at`，不物理删除业务数据。
 - 系统角色可被所有用户读取，私有角色、项目和生成媒体按 `user_id`/项目所有权隔离。
 - 请求日志会对密码、Token、Cookie 等敏感字段脱敏。
-- 浏览器不会获得模型供应商或 TOS 密钥。
+- 浏览器不会获得模型供应商或对象存储密钥。
 
 ## 目录结构
 
@@ -104,7 +107,6 @@ PostgreSQL 是持久化事实来源，主要保存用户、刷新令牌、项目
 │   ├── app/                     FastAPI、领域服务、任务、存储和种子数据
 │   ├── migrations/              Alembic 迁移
 │   └── tests/                   后端自动化测试
-├── model-service/               可选独立模型服务（对外/管理 API + 双前端，承接全部模型调用）
 ├── e2e/                         Playwright 端到端测试
 │   ├── user/                    用户侧旅程、远程冒烟与真实生成全链路
 │   ├── admin/                   管理后台 API 契约与控制台 UI
@@ -123,7 +125,7 @@ PostgreSQL 是持久化事实来源，主要保存用户、刷新令牌、项目
 默认使用本机 Python/Node 开发与测试；需要真实数据库/Redis 时创建一次性容器：
 
 - Docker Desktop / Docker Engine，支持 Compose v2
-- 可用的 PostgreSQL、Redis、LLM、图片生成、视频生成和 TOS 配置
+- 可用的 PostgreSQL、Redis、LLM、图片生成、视频生成和 OSS 配置
 - 浏览器访问端口默认 `5173`
 
 本地开发额外需要：
@@ -147,9 +149,9 @@ cp backend/.env.example backend/.env
 - `LLM_*`：兼容 OpenAI 协议的分镜文本模型。
 - `IMAGE_*`：图片生成服务。
 - `VIDEO_*`：视频生成服务。
-- `TOS_*`：引用媒体桶、视频归档桶、前缀和公开域名。
+- `OSS_*`：新媒体与导出所用的同环境桶、地域、前缀和访问凭据，详见[部署手册](docs/DEPLOYMENT.md#oss-媒体存储与素材导出)。
+- `TOS_*`：历史媒体读取、下载签名和备份。
 - `BUSINESS_API_KEY`、`BUSINESS_USER_ID`：顶部栏业务余额查询凭证；未配置时安全显示 `--`，不会阻塞其他功能。
-- `MODEL_GATEWAY_URL`、`MODEL_GATEWAY_API_KEY`：可选独立模型服务内部接入凭证；留空保持直连各供应商，详见 `docs/ARCHITECTURE.md` 与 `model-service/README.md`。
 - `DATABASE_URL`、`REDIS_URL`：本地启动时的数据服务地址。
 
 项目也支持将统一供应商配置放在 `backend/.provider_config.py`，Compose 会将其作为 secret 挂载。`backend/.env`、`.env.chat` 和 `.provider_config.py` 均已被 Git 忽略，严禁提交真实密钥。
@@ -207,6 +209,6 @@ docker compose exec redis redis-cli
 
 ## 当前状态
 
-PPIO 与 BFL（Black Forest Labs，历史 FLUX 3）已从 MV 与 model-service 移除支持，不再提供配置、调用或余额入口。历史 Alembic 保留防断链；存量配置行须通过两侧各自的前向迁移退役，历史财务工单、费用与媒体保留。详见 [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) 与 [model-service 部署说明](model-service/docs/DEPLOYMENT.md)。
+独立模型服务已从 MV 仓库退役，正式模型调用使用同环境 all in one。历史工单、费用与媒体保留。
 
-`v0.9.1` 是 Web 内测版初版，已完成登录、多用户隔离、ASS/通用分镜、逐条提示词生成、角色库、TOS 媒体、图片/视频生成、素材导出、Token 记账、错误审计及完整自动化测试资产。当前维护本地、独立测试和正式环境。非紧急变更必须先测试服务器验收，再经明确授权发布正式；域名、服务器和 all in one 对应关系见 [部署手册](docs/DEPLOYMENT.md#环境对应与发布顺序强制)。
+`v0.9.1` 是 Web 内测版初版，已完成登录、多用户隔离、ASS/通用分镜、逐条提示词生成、角色库、媒体管理、图片/视频生成、素材导出、Token 记账、错误审计及完整自动化测试资产。当前维护本地、独立测试和正式环境。非紧急变更必须先测试服务器验收，再经明确授权发布正式；域名、服务器和 all in one 对应关系见 [部署手册](docs/DEPLOYMENT.md#环境对应与发布顺序强制)。

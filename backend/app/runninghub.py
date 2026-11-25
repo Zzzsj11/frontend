@@ -14,7 +14,6 @@ from typing import Any
 
 import httpx
 
-from . import model_gateway
 from .config import settings
 
 # 工作流节点 ID 映射（来源：YZ金鱼-MiniMax H3超级多合一工作流-官方版_api.json）
@@ -137,14 +136,10 @@ class RunningHubError(RuntimeError):
 def _base_url() -> str:
     if settings.llm_channel == "all-in-one":
         raise RuntimeError("旧渠道已停用，请使用平台模型")
-    if model_gateway.routed("runninghub"):
-        return model_gateway.route("runninghub")[0] + "/openapi/v2"
     return settings.runninghub_base_url
 
 
 def _headers() -> dict[str, str]:
-    if model_gateway.routed("runninghub"):
-        return model_gateway.request_headers()
     if not settings.runninghub_api_key:
         raise RunningHubError("RunningHub API Key 未配置，请在 backend/.env 设置 RUNNINGHUB_API_KEY")
     return {"Content-Type": "application/json", "Authorization": f"Bearer {settings.runninghub_api_key}"}
@@ -566,7 +561,7 @@ async def _submit_custom_workflow_json(workflow: str | dict[str, Any], node_info
     origin = _base_url().removesuffix("/openapi/v2")
     url = f"{origin}/task/openapi/create"
     payload = {
-        "apiKey": "" if model_gateway.routed("runninghub") else settings.runninghub_api_key,
+        "apiKey": settings.runninghub_api_key,
         # 高级接口的校验仍要求 workflowId 非空；传入 workflow 时完整 JSON 优先。
         "workflowId": settings.runninghub_workflow_id,
         "workflow": workflow,

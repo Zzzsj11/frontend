@@ -244,7 +244,7 @@ async def _recover_stale(kinds: tuple[str, ...], providers: tuple[str, ...], que
             elif (
                 (model.phase == "submitting_provider" and model.idempotency_key or model.kind == "video" and model.phase in {"claimed", "executing"} and provider == "all-in-one")
                 and model.attempt < MAX_INTERNAL_ATTEMPTS
-                and (provider == "all-in-one" or bool((model.request or {}).get("_modelGateway")))
+                and provider == "all-in-one"
                 and model.kind in {"image", "video"}
             ):
                 # Only replay suppliers with proven idempotent creation. ToAPIs

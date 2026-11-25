@@ -38,7 +38,7 @@ def headers(*, user_id: str | None = None, idempotency_key: str | None = None) -
         result["X-User-Id"] = user_id
     if idempotency_key:
         result["Idempotency-Key"] = idempotency_key
-    from .model_gateway import current_agent
+    from .generation_context import current_agent
 
     _, name, run = current_agent_attribution()
     if current_agent() is not None:

@@ -144,7 +144,7 @@ async def require_user(
         "/api/auth/logout",
     }:
         raise HTTPException(403, "首次登录必须先修改密码")
-    from .model_gateway import set_owner
+    from .generation_context import set_owner
 
     set_owner(user.id)
     request.state.user_id = user.id

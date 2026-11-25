@@ -10,7 +10,6 @@ from typing import Any
 
 import httpx
 
-from . import model_gateway
 from .config import settings
 
 MODES: tuple[str, ...] = ("std", "pro", "4k")  # 720P / 1080P / 4K
@@ -27,12 +26,10 @@ class KlingError(RuntimeError):
 def _base_url() -> str:
     if settings.llm_channel == "all-in-one":
         raise RuntimeError("旧渠道已停用，请使用平台模型")
-    return model_gateway.route("yinghe")[0] if model_gateway.routed("yinghe") else settings.kling_api_base_url
+    return settings.kling_api_base_url
 
 
 def _headers() -> dict[str, str]:
-    if model_gateway.routed("yinghe"):
-        return model_gateway.request_headers()
     if not settings.kling_api_key:
         raise KlingError("Kling API Key 未配置，请设置 KLING_API_KEY 或 VIDEO_API_KEY/共享 AIGC_TOKEN")
     return {"Content-Type": "application/json", "Authorization": f"Bearer {settings.kling_api_key}"}

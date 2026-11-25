@@ -99,7 +99,7 @@ async def test_create_maps_payload_and_durable_identity(configured, monkeypatch,
     persist = AsyncMock()
     monkeypatch.setattr(jobs, "set_provider_task", persist)
     monkeypatch.setattr(aio, "resume", AsyncMock(return_value={"done": True}))
-    monkeypatch.setattr("app.model_gateway.current_agent", lambda: ("code-agent", "test-run"))
+    monkeypatch.setattr("app.generation_context.current_agent", lambda: ("code-agent", "test-run"))
     job = Job(
         id="local-job",
         kind=kind,
@@ -155,7 +155,7 @@ async def test_uncertain_submission_is_never_reposted(configured, monkeypatch):
 async def test_direct_worker_keeps_agent_headers(configured, monkeypatch):
     from types import SimpleNamespace
 
-    from app import database, model_gateway
+    from app import database, generation_context
 
     class Session:
         async def __aenter__(self):
@@ -177,7 +177,7 @@ async def test_direct_worker_keeps_agent_headers(configured, monkeypatch):
         assert values["X-Agent-Name"] == "code-agent"
         return "ok"
 
-    assert await model_gateway.run_with_context(job, runner) == "ok"
+    assert await generation_context.run_with_context(job, runner) == "ok"
 
 
 @pytest.mark.asyncio

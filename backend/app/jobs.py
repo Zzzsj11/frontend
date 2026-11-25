@@ -482,7 +482,7 @@ class JobManager:
         if job.worker_id:
             await self.heartbeat(job)
         try:
-            from .model_gateway import run_with_context
+            from .generation_context import run_with_context
 
             job.result = await run_with_context(job, runner)
             job.progress, job.status, job.phase = 100, "succeeded", "succeeded"

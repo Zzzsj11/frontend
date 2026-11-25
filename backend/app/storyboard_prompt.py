@@ -11,11 +11,10 @@ from typing import Any
 
 from .config import settings
 from .error_logging import log_background_error
+from .generation_context import AsyncOpenAI
 from .llm_failover import choose_model, record_failure, record_success
 from .llm_policy import LlmContentPolicyError, TemporaryLlmError, UncertainLlmError, check_provider_text, completion_options, is_transient_error, outline_contract, retry_delay
 from .media_constraints import normalize_video_duration
-from .model_gateway import AsyncOpenAI
-from .model_gateway import enabled as gateway_enabled
 from .prompts import get_prompt
 from .video_prompt_policy import CHARACTER_DIRECTION_RULE, append_shot_quality_requirements, relax_generated_character_direction
 
@@ -535,7 +534,7 @@ async def generate_ass_story_outline(
     extra_requirement: str,
     on_progress: ProgressCallback | None = None,
 ) -> dict[str, Any]:
-    if not settings.llm_api_key and not gateway_enabled():
+    if not settings.llm_api_key:
         raise RuntimeError("LLM_API_KEY 未配置")
     role_ids = [item["id"] for item in selected_humans]
     lyric_only = [segment for segment in segments if segment.get("segmentType", "lyric") == "lyric"]
@@ -692,7 +691,7 @@ async def regenerate_ass_scene_segment(
     extra_requirement: str,
 ) -> dict[str, Any]:
     """段级重试：保留第一轮场景规划，仅重跑指定场景段的第二轮生成。"""
-    if not settings.llm_api_key and not gateway_enabled():
+    if not settings.llm_api_key:
         raise RuntimeError("LLM_API_KEY 未配置")
     if not 0 <= scene_index < len(scene_plan):
         raise ValueError("场景段序号超出范围")
@@ -847,8 +846,8 @@ async def _call(
         safe_retry = not model.endswith("-all-in-one")
         try:
             if model.endswith("-all-in-one"):
+                from .generation_context import current_job_id
                 from .llm_comparison import call_chat_model
-                from .model_gateway import current_job_id
                 from .text_recovery import platform_job_id, reconcile
 
                 digest = hashlib.sha256(json.dumps([model, operation, messages], ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:32]
@@ -930,7 +929,7 @@ async def _call(
 
 
 async def generate_storyboard_line(*, source: str, current: dict[str, Any], full_context: dict[str, Any], allowed_humans: list[dict[str, Any]]) -> dict[str, Any]:
-    if not settings.llm_api_key and not gateway_enabled():
+    if not settings.llm_api_key:
         raise RuntimeError("LLM_API_KEY 未配置")
     planned = current.get("plannedDigitalHumanIds") or []
     # full_context 已由领域层裁剪为当前场景、前后两镜和局部歌词窗口；避免逐镜重复发送全片 story bible。
@@ -1269,7 +1268,7 @@ async def generate_general_story_outline(
     call_override: LlmCallOverride | None = None,
 ) -> dict[str, Any]:
     """通用分镜大纲生成：单轮 LLM 调用，根据曲风/季节/人物/镜头数量规划完整 MV 分镜。"""
-    if not settings.llm_api_key and not gateway_enabled():
+    if not settings.llm_api_key:
         raise RuntimeError("LLM_API_KEY 未配置")
     if settings.outline_protocol_version == "v2":
         return await _generate_general_story_outline_v2(

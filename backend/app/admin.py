@@ -583,7 +583,7 @@ async def sync_generation_job(job_id: str, request: Request, user: CurrentUser, 
     if job_manager.is_active(job_id):
         return {"providerStatus": None, "action": "skipped", "detail": "任务正在本机执行中，无需同步"}
     try:
-        from .model_gateway import run_with_context
+        from .generation_context import run_with_context
 
         async def query_in_owner_context(_job):
             return await query_provider_task(model.kind, model.provider_task_id, model.provider)

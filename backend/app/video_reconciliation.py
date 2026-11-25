@@ -76,7 +76,7 @@ async def heartbeat(job):
 
 
 async def recover(job):
-    from .model_gateway import run_with_context
+    from .generation_context import run_with_context
     from .providers import query_provider_task, store_provider_result, validate_media_job_source
 
     keeper = asyncio.create_task(heartbeat(job))

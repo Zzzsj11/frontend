@@ -21,7 +21,7 @@
 
 本手册环境表与发布规则优先于早期部署报告中的历史“测试服务器”称呼。
 
-2026-10-19 起使用正式域名 `mv.epaipix.com`，HTTP `80` 自动跳转 HTTPS `443`。测试与正式共用现有 TOS 账号/Bucket，通过 `mv/test/`、`mv/production/` 对象目录隔离；历史对象保留原址。当前发布方式是在服务器从 Git 获取指定提交，并在服务器本地构建带 Git SHA 的版本化镜像。
+2026-10-19 起使用正式域名 `mv.epaipix.com`，HTTP `80` 自动跳转 HTTPS `443`。新媒体按环境写入 OSS，详见[存储配置](#oss-媒体存储与素材导出)；历史 TOS 对象保留原址。当前发布方式是在服务器从 Git 获取指定提交，并在服务器本地构建带 Git SHA 的版本化镜像。
 
 ## 1. 部署原则
 
@@ -278,7 +278,7 @@ WORKER_STALE_SECONDS=180
 
 生产单机建议使用 `sudo PROJECT_DIR=/opt/mv-agent-frontend scripts/install-monitoring-systemd.sh` 安装 30 秒监控 timer；`install-maintenance-cron.sh` 会检测该 timer，仅在未启用时保留一分钟采集兜底。监控字段、容量口径和告警阈值见 `docs/ARCHITECTURE-CAPACITY-AND-OBSERVABILITY.md`。
 
-`worker-image`、`worker-media`（仅视频）、`worker-export`、`worker-chat` 与 `worker-storyboard` 必须和 backend 使用同一个版本化后端镜像。图片和视频使用独立并发池，避免长视频轮询占满图片执行槽。12 vCPU / 8 GiB 的实测环境以图片32、视频32起步；供应商视频并发上限为200，若 429、失败率、数据库连接数和 P95 轮询延迟均稳定，可依次把视频提升到64、96。导出 Worker 建议3并发，每个任务内部最多20路流式下载；4核测试机建议图片8、视频8、导出1。分镜编排并发建议2；不要把 `JOB_EXECUTION_MODE` 切为 `worker` 却遗漏 `COMPOSE_PROFILES=workers`，否则新任务只会排队而无人领取。
+所有 Worker 和 backend 使用同一个版本化后端镜像。视频拆为 `worker-wan`（WAN 3.0）、`worker-seedance`（Seedance 2.0）及 `worker-media`（其余视频），图片由 `worker-image` 独立领取。Compose 中对应的领取并发为 `WAN_WORKER_CONCURRENCY`（默认 1000）、`SEEDANCE_WORKER_CONCURRENCY`（默认 1000）、`VIDEO_WORKER_CONCURRENCY`（默认 32）。实际视频执行还受跨副本总槽位（默认 2000）、每模型槽位（默认 1000）和创建限速（默认 16 QPS）约束。素材导出并发见下方 OSS 配置。部署需启用 workers profile，并检查各视频队列、图片、导出、Chat 和分镜 Worker 的健康状态。
 
 生产仅使用 `ALL_IN_ONE_*` 配置；旧 `AIGC_TOKEN` 与其他直连渠道配置在发布时清除。任何核验命令都不得打印 Token。
 
@@ -548,7 +548,9 @@ DEPLOY_ENV=production ./scripts/rollback.sh
 
 2026-10-13 验证中，当前 Key 有效，但文本/媒体创建与大部分报价返回上游 500，GPT-6.1-Sol 未开放生成。须由平台修复后完成真实创建、恢复、交付和费用验收，再发布；目录启用并不代表验收通过。
 
-## 正式域名证书与共用 TOS（2026-10-19）
+## 正式域名证书与历史 TOS 配置（2026-10-19）
+
+此节的 TOS 媒体路径用于历史素材。当前写入配置见[OSS 媒体存储与素材导出](#oss-媒体存储与素材导出)。
 
 域名 `mv.epaipix.com` 指向当前服务器。首次安装 certbot 后执行 HTTP-01：
 
@@ -560,11 +562,11 @@ certbot certonly --manual --preferred-challenges http --non-interactive --agree-
 
 认证钩子只向当前 frontend 容器写入 ACME challenge，不停止网站。证书目录为 `/etc/letsencrypt/live/mv.epaipix.com`，按 §5.0 部署。成功后将版本化 `scripts/reload-tls-certificate.sh` 链接到 `/etc/letsencrypt/renewal-hooks/deploy/`，启用 certbot.timer，并执行 `certbot renew --dry-run`。续期钩子仅复制证书并检查、平滑重载 nginx，不触发模型调用。
 
-正式媒体新路径为 `mv/production/references/` 和 `mv/production/videos/`；测试默认 `mv/test/references/`、`mv/test/videos/`。备份使用同 Bucket 的 `mv/production/backups/database/`；必须提供服务端 Secret 中的 `BACKUP_TOS_ENCRYPTION_KEY`（配置脚本首次生成，后续保留），上传和下载均使用 SSE-C AES256。即使媒体 Bucket 允许公开读，无该密钥也不能下载备份。密钥必须另存受控密码管理器，丢失后无法恢复这些备份；不得放在 TOS 同目录或 Git 中。
+历史正式媒体路径为 `mv/production/references/` 和 `mv/production/videos/`；测试默认 `mv/test/references/`、`mv/test/videos/`。备份使用同 Bucket 的 `mv/production/backups/database/`；必须提供服务端 Secret 中的 `BACKUP_TOS_ENCRYPTION_KEY`（配置脚本首次生成，后续保留），上传和下载均使用 SSE-C AES256。即使媒体 Bucket 允许公开读，无该密钥也不能下载备份。密钥必须另存受控密码管理器，丢失后无法恢复这些备份；不得放在 TOS 同目录或 Git 中。
 
 ## 独立测试服务器
 
-测试环境为 `root@120.77.71.145`，入口 `https://mv-test.epaipix.com`；正式环境保持 `https://mv.epaipix.com`。两台机器各自拥有 PostgreSQL、Redis、JWT、管理员和加密备份密钥，不复制生产用户/项目数据。all in one 平台入口和 Key 按环境隔离；上游供应商账号及 TOS Bucket 可共用，新媒体使用 `mv/test/references/`、`mv/test/videos/`，备份使用 `mv/test/backups/database/`。
+测试环境为 `root@120.77.71.145`，入口 `https://mv-test.epaipix.com`；正式环境保持 `https://mv.epaipix.com`。两台机器各自拥有 PostgreSQL、Redis、JWT、管理员和加密备份密钥，不复制生产用户/项目数据。all in one 平台入口和 Key 按环境隔离；历史测试媒体路径为 `mv/test/references/`、`mv/test/videos/`，备份使用 `mv/test/backups/database/`。
 
 测试服务器 `.env.production`（仅是 Docker 加固覆盖的历史文件名）必须设置 `DEPLOYMENT_TIER=test`、`TLS_DOMAIN=mv-test.epaipix.com`、`APP_CORS_ORIGINS=https://mv-test.epaipix.com`。发布准备脚本从该文件持久读取 tier/domain，后续不显式传环境变量也不会重置为正式目录。4核机器采用图片4、视频4、导出1、分镜2并发。
 

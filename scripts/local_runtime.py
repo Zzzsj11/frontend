@@ -234,7 +234,6 @@ def main():
             "heads",
             "migration",
             "middleware",
-            "gateway-postgres",
             "dev",
             "build",
         ],
@@ -256,16 +255,6 @@ def main():
         redis=args.mode in {"middleware", "dev"}, build=args.mode == "build"
     ) as env:
         if args.mode == "build":
-            return
-        if args.mode == "gateway-postgres":
-            service = ROOT / "model-service"
-            with tempfile.TemporaryDirectory(prefix="mv-gateway-proof-") as results:
-                for script in ("postgres-concurrency.py", "postgres-account-limits.py"):
-                    run(
-                        [PYTHON, service / "tests" / script],
-                        cwd=service,
-                        env={**env, "TEST_RESULT_DIR": results},
-                    )
             return
         migrate(env)
         if args.mode == "middleware":

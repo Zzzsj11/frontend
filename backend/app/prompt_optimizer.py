@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from . import model_gateway
+from . import generation_context
 from .agent_attribution import current_agent_attribution
 from .config import settings
 from .error_logging import redact_error_text
@@ -95,9 +95,6 @@ async def call_gemini(*, prompt: str, duration: int, ratio: str, media: list[dic
     started = time.perf_counter()
     async with httpx.AsyncClient(timeout=settings.prompt_optimizer_timeout) as client:
         url = f"{settings.prompt_optimizer_gemini_base_url}/chat/completions"
-        if model_gateway.routed("optimizer-gemini"):
-            url = model_gateway.base_url() + "/v1/chat/completions"
-            headers.update(model_gateway.request_headers())
         response = await client.post(url, headers=headers, json=payload)
     _raise_provider_error(response, "Gemini")
     body = response.json()
@@ -125,30 +122,25 @@ async def create_minimax(*, prompt: str, duration: int, ratio: str, media: list[
         )
     payload = {"model": settings.prompt_optimizer_minimax_model, "content": content, "duration": duration, "ratio": ratio}
     headers = {"Authorization": f"Bearer {settings.prompt_optimizer_minimax_api_key}", "Content-Type": "application/json", **_agent_headers(agent_name, agent_run_id)}
-    via_gateway = model_gateway.routed("optimizer-minimax")
     async with httpx.AsyncClient(timeout=settings.prompt_optimizer_timeout) as client:
         base = settings.prompt_optimizer_minimax_base_url
-        if via_gateway:
-            base, gateway_headers = model_gateway.route("optimizer-minimax")
-            headers.update(gateway_headers)
         response = await client.post(f"{base}/v2/h3_context_ir", headers=headers, json=payload)
     _raise_provider_error(response, "MiniMax")
     body = response.json()
     task_id = str(body.get("task_id") or "").strip()
     if not task_id:
         raise RuntimeError(f"MiniMax HTTP {response.status_code}: response missing task_id; body={redact_error_text(response.text[:4000])}")
-    return {"taskId": task_id, "requestId": response.headers.get("x-request-id"), "viaGateway": via_gateway}
+    return {"taskId": task_id, "requestId": response.headers.get("x-request-id"), "viaGateway": False}
 
 
 async def query_minimax(task_id: str, *, via_gateway: bool, agent_name: str = "", agent_run_id: str = "") -> dict[str, Any]:
     if settings.llm_channel == "all-in-one":
         raise RuntimeError("MiniMax 专用优化接口已停用，请选择 Gemini")
+    if via_gateway:
+        raise RuntimeError("历史模型网关已退役，请使用原工单记录核对")
     headers = {"Authorization": f"Bearer {settings.prompt_optimizer_minimax_api_key}", **_agent_headers(agent_name, agent_run_id)}
     async with httpx.AsyncClient(timeout=settings.prompt_optimizer_timeout) as client:
         base = settings.prompt_optimizer_minimax_base_url
-        if via_gateway:
-            base, gateway_headers = model_gateway.route("optimizer-minimax")
-            headers.update(gateway_headers)
         response = await client.get(f"{base}/v2/query/video_generation/{task_id}", headers=headers)
     _raise_provider_error(response, "MiniMax")
     task = response.json().get("task") or {}
@@ -181,11 +173,11 @@ async def _job_snapshot(key: str, value: dict | None = None) -> dict | None:
     from .database import session_factory
     from .models import GenerationJobModel
 
-    job_id = model_gateway.current_job_id()
+    job_id = generation_context.current_job_id()
     if not job_id:
         return value
     async with session_factory() as db:
-        query = select(GenerationJobModel).where(GenerationJobModel.id == job_id, GenerationJobModel.user_id == model_gateway.current_owner())
+        query = select(GenerationJobModel).where(GenerationJobModel.id == job_id, GenerationJobModel.user_id == generation_context.current_owner())
         row = await db.scalar(query.with_for_update())
         if row is None:
             raise RuntimeError("提示词优化工单不存在或不属于当前用户")
@@ -209,14 +201,14 @@ async def _call_platform(*, prompt: str, duration: int, ratio: str, media: list[
     if snapshot is None:
         model = await choose_model(settings.llm_model)
         content = [{"type": "text", "text": enrich_prompt(prompt, duration, ratio, media)}]
-        content.extend(await content_parts(media, model_gateway.current_owner()))
+        content.extend(await content_parts(media, generation_context.current_owner()))
         snapshot = await _job_snapshot(
             "_optimizationRequest",
             {
                 "model": model,
                 "messages": [{"role": "system", "content": SYSTEM_INSTRUCTION}, {"role": "user", "content": content}],
                 "options": completion_options(model, 7000),
-                "idempotencyKey": f"aio-{model_gateway.current_job_id()}:prompt-optimization:v1" if model_gateway.current_job_id() else None,
+                "idempotencyKey": f"aio-{generation_context.current_job_id()}:prompt-optimization:v1" if generation_context.current_job_id() else None,
             },
         )
     model, messages = snapshot["model"], snapshot["messages"]
@@ -229,9 +221,9 @@ async def _call_platform(*, prompt: str, duration: int, ratio: str, media: list[
     result = cached or {}
     try:
         if cached is None:
-            job_id = model_gateway.current_job_id()
+            job_id = generation_context.current_job_id()
             async with chat_client(
-                user_id=model_gateway.current_owner(),
+                user_id=generation_context.current_owner(),
                 timeout=settings.prompt_optimizer_timeout,
                 idempotency_key=snapshot.get("idempotencyKey") or (f"aio-{job_id}:prompt-optimization:v1" if job_id else None),
             ) as client:

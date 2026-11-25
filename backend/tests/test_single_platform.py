@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app import llm_comparison, main, model_gateway, prompt_optimizer, providers
+from app import generation_context, llm_comparison, main, prompt_optimizer, providers
 from app.llm_policy import completion_options
 
 
@@ -42,7 +42,7 @@ async def test_platform_optimizer_preserves_headers_usage_and_request(monkeypatc
     monkeypatch.setattr(prompt_optimizer, "settings", replace(prompt_optimizer.settings, llm_channel="all-in-one", llm_model=model))
     monkeypatch.setattr(llm_failover, "choose_model", AsyncMock(return_value=model))
     monkeypatch.setattr(llm_failover, "record_success", AsyncMock())
-    monkeypatch.setattr(model_gateway, "current_owner", lambda: "u1")
+    monkeypatch.setattr(generation_context, "current_owner", lambda: "u1")
     part = {"type": "image_url", "image_url": {"url": "https://tos.test/ref.jpg"}}
     monkeypatch.setattr(optimizer_media, "content_parts", AsyncMock(return_value=[part]))
     create = AsyncMock(

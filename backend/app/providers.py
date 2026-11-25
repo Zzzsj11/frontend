@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 import httpx
 from PIL import Image, UnidentifiedImageError
 
-from . import model_gateway
+from . import generation_context
 from .agent_attribution import current_agent_attribution
 from .config import settings
 from .error_logging import _redact
@@ -228,8 +228,8 @@ def _headers(api_key: str, *, x_api_key: bool = False) -> dict[str, str]:
     auth = {"x-api-key": api_key} if x_api_key else {"Authorization": f"Bearer {api_key}"}
     headers = {**auth, "Content-Type": "application/json", "Idempotency-Key": str(uuid.uuid4())}
     _, name, run = current_agent_attribution()
-    if model_gateway.current_agent() is not None:
-        name, run = model_gateway.current_agent() or ("", "")
+    if generation_context.current_agent() is not None:
+        name, run = generation_context.current_agent() or ("", "")
     if run:
         headers.update({"X-Agent-Name": name or "code-agent", "X-Agent-Run-Id": run, "X-Test-Run-Id": run})
     return headers
@@ -302,8 +302,6 @@ async def create_real_face_asset(public_url: str, *, name: str) -> str:
 def _image_config() -> tuple[str, dict[str, str]]:
     if settings.llm_channel == "all-in-one":
         raise ProviderError("旧渠道已停用，请使用平台模型")
-    if model_gateway.routed("yinghe"):
-        return model_gateway.route("yinghe")
     if not settings.image_api_key:
         raise ProviderError("IMAGE_API_KEY 未配置")
     return settings.image_api_base_url.rstrip("/"), _headers(settings.image_api_key, x_api_key=True)
@@ -312,8 +310,6 @@ def _image_config() -> tuple[str, dict[str, str]]:
 def _video_config() -> tuple[str, dict[str, str]]:
     if settings.llm_channel == "all-in-one":
         raise ProviderError("旧渠道已停用，请使用平台模型")
-    if model_gateway.routed("yinghe"):
-        return model_gateway.route("yinghe")
     if not settings.video_api_key:
         raise ProviderError("VIDEO_API_KEY 未配置")
     return settings.video_api_base_url.rstrip("/"), _headers(settings.video_api_key)
@@ -322,8 +318,6 @@ def _video_config() -> tuple[str, dict[str, str]]:
 def _yseeai_config() -> tuple[str, dict[str, str]]:
     if settings.llm_channel == "all-in-one":
         raise ProviderError("旧渠道已停用，请使用平台模型")
-    if model_gateway.routed("yseeai"):
-        return model_gateway.route("yseeai")
     if not settings.yseeai_api_key:
         raise ProviderError("YSEEAI_API_KEY 未配置")
     return settings.yseeai_api_base_url, _headers(settings.yseeai_api_key)
@@ -332,8 +326,6 @@ def _yseeai_config() -> tuple[str, dict[str, str]]:
 def _toapis_config() -> tuple[str, dict[str, str]]:
     if settings.llm_channel == "all-in-one":
         raise ProviderError("旧渠道已停用，请使用平台模型")
-    if model_gateway.routed("toapis"):
-        return model_gateway.route("toapis")
     if not settings.toapis_api_key:
         raise ProviderError("TOAPIS_API_KEY 未配置")
     return settings.toapis_api_base_url, _headers(settings.toapis_api_key)
@@ -1403,7 +1395,7 @@ async def generate_gemini_omni_video(request: VideoGenerationCreate, job: Job) -
         "metadata": {"aspect_ratio": request.ratio, "task": task},
     }
     if images:
-        payload["images"] = images if model_gateway.routed("yseeai") else [await _gemini_omni_image_data_url(url) for url in images]
+        payload["images"] = [await _gemini_omni_image_data_url(url) for url in images]
     await jobs.record_provider_request(job, payload)
     await jobs.mark_provider_submitting(job)
     async with httpx.AsyncClient(timeout=60) as client:
@@ -1888,7 +1880,7 @@ async def query_provider_task(kind: str, task_id: str, provider: str | None = No
     if provider == "all-in-one":
         from .all_in_one import query_task
 
-        return await query_task(kind, task_id, user_id=model_gateway.current_owner())
+        return await query_task(kind, task_id, user_id=generation_context.current_owner())
     if provider == "runninghub":
         try:
             return await runninghub_query_task(task_id)

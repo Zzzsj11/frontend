@@ -4,8 +4,8 @@ from types import SimpleNamespace
 from typing import Any
 
 from .all_in_one import query_task
+from .generation_context import current_owner
 from .llm_policy import UncertainLlmError, is_transient_error, retry_delay
-from .model_gateway import current_owner
 
 
 def platform_job_id(exc: Exception) -> str | None:

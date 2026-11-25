@@ -42,8 +42,6 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e:smoke
       - run: npx playwright test e2e/user/digital-human-headshot.spec.ts --workers=1
-      - run: npm ci --prefix model-service/admin-web && npm ci --prefix model-service/user-web
-      - run: make -C model-service check
       - run: docker compose -f docker-compose.yml -f docker-compose.local-build.yml build
         env:
           LOCAL_NODE_BASE_IMAGE: docker.io/library/node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
@@ -60,8 +58,6 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm audit --registry=https://registry.npmjs.org --audit-level=high
-      - run: npm audit --prefix model-service/admin-web --registry=https://registry.npmjs.org --audit-level=high
-      - run: npm audit --prefix model-service/user-web --registry=https://registry.npmjs.org --audit-level=high
   image-security:
     runs-on: ubuntu-latest
     strategy:
@@ -70,10 +66,6 @@ jobs:
         include:
           - { image: mvagent-backend, context: backend }
           - { image: mvagent-frontend, context: . }
-          - { image: model-public, context: model-service/public-api }
-          - { image: model-admin, context: model-service/admin-api }
-          - { image: model-user-web, context: model-service/user-web }
-          - { image: model-admin-web, context: model-service/admin-web }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Build the image for this revision

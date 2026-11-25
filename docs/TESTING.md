@@ -147,8 +147,9 @@ npm run test:e2e:real:export      # 复用已有通用视频，仅验播放器�
 ```
 
 - 输入夹具 `test-artifacts/full-journey/inputs/10012204-full-e2e.ass`；首次基准截图在 `test-artifacts/full-journey/screenshots/`（入库保留，复跑不得覆盖）；后续产物进 `runs/<run-id>/`。分阶段恢复必须复用同一 run-id。
-- 环境必须具备：PostgreSQL/Redis、文本/图片/视频供应商、TOS 凭据、32 个系统人物与歌曲情感配置。视频基准选 5 秒控制成本。
-- 成功后数据库核验：2 项目 2 任务；ASS/通用各 2 条 `storyboard_lines` 为 succeeded；4 个 scene_assets + 4 个 shot_assets；generation_jobs 全成功；有成本调用均有 `token_usage_records`；2 条 material_exports 为 ready；所有媒体 URL 为 TOS HTTPS 且返回 200；`api_error_logs` 无非预期 4xx/5xx（冷启动 `/api/auth/refresh` 401 属已知预期）。
+- 环境必须具备：PostgreSQL/Redis、同环境模型平台、OSS 凭据、32 个系统人物与歌曲情感配置。视频基准选 5 秒控制成本。
+- 成功后数据库核验：2 项目 2 任务；ASS/通用各 2 条 `storyboard_lines` 为 succeeded；4 个 scene_assets + 4 个 shot_assets；generation_jobs 全成功；有成本调用均有 `token_usage_records`；2 条 material_exports 为 ready；新媒体 URL 为同环境 OSS HTTPS 且返回 200；`api_error_logs` 无非预期 4xx/5xx（冷启动 `/api/auth/refresh` 401 属已知预期）。
+- 恢复已有 ASS 子项目时，设置 `REAL_E2E_RESUME_ASS_PROJECT` 和 `REAL_E2E_RESUME_ASS_TASK_TITLE` 后运行 `npm run test:e2e:real:ass`。恢复通用项目时设置 `REAL_E2E_RESUME_GENERAL_PROJECT` 为项目名，可用于 `test:e2e:real:general` 或 `test:e2e:real:export`。前者仍可触发真实生成；后者选择指定项目的第一个子项目，需事先已有视频。
 - 失败处理：先看 Playwright 截图/trace，再查后端日志、generation_jobs、api_error_logs 区分交互失败与供应商失败；已有成果优先用恢复阶段重跑，避免重复收费；不得把失败任务改成功。
 - 用例迭代：优先角色/标签定位；新增关键节点同步加截图并更新数量断言；不降低超时掩盖供应商延迟；不删错误弹窗断言。
 

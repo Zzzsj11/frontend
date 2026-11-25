@@ -7,12 +7,11 @@ from typing import Any
 
 import httpx
 
-from . import model_gateway
+from . import generation_context
 from .config import settings
+from .generation_context import AsyncOpenAI
 from .generation_preferences import text_selection
 from .llm_policy import completion_options
-from .model_gateway import AsyncOpenAI
-from .model_gateway import enabled as gateway_enabled
 from .token_usage import normalize_usage
 
 
@@ -54,7 +53,7 @@ async def _call_openai(model: str, messages: list[dict[str, str]], temperature: 
     from . import all_in_one
 
     if model.endswith(all_in_one.SUFFIX):
-        client = all_in_one.chat_client(user_id=model_gateway.current_owner(), timeout=300, idempotency_key=idempotency_key)
+        client = all_in_one.chat_client(user_id=generation_context.current_owner(), timeout=300, idempotency_key=idempotency_key)
         upstream = all_in_one.upstream_model(model)
     else:
         client = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url, timeout=120)
@@ -73,12 +72,10 @@ async def _call_anthropic(model: str, messages: list[dict[str, str]], temperatur
     payload: dict[str, Any] = {"model": model, "messages": conversation, "temperature": temperature, "max_tokens": max_tokens}
     if system:
         payload["system"] = system
-    gateway_headers = model_gateway.request_headers() if model_gateway.enabled() else {}
-    gateway_url = model_gateway.base_url() + "/v1/messages" if model_gateway.enabled() else _anthropic_messages_url()
     async with httpx.AsyncClient(timeout=120) as client:
         response = await client.post(
-            gateway_url,
-            headers={"x-api-key": settings.llm_api_key, "anthropic-version": "2023-06-01", "content-type": "application/json", **gateway_headers},
+            _anthropic_messages_url(),
+            headers={"x-api-key": settings.llm_api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
             json=payload,
         )
         response.raise_for_status()
@@ -107,7 +104,7 @@ async def call_chat_model(
 async def compare_chat_models(
     *, models: list[str], system_prompt: str, prompt: str, temperature: float, max_tokens: int, channels: dict[str, str | None] | None = None
 ) -> list[dict[str, Any]]:
-    if not settings.llm_api_key and not gateway_enabled() and not settings.all_in_one_api_key:
+    if not settings.llm_api_key and not settings.all_in_one_api_key:
         raise RuntimeError("LLM_API_KEY 未配置")
     semaphore = asyncio.Semaphore(3)
     messages = ([{"role": "system", "content": system_prompt}] if system_prompt else []) + [{"role": "user", "content": prompt}]
