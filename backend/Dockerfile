@@ -1,5 +1,12 @@
 ARG BACKEND_BASE_IMAGE=python:3.12-alpine3.24@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89
+FROM ${BACKEND_BASE_IMAGE} AS streamzip-build
+RUN sed -i 's|https://dl-cdn.alpinelinux.org/alpine|https://mirrors.cloud.tencent.com/alpine|' /etc/apk/repositories \
+    && apk add --no-cache go
+COPY tools/streamzip/main.go /src/main.go
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /mv-streamzip /src/main.go
+
 FROM ${BACKEND_BASE_IMAGE}
+COPY --from=streamzip-build /mv-streamzip /usr/local/bin/mv-streamzip
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

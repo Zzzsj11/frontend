@@ -34,6 +34,7 @@ from .image_download import sign_attachment_url
 from .image_model_policy import validate_image_selection
 from .jobs import Job, jobs
 from .material_filename import material_filename
+from .material_zip import stream_material_zip
 from .media_constraints import normalize_video_duration
 from .models import (
     AdminOperationLogModel,
@@ -3022,130 +3023,163 @@ async def _run_material_export(export_id: str, job: Job) -> dict:
                 markdown.extend(["## 人物素材", ""])
             for human, filename in human_filenames:
                 markdown.extend([f"- {human['name']}：`characters/{filename}`", ""])
-            processed_assets = processed_bytes = known_total_bytes = 0
-            last_progress = 5
-            with tempfile.TemporaryDirectory(prefix=f"mvagent-export-{export_id}-") as temporary_directory:
-                temporary_path = Path(temporary_directory)
-                space = ExportSpace(temporary_path)
-                archive_path = temporary_path / f"{export_id}.zip"
-                # 并发下载到临时目录，完成后按清单顺序写入 ZIP，保证包内镜序稳定。
-                # 共用 AsyncClient 复用 TLS/HTTP 连接；文件仍流式落盘，提升并发不会线性放大内存。
-                in_flight: dict[int, float] = {}
-                download_slots = asyncio.Semaphore(settings.export_download_concurrency)
+            if settings.storage_backend == "oss":
 
-                async def download_one(position: int, item: dict) -> None:
-                    nonlocal processed_assets, processed_bytes, known_total_bytes, last_progress
-                    target = temporary_path / f"dl-{position:04d}"
-
-                    async def on_download(current: int, declared: int | None) -> None:
-                        nonlocal last_progress
-                        space.download(position, current, declared)
-                        in_flight[position] = current / declared if declared else 0.0
-                        progress = 5 + int(65 * (processed_assets + sum(in_flight.values())) / max(1, total_assets))
-                        if progress > last_progress:
-                            last_progress = progress
-                            await _set_export_progress(
-                                export_id,
-                                job,
-                                progress,
-                                f"正在下载素材 {processed_assets + 1}/{total_assets}",
-                                processed_assets=processed_assets,
-                                processed_bytes=processed_bytes + current,
-                                total_bytes=known_total_bytes + (declared or 0),
-                            )
-
-                    async with download_slots:
-                        for attempt in range(3):
-                            try:
-                                _, _, size = await download_public_url_to_path(
-                                    item["url"],
-                                    target,
-                                    progress_callback=on_download,
-                                    client=download_client,
-                                )
-                                break
-                            except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
-                                target.unlink(missing_ok=True)
-                                in_flight.pop(position, None)
-                                if attempt == 2:
-                                    raise
-                                await asyncio.sleep(0.5 * (2**attempt))
-                    in_flight.pop(position, None)
-                    item["path"] = target
-                    processed_assets += 1
-                    processed_bytes += size
-                    known_total_bytes += size
-                    progress = 5 + int(65 * processed_assets / max(1, total_assets))
-                    last_progress = max(last_progress, progress)
+                async def report_assets(count: int, size: int) -> None:
+                    progress = 5 + int(80 * count / max(1, total_assets))
                     await _set_export_progress(
                         export_id,
                         job,
                         progress,
-                        f"已下载 {processed_assets}/{total_assets} 个素材",
-                        processed_assets=processed_assets,
-                        processed_bytes=processed_bytes,
-                        total_bytes=known_total_bytes,
+                        f"正在打包并上传 {count}/{total_assets}",
+                        processed_assets=count,
+                        processed_bytes=size,
                     )
 
-                limits = httpx.Limits(
-                    max_connections=settings.export_download_concurrency,
-                    max_keepalive_connections=settings.export_download_concurrency,
+                async def report_finishing(archive_bytes: int, source_bytes: int) -> None:
+                    await _set_export_progress(
+                        export_id,
+                        job,
+                        95,
+                        "正在确认素材包",
+                        archive_size=archive_bytes,
+                        processed_assets=total_assets,
+                        processed_bytes=source_bytes,
+                        total_bytes=source_bytes,
+                    )
+
+                archive_url, archive_size = await stream_material_zip(
+                    safe_key(f"users/{job.user_id}/exports/{job.project_task_id}", f"{export_id}-{job.attempt}.zip"),
+                    downloads,
+                    "\n".join(markdown),
+                    report_assets,
+                    report_finishing,
                 )
-                async with httpx.AsyncClient(timeout=180, follow_redirects=False, limits=limits) as download_client:
-                    async with asyncio.TaskGroup() as group:
-                        for position, item in enumerate(downloads):
-                            group.create_task(download_one(position, item))
-                # 打包 70–85%：按清单顺序写入（videos/01.mp4… 与镜序一致）
-                with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_STORED, allowZip64=True) as bundle:
-                    for written, item in enumerate(downloads, start=1):
-                        if item["path"].stat().st_size > space.output_limit(bundle.fp.tell()):
-                            raise ValueError("素材包超过服务器临时空间限额")
-                        await asyncio.to_thread(bundle.write, item["path"], item["arcname"])
-                        item["path"].unlink(missing_ok=True)
-                        space.inputs.pop(written - 1, None)
-                        progress = 70 + int(15 * written / max(1, total_assets))
+            else:
+                processed_assets = processed_bytes = known_total_bytes = 0
+                last_progress = 5
+                with tempfile.TemporaryDirectory(prefix=f"mvagent-export-{export_id}-") as temporary_directory:
+                    temporary_path = Path(temporary_directory)
+                    space = ExportSpace(temporary_path)
+                    archive_path = temporary_path / f"{export_id}.zip"
+                    # 并发下载到临时目录，完成后按清单顺序写入 ZIP，保证包内镜序稳定。
+                    # 共用 AsyncClient 复用 TLS/HTTP 连接；文件仍流式落盘，提升并发不会线性放大内存。
+                    in_flight: dict[int, float] = {}
+                    download_slots = asyncio.Semaphore(settings.export_download_concurrency)
+
+                    async def download_one(position: int, item: dict) -> None:
+                        nonlocal processed_assets, processed_bytes, known_total_bytes, last_progress
+                        target = temporary_path / f"dl-{position:04d}"
+
+                        async def on_download(current: int, declared: int | None) -> None:
+                            nonlocal last_progress
+                            space.download(position, current, declared)
+                            in_flight[position] = current / declared if declared else 0.0
+                            progress = 5 + int(65 * (processed_assets + sum(in_flight.values())) / max(1, total_assets))
+                            if progress > last_progress:
+                                last_progress = progress
+                                await _set_export_progress(
+                                    export_id,
+                                    job,
+                                    progress,
+                                    f"正在下载素材 {processed_assets + 1}/{total_assets}",
+                                    processed_assets=processed_assets,
+                                    processed_bytes=processed_bytes + current,
+                                    total_bytes=known_total_bytes + (declared or 0),
+                                )
+
+                        async with download_slots:
+                            for attempt in range(3):
+                                try:
+                                    _, _, size = await download_public_url_to_path(
+                                        item["url"],
+                                        target,
+                                        progress_callback=on_download,
+                                        client=download_client,
+                                    )
+                                    break
+                                except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
+                                    target.unlink(missing_ok=True)
+                                    in_flight.pop(position, None)
+                                    if attempt == 2:
+                                        raise
+                                    await asyncio.sleep(0.5 * (2**attempt))
+                        in_flight.pop(position, None)
+                        item["path"] = target
+                        processed_assets += 1
+                        processed_bytes += size
+                        known_total_bytes += size
+                        progress = 5 + int(65 * processed_assets / max(1, total_assets))
+                        last_progress = max(last_progress, progress)
+                        await _set_export_progress(
+                            export_id,
+                            job,
+                            progress,
+                            f"已下载 {processed_assets}/{total_assets} 个素材",
+                            processed_assets=processed_assets,
+                            processed_bytes=processed_bytes,
+                            total_bytes=known_total_bytes,
+                        )
+
+                    limits = httpx.Limits(
+                        max_connections=settings.export_download_concurrency,
+                        max_keepalive_connections=settings.export_download_concurrency,
+                    )
+                    async with httpx.AsyncClient(timeout=180, follow_redirects=False, limits=limits) as download_client:
+                        async with asyncio.TaskGroup() as group:
+                            for position, item in enumerate(downloads):
+                                group.create_task(download_one(position, item))
+                    # 打包 70–85%：按清单顺序写入（videos/01.mp4… 与镜序一致）
+                    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_STORED, allowZip64=True) as bundle:
+                        for written, item in enumerate(downloads, start=1):
+                            if item["path"].stat().st_size > space.output_limit(bundle.fp.tell()):
+                                raise ValueError("素材包超过服务器临时空间限额")
+                            await asyncio.to_thread(bundle.write, item["path"], item["arcname"])
+                            item["path"].unlink(missing_ok=True)
+                            space.inputs.pop(written - 1, None)
+                            progress = 70 + int(15 * written / max(1, total_assets))
+                            if progress > last_progress:
+                                last_progress = progress
+                                await _set_export_progress(
+                                    export_id,
+                                    job,
+                                    progress,
+                                    f"正在打包素材 {written}/{total_assets}",
+                                    processed_assets=processed_assets,
+                                    processed_bytes=processed_bytes,
+                                    total_bytes=known_total_bytes,
+                                )
+                        bundle.writestr("prompts.md", "\n".join(markdown).encode("utf-8"), compress_type=zipfile.ZIP_DEFLATED)
+                    archive_size = archive_path.stat().st_size
+                    await _set_export_progress(export_id, job, 85, "正在上传压缩包", archive_size=archive_size)
+                    # 上传 85–99%：TOS data_transfer_listener 在 worker 线程回报字节数，主协程轮询折算进度
+                    upload_state = {"consumed": 0}
+
+                    def on_upload(consumed: int, _total: int) -> None:
+                        upload_state["consumed"] = consumed
+
+                    upload_task = asyncio.create_task(
+                        get_storage().put_file(
+                            safe_key(f"users/{job.user_id}/exports/{job.project_task_id}", f"{export_id}.zip"),
+                            archive_path,
+                            "application/zip",
+                            progress_callback=on_upload,
+                        )
+                    )
+                    while not upload_task.done():
+                        await asyncio.sleep(1.5)
+                        fraction = min(1.0, upload_state["consumed"] / max(1, archive_size))
+                        progress = 85 + int(14 * fraction)
                         if progress > last_progress:
                             last_progress = progress
                             await _set_export_progress(
                                 export_id,
                                 job,
                                 progress,
-                                f"正在打包素材 {written}/{total_assets}",
-                                processed_assets=processed_assets,
-                                processed_bytes=processed_bytes,
-                                total_bytes=known_total_bytes,
+                                "正在上传压缩包",
+                                archive_size=archive_size,
                             )
-                    bundle.writestr("prompts.md", "\n".join(markdown).encode("utf-8"), compress_type=zipfile.ZIP_DEFLATED)
-                archive_size = archive_path.stat().st_size
-                await _set_export_progress(export_id, job, 85, "正在上传压缩包", archive_size=archive_size)
-                # 上传 85–99%：TOS data_transfer_listener 在 worker 线程回报字节数，主协程轮询折算进度
-                upload_state = {"consumed": 0}
-
-                def on_upload(consumed: int, _total: int) -> None:
-                    upload_state["consumed"] = consumed
-
-                upload_task = asyncio.create_task(
-                    get_storage().put_file(
-                        safe_key(f"users/{job.user_id}/exports/{job.project_task_id}", f"{export_id}.zip"),
-                        archive_path,
-                        "application/zip",
-                        progress_callback=on_upload,
-                    )
-                )
-                while not upload_task.done():
-                    await asyncio.sleep(1.5)
-                    fraction = min(1.0, upload_state["consumed"] / max(1, archive_size))
-                    progress = 85 + int(14 * fraction)
-                    if progress > last_progress:
-                        last_progress = progress
-                        await _set_export_progress(
-                            export_id,
-                            job,
-                            progress,
-                            "正在上传压缩包",
-                            archive_size=archive_size,
-                        )
-                archive_url = await upload_task
+                    archive_url = await upload_task
             async with session_factory() as session:
                 export = await locked_export(session, job, export_id)
                 if not export or export.status not in {"running", "queued", "ready"}:

@@ -8,6 +8,7 @@ import re
 import socket
 import tempfile
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Awaitable, Callable, Protocol
 from urllib.parse import quote, unquote, urljoin, urlparse
@@ -309,6 +310,21 @@ async def _download_request(url: str):
         # Unsigned GET of the same public object, using only the configured bucket endpoint.
         return httpx.URL(internal), {}
     return _pinned_request(url, await _validate_public_url(url))
+
+
+@asynccontextmanager
+async def stream_public_download(url: str, client: httpx.AsyncClient):
+    current = url
+    for _ in range(4):
+        target, options = await _download_request(current)
+        async with client.stream("GET", target, **options) as response:
+            if response.is_redirect and (location := response.headers.get("location")):
+                current = urljoin(current, location)
+                continue
+            response.raise_for_status()
+            yield response
+            return
+    raise ValueError("远程地址重定向次数过多")
 
 
 async def download_public_url(url: str, max_bytes: int = 500 * 1024 * 1024) -> tuple[str, bytes, str]:
