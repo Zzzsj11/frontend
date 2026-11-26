@@ -3,10 +3,12 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useAuthStore } from '../../src/stores/auth'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import VideoModelSelect from '../../src/components/VideoModelSelect.vue'
 import GeneralStoryboardModal from '../../src/components/GeneralStoryboardModal.vue'
 import { DEFAULT_SHOT_OPTIONS, useProjectStore } from '../../src/stores/project'
 import * as models from '../../src/generationModels'
 import * as apiClient from '../../src/api/client'
+import * as videoBatchCost from '../../src/utils/videoBatchCost'
 import * as confirmDialogModule from '../../src/composables/useConfirmDialog'
 
 describe('general storyboard defaults', () => {
@@ -185,6 +187,74 @@ describe('general storyboard defaults', () => {
     expect(document.body.textContent).toContain('上限 30')
     wrapper.unmount()
   })
+
+  it.each([false, true])(
+    'preserves user requirements when switching rain avoidance (random=%s)',
+    async (random) => {
+      const store = useProjectStore()
+      store.generalStoryboardOptions = {
+        genres: [{ value: 'pop', label: '流行歌曲' }],
+        seasons: ['秋'],
+        ageGroups: ['青年'],
+        visualStyles: ['电影写实'],
+        ratios: ['16:9'],
+      }
+      if (random) store.randomGeneralStoryboardOpen = true
+      else store.generalStoryboardOpen = true
+      const run = vi
+        .spyOn(store, random ? 'runRandomGeneralStoryboard' : 'runGeneralStoryboard')
+        .mockResolvedValue()
+      const balanceCheck = vi
+        .spyOn(videoBatchCost, 'videoBalanceCheckRequired')
+        .mockReturnValue(false)
+      const confirm = vi.spyOn(confirmDialogModule, 'confirmDialog').mockResolvedValue(true)
+      const wrapper = mount(GeneralStoryboardModal, { props: { random }, attachTo: document.body })
+      try {
+        const modelSelect = wrapper.getComponent(VideoModelSelect)
+        const textarea = document.body.querySelector('textarea')!
+        const instruction = '请勿生成下雨或雨天场景。'
+        const userText = '  慢镜头\n' + instruction + '  '
+        textarea.value = userText
+        textarea.dispatchEvent(new Event('input'))
+        const toggle = () => document.body.querySelector<HTMLInputElement>('[role="switch"]')
+        const submit = async (expected: string) => {
+          run.mockClear()
+          document.body.querySelector<HTMLButtonElement>('.modal-footer .btn-primary')!.click()
+          await vi.waitFor(() =>
+            expect(run).toHaveBeenCalledWith(
+              expect.objectContaining({ extraRequirement: expected }),
+            ),
+          )
+        }
+
+        modelSelect.vm.$emit('update:modelValue', 'wan3.0-video-all-in-one')
+        await wrapper.vm.$nextTick()
+        expect(toggle()?.checked).toBe(true)
+        await submit(userText + '\n' + instruction)
+
+        toggle()!.click()
+        await wrapper.vm.$nextTick()
+        expect(toggle()?.checked).toBe(false)
+        await submit(userText)
+
+        modelSelect.vm.$emit('update:modelValue', 'wan3.0-video-prime-all-in-one')
+        await wrapper.vm.$nextTick()
+        expect(toggle()).toBeNull()
+        await submit(userText)
+
+        modelSelect.vm.$emit('update:modelValue', 'wan3.0-video-all-in-one')
+        await wrapper.vm.$nextTick()
+        expect(toggle()?.checked).toBe(true)
+        expect(textarea.value).toBe(userText)
+        expect(document.body.querySelectorAll('.rain-scene-instruction')).toHaveLength(1)
+      } finally {
+        wrapper.unmount()
+        run.mockRestore()
+        confirm.mockRestore()
+        balanceCheck.mockRestore()
+      }
+    },
+  )
 
   it('随机批量生成会展示费用和 Key 余额，确认后才提交', async () => {
     const store = useProjectStore()

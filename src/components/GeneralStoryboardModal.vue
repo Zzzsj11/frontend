@@ -65,6 +65,19 @@ const totalDuration = ref(210)
 const groupCount = ref(1)
 const estimatingCost = ref(false)
 const extraRequirement = ref('')
+const rainSceneInstruction = '请勿生成下雨或雨天场景。'
+const isWan30 = computed(() => videoModel.value === 'wan3.0-video-all-in-one')
+const avoidRainScenes = ref(false)
+const showRainSceneInstruction = computed(() => isWan30.value && avoidRainScenes.value)
+const submittedExtraRequirement = computed(() => {
+  const userRequirement = extraRequirement.value.trim() ? extraRequirement.value : undefined
+  if (!showRainSceneInstruction.value) return userRequirement
+  return userRequirement ? userRequirement + '\n' + rainSceneInstruction : rainSceneInstruction
+})
+
+watch(isWan30, (selected) => {
+  avoidRainScenes.value = selected
+})
 const selectedHumanIds = ref<string[]>([])
 
 const genreOption = computed(() =>
@@ -145,6 +158,7 @@ const reset = () => {
     Math.max(minimumTotalDuration.value, 210),
   )
   extraRequirement.value = ''
+  avoidRainScenes.value = isWan30.value
   selectedHumanIds.value = []
 }
 
@@ -219,7 +233,7 @@ const submit = async () => {
       characterShotCount: Math.max(0, Math.round(characterShotCount.value)),
       totalDuration: Math.round(totalDuration.value),
       groupCount: Math.round(groupCount.value),
-      extraRequirement: extraRequirement.value.trim() || undefined,
+      extraRequirement: submittedExtraRequirement.value,
     }
     estimatingCost.value = true
     try {
@@ -314,7 +328,7 @@ const submit = async () => {
     totalDuration: Math.round(totalDuration.value),
     groupCount: Math.round(groupCount.value),
     digitalHumanIds: [...selectedHumanIds.value],
-    extraRequirement: extraRequirement.value.trim() || undefined,
+    extraRequirement: submittedExtraRequirement.value,
   }
   store.runGeneralStoryboard(request)
 }
@@ -520,14 +534,37 @@ const submit = async () => {
             >
           </div>
           <p class="model-hint">超出所选模型并发上限的任务会自动排队。</p>
-          <label class="extra-field"
-            ><span>额外要求（可选）</span
-            ><textarea
-              v-model="extraRequirement"
-              rows="3"
-              placeholder="例如：雨夜、克制情绪、避免舞蹈场面，多使用缓慢运镜…"
-            />
-          </label>
+          <div class="extra-field">
+            <div class="extra-field-header">
+              <span>额外要求（可选）</span>
+              <label v-if="isWan30" class="rain-scene-toggle">
+                <input v-model="avoidRainScenes" type="checkbox" role="switch" />
+                避免雨天场景
+              </label>
+            </div>
+            <div class="extra-field-editor">
+              <textarea
+                v-model="extraRequirement"
+                aria-label="额外要求（可选）"
+                :aria-describedby="
+                  showRainSceneInstruction
+                    ? random
+                      ? 'random-rain-instruction'
+                      : 'custom-rain-instruction'
+                    : undefined
+                "
+                rows="3"
+                placeholder="例如：克制情绪、避免舞蹈场面，多使用缓慢运镜…"
+              />
+              <p
+                v-if="showRainSceneInstruction"
+                :id="random ? 'random-rain-instruction' : 'custom-rain-instruction'"
+                class="rain-scene-instruction"
+              >
+                {{ rainSceneInstruction }}
+              </p>
+            </div>
+          </div>
         </section>
         <section v-if="!random" class="form-section">
           <h4>人物素材{{ castRequired ? '（必选）' : '（可选）' }}</h4>
@@ -631,8 +668,7 @@ const submit = async () => {
   font-size: 13px;
   font-weight: 600;
 }
-.field-label span,
-.extra-field > span {
+.field-label span {
   color: var(--text-secondary);
   font-weight: 400;
 }
@@ -782,8 +818,41 @@ input:focus,
 textarea:focus {
   border-color: var(--primary);
 }
-textarea {
+.extra-field-header,
+.rain-scene-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.extra-field-header {
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+.rain-scene-toggle input {
+  width: auto;
+  accent-color: var(--primary);
+}
+.rain-scene-toggle input:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.extra-field-editor {
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-sm);
+  background: var(--palette-ffffff);
+}
+.extra-field-editor:focus-within {
+  border-color: var(--primary);
+}
+.extra-field-editor textarea {
+  display: block;
+  border: 0;
+  background: transparent;
   resize: vertical;
+}
+.rain-scene-instruction {
+  margin: 0;
+  padding: 0 10px 9px;
 }
 .estimate {
   margin: 11px 0;
