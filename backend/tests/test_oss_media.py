@@ -104,3 +104,25 @@ def test_system_portrait_copy_uses_verified_public_oss_url(config, monkeypatch):
     key, uploaded = writer.bucket.put_object.call_args.args
     assert destination.endswith("/" + key)
     assert uploaded == original.getvalue()
+
+
+def test_missing_stock_portrait_accepts_restored_oss_object(config, monkeypatch):
+    migration = import_module("migrations.versions.0dc71af19e32_system_portraits_to_oss")
+    monkeypatch.setattr(system_human_media, "settings", config)
+    key = system_human_media.portrait_key("028")
+    source = system_human_media.legacy_portrait_url(key)
+    destination = system_human_media.portrait_url(key)
+    writer = Mock()
+
+    def respond(request):
+        if request.method == "HEAD":
+            assert str(request.url) == destination
+            return httpx.Response(200, headers={"content-type": "image/jpeg"})
+        assert str(request.url) == source
+        return httpx.Response(404)
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        assert migration._copy(client, writer, source, key) == destination
+        with pytest.raises(httpx.HTTPStatusError):
+            migration._copy(client, writer, source, key, versioned=True)
+    writer.bucket.put_object.assert_not_called()

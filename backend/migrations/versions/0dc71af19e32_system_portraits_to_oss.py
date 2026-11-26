@@ -29,6 +29,12 @@ def _copy(client, storage, source, key, *, versioned=False):
         raise RuntimeError(f"Unexpected source for system portrait {key}")
     content = bytearray()
     with client.stream("GET", source) as response:
+        if response.status_code == 404 and not versioned:
+            # A missing stock portrait can be restored at its canonical OSS key.
+            destination = portrait_url(key)
+            restored = client.head(destination)
+            if restored.status_code == 200 and restored.headers.get("content-type", "").startswith("image/"):
+                return destination
         response.raise_for_status()
         for chunk in response.iter_bytes():
             content.extend(chunk)
