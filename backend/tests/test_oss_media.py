@@ -1,10 +1,13 @@
 from dataclasses import replace
+from importlib import import_module
+from io import BytesIO
 from unittest.mock import Mock
 
 import httpx
 import pytest
+from PIL import Image
 
-from app import image_download, oss_storage, storage
+from app import image_download, oss_storage, storage, system_human_media
 
 
 @pytest.fixture
@@ -73,3 +76,31 @@ def test_shared_bucket_keeps_platform_and_mv_account_scopes(config, monkeypatch)
     assert storage.is_user_owned_tos_url(src, "alice")
     assert not storage.is_user_owned_tos_url(src, "bob")
     assert not storage.is_user_owned_tos_url(src.replace("1" * 32, "2" * 32), "alice")
+
+
+def test_system_portrait_copy_uses_verified_public_oss_url(config, monkeypatch):
+    migration = import_module("migrations.versions.0dc71af19e32_system_portraits_to_oss")
+    for module in (migration, system_human_media):
+        monkeypatch.setattr(module, "settings", config)
+    original = BytesIO()
+    Image.new("RGB", (8, 12)).save(original, format="JPEG")
+    source = "https://legacy.tos-cn-beijing.volces.com/references/neutral-version/001.jpg"
+    writer = Mock()
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, content=original.getvalue() if request.method == "GET" else b"")
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        destination = migration._copy(client, writer, source, system_human_media.portrait_key("001"), versioned=True)
+        with pytest.raises(RuntimeError, match="Unexpected source"):
+            migration._copy(client, writer, "https://other.example/001.jpg", system_human_media.portrait_key("001"))
+
+    assert str(requests[0].url) == source
+    assert requests[1].method == "HEAD"
+    assert str(requests[1].url) == destination
+    assert destination.startswith("https://media-example.oss-cn-shenzhen.aliyuncs.com/mv/test/media/system/digital-humans/neutral-")
+    key, uploaded = writer.bucket.put_object.call_args.args
+    assert destination.endswith("/" + key)
+    assert uploaded == original.getvalue()

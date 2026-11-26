@@ -579,4 +579,6 @@ certbot certonly --manual --preferred-challenges http --non-interactive --agree-
 
 新上传、模型素材归档、缩略图与导出包使用 `STORAGE_BACKEND=oss`。两个环境分别在 runtime secret 中设置对应环境的 `OSS_BUCKET`、`OSS_REGION`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET` 与 `OSS_PREFIX`。独立桶的前缀为 `mv/<tier>/media`；与 all-in-one 共桶且使用个人平台 Key 时，追加 `/users/<平台归属段>`。从该环境 Key 的认证接口 `/v1/account/credits` 读取绑定账号，经平台的 `user_path_segment` 取得归属段。MV 自身的 `users/<MV user_id>/...` 作为下一级隔离目录。保留 TOS 凭据供历史原图下载签名和备份使用。OSS 使用同地域内网传输，浏览器和模型引用使用稳定 HTTPS 公网对象地址，桶需支持已有媒体交付所需的公开读。测试与正式必须分开验收。
 
+系统人物头像由 Alembic 修订 `0dc71af19e32` 切换。升级前须配置该环境的 OSS 写入和公网读取权限，并保留原头像的 TOS 读取能力。迁移复制内置人物原图和缩略图，验证 OSS 公网对象可读后提交地址。空库在 seed 前准备头像对象，已有库按实际头像版本复制。迁移可重试，源 TOS 对象保留。测试发布后检查系统人物 API 返回的原图和缩略图以及浏览器显示，再验收正式环境。历史生成工单、私有人物与备份均不在此迁移范围内。
+
 素材 ZIP 的 `EXPORT_PER_USER_CONCURRENCY`、`EXPORT_CONCURRENCY` 和 Compose 的 `EXPORT_WORKER_CONCURRENCY` 分别控制用户在途、进程执行和 Worker 领取数量，发布值均为 20。单包下载设为 2，分片上传设为 1，成片渲染仍由独立执行池限流。回滚至仅支持 TOS 的旧镜像前，同时恢复旧环境配置；已发放的 OSS 公网 URL 保持有效。

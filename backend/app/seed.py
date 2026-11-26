@@ -26,7 +26,6 @@ from .models import (
 )
 from .prompts import DEFAULT_PROMPTS
 from .song_emotions import SONG_EMOTIONS
-from .storage import TosStorage
 from .storyboard_options import (
     DEFAULT_AGE_GROUPS,
     DEFAULT_GENRE_TREE,
@@ -34,6 +33,7 @@ from .storyboard_options import (
     DEFAULT_VISUAL_STYLES,
     seed_item_id,
 )
+from .system_human_media import portrait_key, portrait_url
 from .system_humans import SYSTEM_HUMAN_ASSET_URLS, SYSTEM_HUMANS
 from .video_estimation import video_estimate_policy
 
@@ -789,14 +789,12 @@ async def seed_system_data() -> None:
             headshot = HEADSHOT_ASSETS.get(human_id, {})
             human = await session.get(DigitalHumanModel, human_id)
             style = system_styles[data["category"]]
-            bucket, object_key = TosStorage._bucket_for(f"system/digital-humans/{data['asset_code']}.jpg")
-            avatar_url = TosStorage._public_url(bucket, object_key)
-            thumbnail_bucket, thumbnail_key = TosStorage._bucket_for(f"system/digital-humans/thumbnails/{data['asset_code']}.jpg")
-            thumbnail_url = TosStorage._public_url(thumbnail_bucket, thumbnail_key)
-            # 平台虚拟资产链接已注册并固化，seed 直接写入（asset:// 由平台托管，跨环境通用）
+            avatar_url = portrait_url(portrait_key(data["asset_code"]))
+            thumbnail_url = portrait_url(portrait_key(data["asset_code"], thumbnail=True))
+            if settings.storage_backend != "oss":
+                avatar_url = headshot.get("avatar_url", avatar_url)
+                thumbnail_url = headshot.get("avatar_thumbnail_url", thumbnail_url)
             asset_avatar_url = SYSTEM_HUMAN_ASSET_URLS.get(data["asset_code"])
-            avatar_url = headshot.get("avatar_url", avatar_url)
-            thumbnail_url = headshot.get("avatar_thumbnail_url", thumbnail_url)
             asset_avatar_url = headshot.get("asset_avatar_url", asset_avatar_url)
             if not human:
                 human = DigitalHumanModel(
@@ -816,8 +814,7 @@ async def seed_system_data() -> None:
                 session.add(human)
             else:
                 human.style_id, human.deleted_at, human.status = style.id, None, "active"
-                # 已存在的系统人物可能已由受控迁移切换到版本化 TOS 对象；重启时
-                # 只补缺失值，不能把新造型回滚到安装包内置旧地址。
+                # 保留 Alembic 迁移选定的头像版本，启动时仅补缺失值。
                 if not human.avatar_url:
                     human.avatar_url = avatar_url
                 if not human.avatar_thumbnail_url:

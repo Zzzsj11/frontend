@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upload original-resolution system character headshots and portrait thumbnails to TOS."""
+"""Upload original-resolution system character headshots and portrait thumbnails to the configured media storage (OSS in deployment environments)."""
 
 from __future__ import annotations
 
