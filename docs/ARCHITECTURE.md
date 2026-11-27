@@ -2,7 +2,7 @@
 
 计价预检以模型能力中的 `billing` 为单一产品配置：声明渠道、每秒粗估价、是否检查余额和是否排除。新视频使用 all in one 的平台积分结算，不使用英和余额预检；旧通道和 `video_pricing_rules` 仅用于对应历史任务。最终对账以实际供应商用量和平台结算为准。
 
-all in one 视频每次归档只下载一次原片。媒体 Worker 从同一临时文件提取首帧和实际规格，按比例生成封面缩略图，然后将视频、封面、缩略图写入同环境 OSS。工单及 `shot_assets` 记录请求档位、供应商档位、实际宽高、FPS、编码、时长及文件大小。ffprobe 出错时保留下载字节数，视频仍可交付。历史素材可用 `backend/scripts/backfill_video_metadata.py` 幂等补齐。管理后台历史重算通过 `billing_reconcile` 持久化 Worker 工单执行，每批 500 条，支持进度、重复请求复用和中断重放。
+all in one 交付视频原片、首帧封面、缩略图和视频元数据。MV 校验工单归档清单及 OSS 对象路径，将三个对象在同环境 OSS 内复制到用户目录，并直接采用已交付的元数据。缺少有效归档或复制失败时，由工单对账流程处理。工单及 `shot_assets` 记录请求档位、供应商档位、实际宽高、FPS、编码、时长及文件大小。历史素材可用 `backend/scripts/backfill_video_metadata.py` 幂等补齐。
 
 项目是 Vue 3 + TypeScript 前端、FastAPI + SQLAlchemy 后端、PostgreSQL 持久化、Redis 缓存/任务状态、OSS 媒体存储（兼容历史 TOS 素材）的 MV AI 生产平台。Nginx 托管前端并代理 `/api`。
 

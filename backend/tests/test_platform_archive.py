@@ -32,3 +32,14 @@ async def test_platform_copy_is_bound_to_one_job_owner_and_keeps_user_destinatio
         item["cover_url"] = bad + "covers/0.jpg"
         assert await platform_archive.copy_platform_archive(job, body, "users/user1/generated") is None
     assert writer.copy_object.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_video_without_verified_platform_archive_requires_reconciliation():
+    from app.all_in_one import store_result
+    from app.providers import ProviderError
+
+    job = SimpleNamespace(id="mv-1", provider_task_id="job-1", kind="video", user_id="user1", request={})
+    body = {"id": "job-1", "result": {"media": [{"url": "https://example.com/video.mp4"}]}}
+    with pytest.raises(ProviderError, match="视频归档未通过校验"):
+        await store_result(job, body)

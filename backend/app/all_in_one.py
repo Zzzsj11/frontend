@@ -6,12 +6,10 @@ import asyncio
 import logging
 import random
 import re
-import tempfile
 import time
 import uuid
 from contextlib import asynccontextmanager, nullcontext
 from contextvars import ContextVar
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -215,44 +213,7 @@ async def store_result(job: Any, body: dict[str, Any]) -> dict[str, Any]:
             "archiveMethod": "import",
             "archiveMs": round((time.monotonic() - started) * 1000),
         }
-    archived = await _archive_video(job, urls[0], owner)
-    return {
-        **common,
-        **archived,
-        "archiveMethod": "import",
-        "archiveMs": round((time.monotonic() - started) * 1000),
-        "sourceUrl": urls[0],
-        "duration": (job.request or {}).get("duration"),
-        "ratio": (job.request or {}).get("ratio"),
-    }
-
-
-async def _archive_video(job: Any, source_url: str, owner: str) -> dict[str, Any]:
-    from .providers import extract_video_cover
-    from .storage import download_public_url_to_path, get_storage, image_thumbnail
-    from .video_metadata import probe_video_file, video_result_slots
-
-    async with video_result_slots:
-        with tempfile.TemporaryDirectory(prefix="mv-video-archive-") as directory:
-            video_path = Path(directory) / "source.mp4"
-            cover_path = Path(directory) / "cover.jpg"
-            _, content_type, size = await download_public_url_to_path(source_url, video_path)
-            await extract_video_cover(video_path, cover_path)
-            thumbnail = await image_thumbnail(cover_path, "image/jpeg")
-            try:
-                metadata = await probe_video_file(video_path)
-            except Exception:
-                logger.exception("video metadata probe failed: job_id=%s", job.id)
-                metadata = {"fileSize": size}
-
-            # Job-scoped keys let recovery finish a partial upload at the same destinations.
-            storage = get_storage()
-            video_url = await storage.put_file(f"{owner}/videos/{job.id}.mp4", video_path, content_type)
-            cover_url = await storage.put_file(f"{owner}/covers/{job.id}.jpg", cover_path, "image/jpeg")
-            thumbnail_url = await storage.put_bytes(f"{owner}/covers/{job.id}-thumbnail.jpg", thumbnail, "image/jpeg")
-
-    job.video_metadata_probed = True
-    return {**metadata, "videoUrl": video_url, "coverUrl": cover_url, "coverThumbnailUrl": thumbnail_url}
+    raise ProviderError("all in one 视频归档未通过校验或 OSS 复制失败，请核查原工单归档")
 
 
 async def generate(request: Any, job: Any) -> dict[str, Any]:
