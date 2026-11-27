@@ -258,7 +258,7 @@ JOB_EXECUTION_MODE=worker
 COMPOSE_PROFILES=workers
 IMAGE_WORKER_CONCURRENCY=32
 VIDEO_WORKER_CONCURRENCY=32
-EXPORT_WORKER_CONCURRENCY=3
+EXPORT_WORKER_CONCURRENCY=5
 EXPORT_UPLOAD_PART_SIZE_MB=5
 TOS_REQUEST_TIMEOUT_SECONDS=180
 TOS_SOCKET_TIMEOUT_SECONDS=180
@@ -581,4 +581,4 @@ certbot certonly --manual --preferred-challenges http --non-interactive --agree-
 
 系统人物头像由 Alembic 修订 `0dc71af19e32` 切换。升级前须配置该环境的 OSS 写入和公网读取权限，并保留原头像的 TOS 读取能力。迁移复制内置人物原图和缩略图，验证 OSS 公网对象可读后提交地址。空库在 seed 前准备头像对象，已有库按实际头像版本复制。迁移可重试，源 TOS 对象保留。测试发布后检查系统人物 API 返回的原图和缩略图以及浏览器显示，再验收正式环境。历史生成工单、私有人物与备份均不在此迁移范围内。
 
-素材 ZIP 的 `EXPORT_PER_USER_CONCURRENCY`、`EXPORT_CONCURRENCY` 和 Compose 的 `EXPORT_WORKER_CONCURRENCY` 分别控制用户在途、进程执行和 Worker 领取数量，发布值均为 20。测试和正式的导出 Worker 的发布配置均为 3 vCPU、2 GiB。素材 ZIP 的 OSS 原生传输使用 16 MiB 分片，单包最多 2 个在途分片。成片渲染仍由独立执行池限流，并使用独立的临时文件和上传参数。回滚至仅支持 TOS 的旧镜像前，同时恢复旧环境配置；已发放的 OSS 公网 URL 保持有效。
+素材 ZIP 按用户最多等待 100 个（`EXPORT_PER_USER_QUEUE_LIMIT`），领取后释放等待名额。同子项目重复提交复用在途工单。PostgreSQL 在领取事务内限制全环境最多同时执行 5 个 ZIP（`EXPORT_CONCURRENCY`），涵盖历史工单和多个副本。Compose 的 `EXPORT_WORKER_CONCURRENCY` 默认每进程领取 5 个导出任务，包含成片。测试和正式的导出 Worker 限额为 2.5 vCPU、2 GiB，内存同时供 FFmpeg 成片使用。素材 ZIP 的 OSS 原生传输使用 16 MiB 分片，单包最多 2 个在途分片。成片渲染仍由独立执行池限流，并使用独立的临时文件和上传参数。回滚至仅支持 TOS 的旧镜像前，同时恢复旧环境配置；已发放的 OSS 公网 URL 保持有效。

@@ -533,7 +533,7 @@ def test_material_export_supersedes_finished_history(client, monkeypatch) -> Non
         assert client.get(f"/api/material-exports/{foreign.json()['id']}", headers=headers).status_code == 200
 
         # 用户级并发上限：存在进行中导出时，对另一个任务发起导出返回 429
-        monkeypatch.setattr(domain, "settings", replace(domain.settings, export_per_user_concurrency=1))
+        monkeypatch.setattr(domain, "settings", replace(domain.settings, export_per_user_queue_limit=1))
         blocked = client.post(f"/api/tasks/{other_task['id']}/material-exports", headers=headers)
         assert blocked.status_code == 429
         assert "导出" in blocked.json()["detail"]
@@ -545,6 +545,36 @@ def test_material_export_supersedes_finished_history(client, monkeypatch) -> Non
             connection.commit()
         finally:
             connection.close()
+
+
+def test_worker_export_queue_releases_capacity_on_claim(client, monkeypatch) -> None:
+    import sqlite3
+    from dataclasses import replace
+
+    from conftest import TEST_DB
+
+    from app import domain
+
+    async def keep_queued(*args):
+        pass
+
+    monkeypatch.setattr(domain.jobs, "dispatch", keep_queued)
+    monkeypatch.setattr(domain, "settings", replace(domain.settings, job_execution_mode="worker", export_per_user_queue_limit=1))
+    _, headers = create_and_login_user(client, "export-wait-owner")
+    project = client.post("/api/projects", headers=headers, json={"name": "queue"}).json()
+    tasks = [client.post(f"/api/projects/{project['id']}/tasks", headers=headers, json={"title": str(i)}).json() for i in range(2)]
+
+    def submit(index):
+        return client.post(f"/api/tasks/{tasks[index]['id']}/material-exports", headers=headers)
+
+    first = submit(0)
+    assert first.status_code == 202
+    assert submit(0).json()["id"] == first.json()["id"]
+    assert submit(1).status_code == 429
+    with sqlite3.connect(TEST_DB) as connection:
+        connection.execute("UPDATE generation_jobs SET status = 'running' WHERE id = ?", (first.json()["jobId"],))
+    assert submit(1).status_code == 202
+    assert submit(0).json()["id"] == first.json()["id"]
 
 
 def test_material_export_progress_counters_never_regress(client, monkeypatch) -> None:

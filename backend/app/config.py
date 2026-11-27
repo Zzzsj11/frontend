@@ -140,8 +140,8 @@ class Settings:
         60,
         min(3600, int(os.getenv("STORYBOARD_LINE_TIMEOUT_SECONDS", str(STORYBOARD_LINE_TIMEOUT_SECONDS)))),
     )
-    export_concurrency: int = max(1, min(20, int(os.getenv("EXPORT_CONCURRENCY", "20"))))
-    export_per_user_concurrency: int = max(1, min(20, int(os.getenv("EXPORT_PER_USER_CONCURRENCY", "20"))))
+    export_concurrency: int = max(1, min(5, int(os.getenv("EXPORT_CONCURRENCY", "5"))))
+    export_per_user_queue_limit: int = max(1, min(100, int(os.getenv("EXPORT_PER_USER_QUEUE_LIMIT", "100"))))
     # 单个素材导出任务最多同时拉取 20 个源文件；下载过程按 1 MiB 分块落盘，不整文件驻留内存。
     export_download_concurrency: int = max(1, min(20, int(os.getenv("EXPORT_DOWNLOAD_CONCURRENCY", "20"))))
     export_upload_concurrency: int = max(1, min(8, int(os.getenv("EXPORT_UPLOAD_CONCURRENCY", "4"))))

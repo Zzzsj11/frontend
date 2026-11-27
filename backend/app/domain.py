@@ -3230,22 +3230,23 @@ async def create_material_export(task_id: str, user: CurrentUser, db: AsyncSessi
     )
     if active_for_task:
         return material_export_public(active_for_task)
-    active_count = len(
-        list(
-            (
-                await db.execute(
-                    select(MaterialExportModel.id).where(
-                        MaterialExportModel.user_id == user.id,
-                        MaterialExportModel.export_kind == "materials",
-                        MaterialExportModel.status.in_(("queued", "running")),
-                        MaterialExportModel.deleted_at.is_(None),
-                    )
-                )
-            ).scalars()
+    waiting = (
+        select(func.count())
+        .select_from(MaterialExportModel)
+        .where(
+            MaterialExportModel.user_id == user.id,
+            MaterialExportModel.export_kind == "materials",
+            MaterialExportModel.deleted_at.is_(None),
+            MaterialExportModel.status == "queued",
         )
     )
-    if active_count >= settings.export_per_user_concurrency:
-        raise HTTPException(429, f"每个用户最多同时导出 {settings.export_per_user_concurrency} 个子项目")
+    if settings.job_execution_mode == "worker":
+        # The claim commits before the worker builds the manifest and publishes export progress.
+        waiting = waiting.join(GenerationJobModel, GenerationJobModel.id == MaterialExportModel.generation_job_id).where(
+            GenerationJobModel.status == "queued", GenerationJobModel.deleted_at.is_(None)
+        )
+    if await db.scalar(waiting) >= settings.export_per_user_queue_limit:
+        raise HTTPException(429, f"每个用户最多有 {settings.export_per_user_queue_limit} 个素材导出等待执行")
     # 清理同任务的历史已完成/已失败导出（每个子项目只保留最新一次）
     now = utcnow()
     await db.execute(

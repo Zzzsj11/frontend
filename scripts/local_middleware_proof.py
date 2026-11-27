@@ -119,6 +119,28 @@ async def proof():
             job = await db.get(GenerationJobModel, "local-proof-job")
             job.status, job.deleted_at = "queued", utcnow()
         assert await _claim(("general_outline",), (), "must-not-claim-deleted") is None
+        # Mixed-version exports have only a kind, with no execution pool in the request.
+        async with session_factory.begin() as db:
+            db.add_all(
+                GenerationJobModel(
+                    id=f"zip-{i}", kind="export", user_id="local-proof-user", request={}
+                )
+                for i in range(12)
+            )
+        replicas = await asyncio.gather(
+            *(
+                _claim_batch(("export", "mv_export"), (), f"zip-worker-{i}", "", 20)
+                for i in range(3)
+            )
+        )
+        claimed_zips = [job for batch in replicas for job in batch]
+        assert len(claimed_zips) == 5
+        async with session_factory.begin() as db:
+            (await db.get(GenerationJobModel, claimed_zips[0].id)).status = "succeeded"
+        assert len(await _claim_batch(("export",), (), "zip-refill", "", 20)) == 1
+        print(
+            "PASS: three PostgreSQL workers share five material ZIP slots across claims and refill"
+        )
         # Saturate one model pool ahead of another; a lost Redis key cannot erase PG occupancy.
         async with session_factory.begin() as db:
             for index in range(103):
