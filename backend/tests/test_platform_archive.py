@@ -18,7 +18,7 @@ async def test_platform_copy_is_bound_to_one_job_owner_and_keeps_user_destinatio
         thumbnail_url=base + "covers/0-thumbnail.jpg",
         metadata=dict(width=64, height=32, duration=5.2, fps=24, stream=dict(codec_name="h264"), file_size=2400),
     )
-    body = {"id": "job-1", "result": {"archive": {"version": 1, "job_id": "job-1", "storage": "oss"}, "media": [item]}}
+    body = {"id": "job-1", "result": {"archive": {"version": 1, "job_id": "job-1", "storage": "oss", "trace_id": "optional"}, "media": [item]}}
     writer = AsyncMock()
     writer.copy_object.side_effect = lambda source, key: "https://cdn/" + key
     monkeypatch.setattr(platform_archive, "settings", SimpleNamespace(storage_backend="oss"))

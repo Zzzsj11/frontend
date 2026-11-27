@@ -57,7 +57,7 @@ from .generation_preferences import router as generation_preferences_router
 from .h3_prompt_compiler import compile_h3_prompt
 from .image_download import router as image_download_router
 from .image_model_policy import validate_image_selection
-from .jobs import Job, automatic_reconciliation, jobs, needs_provider_reconciliation, public_phase
+from .jobs import Job, automatic_reconciliation, jobs, needs_provider_reconciliation, public_phase, unverified_video_failure
 from .media_constraints import normalize_video_duration
 from .models import (
     AiModelModel,
@@ -1014,6 +1014,7 @@ async def _enqueue_video_generation(payload: VideoGenerationCreate, user: UserMo
                     GenerationJobModel.deleted_at.is_(None),
                     or_(
                         GenerationJobModel.status.in_(("queued", "running")),
+                        unverified_video_failure(),
                         GenerationJobModel.phase.in_(("manual_review", "auto_reconciling")),
                         (GenerationJobModel.status == "failed") & GenerationJobModel.provider_task_id.isnot(None) & GenerationJobModel.error.contains("核查原任务"),
                         GenerationJobModel.request["request_id"].as_string() == payload.request_id if payload.request_id else False,
@@ -1249,6 +1250,7 @@ async def get_generation_status_batch(payload: GenerationStatusBatchRequest, use
                         GenerationJobModel.error,
                         GenerationJobModel.phase,
                         GenerationJobModel.provider,
+                        GenerationJobModel.request,
                         GenerationJobModel.provider_task_id,
                     )
                 )
@@ -1324,6 +1326,7 @@ async def list_active_task_generations(task_id: str, user: CurrentUser, db: Asyn
                     GenerationJobModel.phase,
                     GenerationJobModel.status,
                     GenerationJobModel.provider,
+                    GenerationJobModel.request,
                     GenerationJobModel.provider_task_id,
                     GenerationJobModel.created_at,
                     GenerationJobModel.provider_submitted_at,

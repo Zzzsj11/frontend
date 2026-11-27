@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
@@ -313,12 +315,135 @@ async def reconcile_video_billing(
     return counts
 
 
+async def apply_platform_video_bill(db, job_id, task_id, data):
+    """Merge a final bill for an existing platform job without touching media."""
+    from .image_billing import settled
+    from .jobs import record_media_usage
+
+    if not task_id or data.get("id") != task_id:
+        return "skipped"
+    bill = data.get("billing") or (data.get("usage") or {}).get("platformBilling")
+    if not settled(bill, allow_refund=True):
+        return "pending"
+    job = await db.scalar(
+        select(GenerationJobModel)
+        .where(
+            GenerationJobModel.id == job_id,
+            GenerationJobModel.provider_task_id == task_id,
+            GenerationJobModel.provider == "all-in-one",
+            GenerationJobModel.kind == "video",
+            GenerationJobModel.status.in_(TERMINAL_STATUSES),
+            GenerationJobModel.deleted_at.is_(None),
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if job is None:
+        return "skipped"
+    result = job.result or {}
+    usage = result.get("usage") or {}
+    previous = usage.get("platformBilling") or ((job.request or {}).get("_providerTerminalResponse") or {}).get("billing") or {}
+    if settled(previous, allow_refund=True):
+        revision = bill.get("revision_at")
+        last_revision = previous.get("revision_at")
+        if bill != previous and (not revision or (last_revision and revision <= last_revision)):
+            return "unchanged"
+    usage = {**usage, **(data.get("usage") or {}), "platformBilling": bill}
+    job.result = {**result, "usage": usage}
+    operation = "generation_video_failed" if job.status == "failed" else "generation_video"
+    await record_media_usage(db, job, usage, task_id, operation, job.provider, str((job.request or {}).get("model") or ""))
+    await db.flush()
+    await reconcile_video_job(db, job)
+    return "billing_refreshed"
+
+
+async def query_original_video_bill(row):
+    from .agent_attribution import attribution_context
+    from .all_in_one import query_task
+    from .database import session_factory
+
+    try:
+        with attribution_context(row.generation_origin, row.agent_name, row.agent_run_id, row.test_run_id):
+            data = await query_task("video", row.provider_task_id, user_id=row.user_id)
+        async with session_factory() as db:
+            action = await apply_platform_video_bill(db, row.id, row.provider_task_id, data)
+            await db.commit()
+            return action
+    except Exception:
+        logging.getLogger(__name__).exception("Original video bill query deferred job=%s", row.id)
+        return "deferred"
+
+
+async def poll_pending_video_bills():
+    from datetime import timedelta
+
+    from sqlalchemy import or_
+
+    from .database import session_factory
+    from .models import utcnow
+
+    g = GenerationJobModel
+    while True:
+        job = None
+        try:
+            now = utcnow()
+            async with session_factory() as db:
+                job = await db.scalar(
+                    select(g)
+                    .join(VideoBillingRecordModel, VideoBillingRecordModel.generation_job_id == g.id)
+                    .where(
+                        g.kind == "video",
+                        g.provider == "all-in-one",
+                        g.status == "succeeded",
+                        g.deleted_at.is_(None),
+                        g.provider_task_id.is_not(None),
+                        VideoBillingRecordModel.billing_status == "pending",
+                        or_(g.reconciliation_next_at.is_(None), g.reconciliation_next_at <= now),
+                    )
+                    .order_by(g.reconciliation_next_at.asc().nullsfirst(), g.id)
+                    .with_for_update(skip_locked=True, of=g)
+                    .limit(1)
+                )
+                if job:
+                    job.reconciliation_next_at = now + timedelta(minutes=10)
+                await db.commit()
+            if job:
+                await query_original_video_bill(job)
+        except Exception:
+            logging.getLogger(__name__).exception("Video billing sweep deferred")
+        await asyncio.sleep(2 if job else 30)
+
+
+async def refresh_platform_bills(after_id, limit):
+    """Query originals outside write transactions; bound rate and commit each bill."""
+    from .database import session_factory
+
+    g = GenerationJobModel
+    async with session_factory() as db:
+        page = select(g.id).where(g.kind == "video", g.status.in_(TERMINAL_STATUSES), g.id > after_id).order_by(g.id).limit(limit)
+        rows = (
+            await db.execute(
+                select(g.id, g.provider_task_id, g.user_id, g.generation_origin, g.agent_name, g.agent_run_id, g.test_run_id)
+                .where(g.id.in_(page), g.provider == "all-in-one", g.provider_task_id.is_not(None), g.deleted_at.is_(None))
+                .order_by(g.id)
+            )
+        ).all()
+    refreshed = deferred = 0
+    for row in rows:
+        action = await query_original_video_bill(row)
+        refreshed += action == "billing_refreshed"
+        deferred += action in {"pending", "skipped", "deferred"}
+        await asyncio.sleep(0.1)
+    return refreshed, deferred
+
+
 async def run_video_billing_reconciliation(job) -> dict[str, Any]:
     """后台分批重算历史账单；进度写入 generation_jobs，进程中断后可安全重放。"""
     from .database import session_factory
     from .jobs import jobs as job_manager
 
-    batch_size = 500
+    batch_size = 50
+    refreshed = deferred = 0
     cursor = ""
     totals = {"processed": 0, "priced": 0, "failed": 0, "excluded": 0, "unpriced": 0, "noUsage": 0}
     async with session_factory() as session:
@@ -332,6 +457,9 @@ async def run_video_billing_reconciliation(job) -> dict[str, Any]:
             or 0
         )
     while True:
+        updated, pending = await refresh_platform_bills(cursor, batch_size)
+        refreshed += updated
+        deferred += pending
         async with session_factory() as session:
             result = await reconcile_video_billing(session, after_id=cursor, limit=batch_size)
             await session.commit()
@@ -344,4 +472,4 @@ async def run_video_billing_reconciliation(job) -> dict[str, Any]:
         await job_manager.update_progress(job, min(99, round(totals["processed"] / max(1, total) * 100)))
         if processed < batch_size:
             break
-    return {**totals, "total": total}
+    return {**totals, "total": total, "platformRefreshed": refreshed, "platformDeferred": deferred}

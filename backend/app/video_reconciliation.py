@@ -10,7 +10,7 @@ from datetime import timedelta
 from sqlalchemy import or_, select
 
 from .database import session_factory
-from .jobs import JobExpiredError, jobs
+from .jobs import JobExpiredError, jobs, unverified_video_failure
 from .models import GenerationJobModel, ProjectModel, ProjectTaskModel, StoryboardLineModel, utcnow
 from .redis_store import cache_job
 
@@ -33,7 +33,7 @@ async def claim(job_id: str | None = None):
                 GenerationJobModel.provider_task_id.is_not(None),
                 GenerationJobModel.provider_task_id != "",
                 GenerationJobModel.deleted_at.is_(None),
-                or_(GenerationJobModel.phase.in_(("manual_review", "auto_reconciling")), GenerationJobModel.error.contains("核查原任务")),
+                or_(unverified_video_failure(), GenerationJobModel.phase.in_(("manual_review", "auto_reconciling")), GenerationJobModel.error.contains("核查原任务")),
                 or_(GenerationJobModel.lease_expires_at.is_(None), GenerationJobModel.lease_expires_at <= now),
                 ProjectModel.deleted_at.is_(None),
                 ProjectTaskModel.deleted_at.is_(None),
@@ -95,24 +95,20 @@ async def recover(job):
             return {"action": "recovered", "providerStatus": status}
         if status in {"FAILED", "CANCELLED", "CANCELED"}:
             from .all_in_one import confirmed_failure
-            from .jobs import record_media_usage
-            from .video_billing import reconcile_video_job
+            from .video_billing import apply_platform_video_bill
 
-            bill = data.get("billing") or (data.get("usage") or {}).get("platformBilling")
             if confirmed_failure(job.provider_task_id, data):
                 async with session_factory() as db:
                     model = await db.get(GenerationJobModel, job.id, with_for_update=True)
                     if not model or model.worker_id != job.worker_id or model.deleted_at or model.status != "failed":
                         raise JobExpiredError("核对任务已结束")
-                    usage = {**(data.get("usage") or {}), "platformBilling": bill}
-                    model.result = {**(model.result or {}), "usage": usage}
-                    model.request = {**(model.request or {}), "_providerTerminalResponse": data}
+                    # Merge accounting before storing the terminal envelope so it can compare
+                    # with the previously committed snapshot, including concurrent corrections.
+                    await apply_platform_video_bill(db, model.id, job.provider_task_id, data)
+                    model.request = {**(model.request or {}), "_providerTerminalResponse": data, "_verifiedFailureTaskId": job.provider_task_id}
                     model.error = f"平台已确认终态 {status}，费用已结算"
                     model.phase = "failed"
                     model.worker_id = model.lease_expires_at = model.reconciliation_next_at = None
-                    await record_media_usage(db, model, usage, model.provider_task_id, "generation_video_failed", model.provider, str((model.request or {}).get("model") or ""))
-                    await db.flush()
-                    await reconcile_video_job(db, model)
                     await db.commit()
                     await cache_job(model.id, jobs._from_model(model).public())
                 return {"action": "failed", "providerStatus": status}
@@ -157,7 +153,10 @@ async def serve():
                 logger.exception("video reconciliation sweep failed")
             await asyncio.sleep(15)
 
+    from .video_billing import poll_pending_video_bills
+
     tasks = [asyncio.create_task(lane()) for _ in range(2)]
+    tasks.append(asyncio.create_task(poll_pending_video_bills()))
     try:
         await asyncio.gather(*tasks)
     finally:

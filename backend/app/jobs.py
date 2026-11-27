@@ -42,11 +42,25 @@ def _timestamp(value: datetime | float) -> float:
     return value.timestamp()
 
 
+def unverified_video_failure():
+    job = GenerationJobModel
+    return (
+        (job.kind == "video")
+        & (job.provider == "all-in-one")
+        & (job.status == "failed")
+        & job.provider_task_id.is_not(None)
+        & (job.provider_task_id != "")
+        & ~func.coalesce(job.request["_verifiedFailureTaskId"].as_string() == job.provider_task_id, False)
+    )
+
+
 def needs_provider_reconciliation(job) -> bool:
     if job.phase in {"manual_review", "auto_reconciling"}:
         return True
     if job.status != "failed" or not job.provider_task_id:
         return False
+    if job.kind == "video" and job.provider == "all-in-one":
+        return (job.request or {}).get("_verifiedFailureTaskId") != job.provider_task_id
     error = job.error or ""
     return "核查原任务" in error or (job.kind == "image" and ("生成超过10分钟" in error or error.startswith("查询生成状态连续失败")))
 
@@ -754,6 +768,11 @@ class JobManager:
             raise ValueError("invalid provider response stage")
         key = "_providerTerminalResponse" if stage == "terminal" else "_providerSubmissionResponse"
         job.request = {**(job.request or {}), key: _redact(payload)}
+        if stage == "terminal" and job.kind == "video" and job.provider == "all-in-one":
+            from .all_in_one import confirmed_failure
+
+            if confirmed_failure(job.provider_task_id, payload):
+                job.request["_verifiedFailureTaskId"] = job.provider_task_id
         async with session_factory() as session:
             model = await session.get(GenerationJobModel, job.id)
             if model and (not job.worker_id or model.worker_id == job.worker_id):

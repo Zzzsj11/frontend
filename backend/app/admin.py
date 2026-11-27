@@ -597,9 +597,11 @@ async def sync_generation_job(job_id: str, request: Request, user: CurrentUser, 
     action = "unchanged"
     from .all_in_one import confirmed_failure
 
+    if model.provider == "all-in-one" and model.kind == "video" and data.get("id") != model.provider_task_id:
+        raise HTTPException(502, "平台响应与原工单 ID 不一致")
     if failed and model.provider == "all-in-one" and not confirmed_failure(model.provider_task_id, data):
         await db.refresh(model, with_for_update=True)
-        if model.status != "succeeded" and not model.worker_id:
+        if model.status != "succeeded" and not model.worker_id and (model.request or {}).get("_verifiedFailureTaskId") != model.provider_task_id:
             from .jobs import record_media_usage
 
             model.status, model.phase = "failed", "manual_review"
@@ -615,27 +617,15 @@ async def sync_generation_job(job_id: str, request: Request, user: CurrentUser, 
             result = await store_provider_result(job, data)
             await job_manager.finalize_success(job, result)
             action = "recovered"
-    elif failed and model.status != "failed":
+    elif failed and model.status != "failed" and not (model.kind == "video" and model.provider == "all-in-one" and model.status == "succeeded"):
         job = await job_manager.get(job_id)
         if job:
             await job_manager.finalize_failure(job, str(data.get("failReason") or f"供应商任务状态：{provider_status}"))
             action = "failed"
     elif (succeeded or failed) and model.provider == "all-in-one" and model.kind == "video":
-        from .video_billing import reconcile_video_job
+        from .video_billing import apply_platform_video_bill
 
-        # 只查询并刷新已存在任务的结算，不重复生成、下载或创建素材。
-        reported = data.get("usage") or {}
-        if isinstance(reported.get("platformBilling"), dict):
-            await db.execute(select(GenerationJobModel.id).where(GenerationJobModel.id == model.id).with_for_update())
-            await db.refresh(model)
-            model.result = {**(model.result or {}), "usage": reported}
-            model.request = {**(model.request or {}), "_providerTerminalResponse": data}
-            from .jobs import record_media_usage
-
-            await record_media_usage(db, model, reported, model.provider_task_id, f"generation_{model.kind}", "all-in-one", str((model.request or {}).get("model") or ""))
-            await db.flush()
-            await reconcile_video_job(db, model)
-            action = "billing_refreshed"
+        action = await apply_platform_video_bill(db, model.id, model.provider_task_id, data)
     elif not succeeded and not failed and model.status in {"queued", "running"}:
         if await job_manager.resume_one(job_id, resume_generation):
             action = "resumed"

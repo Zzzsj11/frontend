@@ -204,3 +204,18 @@ def test_confirmed_platform_failure_ends_reconciliation_and_retains_charge(clien
     with sqlite3.connect(TEST_DB) as db:
         assert db.execute("SELECT status,phase,reconciliation_next_at FROM generation_jobs WHERE id=?", (jid,)).fetchone() == ("failed", "failed", None)
         assert db.execute("SELECT json_extract(raw_usage,'$.platformBilling.points') FROM token_usage_records WHERE generation_job_id=?", (jid,)).fetchone() == (points,)
+
+
+def test_legacy_accepted_failure_is_claimed_without_phase_or_matching_error(client, recovery, monkeypatch):
+    module, jid, body, _, _ = recovery
+    with sqlite3.connect(TEST_DB) as db:
+        db.execute("UPDATE generation_jobs SET phase='failed', error='provider failed' WHERE id=?", (jid,))
+    snapshot = client.post("/api/generations/status", json={"ids": [jid]}).json()[0]
+    assert snapshot["retryAllowed"] is False
+    retry = client.post("/api/generations/videos", json={**body, "request_id": "legacy-pending-new-id"})
+    assert retry.status_code == 409 and jid in retry.text
+    monkeypatch.setattr(
+        "app.providers.query_provider_task", AsyncMock(return_value={"id": "original-id", "status": "FAILED", "billing": {"status": "pending_reconciliation", "points": None}})
+    )
+    assert asyncio.run(module.reconcile_one(jid))["action"] == "waiting"
+    assert client.post("/api/generations/status", json={"ids": [jid]}).json()[0]["retryAllowed"] is False

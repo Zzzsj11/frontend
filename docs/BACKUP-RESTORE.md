@@ -1,6 +1,6 @@
 # 备份与恢复
 
-`scripts/backup-postgres.sh` 生成 PostgreSQL custom dump 和 SHA-256，默认保留 30 天。服务器测试环境通过 cron 每日执行。目前脚本仅保存在服务器本地，尚未提供异地副本，不能抵御整机或磁盘丢失。按2026-10-19部署要求共用媒体 Bucket，通过环境备份目录隔离，使用 SSE-C AES256 密钥加密，并完成上传、下载及恢复演练。预发布和正式生产的备份目标、RPO/RTO 在 v1.0.0 后另行设计。
+默认运行 `scripts/backup-postgres.sh` 在服务器生成 PostgreSQL custom dump 和 SHA-256，日备份成对保留 30 天。测试和正式分别配置自己的备份目标。配置远端 Bucket 的环境还会上传加密副本；实际保障以该环境最近一次上传、下载及独立恢复记录为准。2026-10-19 的共用媒体 Bucket 演练使用环境前缀和 SSE-C AES256。跨地域保障、RPO 和 RTO 需独立验证。
 
 恢复是破坏性操作：先停止写流量，在隔离数据库执行恢复验证；脚本校验同目录的 `.dump.sha256`，在 UUID 命名的新库完整恢复，核对用户表行数和 Alembic 版本。验证通过且临时库已清理后，再在目标库的单个事务内执行恢复，错误会撤销本次写入。正式恢复需 `CONFIRM_RESTORE=RESTORE scripts/restore-postgres.sh FILE.dump`。每月至少进行一次隔离恢复演练并记录耗时、行数和迁移版本。
 

@@ -205,7 +205,12 @@ onMounted(load)
         </button>
       </div>
       <button class="action search-action" @click="search">查询</button>
-      <button class="action primary" :disabled="reconciling" @click="reconcile">
+      <button
+        class="action primary"
+        title="按原工单刷新平台费用并重算本地账单"
+        :disabled="reconciling"
+        @click="reconcile"
+      >
         {{ reconciling ? '核算中…' : '重新核算全部历史' }}
       </button>
     </div>

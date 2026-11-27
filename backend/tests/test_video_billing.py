@@ -600,7 +600,9 @@ def test_admin_sync_refreshes_settlement_without_resubmitting_or_duplicating_usa
             await db.commit()
 
     asyncio.run(seed())
-    provider = AsyncMock(return_value={"status": "SUCCEEDED", "usage": {"platformBilling": {"status": "settled", "points": "150.125600", "cny": "1.501256"}}})
+    provider = AsyncMock(
+        return_value={"id": "synthetic-platform-bill", "status": "SUCCEEDED", "usage": {"platformBilling": {"status": "settled", "points": "150.125600", "cny": "1.501256"}}}
+    )
     monkeypatch.setattr("app.admin.query_provider_task", provider)
     monkeypatch.setattr("app.admin.job_manager.is_active", lambda _: False)
     for _ in range(2):
@@ -620,3 +622,33 @@ def test_admin_sync_refreshes_settlement_without_resubmitting_or_duplicating_usa
             assert record.usage_quantity == Decimal("150.125600")
 
     asyncio.run(check())
+    provider.return_value["usage"] = {"platformBilling": {"status": "pending_reconciliation", "points": None}}
+    assert client.post(f"/api/admin/jobs/{job_id}/sync").json()["action"] == "pending"
+    asyncio.run(check())
+    provider.return_value["id"] = "different-platform-job"
+    assert client.post(f"/api/admin/jobs/{job_id}/sync").status_code == 502
+    asyncio.run(check())
+
+    # The bulk path queries the same original and accepts a newer correction/refund.
+    from app.video_billing import refresh_platform_bills
+
+    query = AsyncMock(
+        return_value={
+            "id": "synthetic-platform-bill",
+            "status": "SUCCEEDED",
+            "billing": {"status": "refunded", "points": "0", "cny": "0", "revision_at": "2026-11-27T10:00:01.000000+00:00"},
+        }
+    )
+    monkeypatch.setattr("app.all_in_one.query_task", query)
+
+    async def batch():
+        await refresh_platform_bills("", 500)
+        query.assert_any_await("video", "synthetic-platform-bill", user_id="user-admin")
+        query.return_value["billing"] = {"status": "settled", "points": "23", "cny": "0.23", "revision_at": "2026-11-27T10:00:00.000000+00:00"}
+        await refresh_platform_bills("", 500)
+        async with session_factory() as db:
+            record = await db.scalar(select(VideoBillingRecordModel).where(VideoBillingRecordModel.generation_job_id == job_id))
+            assert record.billing_status == "priced" and record.amount == 0
+            assert len(list(await db.scalars(select(TokenUsageModel).where(TokenUsageModel.generation_job_id == job_id)))) == 1
+
+    asyncio.run(batch())

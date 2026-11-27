@@ -397,6 +397,7 @@ def confirmed_failure(task_id, data):
     return (
         bool(task_id)
         and data.get("id") == task_id
+        and str(data.get("status") or "").upper() in {"FAILED", "CANCELLED", "CANCELED", "ERROR"}
         and not data.get("requires_reconciliation")
         and settled(data.get("billing") or (data.get("usage") or {}).get("platformBilling"), allow_refund=True)
     )

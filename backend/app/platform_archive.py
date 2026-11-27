@@ -30,7 +30,16 @@ async def copy_platform_archive(job, body, owner):
     result = body.get("result") or {}
     manifest = result.get("archive")
     platform_id = job.provider_task_id
-    if settings.storage_backend != "oss" or not platform_id or body.get("id") != platform_id or manifest != {"version": 1, "job_id": platform_id, "storage": "oss"}:
+    if (
+        settings.storage_backend != "oss"
+        or not platform_id
+        or body.get("id") != platform_id
+        or not isinstance(manifest, dict)
+        or type(manifest.get("version")) is not int
+        or manifest["version"] != 1
+        or manifest.get("job_id") != platform_id
+        or manifest.get("storage") != "oss"
+    ):
         return None
     media = result.get("media") or []
     if len(media) != 1:
