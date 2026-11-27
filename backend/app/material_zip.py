@@ -109,7 +109,11 @@ async def _stream_legacy(bucket, object_key: str, upload_id: str, items: list[di
         with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED, allowZip64=True) as archive:
             for index, item in enumerate(items, 1):
                 size = 0
-                async with stream_public_download(item["url"], client) as response:
+                internal = internal_read_url(item["url"])
+                source = client.stream("GET", internal) if internal else stream_public_download(item["url"], client)
+                async with source as response:
+                    if internal:
+                        response.raise_for_status()
                     with archive.open(item["arcname"], "w", force_zip64=True) as member:
                         async for chunk in response.aiter_bytes(1024**2):
                             size += len(chunk)

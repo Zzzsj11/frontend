@@ -804,6 +804,12 @@ async def preview_portrait_prompt(payload: PortraitPromptParams, user: CurrentUs
     return {"prompt": await _portrait_prompt(payload.description, payload.style)}
 
 
+def _scene_image_digest(payload: ImageGenerationCreate) -> str:
+    values = payload.model_dump(exclude={"project_task_id", "storyboard_line_id"})
+    values["images"] = [hashlib.sha256(ref.encode()).hexdigest() for ref in payload.images]
+    return hashlib.sha256(json.dumps(values, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
 @app.post("/api/generations/images", status_code=202, dependencies=[Depends(require_generation_attribution)])
 async def create_image_generation(payload: ImageGenerationCreate, user: CurrentUser, db: AsyncSession = Depends(database_session)) -> dict:
     from .generation_preferences import apply_media_preference
@@ -830,10 +836,14 @@ async def create_image_generation(payload: ImageGenerationCreate, user: CurrentU
         quality=payload.quality,
     )
     await validate_platform_references(db, user.id, payload.images)
-    payload.images = [await store_inline_reference(reference, user.id) for reference in payload.images]
     project_id, task_id, line_id = await generation_context(user, payload.project_task_id, payload.storyboard_line_id, db)
-    await db.execute(select(UserModel.id).where(UserModel.id == user.id).with_for_update())
+    digest = None
     if line_id and payload.purpose == "scene":
+        digest = _scene_image_digest(payload)
+        if db.get_bind().dialect.name == "postgresql":
+            # Serialize this shot across API replicas, without holding the user's
+            # quota lock during reference uploads.
+            await db.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("scene-image:" + line_id, 0))))
         existing = await db.scalar(
             select(GenerationJobModel)
             .where(
@@ -846,13 +856,21 @@ async def create_image_generation(payload: ImageGenerationCreate, user: CurrentU
             .limit(1)
         )
         if existing and (existing.status in {"queued", "running"} or needs_provider_reconciliation(existing)):
+            previous = existing.request or {}
+            prior_digest = previous.get("_sceneImageDigest")
+            if not prior_digest:
+                prior_digest = _scene_image_digest(ImageGenerationCreate.model_validate(previous))
+            if digest != prior_digest:
+                raise HTTPException(409, "此镜头已有不同参数的图片工单，请先等待或核对原工单")
             return jobs._from_model(existing).public()
+    payload.images = [await store_inline_reference(reference, user.id) for reference in payload.images]
+    await db.execute(select(UserModel.id).where(UserModel.id == user.id).with_for_update())
     await _check_concurrency(db, user.id, "image", settings.image_generation_concurrency)
     await consume_daily_quota(db, user_id=user.id, category="image", commit=False)
     job = await jobs.enqueue(
         db,
         "image",
-        generation_request_snapshot(payload, model, provider),
+        {**generation_request_snapshot(payload, model, provider), **({"_sceneImageDigest": digest} if digest else {})},
         user_id=user.id,
         project_id=project_id,
         project_task_id=task_id,
@@ -1189,7 +1207,7 @@ async def check_image_generation(job_id: str, user: CurrentUser, db: AsyncSessio
             request = job.request or {}
             model = request.get("_providerModelId") or all_in_one.upstream_model(request.get("model", ""))
 
-            with attribution_context(row.generation_origin or "business", row.agent_name or "", row.agent_run_id or ""):
+            with attribution_context(row.generation_origin or "business", row.agent_name or "", row.agent_run_id or "", row.test_run_id or ""):
                 headers = all_in_one.headers(user_id=job.user_id, idempotency_key=job.idempotency_key)
                 found = await all_in_one._lookup_submission(client, headers, model)
             task_id = found.json()["id"] if found is not None else None

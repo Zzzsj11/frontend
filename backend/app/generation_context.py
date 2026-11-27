@@ -7,7 +7,7 @@ from typing import Any
 
 from openai import AsyncOpenAI as OpenAIClient
 
-from .agent_attribution import current_agent_attribution
+from .agent_attribution import attribution_context, current_agent_attribution, current_test_run_id
 
 _owner: ContextVar[str] = ContextVar("generation_owner", default="")
 _agent: ContextVar[tuple[str, str] | None] = ContextVar("generation_agent", default=None)
@@ -54,7 +54,8 @@ async def run_with_context(job: Any, runner: Any) -> Any:
 
     selection_token = text_selection.set(snapshot.get("_textSelection"))
     try:
-        return await runner(job)
+        with attribution_context(row.generation_origin if row else "business", *attrs, row.test_run_id if row else ""):
+            return await runner(job)
     finally:
         _owner.reset(owner_token)
         _agent.reset(agent_token)
@@ -78,6 +79,6 @@ class AsyncOpenAI(OpenAIClient):
                     **kwargs.get("default_headers", {}),
                     "X-Agent-Name": name or "code-agent",
                     "X-Agent-Run-Id": run,
-                    "X-Test-Run-Id": run,
+                    "X-Test-Run-Id": current_test_run_id() or run,
                 }
         super().__init__(**kwargs)

@@ -10,9 +10,7 @@ all in one 交付视频原片、首帧封面、缩略图和视频元数据。MV 
 
 生成链路：前端提交任务，后端校验用户和模型，创建 `generation_jobs`，调用供应商，原媒体及缩略图归档到 OSS，资产记录入 PostgreSQL，用量写入账本。列表只加载缩略图，用户交互时才加载原图或视频。
 
-统一供应商配置通过 Docker Secret `provider_config` 挂载。检测到其中的 `AIGC_TOKEN` 时，文本模型 Token、聊天 API 地址和默认模型作为同一个配置组生效，优先于遗留的 `LLM_*` 环境变量，避免共享 Token 被误发往其他供应商；只有未配置统一供应商 Secret 时才启用独立 `LLM_*` 配置。
-
-文本模型可通过 `LLM_CHANNEL=yseeai` 或 `LLM_CHANNEL=toapis` 单独选择英和海外或 ToAPIs；前者使用 `YSEEAI_LLM_API_KEY` 和固定的 `https://ai-aigc.yseeai.com/v1`，后者优先使用 `TOAPIS_LLM_API_KEY`，未配置时复用 `TOAPIS_API_KEY`，默认地址为 `https://toapis.cn/v1`。两渠道默认模型均为 `gpt-6.1-sol`，大纲默认使用同一模型，也可由 `GENERAL_OUTLINE_LLM_MODEL` 单独指定。显式文本渠道优先于国内共享 Token，仅改变 Chat、大纲及逐镜提示词调用；图片和视频仍用各自渠道配置。模型网关开启时，显式文本渠道仍直连所选供应商，媒体继续按网关设置路由。Token 账本及 LLM 调用记录保存实际渠道。
+服务器所有新模型请求通过同环境 all-in-one。旧供应商配置和独立网关只用于解释历史数据。
 
 `LLM_CHANNEL=all-in-one` 使用平台 Key 的 `gemini-3.8-flash-all-in-one` 作为 Chat、大纲和逐镜提示词默认模型，暂时性失败按安全规则重试同一模型。所有新视频任务只开放 all in one 的 12 个模型，默认 `doubao-seedance-2.0-all-in-one`；目录、规格、并发和迁移规则见 [视频模型目录](VIDEO-MODEL-CATALOG.md)。界面按系列分组，不展示渠道后缀。历史渠道、素材和费用归因保留，旧模型不能创建新任务。all in one 工单保存上游请求、受理响应、终态响应和平台积分结算。
 
@@ -25,7 +23,7 @@ all in one 视频工单从项目创建起允许最多 2 小时的排队、生成
 
 ASS 与定制通用分镜默认使用 `OUTLINE_PROTOCOL_VERSION=v2` 的紧凑大纲协议。定制通用一次输出全片导演决策骨架；ASS 固定为一次大场景规划加一次全曲镜头骨架，不再按大场景并行重复提交人物长描述。后续逐镜提示词仍消费兼容的标准大纲字段，因此无需改动下游图片、视频和导出链路。紧急回滚可将该变量设为 `v1`，恢复旧提示词和旧调用编排。
 
-Chat对话、媒体生成、素材导出、ASS/通用大纲、逐镜提示词和ASS场景段重试支持两种执行模式：默认 `inline` 保持本地单进程行为；服务器设置 `JOB_EXECUTION_MODE=worker` 后，API只在同一事务中写领域状态和 `generation_jobs`，`worker-chat`、`worker-image`、`worker-media`（其他视频）、`worker-wan`、`worker-seedance`、`worker-export` 与 `worker-storyboard` 使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 领取。图片和视频使用独立执行池，避免长视频轮询占满图片槽；图片进程默认 32 并发。分镜工单的完整人物、上下文、大纲和重试快照保存在 `generation_jobs.request`，进度与心跳同时落PostgreSQL；Worker中断后最多自动重放3次。Redis承担低延迟 Worker 唤醒、Chat跨进程取消、热状态与事件，短暂不可用不会丢失数据库工单。PostgreSQL 环境按模型的 `executionPool/executionConcurrency` 在受理事务内获取模型池锁、统计运行工单并领取工单。Redis 断连或清空不改变已占用的容量。SQLite 验收模式保留 Redis 租约。新视频生成全部使用 all in one，按模型拆分执行池；旧供应商适配保留用于历史查询。人物图按原始 OSS 或历史 TOS 地址提供给平台。各 H3 通道共享提示词编译与参考素材约束，但分别适配创建、查询、恢复和结果解析协议。顶部余额接口查询当前环境的平台积分；历史费用预检按原模型 `billing` 规则解释。新模型接入现状和剩余清单见 `TODO_MODEL_EXPANSION.md`。
+Chat对话、媒体生成、素材导出、ASS/通用大纲、逐镜提示词和ASS场景段重试支持两种执行模式：默认 `inline` 保持本地单进程行为；服务器设置 `JOB_EXECUTION_MODE=worker` 后，API只在同一事务中写领域状态和 `generation_jobs`，`worker-chat`、`worker-image`、`worker-media`（其他视频）、`worker-wan`、`worker-seedance`、`worker-export` 与 `worker-storyboard` 使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 领取。图片和视频使用独立执行池，避免长视频轮询占满图片槽；图片进程默认 32 并发。分镜工单的完整人物、上下文、大纲和重试快照保存在 `generation_jobs.request`，进度与心跳同时落PostgreSQL；Worker中断后最多自动重放3次。Redis承担低延迟 Worker 唤醒、Chat跨进程取消、热状态与事件，短暂不可用不会丢失数据库工单。PostgreSQL 环境按模型的 `executionPool/executionConcurrency` 在受理事务内获取模型池锁、统计运行工单并领取工单。Redis 断连或清空不改变已占用的容量。SQLite 验收模式保留 Redis 租约。新视频生成全部使用 all in one，按模型拆分执行池；旧供应商适配保留用于历史查询。人物图按原始 OSS 或历史 TOS 地址提供给平台。各 H3 通道共享提示词编译与参考素材约束，但分别适配创建、查询、恢复和结果解析协议。顶部余额接口查询当前环境的平台积分；历史费用预检按原模型 `billing` 规则解释。模型选项的维护与验收见[模型偏好](GENERATION-PREFERENCES.md)。
 
 余额展示查询使用 60 秒服务端缓存，前端仅在页面可见时每 5 分钟按需刷新；用户手动点击可请求实时刷新，但服务端会合并 5 秒内的并发强刷。生成确认弹窗读取短时缓存，真正提交时仅对任务涉及的渠道执行最终余额校验，因此降频不削弱任务提交卡口。
 
@@ -93,7 +91,7 @@ all in one 仅在英和国内与 RunningHub SD2.0 Token 之间路由：英和先
 
 ## 图片工单与素材下载接口
 
-- `POST /api/generations/images` 返回 202 和 MV 工单。场景图提交会先检查同一用户与分镜最近的图片工单，排队、运行或待核查时复用该工单。
+- `POST /api/generations/images` 返回 202 和 MV 工单。场景图提交会先检查同一用户与分镜最近的图片工单，排队、运行或待核查时按有效输入摘要复用同参工单，参数不同返回 409；复用判定在内联图上传前完成。
 - MV Worker 异步调用 all in one `POST /v1/images`，使用稳定的 `{MV 工单 ID}:image` 幂等键。受理后保存平台任务 ID 并查询原任务。提交结果不确定时可用原归属和幂等键查询平台 `GET /v1/jobs/lookup`。图片观察期限为 10 分钟，查询中断或超期时保留原工单供核查。
 - `POST /api/generations/{job_id}/check-image` 只接受当前用户的图片工单，其他工单返回 404。对失败且待核查的工单，找到原平台任务后将同一个 MV 工单重新排队，仅查询与归档，沿用原生成归因且不消耗新生成配额。未找到原任务时返回当前状态。
 - `POST /api/tasks/{task_id}/material-exports` 返回 202。下载就绪后，`GET /api/material-exports/{export_id}/download` 返回含签名地址的 `{"url":"..."}`。附件名按可见角色名、分镜分类、子项目标题、`素材.zip` 的顺序取首个可用值。新导出在受理时固定名称，历史导出缺少名称时下载时补算。未就绪返回 409，找不到当前用户的素材导出时返回 404。

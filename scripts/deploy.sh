@@ -92,6 +92,9 @@ fi
 # 只导入配置，不启动应用、不执行迁移，也不会恢复或触发模型工单。
 "${compose[@]}" run --rm -T --no-deps --entrypoint python backend \
   -c 'from app.config import validate_runtime_security; validate_runtime_security()'
+if [[ "${RUN_MIGRATIONS:-1}" != "0" ]]; then
+  "${compose[@]}" run --rm -T --no-deps --entrypoint python backend -m app.platform_archive
+fi
 if [[ "${DEPLOY_TLS:-0}" == "1" ]]; then
   "${compose[@]}" run --rm -T --no-deps frontend nginx -t
 fi

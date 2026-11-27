@@ -4,7 +4,7 @@
 
 当前版本：`v0.9.1 web 内测版初版`。
 
-维护入口：[`AGENTS.md`](AGENTS.md)（Code Agent 约定）、[`ARCHITECTURE.md`](docs/ARCHITECTURE.md)、[`LOCAL-DEVELOPMENT.md`](docs/LOCAL-DEVELOPMENT.md)、[`TESTING.md`](docs/TESTING.md)、[`DEPLOYMENT.md`](docs/DEPLOYMENT.md)、[`ROLLBACK.md`](docs/ROLLBACK.md)、[`BACKUP-RESTORE.md`](docs/BACKUP-RESTORE.md) 和 [`SECURITY.md`](docs/SECURITY.md)。专题文档（`docs/`）：前端规范 `FRONTEND-GUIDELINES.md`、性能观测 `PERFORMANCE-MONITORING.md`、数字人资产链路 `ASSET-AVATAR.md`、歌曲分类数据 `SONG-CATEGORIES.md`、模型接入现状与剩余债务 `TODO_MODEL_EXPANSION.md`。
+维护入口：[`AGENTS.md`](AGENTS.md)（Code Agent 约定）、[`ARCHITECTURE.md`](docs/ARCHITECTURE.md)、[`LOCAL-DEVELOPMENT.md`](docs/LOCAL-DEVELOPMENT.md)、[`TESTING.md`](docs/TESTING.md)、[`DEPLOYMENT.md`](docs/DEPLOYMENT.md)、[`ROLLBACK.md`](docs/ROLLBACK.md)、[`BACKUP-RESTORE.md`](docs/BACKUP-RESTORE.md) 和 [`SECURITY.md`](docs/SECURITY.md)。专题文档（`docs/`）：前端规范 `FRONTEND-GUIDELINES.md`、性能观测 `PERFORMANCE-MONITORING.md`、数字人资产链路 `ASSET-AVATAR.md`、歌曲分类数据 `SONG-CATEGORIES.md`、用户模型与渠道选择 [GENERATION-PREFERENCES.md](docs/GENERATION-PREFERENCES.md)。
 
 MV 的图片恢复与素材下载接口见[技术架构](docs/ARCHITECTURE.md#图片工单与素材下载接口)。
 
@@ -52,14 +52,10 @@ flowchart LR
     FE -->|"Access Token / Refresh Cookie"| API["FastAPI API"]
     API --> PG["PostgreSQL 16"]
     API --> REDIS["Redis 7"]
-    API --> LLM["OpenAI-compatible LLM"]
-    API --> IMG["图片生成服务"]
-    API --> VIDEO["all in one 视频生成服务"]
+    API --> AIO["同环境 all-in-one 文本、图片、视频工单"]
     API --> OSS["阿里云 OSS"]
     API -.-> TOS["历史媒体与备份 TOS"]
-    LLM --> API
-    IMG --> API
-    VIDEO --> API
+    AIO --> API
     OSS -->|"稳定 HTTPS 媒体地址"| FE
 ```
 
@@ -146,12 +142,9 @@ cp backend/.env.example backend/.env
 然后配置以下类别：
 
 - `JWT_SECRET`：至少 32 字符的随机值，服务器测试环境禁止使用 Compose 默认值。
-- `LLM_*`：兼容 OpenAI 协议的分镜文本模型。
-- `IMAGE_*`：图片生成服务。
-- `VIDEO_*`：视频生成服务。
+- `ALL_IN_ONE_BASE_URL`、`ALL_IN_ONE_API_KEY`、`ALL_IN_ONE_SYSTEM_KEY` 和 `LLM_CHANNEL=all-in-one`：模型生成、可用目录和积分查询均使用同环境平台。个人 Key 使用绑定身份，系统 Key 传递 MV 用户归属。模型权限可用该 Key 查询平台 `GET /v1/models`。
 - `OSS_*`：新媒体与导出所用的同环境桶、地域、前缀和访问凭据，详见[部署手册](docs/DEPLOYMENT.md#oss-媒体存储与素材导出)。
 - `TOS_*`：历史媒体读取、下载签名和备份。
-- `BUSINESS_API_KEY`、`BUSINESS_USER_ID`：顶部栏业务余额查询凭证；未配置时安全显示 `--`，不会阻塞其他功能。
 - `DATABASE_URL`、`REDIS_URL`：本地启动时的数据服务地址。
 
 项目也支持将统一供应商配置放在 `backend/.provider_config.py`，Compose 会将其作为 secret 挂载。`backend/.env`、`.env.chat` 和 `.provider_config.py` 均已被 Git 忽略，严禁提交真实密钥。

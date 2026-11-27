@@ -94,12 +94,12 @@ async def recover(job):
             await jobs.finalize_success(job, result)
             return {"action": "recovered", "providerStatus": status}
         if status in {"FAILED", "CANCELLED", "CANCELED"}:
-            from .image_billing import settled
+            from .all_in_one import confirmed_failure
             from .jobs import record_media_usage
             from .video_billing import reconcile_video_job
 
             bill = data.get("billing") or (data.get("usage") or {}).get("platformBilling")
-            if data.get("id") == job.provider_task_id and settled(bill, allow_refund=True):
+            if confirmed_failure(job.provider_task_id, data):
                 async with session_factory() as db:
                     model = await db.get(GenerationJobModel, job.id, with_for_update=True)
                     if not model or model.worker_id != job.worker_id or model.deleted_at or model.status != "failed":

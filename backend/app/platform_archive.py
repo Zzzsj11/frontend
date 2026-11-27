@@ -5,6 +5,8 @@ import logging
 import re
 from urllib.parse import urlsplit
 
+import httpx
+
 from .config import settings
 from .oss_storage import OssStorage, public_host
 
@@ -72,8 +74,25 @@ async def copy_platform_archive(job, body, owner):
                 raise copied
             imported[name] = [copied] if job.kind == "image" else copied
     except Exception as exc:
-        logger.warning("Platform OSS copy unavailable for %s (%s), using media import", job.id, type(exc).__name__)
+        logger.warning("Platform OSS copy failed for job=%s error=%s", job.id, type(exc).__name__)
         return None
     if job.kind == "video":
         job.video_metadata_probed = True
     return imported
+
+
+async def verify_deployment():
+    from .all_in_one import headers
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.get(settings.all_in_one_base_url + "/v1/account/archive-config", headers=headers(user_id="mv-deployment-check"))
+        response.raise_for_status()
+    expected = {"storage": "oss", "version": 1, "bucket": settings.oss_bucket, "region": settings.oss_region, "host": public_host()}
+    actual = response.json()
+    mismatch = [field for field, value in expected.items() if actual.get(field) != value]
+    if settings.storage_backend != "oss" or mismatch:
+        raise RuntimeError("MV 与同环境平台的 OSS 归档配置不兼容，请检查 " + ", ".join(mismatch or ["storage"]))
+
+
+if __name__ == "__main__":
+    asyncio.run(verify_deployment())

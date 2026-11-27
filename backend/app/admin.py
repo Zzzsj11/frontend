@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .agent_attribution import current_agent_attribution, require_generation_attribution
+from .agent_attribution import current_agent_attribution, current_test_run_id, require_generation_attribution
 from .auth import CurrentUser
 from .config import settings
 from .database import database_session
@@ -595,7 +595,21 @@ async def sync_generation_job(job_id: str, request: Request, user: CurrentUser, 
     succeeded = provider_status in {"SUCCESS", "SUCCEEDED", "SUCCEED", "COMPLETED", "READY"}
     failed = provider_status in {"FAILED", "CANCELLED", "CANCELED", "ERROR", "REQUEST MODERATED", "CONTENT MODERATED"} or "FAIL" in provider_status
     action = "unchanged"
-    if succeeded and model.status != "succeeded":
+    from .all_in_one import confirmed_failure
+
+    if failed and model.provider == "all-in-one" and not confirmed_failure(model.provider_task_id, data):
+        await db.refresh(model, with_for_update=True)
+        if model.status != "succeeded" and not model.worker_id:
+            from .jobs import record_media_usage
+
+            model.status, model.phase = "failed", "manual_review"
+            model.error = "平台已受理，结果或费用待核对，请核查原任务"
+            model.request = {**(model.request or {}), "_providerTerminalResponse": data}
+            await record_media_usage(
+                db, model, data.get("usage") or {}, model.provider_task_id, f"generation_{model.kind}_failed", model.provider, (model.request or {}).get("model", "")
+            )
+            action = "requires_reconciliation"
+    elif succeeded and model.status != "succeeded":
         job = await job_manager.get(job_id)
         if job:
             result = await store_provider_result(job, data)
@@ -754,6 +768,7 @@ async def video_billing(
                 "generationOrigin": job.generation_origin,
                 "agentName": job.agent_name,
                 "agentRunId": job.agent_run_id,
+                "testRunId": job.test_run_id,
                 "userId": record.user_id,
                 "username": username or "-",
                 "projectId": record.project_id,
@@ -953,6 +968,7 @@ async def video_billing_detail(record_id: str, user: CurrentUser, db: AsyncSessi
         "generationOrigin": job.generation_origin,
         "agentName": job.agent_name,
         "agentRunId": job.agent_run_id,
+        "testRunId": job.test_run_id,
         "providerTaskId": job.provider_task_id,
         "status": job.status,
         "error": job.error or "",
@@ -1128,6 +1144,7 @@ def _llm_call_summary(x: LlmCallLogModel) -> dict:
         "generationOrigin": x.generation_origin,
         "agentName": x.agent_name,
         "agentRunId": x.agent_run_id,
+        "testRunId": x.test_run_id,
         "createdAt": iso(x.created_at),
     }
 
@@ -2241,6 +2258,7 @@ async def prompt_optimizer_create(payload: PromptOptimizerRunIn, request: Reques
         generation_origin=origin,
         agent_name=agent_name,
         agent_run_id=agent_run_id,
+        test_run_id=current_test_run_id(),
     )
     db.add(item)
     await db.flush()

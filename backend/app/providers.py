@@ -20,7 +20,7 @@ import httpx
 from PIL import Image, UnidentifiedImageError
 
 from . import generation_context
-from .agent_attribution import current_agent_attribution
+from .agent_attribution import current_agent_attribution, current_test_run_id
 from .config import settings
 from .error_logging import _redact
 from .jobs import Job, jobs
@@ -231,7 +231,7 @@ def _headers(api_key: str, *, x_api_key: bool = False) -> dict[str, str]:
     if generation_context.current_agent() is not None:
         name, run = generation_context.current_agent() or ("", "")
     if run:
-        headers.update({"X-Agent-Name": name or "code-agent", "X-Agent-Run-Id": run, "X-Test-Run-Id": run})
+        headers.update({"X-Agent-Name": name or "code-agent", "X-Agent-Run-Id": run, "X-Test-Run-Id": current_test_run_id() or run})
     return headers
 
 
@@ -1942,6 +1942,10 @@ async def check_existing_image(job: Job) -> dict[str, Any]:
     if status in {"FAILED", "CANCELLED", "CANCELED"} or "FAIL" in status:
         await jobs.record_provider_response(job, "terminal", data)
         error = _task_failure(data, status)
+        if job.provider == "all-in-one":
+            from .all_in_one import confirmed_failure
+
+            error.requires_reconciliation = not confirmed_failure(job.provider_task_id, data)
         error.provider, error.request_id = job.provider, job.provider_task_id
         error.usage = data.get("usage") or {}
         raise error

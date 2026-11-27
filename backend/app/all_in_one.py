@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-import re
 import time
 import uuid
 from contextlib import asynccontextmanager, nullcontext
@@ -15,7 +14,7 @@ from typing import Any
 import httpx
 from openai import AsyncOpenAI
 
-from .agent_attribution import current_agent_attribution
+from .agent_attribution import current_agent_attribution, current_test_run_id
 from .config import settings
 
 PROVIDER = "all-in-one"
@@ -43,7 +42,7 @@ def headers(*, user_id: str | None = None, idempotency_key: str | None = None) -
     if current_agent() is not None:
         name, run = current_agent() or ("", "")
     if run:
-        result.update({"X-Agent-Name": name or "code-agent", "X-Agent-Run-Id": run, "X-Test-Run-Id": run})
+        result.update({"X-Agent-Name": name or "code-agent", "X-Agent-Run-Id": run, "X-Test-Run-Id": current_test_run_id() or run})
     return result
 
 
@@ -298,10 +297,6 @@ async def generate(request: Any, job: Any) -> dict[str, Any]:
             await jobs.set_provider_task(job, PROVIDER, task_id, idempotency_key=job.idempotency_key)
             await jobs.record_provider_response(job, "submission", body)
     except ProviderError as exc:
-        if getattr(exc, "submission_certain", False) and not _content_rejection(exc):
-            from .image_failover import record_outcome
-
-            await record_outcome(job, succeeded=False)
         exc.provider = PROVIDER
         raise
     except (httpx.RequestError, ValueError) as exc:
@@ -365,9 +360,6 @@ async def _poll_until_complete(job: Any, scheduler: PlatformPolling | None) -> d
             await jobs.update_progress(job, job.progress)
         if data["status"] == "SUCCEEDED":
             await jobs.record_provider_response(job, "terminal", data)
-            from .image_failover import record_outcome
-
-            await record_outcome(job, succeeded=True)
             try:
                 traffic = _video_traffic.get()
                 if traffic and job.kind == "video":
@@ -385,11 +377,8 @@ async def _poll_until_complete(job: Any, scheduler: PlatformPolling | None) -> d
                 raise
         if data["status"] in {"FAILED", "CANCELLED"}:
             await jobs.record_provider_response(job, "terminal", data)
-            from .image_failover import record_outcome
-
-            if data["status"] == "FAILED" and not _content_rejection(data.get("failReason")):
-                await record_outcome(job, succeeded=False)
             error = ProviderError(data["failReason"] or "all in one 生成失败")
+            error.requires_reconciliation = not confirmed_failure(job.provider_task_id, data)
             error.usage = data.get("usage") or {}
             error.provider = PROVIDER
             error.request_id = job.provider_task_id
@@ -401,5 +390,13 @@ async def _poll_until_complete(job: Any, scheduler: PlatformPolling | None) -> d
     raise error
 
 
-def _content_rejection(value: Any) -> bool:
-    return bool(re.search(r"sensitive|moderation|violat|content.?policy|content.?filter|content.?safety|usage policy|审核|违规|敏感", str(value), re.I))
+def confirmed_failure(task_id, data):
+    """Only release retries on evidence for the same job and final accounting."""
+    from .image_billing import settled
+
+    return (
+        bool(task_id)
+        and data.get("id") == task_id
+        and not data.get("requires_reconciliation")
+        and settled(data.get("billing") or (data.get("usage") or {}).get("platformBilling"), allow_refund=True)
+    )

@@ -11,7 +11,7 @@ from typing import Any, Awaitable, Callable
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .agent_attribution import attribution_context, current_agent_attribution
+from .agent_attribution import attribution_context, current_agent_attribution, current_test_run_id
 from .config import settings
 from .database import session_factory
 from .error_logging import _redact, redact_error_text
@@ -126,7 +126,7 @@ async def record_media_usage(session: AsyncSession, model: GenerationJobModel, u
         if record is not None:
             record.request_id = request_id
     if record is None:
-        with attribution_context(model.generation_origin, model.agent_name, model.agent_run_id):
+        with attribution_context(model.generation_origin, model.agent_name, model.agent_run_id, model.test_run_id):
             record, _ = add_token_usage(
                 session,
                 operation=operation,
@@ -143,6 +143,7 @@ async def record_media_usage(session: AsyncSession, model: GenerationJobModel, u
             record.id = "usage-" + uuid.uuid5(uuid.NAMESPACE_URL, f"mv/media/{model.id}/{request_id or ''}").hex
     else:
         record.operation, record.provider, record.model = operation, provider, model_name
+        record.test_run_id = model.test_run_id
         record.generation_origin, record.agent_name, record.agent_run_id = model.generation_origin, model.agent_name, model.agent_run_id
         if usage is not None:
             normalized = normalize_usage(usage)
@@ -285,6 +286,7 @@ class JobManager:
                 generation_origin=generation_origin,
                 agent_name=agent_name,
                 agent_run_id=agent_run_id,
+                test_run_id=current_test_run_id(),
             )
         )
         await session.flush()
@@ -305,7 +307,7 @@ class JobManager:
         """Execute a job atomically claimed by an external worker."""
         async with session_factory() as session:
             row = await session.get(GenerationJobModel, job.id)
-            attribution = (row.generation_origin, row.agent_name, row.agent_run_id) if row else ("business", "", "")
+            attribution = (row.generation_origin, row.agent_name, row.agent_run_id, row.test_run_id) if row else ("business", "", "", "")
         with attribution_context(*attribution):
             await self._run(job, runner)
 

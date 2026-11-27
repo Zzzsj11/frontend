@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .agent_attribution import current_agent_attribution
+from .agent_attribution import current_agent_attribution, current_test_run_id
 from .models import LlmCallLogModel, TokenUsageModel
 
 
@@ -55,6 +55,7 @@ def add_token_usage(
         generation_origin=origin,
         agent_name=agent_name,
         agent_run_id=agent_run_id,
+        test_run_id=current_test_run_id(),
         project_id=project_id,
         project_task_id=project_task_id,
         storyboard_line_id=storyboard_line_id,
@@ -104,6 +105,7 @@ def add_llm_call_log(
         generation_origin=origin,
         agent_name=agent_name,
         agent_run_id=agent_run_id,
+        test_run_id=current_test_run_id(),
         project_id=project_id,
         project_task_id=project_task_id,
         storyboard_line_id=storyboard_line_id,

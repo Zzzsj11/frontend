@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 
 from . import generation_context
-from .agent_attribution import current_agent_attribution
+from .agent_attribution import current_agent_attribution, current_test_run_id
 from .config import settings
 from .error_logging import redact_error_text
 
@@ -46,7 +46,7 @@ def _agent_headers(agent_name: str = "", agent_run_id: str = "") -> dict[str, st
     return {
         "X-Agent-Name": agent_name or "code-agent",
         "X-Agent-Run-Id": agent_run_id,
-        "X-Test-Run-Id": agent_run_id,
+        "X-Test-Run-Id": current_test_run_id() or agent_run_id,
     }
 
 

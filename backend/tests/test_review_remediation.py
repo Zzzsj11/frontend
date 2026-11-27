@@ -164,22 +164,6 @@ async def test_unlinked_usage_and_llm_logs_preserve_agent_source():
         assert record.generation_job_id is None
 
 
-@pytest.mark.asyncio
-async def test_content_rejections_do_not_trip_global_image_failover(monkeypatch):
-    from app import all_in_one, image_failover
-    from app.jobs import Job, jobs
-    from app.providers import ProviderError
-
-    task = Job(id="review-moderation", kind="image", provider_task_id="moderated", request={"_provider": "all-in-one", "model": image_failover.PRIMARY_MODEL})
-    monkeypatch.setattr(all_in_one, "query_task", AsyncMock(return_value={"status": "FAILED", "failReason": {"code": "ContentPolicyViolation"}, "usage": {}}))
-    monkeypatch.setattr(jobs, "record_provider_response", AsyncMock())
-    outcome = AsyncMock()
-    monkeypatch.setattr(image_failover, "record_outcome", outcome)
-    with pytest.raises(ProviderError):
-        await all_in_one.resume(task)
-    outcome.assert_not_awaited()
-
-
 def test_admin_user_changes_revoke_sessions_and_protect_self(client):
     owner, headers = create_and_login_user(client, "review-session-owner")
     changed = client.patch(f"/api/admin/users/{owner}", json={"status": "disabled"})

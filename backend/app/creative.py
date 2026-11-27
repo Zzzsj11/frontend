@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .agent_attribution import current_agent_attribution, require_generation_attribution
+from .agent_attribution import current_agent_attribution, current_test_run_id, require_generation_attribution
 from .auth import CurrentUser
 from .config import settings
 from .database import database_session, session_factory
@@ -154,6 +154,7 @@ async def create_optimization(payload: CreativeOptimizeIn, user: CurrentUser, db
         generation_origin=origin,
         agent_name=agent_name,
         agent_run_id=agent_run_id,
+        test_run_id=current_test_run_id(),
     )
     db.add(item)
     job = await jobs.enqueue(

@@ -158,3 +158,55 @@ def test_release_rejects_accepted_and_running_jobs(client, video_submission):
     ).json()
     assert client.post(url, json=payload, headers={"Authorization": f"Bearer {changed['accessToken']}"}).status_code == 403
     client.delete(f"/api/admin/users/{created['id']}")
+
+
+def test_scene_image_replay_compares_input_before_upload(client, video_submission, monkeypatch):
+    from app import main
+
+    body, dispatch, quota, _ = video_submission
+    upload = AsyncMock(return_value="https://example.test/stored.png")
+    monkeypatch.setattr(main, "store_inline_reference", upload)
+    image = {
+        "purpose": "scene",
+        "prompt": "cup",
+        "images": ["data:image/png;base64,YQ=="],
+        "project_task_id": body["project_task_id"],
+        "storyboard_line_id": body["storyboard_line_id"],
+    }
+    first = client.post("/api/generations/images", json=image)
+    assert first.status_code == 202, first.text
+    assert client.post("/api/generations/images", json=image).json()["id"] == first.json()["id"]
+    assert client.post("/api/generations/images", json={**image, "prompt": "other"}).status_code == 409
+    assert upload.await_count == dispatch.await_count == quota.await_count == 1
+
+
+def test_platform_review_blocks_new_intent_and_preserves_original_batches(client, video_submission, monkeypatch):
+    import asyncio
+
+    from app import all_in_one
+    from app.jobs import jobs
+
+    body, dispatch, quota, _ = video_submission
+    headers = {"X-Agent-Name": "code-agent", "X-Agent-Run-Id": "review-agent", "X-Test-Run-Id": "review-suite"}
+    jid = client.post("/api/generations/videos", json=body, headers=headers).json()["id"]
+    with sqlite3.connect(TEST_DB) as db:
+        db.execute("UPDATE generation_jobs SET provider='all-in-one',provider_task_id='original-job' WHERE id=?", (jid,))
+    projection = {
+        "id": "original-job",
+        "status": "failed",
+        "requires_reconciliation": True,
+        "error": "Submission outcome uncertain",
+        "billing": {"status": "pending_reconciliation"},
+    }
+    monkeypatch.setattr(all_in_one, "query_task", AsyncMock(return_value=all_in_one.normalized_task(projection)))
+
+    async def worker():
+        await jobs.run_claimed(await jobs.get(jid), all_in_one.resume)
+
+    asyncio.run(worker())
+    status = client.get("/api/generations/" + jid).json()
+    assert status["phase"] == "auto_reconciling" and not status["retryAllowed"]
+    assert client.post("/api/generations/videos", json={**body, "request_id": "different-intent"}).status_code == 409
+    assert dispatch.await_count == quota.await_count == 1
+    with sqlite3.connect(TEST_DB) as db:
+        assert db.execute("SELECT agent_run_id,test_run_id FROM token_usage_records WHERE generation_job_id=?", (jid,)).fetchall() == [("review-agent", "review-suite")]

@@ -6,6 +6,7 @@ export interface VideoBillingItem {
   generationOrigin: 'business' | 'agent_test'
   agentName: string
   agentRunId: string
+  testRunId?: string
   username: string
   projectName: string
   taskTitle: string
@@ -39,6 +40,7 @@ export interface VideoBillingDetail {
   generationOrigin: 'business' | 'agent_test'
   agentName: string
   agentRunId: string
+  testRunId?: string
   providerTaskId?: string
   status: string
   error: string

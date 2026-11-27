@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -55,8 +56,8 @@ var client = &http.Client{
 var buffers sync.Pool
 var progress = json.NewEncoder(os.Stdout)
 
-func upload(url string, payload []byte) Part {
-	req, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(payload))
+func upload(ctx context.Context, url string, payload []byte) Part {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(payload))
 	if err != nil {
 		return Part{Failure: "part request setup"}
 	}
@@ -77,6 +78,8 @@ func upload(url string, payload []byte) Part {
 }
 
 type Pending struct {
+	ctx      context.Context
+	cancel   context.CancelCauseFunc
 	urls     []string
 	partSize int
 	buf      []byte
@@ -95,7 +98,14 @@ func (s *Pending) submit() error {
 	if s.number >= len(s.urls) {
 		return fmt.Errorf("no signed part available")
 	}
-	s.slots <- struct{}{}
+	if err := context.Cause(s.ctx); err != nil {
+		return err
+	}
+	select {
+	case s.slots <- struct{}{}:
+	case <-s.ctx.Done():
+		return context.Cause(s.ctx)
+	}
 	n, data := s.number, s.buf
 	s.number++
 	s.buf = nil
@@ -103,7 +113,11 @@ func (s *Pending) submit() error {
 	go func() {
 		defer s.wg.Done()
 		defer func() { buffers.Put(data[:0]); <-s.slots }()
-		s.finished[n] = upload(s.urls[n], data)
+		part := upload(s.ctx, s.urls[n], data)
+		s.finished[n] = part
+		if part.Failure != "" {
+			s.cancel(fmt.Errorf("upload failed: %s", part.Failure))
+		}
 	}()
 	return nil
 }
@@ -137,12 +151,27 @@ func (s *Pending) Write(p []byte) (int, error) {
 
 func runJob(task Spec, config Config) (result Result) {
 	result.Index = task.Index
-	sink := &Pending{urls: task.Parts, partSize: config.PartSize, finished: make([]Part, len(task.Parts)), slots: make(chan struct{}, config.InFlight), limit: config.Limit}
-	defer sink.wg.Wait()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	sink := &Pending{ctx: ctx, cancel: cancel, urls: task.Parts, partSize: config.PartSize, finished: make([]Part, len(task.Parts)), slots: make(chan struct{}, config.InFlight), limit: config.Limit}
+	defer func() {
+		if result.Failure != "" && context.Cause(ctx) == nil {
+			cancel(fmt.Errorf("%s", result.Failure))
+		}
+		sink.wg.Wait()
+		if err := context.Cause(ctx); err != nil {
+			result.Failure = err.Error()
+		}
+	}()
 	writer := zip.NewWriter(sink)
 	buffer := make([]byte, 1<<20)
 	for i, source := range task.Sources {
-		response, err := client.Get(source.URL)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, source.URL, nil)
+		if err != nil {
+			result.Failure = "source request setup"
+			return
+		}
+		response, err := client.Do(req)
 		if err != nil {
 			result.Failure = "source transport"
 			return

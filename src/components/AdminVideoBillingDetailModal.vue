@@ -39,6 +39,9 @@ const money = (value: number) => `¥${value.toFixed(6)}`
               </template>
             </b>
           </div>
+          <div v-if="detail.testRunId">
+            <span>测试批次</span><b>{{ detail.testRunId }}</b>
+          </div>
           <div>
             <span>供应商任务</span><b>{{ detail.providerTaskId || '-' }}</b>
           </div>

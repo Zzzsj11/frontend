@@ -216,6 +216,7 @@ class GenerationJobModel(LifecycleMixin, Base):
     generation_origin: Mapped[str] = mapped_column(String(32), default="business", server_default="business", index=True)
     agent_name: Mapped[str] = mapped_column(String(80), default="", server_default="", index=True)
     agent_run_id: Mapped[str] = mapped_column(String(160), default="", server_default="", index=True)
+    test_run_id: Mapped[str] = mapped_column(String(160), default="", server_default="")
     kind: Mapped[str] = mapped_column(String(32), index=True)
     status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
     progress: Mapped[int] = mapped_column(Integer, default=0)
@@ -370,6 +371,7 @@ class TokenUsageModel(LifecycleMixin, Base):
     generation_origin: Mapped[str] = mapped_column(String(32), default="business", server_default="business", index=True)
     agent_name: Mapped[str] = mapped_column(String(80), default="", server_default="", index=True)
     agent_run_id: Mapped[str] = mapped_column(String(160), default="", server_default="", index=True)
+    test_run_id: Mapped[str] = mapped_column(String(160), default="", server_default="")
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
@@ -441,6 +443,7 @@ class LlmCallLogModel(LifecycleMixin, Base):
     generation_origin: Mapped[str] = mapped_column(String(32), default="business", server_default="business", index=True)
     agent_name: Mapped[str] = mapped_column(String(80), default="", server_default="", index=True)
     agent_run_id: Mapped[str] = mapped_column(String(160), default="", server_default="", index=True)
+    test_run_id: Mapped[str] = mapped_column(String(160), default="", server_default="")
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
@@ -619,6 +622,7 @@ class PromptOptimizationTaskModel(LifecycleMixin, Base):
     generation_origin: Mapped[str] = mapped_column(String(32), default="business", index=True)
     agent_name: Mapped[str] = mapped_column(String(80), default="", index=True)
     agent_run_id: Mapped[str] = mapped_column(String(160), default="", index=True)
+    test_run_id: Mapped[str] = mapped_column(String(160), default="", server_default="")
 
 
 class ServerMetricSampleModel(LifecycleMixin, Base):

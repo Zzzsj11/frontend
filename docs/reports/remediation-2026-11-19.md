@@ -33,18 +33,18 @@
 
 | 编号 | 生效行为 | 验证 |
 | --- | --- | --- |
-| GW-01 | 同步 Chat 在同一事务中检查容量、预留积分并取得租约。满额回滚，旧队列里结果不明的请求转人工核对。原生异步端点拒绝 Chat。 | mock 下同一幂等键首轮满额返回 429、工单数为零，恢复容量后成功一次；原有同步、流式测试核对用量。[服务回归](../../model-service/tests/test_service.py) |
-| GW-02 | 从每个资源组合的队首选取候选，失效 Key 与已删除目标分别处理。尚未提交且可证明无费用的工单释放预留，有平台证据的进入人工核对。 | 100 个历史失效工单之后的有效任务仍能在同次领取中获租，核对历史费用未被重算。另验证撤销 Key 后其他租户可领取。[领取代码](../../model-service/public-api/gateway/queue.py) |
-| GW-03 | 同步图片保留已成功的供应商结果。管理后台可以只重试归档，不要求原平台返回异步任务号。 | 模拟首次归档失败，从真实管理 API 恢复，结果入库，供应商提交计数始终为 1。[图片归档验收](../../model-service/tests/test_overseas.py) |
-| GW-04 | 调度、同一所有者的钱包分别加锁；进度和心跳只锁对应工单；跨账户管理操作保留独占屏障。月度重置分批处理。 | 真实 PostgreSQL 中持有一个钱包锁时，另一个钱包和执行心跳仍可完成；12 次并发回调只产生两笔扣款。[并发验收](../../model-service/tests/postgres-concurrency.py) |
-| GW-05 | 只计登录失败，账号与来源分别限流。user-web 覆写来源，仅受信代理对端可以提供该地址，密码计算在数据库事务外执行。 | 同代理下两个账号登录成功不消耗窗口，单账号达到上限不阻断另一个账号，未受信连接不能指定来源。真实门户另验证 A 收到 429 后 B 仍可登录并查看自己的账户。[登录验收](../../model-service/tests/test_portal_password.py) |
-| GW-06 | ASGI 在读取请求数据时累计大小，保留原始分块，带长度时可提前拒绝。 | 声明长度和分块累计超过阈值均返回 413，未受理工单。[服务回归](../../model-service/tests/test_service.py) |
-| GW-07 | ffprobe 和 FFmpeg 子进程统一限时，取消或超时后终止并回收，日志内存有上限；仅安装 FFmpeg 时用同一次封面提取取得元数据。 | 对真实本地延迟子进程分别取消和超时，均确认 PID 已回收。[媒体验收](../../model-service/tests/test_media.py) |
-| GW-08 | Worker 在主循环和数据库往返成功后更新时间戳，持续满载却无完成时停止刷新，退出时撤销就绪。容器检查时间戳新鲜度。 | [Worker 测试](../../model-service/tests/test_worker_shutdown.py)验证空队列仍就绪，数据库中断和进程退出均撤销可用信号；[健康探针](../../model-service/docker-compose.yml)检查 45 秒期限。 |
+| GW-01 | 同步 Chat 在同一事务中检查容量、预留积分并取得租约。满额回滚，旧队列里结果不明的请求转人工核对。原生异步端点拒绝 Chat。 | mock 下同一幂等键首轮满额返回 429、工单数为零，恢复容量后成功一次；原有同步、流式测试核对用量。[服务回归](https://github.com/Zzzsj11/frontend/blob/97beaac/model-service/tests/test_service.py) |
+| GW-02 | 从每个资源组合的队首选取候选，失效 Key 与已删除目标分别处理。尚未提交且可证明无费用的工单释放预留，有平台证据的进入人工核对。 | 100 个历史失效工单之后的有效任务仍能在同次领取中获租，核对历史费用未被重算。另验证撤销 Key 后其他租户可领取。[领取代码](https://github.com/Zzzsj11/frontend/blob/97beaac/model-service/public-api/gateway/queue.py) |
+| GW-03 | 同步图片保留已成功的供应商结果。管理后台可以只重试归档，不要求原平台返回异步任务号。 | 模拟首次归档失败，从真实管理 API 恢复，结果入库，供应商提交计数始终为 1。[图片归档验收](https://github.com/Zzzsj11/frontend/blob/97beaac/model-service/tests/test_overseas.py) |
+| GW-04 | 调度、同一所有者的钱包分别加锁；进度和心跳只锁对应工单；跨账户管理操作保留独占屏障。月度重置分批处理。 | 真实 PostgreSQL 中持有一个钱包锁时，另一个钱包和执行心跳仍可完成；12 次并发回调只产生两笔扣款。[并发验收](https://github.com/Zzzsj11/frontend/blob/97beaac/model-service/tests/postgres-concurrency.py) |
+| GW-05 | 只计登录失败，账号与来源分别限流。user-web 覆写来源，仅受信代理对端可以提供该地址，密码计算在数据库事务外执行。 | 同代理下两个账号登录成功不消耗窗口，单账号达到上限不阻断另一个账号，未受信连接不能指定来源。真实门户另验证 A 收到 429 后 B 仍可登录并查看自己的账户。[登录验收](https://github.com/Zzzsj11/frontend/blob/97beaac/model-service/tests/test_portal_password.py) |
+| GW-06 | ASGI 在读取请求数据时累计大小，保留原始分块，带长度时可提前拒绝。 | 声明长度和分块累计超过阈值均返回 413，未受理工单。[服务回归](https://github.com/Zzzsj11/frontend/blob/97beaac/model-service/tests/test_service.py) |
+| GW-07 | ffprobe 和 FFmpeg 子进程统一限时，取消或超时后终止并回收，日志内存有上限；仅安装 FFmpeg 时用同一次封面提取取得元数据。 | 对真实本地延迟子进程分别取消和超时，均确认 PID 已回收。[媒体验收](https://github.com/Zzzsj11/frontend/blob/97beaac/model-service/tests/test_media.py) |
+| GW-08 | Worker 在主循环和数据库往返成功后更新时间戳，持续满载却无完成时停止刷新，退出时撤销就绪。容器检查时间戳新鲜度。 | [Worker 测试](https://github.com/Zzzsj11/frontend/blob/97beaac/model-service/tests/test_worker_shutdown.py)验证空队列仍就绪，数据库中断和进程退出均撤销可用信号；[健康探针](https://github.com/Zzzsj11/frontend/blob/97beaac/model-service/docker-compose.yml)检查 45 秒期限。 |
 | GW-09 | 两个门户锁定 source-map-js 1.2.4。 | 两份独立锁的 npm audit 均为零，分别构建管理页和用户页。 |
-| GW-10 | 两个独立 API 的基础镜像使用 digest，构建时安装各自适用的 Linux/Python 3.12 完整运行依赖锁。 | 两个 API 镜像分别按锁构建，CI 按提交运行镜像扫描。[公开 API 锁](../../model-service/public-api/requirements.lock) · [管理 API 锁](../../model-service/admin-api/requirements.lock) |
-| GW-11 | 独立资产登记有提交租约及幂等保护；新旧中断记录进入人工核对，资产登记不计入生成队列和执行容量。 | 同时存在旧的无租约资产与有效登记时，新生成工单仍可受理并领取；只回收过期的旧记录。[服务回归](../../model-service/tests/test_service.py) |
-| GW-12 | 普通 Key 无法自行声明 Agent 费用来源。专用 Key 强制填写三项归因头，混合用途 Key 须按客户端 ID 显式授权。 | 同一组模拟请求分别验证拒绝、显式授权和持久化的费用来源。[归因校验](../../model-service/public-api/gateway/security.py) |
+| GW-10 | 两个独立 API 的基础镜像使用 digest，构建时安装各自适用的 Linux/Python 3.12 完整运行依赖锁。 | 两个 API 镜像分别按锁构建，CI 按提交运行镜像扫描。[公开 API 锁](https://github.com/Zzzsj11/frontend/blob/97beaac/model-service/public-api/requirements.lock) · [管理 API 锁](https://github.com/Zzzsj11/frontend/blob/97beaac/model-service/admin-api/requirements.lock) |
+| GW-11 | 独立资产登记有提交租约及幂等保护；新旧中断记录进入人工核对，资产登记不计入生成队列和执行容量。 | 同时存在旧的无租约资产与有效登记时，新生成工单仍可受理并领取；只回收过期的旧记录。[服务回归](https://github.com/Zzzsj11/frontend/blob/97beaac/model-service/tests/test_service.py) |
+| GW-12 | 普通 Key 无法自行声明 Agent 费用来源。专用 Key 强制填写三项归因头，混合用途 Key 须按客户端 ID 显式授权。 | 同一组模拟请求分别验证拒绝、显式授权和持久化的费用来源。[归因校验](https://github.com/Zzzsj11/frontend/blob/97beaac/model-service/public-api/gateway/security.py) |
 
 ## 本地验收结果
 

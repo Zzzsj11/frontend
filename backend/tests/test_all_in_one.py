@@ -165,7 +165,7 @@ async def test_direct_worker_keeps_agent_headers(configured, monkeypatch):
             pass
 
         async def get(self, *_args):
-            return SimpleNamespace(agent_name="code-agent", agent_run_id="persisted-run")
+            return SimpleNamespace(generation_origin="agent_test", agent_name="code-agent", agent_run_id="persisted-run", test_run_id="suite-run")
 
     monkeypatch.delenv("MODEL_GATEWAY_URL", raising=False)
     monkeypatch.setattr(database, "session_factory", Session)
@@ -173,7 +173,8 @@ async def test_direct_worker_keeps_agent_headers(configured, monkeypatch):
 
     async def runner(_job):
         values = aio.headers(user_id="owner")
-        assert values["X-Agent-Run-Id"] == values["X-Test-Run-Id"] == "persisted-run"
+        assert values["X-Agent-Run-Id"] == "persisted-run"
+        assert values["X-Test-Run-Id"] == "suite-run"
         assert values["X-Agent-Name"] == "code-agent"
         return "ok"
 
@@ -369,7 +370,6 @@ async def test_async_image_resume_preserves_charge_on_archive_failure(configured
     for name in ("mark_provider_submitting", "record_provider_request", "record_provider_response", "update_progress"):
         monkeypatch.setattr(jobs, name, AsyncMock())
     monkeypatch.setattr(jobs, "set_provider_task", persist)
-    monkeypatch.setattr("app.image_failover.record_outcome", AsyncMock())
     monkeypatch.setattr("app.storage.import_remote_image", AsyncMock(side_effect=RuntimeError("mocked archive offline")))
     job = Job(id="uncertain-archive", kind="image", user_id="owner", request={"_providerModelId": "gpt-image-2"})
     if recover_existing:

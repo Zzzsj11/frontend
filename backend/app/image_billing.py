@@ -40,7 +40,7 @@ def eligible():
 
 async def refresh_image_bill(db, job):
     task_id = job.provider_task_id
-    with attribution_context(job.generation_origin, job.agent_name, job.agent_run_id):
+    with attribution_context(job.generation_origin, job.agent_name, job.agent_run_id, job.test_run_id):
         data = await query_task("image", task_id, user_id=job.user_id)
     bill = data.get("billing")
     if data.get("id") != task_id or not settled(bill):
@@ -61,7 +61,7 @@ async def refresh_image_bill(db, job):
     if record:
         record.raw_usage = {**(record.raw_usage or {}), "platformBilling": bill}
     else:
-        with attribution_context(job.generation_origin, job.agent_name, job.agent_run_id):
+        with attribution_context(job.generation_origin, job.agent_name, job.agent_run_id, job.test_run_id):
             add_token_usage(
                 db,
                 operation="generation_image",
