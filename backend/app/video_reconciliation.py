@@ -10,7 +10,7 @@ from datetime import timedelta
 from sqlalchemy import or_, select
 
 from .database import session_factory
-from .jobs import JobExpiredError, jobs, unverified_video_failure
+from .jobs import JobExpiredError, jobs, needs_provider_reconciliation, unverified_video_failure
 from .models import GenerationJobModel, ProjectModel, ProjectTaskModel, StoryboardLineModel, utcnow
 from .redis_store import cache_job
 
@@ -33,7 +33,7 @@ async def claim(job_id: str | None = None):
                 GenerationJobModel.provider_task_id.is_not(None),
                 GenerationJobModel.provider_task_id != "",
                 GenerationJobModel.deleted_at.is_(None),
-                or_(unverified_video_failure(), GenerationJobModel.phase.in_(("manual_review", "auto_reconciling")), GenerationJobModel.error.contains("核查原任务")),
+                or_(unverified_video_failure(), GenerationJobModel.phase.in_(("manual_review", "auto_reconciling"))),
                 or_(GenerationJobModel.lease_expires_at.is_(None), GenerationJobModel.lease_expires_at <= now),
                 ProjectModel.deleted_at.is_(None),
                 ProjectTaskModel.deleted_at.is_(None),
@@ -53,6 +53,11 @@ async def claim(job_id: str | None = None):
             .limit(1)
         )
         if not model:
+            return None
+        if not needs_provider_reconciliation(model):
+            # Legacy terminal evidence already identifies the original and its final charge.
+            model.request = {**(model.request or {}), "_verifiedFailureTaskId": model.provider_task_id}
+            await db.commit()
             return None
         model.worker_id = f"reconcile-{uuid.uuid4().hex}"
         model.lease_expires_at = now + timedelta(seconds=LEASE_SECONDS)

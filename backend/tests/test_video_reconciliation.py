@@ -219,3 +219,18 @@ def test_legacy_accepted_failure_is_claimed_without_phase_or_matching_error(clie
     )
     assert asyncio.run(module.reconcile_one(jid))["action"] == "waiting"
     assert client.post("/api/generations/status", json={"ids": [jid]}).json()[0]["retryAllowed"] is False
+
+
+def test_existing_final_failure_evidence_remains_retryable_without_provider_lookup(client, recovery):
+    import json
+
+    module, jid, _, query, _ = recovery
+    final = {"id": "original-id", "status": "FAILED", "billing": {"status": "settled", "points": "2"}}
+    with sqlite3.connect(TEST_DB) as db:
+        db.execute(
+            "UPDATE generation_jobs SET phase='failed', error='provider rejection', request=json_set(request, '$._providerTerminalResponse', json(?)) WHERE id=?",
+            (json.dumps(final), jid),
+        )
+    assert client.post("/api/generations/status", json={"ids": [jid]}).json()[0]["retryAllowed"]
+    assert asyncio.run(module.claim(jid)) is None
+    query.assert_not_awaited()

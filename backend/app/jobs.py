@@ -60,7 +60,10 @@ def needs_provider_reconciliation(job) -> bool:
     if job.status != "failed" or not job.provider_task_id:
         return False
     if job.kind == "video" and job.provider == "all-in-one":
-        return (job.request or {}).get("_verifiedFailureTaskId") != job.provider_task_id
+        from .all_in_one import confirmed_failure
+
+        snapshot = job.request or {}
+        return snapshot.get("_verifiedFailureTaskId") != job.provider_task_id and not confirmed_failure(job.provider_task_id, snapshot.get("_providerTerminalResponse") or {})
     error = job.error or ""
     return "核查原任务" in error or (job.kind == "image" and ("生成超过10分钟" in error or error.startswith("查询生成状态连续失败")))
 
