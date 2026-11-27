@@ -82,9 +82,14 @@ async def _claim_batch(kinds, providers, worker_id, queue, free):
             full = [pool for pool in VIDEO_POOLS.values() if occupied.get(pool, 0) >= settings.video_model_slots]
             if full:
                 eligible.append((row.kind != "video") | resumed | pool_column().not_in(full))
+        if pg and ("export" in kinds or "mv_export" in kinds):
+            await session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("mv:export:render", 0))))
+        zip_slots = settings.export_concurrency
+        if "export" in kinds:
+            zip_slots -= await session.scalar(select(func.count()).select_from(row).where(row.kind == "export", row.status == "running", row.deleted_at.is_(None)))
+            if zip_slots <= 0:
+                eligible.append(row.kind != "export")
         if "mv_export" in kinds:
-            if pg:
-                await session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("mv:export:render", 0))))
             if await session.scalar(select(row.id).where(row.kind == "mv_export", row.status == "running", row.deleted_at.is_(None)).limit(1)):
                 eligible.append(row.kind != "mv_export")
         if pg:
@@ -105,7 +110,9 @@ async def _claim_batch(kinds, providers, worker_id, queue, free):
                     )
         # Only lightweight identifiers enter the 1000-row candidate window.
         candidates = (
-            await session.execute(select(row.id, row.project_task_id, row.created_at, pool_column().label("pool")).where(*eligible).order_by(row.created_at, row.id).limit(1000))
+            await session.execute(
+                select(row.id, row.kind, row.project_task_id, row.created_at, pool_column().label("pool")).where(*eligible).order_by(row.created_at, row.id).limit(1000)
+            )
         ).all()
         tasks = {item.project_task_id for item in candidates if item.project_task_id}
         active = {}
@@ -168,6 +175,10 @@ async def _claim_batch(kinds, providers, worker_id, queue, free):
                 batch.append(job)
                 active[model.project_task_id] = active.get(model.project_task_id, 0) + 1
                 rendered |= model.kind == "mv_export"
+                if model.kind == "export":
+                    zip_slots -= 1
+                    if zip_slots == 0:
+                        candidates = [c for c in candidates if c.kind != "export"]
             await session.commit()
         except BaseException:
             for lease in leases:

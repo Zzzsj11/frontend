@@ -28,7 +28,7 @@ PREFIXES = (
     "KLING_",
     "MODEL_GATEWAY_",
 )
-LEGACY_KEYS = {"LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"}
+LEGACY_KEYS = {"LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "EXPORT_PER_USER_CONCURRENCY"}
 DEFAULTS = {
     "TOS_REFERENCE_PREFIX": "mv/production/references",
     "TOS_VIDEO_ARCHIVE_PREFIX": "mv/production/videos",
@@ -110,6 +110,8 @@ def configure():
             if key in defaults or key in LEGACY_KEYS or key.startswith(PREFIXES):
                 removed += 1
                 continue
+            if key in {"EXPORT_WORKER_CONCURRENCY", "EXPORT_CONCURRENCY"} and line.strip() == f"{key}=20":
+                line = f"{key}=5"
             retained.append(line)
         if path == deploy_file:
             retained = [line for line in retained if not line.startswith(("DEPLOYMENT_TIER=", "TLS_DOMAIN="))]

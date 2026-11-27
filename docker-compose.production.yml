@@ -90,7 +90,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '3.00'
+          cpus: '2.50'
           memory: 2G
   worker-chat:
     image: ${REGISTRY:?set REGISTRY}/mv-agent-backend:${RELEASE_VERSION:?set RELEASE_VERSION}
